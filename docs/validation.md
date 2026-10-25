@@ -137,3 +137,50 @@ Rust edit tests assert exact byte preservation for multiple Unicode/CRLF edits,
 compact CRLF insertions, comment/injection rejection, directional insertion,
 frame add/remove, offset movement, and normalized-offset collisions. The WASM
 wrapper exposes the same planner; filesystem policy remains a server responsibility.
+
+## Editor transactions and preview lifecycle (E6)
+
+The development editor uses opaque source identities registered by the Vite plugin.
+The server resolves each source inside the canonical Vite root, verifies a full-SFC
+SHA-256 revision, applies Rust-planned changes in memory, and recompiles before a
+write. Saves serialize per source; in-flight and completed request IDs prevent
+repeated writes. A same-directory temporary file is renamed atomically after a
+second revision check. Original bytes are retained in `.liva-backups/<hash>.vue`.
+An unrelated process can still write between the final check and rename: filesystem
+rename is not a compare-and-swap operation. The backup supports manual recovery.
+Do not run source formatters concurrently with editor saves.
+
+The HTTP bridge accepts bounded JSON POSTs only from loopback clients, with a local
+Host, matching HTTP Origin, and the active random session token. It accepts at most
+64 KiB and 100 edits. It has no arbitrary path input. HTTPS/proxied or remote editor
+sessions are outside the MVP; local HTTP development remains supported.
+
+Preview replies carry instance/sequence identity and cannot outlive selection,
+application state updates, source revisions, or unmount. Cancel restores the latest
+Vue-requested state. Failed saves retain the draft. Save acknowledgment requires
+both the current source hash and every mounted shared instance to match; delayed
+HMR reports pending synchronization and preserves an idempotent retry. New edits or
+selection changes during a save are preserved by a separate user-edit revision.
+
+The UI exposes timing expressions and their existing parameters, frame fields,
+frame insertion/removal, and directional timing override insertion. A pending full
+expression replacement disables its old parameter controls until save or cancel;
+removed-frame controls are likewise disabled. This avoids silently discarding a
+mode change or appending edits to deleted paths. States are read-only in the MVP.
+
+Server and controller tests cover byte preservation, backups, stale hashes, invalid
+edits, concurrent commits, cross-file request-ID reuse, containment, symlinks,
+out-of-order replies, external invalidation, unmount, selection/loading races,
+new drafts during save, and failed-save retention. Browser editor tests cover preview
+isolation/cancel, source save with shared-instance HMR, override/frame add/remove,
+invalid sessions/origins/hosts, oversized requests, and conflicting UI controls.
+Source-writing browser cases run only in Chromium; other editor cases run in all
+three engines.
+
+## Production isolation (E7)
+
+`scripts/test-production.mjs` builds both `production` and `development` modes,
+scans emitted files for editor/source/compiler markers and map/WASM artifacts, then
+runs actual playback and POST rejection against each static preview server. Both
+modes pass. The plugin keys development behavior on `configureServer`, not the mode
+name. Production imports only the Vue adapter and runtime plus immutable definitions.

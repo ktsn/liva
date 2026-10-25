@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+import { EditorService } from "./editor/server.ts";
 import { readFile } from "node:fs/promises";
 import type { Plugin, ViteDevServer } from "vite-plus";
 import {
@@ -10,6 +12,7 @@ import {
 
 export default function liva(): Plugin {
   let server: ViteDevServer | undefined;
+  let editor: EditorService | undefined;
   const valid = new Map<string, SourceSnapshot>();
 
   const compileFile = async (file: string) => {
@@ -26,11 +29,17 @@ export default function liva(): Plugin {
     enforce: "pre",
     configureServer(devServer) {
       server = devServer;
+      editor = new EditorService(devServer.config.root);
+      editor.install(devServer);
     },
     resolveId(id) {
       if (id === "virtual:liva-plugin") return "\0virtual:liva-plugin";
     },
     load(id) {
+      if (id === "\0virtual:liva-plugin" && editor) {
+        const client = "/@fs/" + fileURLToPath(new URL("./editor/client.ts", import.meta.url));
+        return `import { createDevPlugin } from ${JSON.stringify(client)}; export default createDevPlugin(${JSON.stringify(editor.token)});`;
+      }
       if (id === "\0virtual:liva-plugin")
         return `import { createLivaPlugin } from '@liva/vue'; export default createLivaPlugin();`;
     },
@@ -79,8 +88,11 @@ export default function liva(): Plugin {
       const bundle = JSON.stringify({ schemaVersion: 1, definitions: snapshot.result.definitions })
         .replace(/\u2028/g, "\\u2028")
         .replace(/\u2029/g, "\\u2029");
+      const association = editor
+        ? `component.livaSource = ${JSON.stringify(await editor.register(file))};`
+        : "";
       return {
-        code: `import { decodeBundle } from '@liva/runtime'; const bundle = decodeBundle(${JSON.stringify(bundle)}); export default (component) => { component.livaDefinitions = bundle.definitions; };`,
+        code: `import { decodeBundle } from '@liva/runtime'; const bundle = decodeBundle(${JSON.stringify(bundle)}); export default (component) => { component.livaDefinitions = bundle.definitions; ${association} };`,
         map: null,
       };
     },
@@ -90,6 +102,12 @@ export default function liva(): Plugin {
       if (!hasLivaBlock(source, context.file)) return;
 
       try {
+        if (editor)
+          server?.ws.send({
+            type: "custom",
+            event: "liva:source-changed",
+            data: { sourceId: await editor.register(context.file) },
+          });
         const snapshot = compileSfc(source, context.file, true);
         if (hasErrors(snapshot)) {
           server?.ws.send({

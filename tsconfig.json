@@ -9,7 +9,7 @@
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["node"]
+    "types": ["node", "vite-plus/client"]
   },
   "include": ["packages/**/*.ts", "tests/**/*.ts", "vite.config.ts", "playwright.config.ts"],
   "exclude": ["packages/vite/wasm"]

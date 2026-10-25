@@ -4,3 +4,5 @@ dist/
 playwright-report/
 test-results/
 packages/vite/wasm/
+**/.liva-backups/
+**/*.liva.tmp

@@ -33,7 +33,12 @@ export interface SourceSnapshot {
 }
 
 const require = createRequire(import.meta.url);
-let wasm: { compile(source: string, development: boolean): string } | undefined;
+let wasm:
+  | {
+      compile(source: string, development: boolean): string;
+      applyEdits(source: string, edits: string): string;
+    }
+  | undefined;
 
 export function compile(source: string, development: boolean): Compilation {
   wasm ??= require("../wasm/liva_wasm.js");
@@ -78,4 +83,18 @@ export function hasErrors(snapshot: SourceSnapshot): boolean {
 
 export function hasLivaBlock(source: string, filename: string): boolean {
   return parse(source, { filename }).descriptor.customBlocks.some((block) => block.type === "liva");
+}
+
+export function applyEdits(
+  source: string,
+  edits: unknown,
+): { source: string; compilation: Compilation } {
+  wasm ??= require("../wasm/liva_wasm.js");
+  const result = JSON.parse(wasm!.applyEdits(source, JSON.stringify(edits))) as {
+    source: string;
+    compilation: Compilation;
+    error?: string;
+  };
+  if (result.error) throw new Error(result.error);
+  return result;
 }
