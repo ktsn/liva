@@ -85,3 +85,35 @@ The pinned local Vite+ 1.4.0 contains Vite 8.3.5 and Vitest 5.0.5; the global `v
 launcher is 1.1.0. pnpm 12.4.2 reports Vitest's Vite peer range against the wrapper's
 1.4.0 version, although its bundled Vite is 8.3.5 and the tests pass. Vue SFCs are
 excluded from automatic formatting to preserve custom-block source.
+
+## Vue custom blocks, directives, and HMR (E5)
+
+Vue 3.5.44 and `@vitejs/plugin-vue` 6.0.10 pass the integration experiment. The
+Vue plugin emits custom requests with `vue&type=liva&index=0`; Liva parses those
+parameters and returns the documented component-augmentation function. Directives
+read the custom `livaDefinitions` option through `binding.instance.$options`.
+No private Vue instance fields or injected script-setup imports are used.
+
+Targets reconcile in a queued pass against the nearest root and declaring
+component instance. The root can also be a target. Nested roots, conditional
+children, repeated mounts, two component instances, keyboard operation, and a
+second definition are covered by browser tests. Invalid HMR retains the prior
+valid definition; a fixed custom block can reload its component. Source-writing
+HMR tests run once in Chromium to avoid competing writes to a shared fixture;
+ordinary interaction/lifecycle tests run in all three browsers.
+
+The normal page is `playground/`. Its visual smoke check confirms the two-switch
+layout and separate beacon definition. Build output contains only Vue, runtime,
+and serialized definitions. Native buttons provide Space/Enter interaction and
+Vue owns `aria-checked` and application state.
+
+TypeScript 5.9.3 is pinned for `vue-tsc` 3.3.13. TypeScript 7 does not expose the
+legacy `lib/tsc` API required by this Vue checker. Vue checking targets SFCs and
+application/test sources; `vp check` checks the Vite configurations separately.
+Including the Vite configuration in the Vue checker triggers a compiler assertion
+in overloaded plugin signatures. This separation preserves both checks.
+
+Run `sh scripts/verify.sh` (or `vp run verify`) for ordered Rust, WASM, JS, Vue,
+browser, and production-build verification. WASM is rebuilt before dependent tests
+and builds; no artifact caching is configured. Install dependencies with
+`pnpm install --frozen-lockfile` and browsers with `pnpm exec playwright install`.

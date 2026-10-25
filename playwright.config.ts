@@ -9,9 +9,16 @@ export default defineConfig({
     { name: "firefox", use: { ...devices["Desktop Firefox"] } },
     { name: "webkit", use: { ...devices["Desktop Safari"] } },
   ],
-  webServer: {
-    command: "vp dev --host 127.0.0.1 --port 4179 --strictPort",
-    url: "http://127.0.0.1:4179/tests/browser/",
-    reuseExistingServer: !process.env.CI,
-  },
+  webServer: [
+    {
+      command: "vp dev --host 127.0.0.1 --port 4179 --strictPort",
+      url: "http://127.0.0.1:4179/tests/browser/",
+      reuseExistingServer: !process.env.CI,
+    },
+    {
+      command: "cd playground && vp dev --host 127.0.0.1 --port 4180 --strictPort",
+      url: "http://127.0.0.1:4180",
+      reuseExistingServer: !process.env.CI,
+    },
+  ],
 });

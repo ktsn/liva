@@ -7,12 +7,13 @@
     "test:wasm": "node scripts/test-wasm.mjs",
     "check": "vp check",
     "test": "vp test --run",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "verify": "sh scripts/verify.sh"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",
     "@types/node": "24.10.0",
-    "typescript": "7.0.2",
+    "typescript": "5.9.3",
     "vite-plus": "1.4.0"
   },
   "engines": {
