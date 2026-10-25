@@ -222,9 +222,8 @@ A spring solver computes scalar progress, not colors, translations, or scales.
 For physics mode, use normalized displacement from 0 to 1, zero initial velocity,
 and the equation `mass * x'' + damping * x' + stiffness * (x - 1) = 0`.
 Spring termination requires both displacement and velocity below tolerances for
-a sustained interval, with a maximum duration/sample cap. The exact tolerances,
-cap, duration-mode bounce mapping, and duration meaning must be determined and documented through the
-spring experiment. An exhausted cap must be reported, not silently treated as
+a sustained interval, with a maximum duration/sample cap. The calibrated tolerances, caps, duration-mode mapping, and measured browser
+results are recorded in [implementation validation](validation.md#runtime-spring-calibration-and-interruption-e3e4). An exhausted cap must be reported, not silently treated as
 physical convergence.
 
 First validation experiment: sample progress into CSS `linear()` easing stops

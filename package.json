@@ -1,0 +1,22 @@
+{
+  "name": "liva-workspace",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "wasm": "sh scripts/build-wasm.sh",
+    "test:wasm": "node scripts/test-wasm.mjs",
+    "check": "vp check",
+    "test": "vp test --run",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "24.10.0",
+    "typescript": "7.0.2",
+    "vite-plus": "1.4.0"
+  },
+  "engines": {
+    "node": "24.22.1"
+  },
+  "packageManager": "pnpm@12.4.2"
+}

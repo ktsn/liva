@@ -1,0 +1,15 @@
+{
+  "name": "@liva/vite",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@liva/runtime": "workspace:*",
+    "@liva/vue": "workspace:*",
+    "@vue/compiler-sfc": "3.5.44"
+  },
+  "peerDependencies": {
+    "vite-plus": "1.4.0"
+  }
+}

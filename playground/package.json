@@ -1,0 +1,22 @@
+{
+  "name": "@liva/playground",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vp dev",
+    "build": "vp build",
+    "check:vue": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@liva/runtime": "workspace:*",
+    "@liva/vue": "workspace:*",
+    "vue": "3.5.44"
+  },
+  "devDependencies": {
+    "@liva/vite": "workspace:*",
+    "@vitejs/plugin-vue": "6.0.10",
+    "vite-plus": "1.4.0",
+    "vue-tsc": "3.3.13"
+  }
+}
