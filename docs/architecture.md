@@ -1,10 +1,8 @@
 # Architecture and workspace setup
 
-Status: confirmed architecture and workspace plan. Decisions A1–A7 and the
-contracts, lifecycle policies, integration, and editor design below are approved.
-Implementation proceeds incrementally through the MVP milestones. Experiments
-validate feasibility and determine unspecified numeric parameters; approval does
-not imply that browser behavior or packaging has already been tested.
+Status: implemented MVP architecture. Decisions A1–A7 are reflected in the code;
+[validation results](validation.md) record experiments, tested versions, numerical
+parameters, source-edit constraints, and production isolation.
 
 ## Module boundaries
 
@@ -490,7 +488,8 @@ the Vite+ checks/unit tests, Vue type checks, Playwright tests, and the playgrou
 production build. Build WASM before dependent Vite+ integration tests and builds.
 Any cached task consuming WASM must track its source/artifact inputs or run uncached
 until invalidation is proven. Verify packaging and checks from a clean checkout.
-None of these commands is available yet in the documentation-only repository.
+The ordered entrypoint is `sh scripts/verify.sh`; `.github/workflows/ci.yml` runs
+the same checks. WASM consumers run uncached after an explicit rebuild.
 
 ## Confirmed architecture decisions
 

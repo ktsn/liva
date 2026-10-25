@@ -1,9 +1,8 @@
 # MVP implementation plan
 
-Status: approved implementation plan. Specification review is complete for the
-MVP language and architecture. Proceed incrementally through the milestones below;
-validation gates establish correctness before dependent work. No implementation
-or experiment results are implied by design approval.
+Status: milestones 0–5 are implemented. This document retains the acceptance
+criteria; the [validation record](validation.md) describes the evidence and bounded
+MVP decisions. Run `sh scripts/verify.sh` to reproduce the automated checks.
 
 ## Scope
 
@@ -198,8 +197,8 @@ functional requirements, not optional editor polish.
 
 ## Smallest experiments and technical risks
 
-Experiments validate the approved design; they have not yet been performed. Each should
-produce a minimal fixture, a result, and a documented decision before expanding.
+Experiments validate the approved design; results are recorded in
+[validation.md](validation.md). Each must produce a minimal fixture, a result, and a documented decision before expanding.
 
 | Experiment | Risk | Smallest proof and pass condition | If it fails |
 | --- | --- | --- | --- |

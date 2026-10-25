@@ -10,4 +10,4 @@ vp check
 vp test --run
 pnpm --dir playground exec vue-tsc --noEmit
 pnpm exec playwright test
-(cd playground && vp build)
+node scripts/test-production.mjs

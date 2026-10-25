@@ -1,9 +1,8 @@
 # Language specification
 
-Status: confirmed MVP language specification. The rules and decisions below are
-approved for implementation planning. Runtime spring calibration and future DOM
-fallback details remain separate design work. Architecture is also approved;
-implementation follows the incremental MVP plan.
+Status: implemented MVP language specification. Runtime spring calibration is
+specified in the [architecture](architecture.md), with measured behavior in the
+[validation record](validation.md). Implicit DOM fallback remains outside the MVP.
 
 ## Structure and examples
 

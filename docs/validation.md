@@ -184,3 +184,32 @@ scans emitted files for editor/source/compiler markers and map/WASM artifacts, t
 runs actual playback and POST rejection against each static preview server. Both
 modes pass. The plugin keys development behavior on `configureServer`, not the mode
 name. Production imports only the Vue adapter and runtime plus immutable definitions.
+
+## Reproducible verification
+
+On 2026-10-26, a fresh source copy with no `node_modules`, `target`, compiler WASM,
+or build output passed `pnpm install --frozen-lockfile --offline` followed by
+`CI=1 sh scripts/verify.sh`. The dependency store and installed toolchains/browser
+binaries were reused; project build artifacts were rebuilt from scratch.
+
+| Check | Result |
+| --- | --- |
+| Rust formatting and Clippy with warnings denied | Pass |
+| Rust syntax / compiler / source edits | 23 tests passed |
+| Node WASM and immutable TypeScript schema contract | Pass |
+| Vite+ formatting, lint, and TypeScript checking | Pass, no warnings |
+| TypeScript runtime / compiler / editor tests | 23 tests passed |
+| Vue SFC and template checking | Pass |
+| Chromium / Firefox / WebKit browser suite | 57 passed; 6 deliberate skips |
+| Normal and development-named production builds | Isolation and playback passed |
+
+The six skips are the Firefox/WebKit copies of three shared-file-writing cases
+(invalid/fixed HMR, value save, override/frame save). Their transactions execute
+once in Chromium; ordinary runtime, integration, and editor behavior executes in
+all three engines. The root runtime harness limits dependency scanning to its own
+HTML entry, so it does not try to resolve the playground's virtual editor module
+without the playground plugin.
+
+The checked-in GitHub Actions workflow uses the same verification entrypoint and
+the official [setup-vp integration](https://viteplus.dev/guide/ci), pinned to
+v1.22.0. Hosted Linux CI has not been executed as part of this local verification.
