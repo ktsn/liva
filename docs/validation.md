@@ -117,3 +117,23 @@ Run `sh scripts/verify.sh` (or `vp run verify`) for ordered Rust, WASM, JS, Vue,
 browser, and production-build verification. WASM is rebuilt before dependent tests
 and builds; no artifact caching is configured. Install dependencies with
 `pnpm install --frozen-lockfile` and browsers with `pnpm exec playwright install`.
+
+## Targeted source planning (E6, compiler portion)
+
+`apply_edits` accepts semantic field paths, frame additions/removals, and directional
+property timing overrides. It resolves paths against fresh compiler mappings,
+preserves boundary whitespace, and validates every intermediate edit before returning
+a candidate source. Transactions never partially persist. Frame values should be
+edited before moving their offset because offset changes their semantic identity.
+Inserted blocks use local LF/CRLF and closing-block indentation; compact blocks
+receive local newline separators without reformatting neighboring text.
+
+Fields containing comments, and new values introducing comment tokens, are rejected
+with an explanation. Quoted comment-like text remains opaque. This conservative
+policy avoids moving comments or letting a new line comment consume a neighboring
+declaration. Authors can make those edits directly in source.
+
+Rust edit tests assert exact byte preservation for multiple Unicode/CRLF edits,
+compact CRLF insertions, comment/injection rejection, directional insertion,
+frame add/remove, offset movement, and normalized-offset collisions. The WASM
+wrapper exposes the same planner; filesystem policy remains a server responsibility.

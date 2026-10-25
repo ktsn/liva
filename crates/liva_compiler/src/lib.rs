@@ -1,3 +1,4 @@
+pub mod edits;
 pub mod ir;
 
 use ir::*;

@@ -555,3 +555,10 @@ fn validate_headers(node: &Ast, depth: usize, diagnostics: &mut Vec<Diagnostic>)
         validate_headers(&block, depth + 1, diagnostics);
     }
 }
+
+pub fn contains_comments(source: &str) -> bool {
+    lex(source, true)
+        .0
+        .iter()
+        .any(|token| token.trivia && (token.text.starts_with("/*") || token.text.starts_with("//")))
+}
