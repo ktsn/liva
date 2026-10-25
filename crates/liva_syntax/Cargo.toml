@@ -1,0 +1,9 @@
+[package]
+name = "liva_syntax"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+rowan = "0.17"
+serde.workspace = true
