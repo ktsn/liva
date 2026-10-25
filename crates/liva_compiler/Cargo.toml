@@ -1,0 +1,10 @@
+[package]
+name = "liva_compiler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+liva_syntax = { path = "../liva_syntax" }
+serde.workspace = true
+serde_json.workspace = true

@@ -422,6 +422,9 @@ impl Parser<'_> {
             }
 
             match text {
+                ";" if argument && stack.is_empty() => {
+                    self.error("Arguments must be separated by commas, not semicolons")
+                }
                 "(" => stack.push(")"),
                 "[" => stack.push("]"),
                 ")" | "]" => {

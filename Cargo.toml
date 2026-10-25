@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/liva_syntax"]
+members = ["crates/liva_syntax", "crates/liva_compiler", "crates/liva_wasm"]
 resolver = "3"
 
 [workspace.package]
