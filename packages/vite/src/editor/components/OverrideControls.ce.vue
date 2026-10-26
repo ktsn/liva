@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import type { Definition } from "@liva/runtime";
-import type { Edit } from "./protocol.ts";
+import type { Edit } from "../communication/protocol.ts";
 
 const props = defineProps<{ definition: Definition }>();
 const emit = defineEmits<{ add: [edit: Edit] }>();

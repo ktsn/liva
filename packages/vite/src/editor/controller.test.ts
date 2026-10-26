@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { EditorController } from "./controller.ts";
-import type { EditorReply, EditorRequest, Edit } from "./protocol.ts";
+import type { EditorReply, EditorRequest, Edit } from "./communication/protocol.ts";
 import type { InstanceBinding } from "@liva/vue";
 import type { Definition } from "@liva/runtime";
 

@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { EditorService } from "./editor/server.ts";
+import { EditorService } from "./editor/communication/server.ts";
 import { readFile } from "node:fs/promises";
 import type { Plugin, ViteDevServer } from "vite-plus";
 import {

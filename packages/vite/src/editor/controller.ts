@@ -1,5 +1,5 @@
 import type { InstanceBinding } from "@liva/vue";
-import type { EditorReply, EditorRequest, Edit, Inspection } from "./protocol.ts";
+import type { EditorReply, EditorRequest, Edit, Inspection } from "./communication/protocol.ts";
 
 export interface Entry {
   id: string;

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import type { Edit, Inspection } from "./protocol.ts";
+import type { Edit, Inspection } from "../communication/protocol.ts";
 
 const props = defineProps<{ inspection: Inspection; draft: Edit[] }>();
 const emit = defineEmits<{ add: [edit: Edit]; remove: [path: string] }>();

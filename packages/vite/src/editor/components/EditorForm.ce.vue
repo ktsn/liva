@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { resolve } from "@liva/runtime";
-import type { Edit, Inspection } from "./protocol.ts";
+import type { Edit, Inspection } from "../communication/protocol.ts";
 import TimingField from "./TimingField.ce.vue";
 import FrameControls from "./FrameControls.ce.vue";
 import OverrideControls from "./OverrideControls.ce.vue";

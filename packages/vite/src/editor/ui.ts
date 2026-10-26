@@ -1,5 +1,5 @@
 import { defineCustomElement } from "vue";
-import EditorPanel from "./EditorPanel.ce.vue";
+import EditorPanel from "./components/EditorPanel.ce.vue";
 import type { EditorController } from "./controller.ts";
 
 const tag = "liva-motion-editor";

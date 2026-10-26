@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onScopeDispose, ref, shallowRef } from "vue";
-import type { EditorController } from "./controller.ts";
-import type { Edit } from "./protocol.ts";
+import type { EditorController } from "../controller.ts";
+import type { Edit } from "../communication/protocol.ts";
 import EditorForm from "./EditorForm.ce.vue";
 
 const { controller } = defineProps<{ controller: EditorController }>();
@@ -113,7 +113,7 @@ onScopeDispose(() => {
   </div>
 </template>
 
-<style src="./editor.css"></style>
+<style src="../editor.css"></style>
 
 <style scoped>
 .editor {

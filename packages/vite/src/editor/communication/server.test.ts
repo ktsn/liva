@@ -14,7 +14,7 @@ let source: string;
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "liva-editor-"));
   outside = await mkdtemp(join(tmpdir(), "liva-outside-"));
-  source = `<script setup>const label = '😀日本語'</script>\r\n<template><div>{{ label }}</div></template>\r\n<liva>\r\n${(await readFile(new URL("../../../../fixtures/toggle.liv", import.meta.url), "utf8")).replaceAll("\n", "\r\n")}</liva>\r\n`;
+  source = `<script setup>const label = '😀日本語'</script>\r\n<template><div>{{ label }}</div></template>\r\n<liva>\r\n${(await readFile(new URL("../../../../../fixtures/toggle.liv", import.meta.url), "utf8")).replaceAll("\n", "\r\n")}</liva>\r\n`;
   await writeFile(join(root, "Toggle.vue"), source);
   service = new EditorService(root);
   sourceId = await service.register(join(root, "Toggle.vue"));

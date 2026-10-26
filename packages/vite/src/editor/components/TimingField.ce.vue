@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import type { Inspection } from "./protocol.ts";
+import type { Inspection } from "../communication/protocol.ts";
 
 const props = defineProps<{ field: Inspection["fields"][number]; disabled: boolean }>();
 const emit = defineEmits<{ change: [value: string] }>();

@@ -3,7 +3,7 @@ import { readFile, realpath, stat, writeFile, rename, unlink, mkdir } from "node
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ViteDevServer } from "vite-plus";
-import { applyEdits, compileSfc, hash, hasErrors, type SourceSnapshot } from "../compiler.ts";
+import { applyEdits, compileSfc, hash, hasErrors, type SourceSnapshot } from "../../compiler.ts";
 import type { EditorRequest, EditorReply, Inspection } from "./protocol.ts";
 
 export class EditorError extends Error {
