@@ -224,8 +224,11 @@ The development editor uses Vue SFC templates, props, and typed events. A shallo
 controller snapshot drives the panel without proxying DOM elements or animation
 instances. Inspection changes reset form controls; ordinary status or registry
 notifications retain input values and the draft. Vue scope disposal removes the
-controller subscription and pending preview timer, and the mount adapter unmounts
-the app during module disposal. The shared stylesheet stays inside Shadow DOM.
+controller subscription and pending preview timer, and removing the custom element disposes
+the app during module disposal. Vue custom-element compilation injects scoped SFC
+styles into Shadow DOM, including child-component styles. `editor.css` contains
+only shared base rules and is loaded by the root component. Browser assertions
+verify the root layout, form actions, and child field styles in all three engines.
 
 The preview timer reads the current destination and is canceled when selection,
 application state, source revision, or mounted-instance availability changes.

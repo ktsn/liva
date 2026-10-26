@@ -57,3 +57,10 @@ function slide(event: Event) {
     />
   </div>
 </template>
+
+<style scoped>
+.field {
+  border-left: 2px solid #d4dfca;
+  padding-left: 10px;
+}
+</style>

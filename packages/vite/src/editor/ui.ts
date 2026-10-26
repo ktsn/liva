@@ -1,23 +1,20 @@
-import { createApp } from "vue";
-import EditorPanel from "./EditorPanel.vue";
-import styles from "./editor.css?inline";
+import { defineCustomElement } from "vue";
+import EditorPanel from "./EditorPanel.ce.vue";
 import type { EditorController } from "./controller.ts";
 
+const tag = "liva-motion-editor";
+
+if (!customElements.get(tag)) {
+  customElements.define(tag, defineCustomElement(EditorPanel));
+}
+
 export function mountEditor(controller: EditorController) {
-  const host = document.createElement("div");
+  const host = document.createElement(tag) as HTMLElement & { controller: EditorController };
+  host.controller = controller;
   host.dataset.livaEditor = "";
-  const shadow = host.attachShadow({ mode: "open" });
-  const style = document.createElement("style");
-  style.textContent = styles;
-  const container = document.createElement("div");
-  shadow.append(style, container);
   document.body.append(host);
 
-  const app = createApp(EditorPanel, { controller });
-  app.mount(container);
-
   import.meta.hot?.dispose(() => {
-    app.unmount();
     host.remove();
   });
 }

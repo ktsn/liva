@@ -2,9 +2,9 @@
 import { computed, ref } from "vue";
 import { resolve } from "@liva/runtime";
 import type { Edit, Inspection } from "./protocol.ts";
-import TimingField from "./TimingField.vue";
-import FrameControls from "./FrameControls.vue";
-import OverrideControls from "./OverrideControls.vue";
+import TimingField from "./TimingField.ce.vue";
+import FrameControls from "./FrameControls.ce.vue";
+import OverrideControls from "./OverrideControls.ce.vue";
 
 const props = defineProps<{ inspection: Inspection; draft: Edit[]; requestedState?: string }>();
 const emit = defineEmits<{
@@ -150,3 +150,33 @@ function disabled(path: string) {
     <button @click="emit('save')">Save to source</button>
   </div>
 </template>
+
+<style scoped>
+.actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+.actions {
+  position: sticky;
+  bottom: -20px;
+  background: #fffefa;
+  padding: 14px 0;
+  margin-top: 12px;
+  border-top: 1px solid #dce3d7;
+}
+.origin {
+  font-size: 10px;
+  color: #75856c;
+}
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font:
+    10px/1.6 ui-monospace,
+    monospace;
+  max-height: 180px;
+  overflow: auto;
+}
+</style>

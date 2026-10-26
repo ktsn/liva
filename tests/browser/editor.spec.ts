@@ -12,6 +12,13 @@ test("editor isolates previews and restores the latest application state on canc
   const first = page.getByRole("switch", { name: "Notifications", exact: true });
   const second = page.getByRole("switch", { name: "Product updates", exact: true });
   await page.getByRole("button", { name: "Motion editor", exact: true }).click();
+  await expect(page.locator("[data-liva-editor] .editor")).toHaveCSS("position", "fixed");
+  await expect(page.locator("[data-liva-editor] .panel")).toHaveCSS("padding", "20px");
+  await expect(page.locator("[data-liva-editor] .actions")).toHaveCSS("position", "sticky");
+  await expect(page.locator("[data-liva-editor] .field").first()).toHaveCSS(
+    "border-left-width",
+    "2px",
+  );
   await page.getByRole("button", { name: "Preview", exact: true }).click();
   await expect(first).toHaveCSS("background-color", "rgb(52, 178, 123)");
   await expect(first).toHaveAttribute("aria-checked", "false");

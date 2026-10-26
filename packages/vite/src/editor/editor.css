@@ -1,8 +1,4 @@
 :host {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 2147483646;
   font: 12px/1.5 system-ui;
   color: #244238;
 }
@@ -46,52 +42,6 @@ label {
   font-size: 11px;
   color: #627568;
 }
-h2 {
-  font-size: 16px;
-  margin: 0;
-}
-h3 {
-  font-size: 12px;
-  margin: 16px 0 6px;
-}
-p {
-  margin: 8px 0;
-  color: #627568;
-}
-.launcher {
-  background: #244e3a;
-  color: white;
-  border: 0;
-  border-radius: 30px;
-  padding: 12px 20px;
-  box-shadow: 0 4px 24px #0002;
-}
-.panel {
-  width: min(440px, calc(100vw - 32px));
-  max-height: 82vh;
-  background: #fffefa;
-  border: 1px solid #cbd6c7;
-  border-radius: 12px;
-  box-shadow: 0 12px 60px #152c3030;
-  overflow: auto;
-  padding: 20px;
-  margin-bottom: 10px;
-}
-.top,
-.actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-}
-.actions {
-  position: sticky;
-  bottom: -20px;
-  background: #fffefa;
-  padding: 14px 0;
-  margin-top: 12px;
-  border-top: 1px solid #dce3d7;
-}
 details {
   border-top: 1px solid #e2e8dc;
   margin-top: 12px;
@@ -100,31 +50,6 @@ details {
 summary {
   cursor: pointer;
   font-weight: 600;
-}
-.field {
-  border-left: 2px solid #d4dfca;
-  padding-left: 10px;
-}
-.status {
-  white-space: pre-wrap;
-  background: #edf3e8;
-  padding: 10px;
-  border-radius: 6px;
-  margin-top: 12px;
-  font-size: 11px;
-}
-.origin {
-  font-size: 10px;
-  color: #75856c;
-}
-pre {
-  white-space: pre-wrap;
-  word-break: break-word;
-  font:
-    10px/1.6 ui-monospace,
-    monospace;
-  max-height: 180px;
-  overflow: auto;
 }
 button:focus-visible,
 input:focus-visible,

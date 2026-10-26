@@ -90,11 +90,12 @@ contains no editor, compiler WASM, source mappings, or source-writing endpoint.
 | `playground`           | Normal Vue application and integration fixtures   |
 
 The editor UI is implemented as Vue single-file components in
-`packages/vite/src/editor/`: `EditorPanel.vue` owns selection and controller
-subscriptions, `EditorForm.vue` coordinates edits, and `TimingField.vue`,
-`FrameControls.vue`, and `OverrideControls.vue` render the individual controls.
-`editor.css` is isolated inside the editor's shadow root. `ui.ts` only mounts and
-unmounts the Vue app; source transactions remain in `controller.ts` and `server.ts`.
+`packages/vite/src/editor/`: `EditorPanel.ce.vue` owns selection and controller
+subscriptions, `EditorForm.ce.vue` coordinates edits, and `TimingField.ce.vue`,
+`FrameControls.ce.vue`, and `OverrideControls.ce.vue` render the individual controls.
+`editor.css` contains shared base styles; component-specific rules live in each
+SFC's `<style scoped>`. The `.ce.vue` convention lets Vue inject component styles
+into the editor's shadow root. `ui.ts` only registers and mounts the Vue custom element; source transactions remain in `controller.ts` and `server.ts`.
 The verification script type-checks the editor templates separately from the
 playground and formats editor SFCs without reformatting playground `<liva>` blocks.
 
