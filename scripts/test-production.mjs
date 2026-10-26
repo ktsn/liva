@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { chromium } from "@playwright/test";
 
 const cwd = resolve(import.meta.dirname, "../playground");
@@ -54,7 +55,7 @@ for (const mode of ["production", "development"]) {
     for (let attempt = 0; attempt < 100; attempt++) {
       if (server.exitCode !== null) throw new Error(output);
       try {
-        ready = output.includes(base) && (await fetch(base)).ok;
+        ready = stripVTControlCharacters(output).includes(base) && (await fetch(base)).ok;
       } catch {
         /* Wait for the preview listener. */
       }

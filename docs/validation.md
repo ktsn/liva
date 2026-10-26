@@ -212,4 +212,7 @@ without the playground plugin.
 
 The checked-in GitHub Actions workflow uses the same verification entrypoint and
 the official [setup-vp integration](https://viteplus.dev/guide/ci), pinned to
-v1.22.0. Hosted Linux CI has not been executed as part of this local verification.
+v1.22.0. Preview readiness strips ANSI terminal control sequences before matching
+the server URL; CI may colorize the host and port separately. The forced-color
+regression command `FORCE_COLOR=1 CI=1 node scripts/test-production.mjs` passes
+for both build modes locally.
