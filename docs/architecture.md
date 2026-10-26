@@ -371,6 +371,14 @@ Commit protocol:
    Deduplicate commits by request ID/revision. Clear preview only after successful
    synchronization; on conflicts retain the draft for explicit rebase or cancel.
 
+The `track` edit replaces one property's local timing and keyframe collection
+atomically. Omitted timing or frames restore inheritance independently; an empty
+frame collection also means inheritance because the language has no empty override.
+Missing transition/target/property containers are inserted as needed. Existing
+property blocks containing comments reject replacement to preserve comment
+placement. Unrelated source remains byte-for-byte intact. Opaque field values are
+validated as single declarations and protected from generated indentation.
+
 General settings can be inherited by the selected direction. The editor must show
 where a value comes from and offer an explicit directional override, avoiding
 accidental edits to all directions. A successful save affects every instance of

@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Edit {
+    Track {
+        path: String,
+        timing: Option<String>,
+        frames: Option<Vec<FrameEdit>>,
+    },
     Set {
         path: String,
         value: String,
@@ -26,6 +31,14 @@ pub enum Edit {
         property: String,
         timing: String,
     },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FrameEdit {
+    pub offset: f64,
+    pub value: String,
+    pub easing: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -149,6 +162,163 @@ fn set(source: &str, compiled: &Compilation, path: &str, value: &str) -> Result<
     Ok(result)
 }
 
+// Track replacement is atomic: changing timing and frames together may have an
+// invalid intermediate state (for example, switching a keyed tween to a spring).
+fn replace_track(
+    source: &str,
+    compiled: &Compilation,
+    path: &str,
+    timing: &Option<String>,
+    frames: &Option<Vec<FrameEdit>>,
+) -> Result<String, String> {
+    let parts: Vec<_> = path.split('/').collect();
+    let (definition, transition, target, property) = match parts.as_slice() {
+        [d, "transition", "general", "target", t, "property", p] => {
+            (*d, "transition".to_string(), *t, *p)
+        }
+        [
+            d,
+            "transition",
+            "directional",
+            from,
+            to,
+            "target",
+            t,
+            "property",
+            p,
+        ] if is_name(from) && is_name(to) => (*d, format!("transition {from} -> {to}"), *t, *p),
+        _ => return Err("Invalid property track path".into()),
+    };
+
+    if !is_name(definition) || !is_name(target) || !is_property(property) {
+        return Err("Invalid track identifiers".into());
+    }
+
+    let safe_value = |value: &str| -> Result<(), String> {
+        preserve_comments(value)?;
+        let parsed = liva_syntax::parse(&format!("t {{ value: {value}\n}}"));
+        let block = parsed
+            .root
+            .child(liva_syntax::Kind::Block)
+            .ok_or("Invalid field value")?;
+        let fields: Vec<_> = block.children(liva_syntax::Kind::Declaration).collect();
+        if !parsed.diagnostics.is_empty()
+            || parsed.root.0.children().count() != 1
+            || block.children(liva_syntax::Kind::Block).next().is_some()
+            || fields.len() != 1
+            || fields[0].value().as_deref() != Some(semantic_text(value).as_str())
+            || semantic_text(value).is_empty()
+        {
+            return Err("Track fields must contain exactly one value".into());
+        }
+        Ok(())
+    };
+    let mut prefix = "__LIVA_TRACK_VALUE_".to_string();
+    let inputs: Vec<&str> =
+        timing
+            .iter()
+            .map(String::as_str)
+            .chain(frames.iter().flatten().flat_map(|frame| {
+                std::iter::once(frame.value.as_str()).chain(frame.easing.as_deref())
+            }))
+            .collect();
+    while source.contains(&prefix) || inputs.iter().any(|value| value.contains(&prefix)) {
+        prefix.push('_');
+    }
+    let mut values = Vec::new();
+    let mut placeholder = |value: &str| {
+        let token = format!("{prefix}{}__", values.len());
+        values.push((token.clone(), value.to_string()));
+        token
+    };
+    let mut declarations = Vec::new();
+
+    if let Some(timing) = timing {
+        safe_value(timing)?;
+        declarations.push(format!("timing: {}", placeholder(timing)));
+    }
+
+    if let Some(frames) = frames {
+        if frames.len() > 100 {
+            return Err("At most 100 keyframes per track".into());
+        }
+        for frame in frames {
+            if !frame.offset.is_finite() || !(0.0..=1.0).contains(&frame.offset) {
+                return Err("Offset must be between 0 and 1".into());
+            }
+            safe_value(&frame.value)?;
+            let easing = if let Some(easing) = &frame.easing {
+                safe_value(easing)?;
+                format!("\n  easing: {}", placeholder(easing))
+            } else {
+                String::new()
+            };
+            declarations.push(format!(
+                "{}% {{\n  value: {}{easing}\n}}",
+                frame.offset * 100.0,
+                placeholder(&frame.value)
+            ));
+        }
+    }
+
+    let restore_values = |mut result: String| {
+        let newline = if source.contains("\r\n") {
+            "\r\n"
+        } else {
+            "\n"
+        };
+        for (token, value) in &values {
+            result = result.replace(token, &value.replace("\r\n", "\n").replace('\n', newline));
+        }
+        result
+    };
+    let body = format!("{property} {{\n{}\n}}", indent(&declarations.join("\n")));
+    if let Ok(existing) = mapping(compiled, path, "block") {
+        preserve_comments(&source[existing.range.start..existing.range.end])?;
+        let mut result = source.to_string();
+        let line = source[..existing.range.start]
+            .rsplit('\n')
+            .next()
+            .unwrap_or("");
+        let prefix: String = line
+            .chars()
+            .take_while(|c| *c == ' ' || *c == '\t')
+            .collect();
+        let newline = if source.contains("\r\n") {
+            "\r\n"
+        } else {
+            "\n"
+        };
+        let replacement = if declarations.is_empty() {
+            String::new()
+        } else {
+            body.replace('\n', &format!("{newline}{prefix}"))
+        };
+        result.replace_range(existing.range.start..existing.range.end, &replacement);
+        return Ok(restore_values(result));
+    }
+
+    if declarations.is_empty() {
+        return Ok(source.to_string());
+    }
+    let (target_path, _) = path.rsplit_once("/property/").unwrap();
+    let (transition_path, _) = target_path.rsplit_once("/target/").unwrap();
+    let (parent, body) = if mapping(compiled, target_path, "block").is_ok() {
+        (target_path, body)
+    } else {
+        let body = format!("{target} {{\n{}\n}}", indent(&body));
+        if mapping(compiled, transition_path, "block").is_ok() {
+            (transition_path, body)
+        } else {
+            (
+                definition,
+                format!("{transition} {{\n{}\n}}", indent(&body)),
+            )
+        }
+    };
+    insert(source, mapping(compiled, parent, "block")?, &body).map(restore_values)
+}
+
 pub fn apply_edits(source: &str, edits: &[Edit]) -> Result<EditResult, String> {
     if edits.len() > 100 {
         return Err("At most 100 edits per transaction".into());
@@ -159,6 +329,11 @@ pub fn apply_edits(source: &str, edits: &[Edit]) -> Result<EditResult, String> {
 
     for edit in edits {
         current = match edit {
+            Edit::Track {
+                path,
+                timing,
+                frames,
+            } => replace_track(&current, &compiled, path, timing, frames)?,
             Edit::Set { path, value } => set(&current, &compiled, path, value)?,
             Edit::RemoveFrame { path } => {
                 if path

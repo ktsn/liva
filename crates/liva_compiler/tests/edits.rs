@@ -193,3 +193,160 @@ fn compact_insertions_preserve_crlf() {
     );
     assert!(result.source.starts_with("// header\r\na { state off { t { x: 0 } } state on { t { x: 1 } } transition { timing: tween(duration: 1ms)\r\nt { x {"));
 }
+
+#[test]
+fn track_edits_copy_frames_and_restore_inheritance_independently() {
+    use liva_compiler::edits::FrameEdit;
+    let source = include_str!("../../../fixtures/toggle.liv");
+    let path = "toggle/transition/directional/off/on/target/thumb/property/scale";
+    let edit = |timing, frames| Edit::Track {
+        path: path.into(),
+        timing,
+        frames,
+    };
+    let copied = apply_edits(
+        source,
+        &[edit(
+            None,
+            Some(vec![
+                FrameEdit {
+                    offset: 0.4,
+                    value: "1.4".into(),
+                    easing: Some("ease-in".into()),
+                },
+                FrameEdit {
+                    offset: 0.7,
+                    value: "0.95 1".into(),
+                    easing: None,
+                },
+            ]),
+        )],
+    )
+    .unwrap();
+
+    assert!(copied.source.contains("transition off -> on"));
+    assert!(copied.source.contains("value: 1.4"));
+    assert!(copied.source.contains("value: 1.3 1"));
+
+    let restored = apply_edits(
+        &copied.source,
+        &[edit(Some("tween(duration: 200ms)".into()), None)],
+    )
+    .unwrap();
+    let direction = restored.compilation.definitions[0]
+        .directional_transitions
+        .iter()
+        .find(|d| d.from == "off")
+        .unwrap();
+    let track = &direction.transition.targets[0].properties[0];
+    assert!(track.keyframes.is_none());
+    assert!(track.timing.is_some());
+
+    let removed = apply_edits(&restored.source, &[edit(None, None)]).unwrap();
+    assert!(!removed.source.contains("200ms)"));
+}
+
+#[test]
+fn track_edits_reject_injection_collisions_and_comment_loss() {
+    use liva_compiler::edits::FrameEdit;
+    let source = include_str!("../../../fixtures/toggle.liv");
+    let path = "toggle/transition/general/target/thumb/property/scale";
+    let edit = |frames| Edit::Track {
+        path: path.into(),
+        timing: None,
+        frames: Some(frames),
+    };
+    let frame = |value: &str| FrameEdit {
+        offset: 0.4,
+        value: value.into(),
+        easing: None,
+    };
+
+    for frames in [
+        vec![frame("1\neasing: ease")],
+        vec![frame("1 } 60% { value: 2")],
+        vec![frame("1"), frame("2")],
+    ] {
+        assert!(apply_edits(source, &[edit(frames)]).is_err());
+    }
+
+    let commented = source.replace("value: 1.3 1", "value: /* keep */ 1.3 1");
+    assert!(
+        apply_edits(&commented, &[edit(vec![frame("1")])])
+            .unwrap_err()
+            .contains("comments")
+    );
+}
+
+#[test]
+fn track_edits_accept_opaque_grouped_values_and_preserve_surrounding_crlf() {
+    use liva_compiler::edits::FrameEdit;
+    let source = include_str!("../../../fixtures/toggle.liv").replace('\n', "\r\n");
+    let path = "toggle/transition/general/target/thumb/property/scale";
+    let result = apply_edits(
+        &source,
+        &[Edit::Track {
+            path: path.into(),
+            timing: Some("tween(\n duration: 500ms,\n easing: linear\n)".into()),
+            frames: Some(vec![
+                FrameEdit {
+                    offset: 0.5,
+                    value: "var(--scale,\n 1.5)".into(),
+                    easing: Some("linear".into()),
+                },
+                FrameEdit {
+                    offset: 0.7,
+                    value: "\"a;b{}\"".into(),
+                    easing: None,
+                },
+            ]),
+        }],
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.source.matches('\n').count(),
+        result.source.matches("\r\n").count()
+    );
+    let original_range = &liva_compiler::compile(&source, true).mappings.unwrap()[path].range;
+    let new_range = &result.compilation.mappings.as_ref().unwrap()[path].range;
+    assert_eq!(
+        &source[..original_range.start],
+        &result.source[..new_range.start]
+    );
+    assert_eq!(
+        &source[original_range.end..],
+        &result.source[new_range.end..]
+    );
+}
+
+#[test]
+fn track_formatting_does_not_indent_inside_opaque_values() {
+    use liva_compiler::edits::FrameEdit;
+    let source = include_str!("../../../fixtures/toggle.liv");
+    let value = "\"a\\\nb\"";
+    for path in [
+        "toggle/transition/general/target/thumb/property/scale",
+        "toggle/transition/directional/off/on/target/thumb/property/scale",
+    ] {
+        let result = apply_edits(
+            source,
+            &[Edit::Track {
+                path: path.into(),
+                timing: None,
+                frames: Some(vec![FrameEdit {
+                    offset: 0.5,
+                    value: value.into(),
+                    easing: None,
+                }]),
+            }],
+        )
+        .unwrap();
+        let mapping =
+            &result.compilation.mappings.as_ref().unwrap()[&format!("{path}/frame/0.5/value")];
+        assert_eq!(
+            liva_syntax::semantic_text(&result.source[mapping.range.start..mapping.range.end]),
+            value
+        );
+    }
+}

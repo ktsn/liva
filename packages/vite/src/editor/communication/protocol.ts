@@ -1,6 +1,7 @@
-import type { Definition } from "@liva/runtime";
+import type { Definition, Frame } from "@liva/runtime";
 
 export type Edit =
+  | { op: "track"; path: string; timing?: string; frames?: readonly Frame[] }
   | { op: "set"; path: string; value: string }
   | { op: "removeFrame"; path: string }
   | { op: "addFrame"; path: string; offset: number; value: string; easing?: string }
