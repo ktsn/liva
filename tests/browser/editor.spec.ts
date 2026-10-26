@@ -108,7 +108,7 @@ test("editor inserts overrides and frames and removes frames through guarded sav
 
 test("editor rejects invalid sessions, origins, hosts and oversized requests", async ({ page }) => {
   await page.goto(base);
-  const module = await (await page.request.get(`${base}/@id/__x00__virtual:liva-plugin`)).text();
+  const module = await (await page.request.get(`${base}/@id/__x00__liva:vue-plugin`)).text();
   const token = module.match(/createDevPlugin\("([^"]+)"\)/)![1];
   const headers = { "X-Liva-Session": token, Origin: base, "Content-Type": "application/json" };
   for (const invalid of [

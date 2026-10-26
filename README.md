@@ -52,6 +52,25 @@ revision before editing again. Recovery copies live in the ignored
 `playground/.liva-backups/` directory, keyed by the original full-file SHA-256.
 The bridge supports local HTTP sessions; remote/proxied editing is outside the MVP.
 
+## Vue integration
+
+With the Liva Vite plugin configured, install the Vue plugin through its package:
+
+```ts
+import { createApp } from "vue";
+import liva from "@liva/vue";
+import App from "./App.vue";
+
+createApp(App).use(liva).mount("#app");
+```
+
+The Vite plugin resolves this package entry to the development integration while
+serving, and to the runtime-only plugin while building. Application code and its
+types use ordinary package exports; no virtual-module declaration is needed.
+Without Vite interception, the package's default export is also runtime-only.
+For explicit plugin construction without the editor, import `createLivaPlugin`
+from `@liva/vue/runtime` and pass it the diagnostic/observation options you need.
+
 ## Verify and build
 
 ```sh

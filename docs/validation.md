@@ -237,3 +237,19 @@ verifies that a later application action supersedes the pending preview. Overrid
 and frame save tests operate the rendered Vue controls, including add/remove and
 shared-instance synchronization. `tsconfig.editor.json` checks editor scripts and
 templates through `vue-tsc` in the standard verification entrypoint.
+
+
+## Public Vue plugin entry
+
+Application code imports the default plugin from `@liva/vue`. The package exports
+an actual typed runtime-only implementation, so type checking and non-Vite imports
+work without ambient virtual-module declarations. The Vite plugin intercepts that
+exact public entry and generates the development integration only for its dev
+server; production imports `@liva/vue/runtime` directly. This runtime subpath also
+supports explicit factory use and avoids recursive interception inside the editor.
+The public entry is excluded from dependency prebundling so the development
+integration cannot be replaced by a prebundled runtime-only entry.
+
+A package-export test installs the public default plugin without the Liva Vite
+resolver. The playground and editor fixture use the public import in browser tests;
+production isolation checks exercise that same import in both build modes.

@@ -1,4 +1,4 @@
-import { createLivaPlugin } from "@liva/vue";
+import { createLivaPlugin } from "@liva/vue/runtime";
 import type { Edit, EditorReply } from "./protocol.ts";
 import { EditorController } from "./controller.ts";
 import { mountEditor } from "./ui.ts";

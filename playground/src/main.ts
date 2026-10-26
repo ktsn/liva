@@ -1,5 +1,5 @@
 import { createApp } from "vue";
-import liva from "virtual:liva-plugin";
+import liva from "@liva/vue";
 import App from "./App.vue";
 import "./style.css";
 

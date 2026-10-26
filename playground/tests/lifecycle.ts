@@ -1,5 +1,5 @@
 import { createApp } from "vue";
-import { createLivaPlugin, type InstanceBinding } from "@liva/vue";
+import { createLivaPlugin, type InstanceBinding } from "@liva/vue/runtime";
 import Lifecycle from "./Lifecycle.vue";
 
 const records = new Set<InstanceBinding>();

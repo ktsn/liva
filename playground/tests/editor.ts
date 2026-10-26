@@ -1,5 +1,5 @@
 import { createApp, h } from "vue";
-import plugin from "virtual:liva-plugin";
+import plugin from "@liva/vue";
 import EditorToggle from "./EditorToggle.vue";
 
 createApp({

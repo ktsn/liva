@@ -27,21 +27,24 @@ export default function liva(): Plugin {
   return {
     name: "liva",
     enforce: "pre",
+    config() {
+      return { optimizeDeps: { exclude: ["@liva/vue"] } };
+    },
     configureServer(devServer) {
       server = devServer;
       editor = new EditorService(devServer.config.root);
       editor.install(devServer);
     },
     resolveId(id) {
-      if (id === "virtual:liva-plugin") return "\0virtual:liva-plugin";
+      if (id === "@liva/vue") return "\0liva:vue-plugin";
     },
     load(id) {
-      if (id === "\0virtual:liva-plugin" && editor) {
+      if (id === "\0liva:vue-plugin" && editor) {
         const client = "/@fs/" + fileURLToPath(new URL("./editor/client.ts", import.meta.url));
-        return `import { createDevPlugin } from ${JSON.stringify(client)}; export default createDevPlugin(${JSON.stringify(editor.token)});`;
+        return `export * from "@liva/vue/runtime"; import { createDevPlugin } from ${JSON.stringify(client)}; export default createDevPlugin(${JSON.stringify(editor.token)});`;
       }
-      if (id === "\0virtual:liva-plugin")
-        return `import { createLivaPlugin } from '@liva/vue'; export default createLivaPlugin();`;
+      if (id === "\0liva:vue-plugin")
+        return `export * from "@liva/vue/runtime"; import { createLivaPlugin } from '@liva/vue/runtime'; export default createLivaPlugin();`;
     },
     async transform(_code, id) {
       const [file, query = ""] = id.split("?", 2);
