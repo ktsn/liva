@@ -69,43 +69,29 @@ test("editor inserts overrides and frames and removes frames through guarded sav
     await page.goto(`${base}/tests/editor.html`);
     await page.getByRole("button", { name: "Motion editor", exact: true }).click();
     await expect(page.getByRole("button", { name: "Save to source" })).toBeVisible();
-    await page.evaluate(async () => {
-      const editor = (window as any).__LIVA_EDITOR__;
-      editor.setDraft([
-        {
-          op: "override",
-          definition: "motion",
-          from: "off",
-          to: "on",
-          target: "box",
-          property: "background-color",
-          timing: "tween(duration: 100ms)",
-        },
-        {
-          op: "addFrame",
-          path: "motion/transition/directional/off/on/target/box/property/background-color",
-          offset: 0.5,
-          value: "purple",
-        },
-      ]);
-      await editor.preview("on");
-      await editor.commit();
-    });
+    await page.getByText("Create a directional timing override", { exact: true }).click();
+    await page.getByLabel("Override timing", { exact: true }).fill("tween(duration: 100ms)");
+    await page.getByRole("button", { name: "Add override to draft" }).click();
+    await expect(page.getByRole("status")).toContainText("Previewing");
+    await page.getByRole("button", { name: "Save to source" }).click();
+    await expect(page.getByRole("status")).toContainText("All shared instances are synchronized");
+
+    await page.getByText("Add or remove a keyframe", { exact: true }).click();
+    await page.getByLabel("New frame value", { exact: true }).fill("purple");
+    await page.getByRole("button", { name: "Add frame to draft" }).click();
+    await expect(page.getByRole("status")).toContainText("Previewing");
+    await page.getByRole("button", { name: "Save to source" }).click();
+    await expect(page.getByRole("status")).toContainText("All shared instances are synchronized");
     const saved = await readFile(file, "utf8");
     expect(saved).toContain("value: purple");
     expect(saved.slice(0, saved.indexOf("<liva>"))).toBe(
       original.slice(0, original.indexOf("<liva>")),
     );
-    await page.evaluate(async () => {
-      const editor = (window as any).__LIVA_EDITOR__;
-      editor.setDraft([
-        {
-          op: "removeFrame",
-          path: "motion/transition/directional/off/on/target/box/property/background-color/frame/0.5",
-        },
-      ]);
-      await editor.commit();
-    });
+    await page.getByText("Add or remove a keyframe", { exact: true }).click();
+    await page.getByRole("button", { name: "Remove 0.5 frame", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText("Previewing");
+    await page.getByRole("button", { name: "Save to source" }).click();
+    await expect(page.getByRole("status")).toContainText("All shared instances are synchronized");
     expect(await readFile(file, "utf8")).not.toContain("value: purple");
     await expect(page.getByRole("status")).toContainText("All shared instances are synchronized");
   } finally {
@@ -160,4 +146,50 @@ test("pending mode changes and removed frames disable conflicting parameter cont
     ),
   ).toBeDisabled();
   await expect(page.getByRole("status")).toContainText("Previewing");
+});
+
+test("debounced Vue form preview follows the latest destination and yields to app state", async ({
+  page,
+}) => {
+  await page.goto(base);
+  await page.getByRole("button", { name: "Motion editor", exact: true }).click();
+  const path = "toggle/transition/general/target/track/property/background-color/timing/duration";
+  await expect(page.locator(`input:not([type="range"])[data-path="${path}"]`)).toBeVisible();
+
+  await page.evaluate((path) => {
+    const shadow = document.querySelector("[data-liva-editor]")!.shadowRoot!;
+    const input = shadow.querySelector<HTMLInputElement>(
+      `input:not([type="range"])[data-path="${path}"]`,
+    )!;
+    input.value = "100ms";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    const destination = shadow.querySelector<HTMLSelectElement>(
+      '[aria-label="Preview destination"]',
+    )!;
+    destination.value = "off";
+    destination.dispatchEvent(new Event("change", { bubbles: true }));
+  }, path);
+
+  await expect(page.getByRole("status")).toContainText("Previewing");
+  await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
+  const first = page.getByRole("switch", { name: "Notifications" });
+  await expect(first).toHaveCSS("background-color", "rgb(136, 136, 136)");
+
+  await page.evaluate((path) => {
+    const shadow = document.querySelector("[data-liva-editor]")!.shadowRoot!;
+    const input = shadow.querySelector<HTMLInputElement>(
+      `input:not([type="range"])[data-path="${path}"]`,
+    )!;
+    input.value = "150ms";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    document.querySelector<HTMLButtonElement>('[aria-label="Notifications"]')!.click();
+  }, path);
+
+  await expect(first).toHaveAttribute("aria-checked", "true");
+  await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
+  await expect(first).toHaveCSS("background-color", "rgb(52, 178, 123)");
+  await expect(page.getByRole("status")).toContainText("Application state superseded");
+  await expect(page.locator(`input:not([type="range"])[data-path="${path}"]`)).toHaveValue("150ms");
 });

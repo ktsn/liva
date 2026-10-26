@@ -9,5 +9,6 @@ node scripts/test-wasm.mjs
 vp check
 vp test --run
 pnpm --dir playground exec vue-tsc --noEmit
+pnpm --dir playground exec vue-tsc --noEmit -p ../packages/vite/tsconfig.editor.json
 pnpm exec playwright test
 node scripts/test-production.mjs

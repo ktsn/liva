@@ -102,6 +102,7 @@ export class EditorController {
     this.sequence++;
     this.draft = edits;
     this.pendingCommit = undefined;
+    this.notify();
   }
 
   async preview(state: string) {

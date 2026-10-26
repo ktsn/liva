@@ -89,6 +89,15 @@ contains no editor, compiler WASM, source mappings, or source-writing endpoint.
 | `packages/vite`        | Custom-block compilation, HMR, development editor |
 | `playground`           | Normal Vue application and integration fixtures   |
 
+The editor UI is implemented as Vue single-file components in
+`packages/vite/src/editor/`: `EditorPanel.vue` owns selection and controller
+subscriptions, `EditorForm.vue` coordinates edits, and `TimingField.vue`,
+`FrameControls.vue`, and `OverrideControls.vue` render the individual controls.
+`editor.css` is isolated inside the editor's shadow root. `ui.ts` only mounts and
+unmounts the Vue app; source transactions remain in `controller.ts` and `server.ts`.
+The verification script type-checks the editor templates separately from the
+playground and formats editor SFCs without reformatting playground `<liva>` blocks.
+
 Read the [language specification](docs/language.md), [architecture](docs/architecture.md),
 [MVP acceptance plan](docs/mvp.md), and [validation record](docs/validation.md).
 The validation record describes tested browser versions, tolerances, source-save

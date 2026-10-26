@@ -5,7 +5,7 @@ export default defineConfig({
   lint: { options: { typeAware: true, typeCheck: true } },
   fmt: {
     ignorePatterns: [
-      "**/*.vue",
+      "playground/**/*.vue",
       "fixtures/**",
       "docs/**",
       "AGENTS.local.md",

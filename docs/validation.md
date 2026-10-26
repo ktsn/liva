@@ -216,3 +216,21 @@ v1.22.0. Preview readiness strips ANSI terminal control sequences before matchin
 the server URL; CI may colorize the host and port separately. The forced-color
 regression command `FORCE_COLOR=1 CI=1 node scripts/test-production.mjs` passes
 for both build modes locally.
+
+
+## Vue editor presentation
+
+The development editor uses Vue SFC templates, props, and typed events. A shallow
+controller snapshot drives the panel without proxying DOM elements or animation
+instances. Inspection changes reset form controls; ordinary status or registry
+notifications retain input values and the draft. Vue scope disposal removes the
+controller subscription and pending preview timer, and the mount adapter unmounts
+the app during module disposal. The shared stylesheet stays inside Shadow DOM.
+
+The preview timer reads the current destination and is canceled when selection,
+application state, source revision, or mounted-instance availability changes.
+Browser regression coverage changes destination immediately after editing, then
+verifies that a later application action supersedes the pending preview. Override
+and frame save tests operate the rendered Vue controls, including add/remove and
+shared-instance synchronization. `tsconfig.editor.json` checks editor scripts and
+templates through `vue-tsc` in the standard verification entrypoint.
