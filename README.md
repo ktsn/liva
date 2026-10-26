@@ -30,21 +30,23 @@ share one definition but have independent Vue and animation state. Click or use
 Space/Enter; reverse a switch before its motion finishes. The separate beacon
 illustrates a second definition.
 
-Open **Motion editor**, choose an instance, and inspect states, inherited timing,
-and local overrides. Edit a timing parameter, or replace a whole timing expression
-to switch modes. Parameter controls for the old expression stay disabled until
-save or cancel. Preview changes only that instance and never writes the file.
-Close the panel to interact with UI it covers; reopening keeps the draft.
+Open **Motion editor** to show the docked timeline. Choose an instance and a
+transition, then expand a target to reveal its CSS property tracks. Double-click
+a property lane to add a keyframe, enter its value, and apply it in the inspector.
+Drag keys to change their positions or drag the duration handle to stretch a track
+while preserving its keyframe percentages. Hold Alt to disable snapping.
 
-**Cancel draft** restores the latest application state and reloads source fields.
-**Save to source** updates the selected component's `<liva>` block and waits for
-all shared instances to synchronize through HMR. Vue may reload component state
-on HMR. Check the diff in `playground/src/Toggle.vue` after saving.
+Drag the playhead to scrub the selected instance, or use **Play** / **Pause**.
+**End preview** and closing the dock restore the latest application state while
+retaining the draft. **Discard changes** reloads the source. **Save to source**
+updates the component's `<liva>` block and waits for shared instances to synchronize
+through HMR. Vue may reload component state on HMR.
 
-The editor also inserts directional property timing overrides and adds/removes
-intermediate frames. Frame offsets use percentages in controls and normalize to
-0–1 in the compiler. State values are read-only in the editor. Values containing
-comments require direct source editing so their placement stays unambiguous.
+The inspector edits tween and spring parameters, keyframe values/easing, and
+state-derived endpoints. Directional edits copy inherited keyframes automatically;
+timing and frame overrides can return to common settings independently. Property
+blocks containing comments require direct source editing to preserve placement.
+See the [timeline editor guide](docs/editor.md) for inheritance, playback, and scope.
 
 A save rejects stale revisions, invalid input, and paths outside the Vite project
 root. Failed saves retain the draft. After an external edit, cancel to reload its
@@ -114,7 +116,8 @@ The editor lives in `packages/vite/src/editor/`:
 - `communication/` contains the shared protocol, HTTP client, HMR event subscriptions,
   and server-side source transactions with their tests.
 - The editor root contains `controller.ts` for state and edit coordination,
-  `client.ts` for development-plugin setup, `ui.ts` for mounting, and `editor.css`
+  `timeline.ts` for track resolution and coordinates, `client.ts` for development-plugin
+  setup, `ui.ts` for mounting, and `editor.css`
   for shared base styles.
 
 Component-specific rules live in each SFC's `<style scoped>`. The `.ce.vue`

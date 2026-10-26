@@ -53,6 +53,7 @@ export class LivaInstance {
   private active: ActiveTrack[] = [];
   private owned: OwnedElement[] = [];
   private generation = 0;
+  private manuallyPaused = false;
   private disposed = false;
   private suspended = true;
   private duplicateBindings = false;
@@ -77,7 +78,7 @@ export class LivaInstance {
   }
 
   private motionChanged = () => {
-    if (this.motion.matches) {
+    if (this.motion.matches && !this.manuallyPaused) {
       this.cancel();
       this.settle();
     }
@@ -85,6 +86,7 @@ export class LivaInstance {
 
   private cancel() {
     this.generation++;
+    this.manuallyPaused = false;
 
     for (const { animation } of this.active) {
       animation.cancel();
@@ -244,7 +246,7 @@ export class LivaInstance {
     this.settle();
   }
 
-  setState(state: string): boolean {
+  setState(state: string, options: { paused?: boolean } = {}): boolean {
     if (this.disposed) return false;
 
     let tracks: ResolvedTrack[];
@@ -258,7 +260,7 @@ export class LivaInstance {
 
     if (state === this.state) return true;
 
-    if (this.suspended || this.motion.matches) {
+    if (this.suspended || (this.motion.matches && !options.paused)) {
       this.state = state;
       this.cancel();
       this.settle();
@@ -306,7 +308,7 @@ export class LivaInstance {
         const effect = new KeyframeEffect(element, frames, {
           duration: timing.durationMs,
           easing: timing.easing,
-          fill: "both",
+          fill: options.paused ? "backwards" : "both",
         });
         const animation = new Animation(effect, document.timeline);
         prepared.push({ track, element, animation });
@@ -322,16 +324,23 @@ export class LivaInstance {
     const generation = this.generation;
     this.settle();
 
-    for (const { track, element } of prepared) {
+    for (const { track, element } of options.paused ? [] : prepared) {
       this.write(element, track.property, snapshots.get(element)!.get(track.property)!);
     }
 
     this.active = prepared;
+    this.manuallyPaused = options.paused ?? false;
     const start = document.timeline.currentTime;
 
     try {
       for (const entry of prepared) {
         const { animation, track, element } = entry;
+        if (options.paused) {
+          animation.pause();
+          animation.currentTime = 0;
+          continue;
+        }
+
         animation.play();
         if (typeof start === "number") animation.startTime = start;
 

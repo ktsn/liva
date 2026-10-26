@@ -1,4 +1,5 @@
 :host {
+  display: block;
   font: 12px/1.5 system-ui;
   color: #244238;
 }
@@ -18,6 +19,10 @@ button {
   padding: 7px 10px;
   background: #f5f8f0;
   color: #244238;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 button:hover {
   background: #e5eddf;

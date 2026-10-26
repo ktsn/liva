@@ -195,6 +195,14 @@ created effects for that request and keep the runtime usable for subsequent stat
 changes. This is exception containment, not CSS validation. Ignored properties
 need neither a diagnostic nor a fallback, and are not treated as failed requests.
 
+The runtime's optional paused transition mode prepares the same effects without
+completion callbacks. Effects use backwards fill over a destination-state inline
+baseline, allowing repeated forward/backward seeks and correct settlement at each
+track's end. Manually paused effects survive reduced-motion changes; the editor
+stops automatic playback when that preference becomes active. The editor owns the
+playhead clock, server validation, and restoring the application's requested state.
+See the [timeline editor guide](editor.md) for controls and lifecycle behavior.
+
 On completion, write the destination values to inline style and cancel filled
 effects. Catch cancellation rejections and guard completion callbacks with the
 animation generation so stale effects cannot overwrite newer states. On disposal,

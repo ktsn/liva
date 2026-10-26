@@ -253,3 +253,33 @@ integration cannot be replaced by a prebundled runtime-only entry.
 A package-export test installs the public default plugin without the Liva Vite
 resolver. The playground and editor fixture use the public import in browser tests;
 production isolation checks exercise that same import in both build modes.
+
+## Timeline editor
+
+The docked editor uses target summaries, expandable property lanes, and a common
+millisecond ruler. Unit tests establish per-property percentage conversion,
+directional/common timing resolution, snapping, and isolated spring-solver errors.
+Rust edit tests cover atomic track replacement, independent inheritance reset,
+comment rejection, field-injection rejection, duplicate offsets, unchanged
+surrounding CRLF bytes, and opaque multiline/quoted CSS preservation.
+
+The Chromium, Firefox, and WebKit editor tests exercise real DOM scrubbing in both
+directions, per-instance isolation, inherited-frame copying/reset, collision
+rejection, duration changes, spring-mode controls, pointer insertion/dragging,
+play/pause, selection/discard, debounce cancellation on close/application updates,
+reduced-motion changes during playback, unmount cleanup, and solver-error recovery.
+The source-save/HMR scenario runs in Chromium only to avoid concurrent writes to a
+shared fixture; it covers timing, frames, deletion, state values, and unrelated SFC
+text preservation.
+
+`sh scripts/verify.sh` passes with 27 Rust tests, 28 JavaScript unit tests, both Vue
+checks, and 77 browser tests (4 deliberate shared-write skips). Production and
+`development`-named builds both pass editor/compiler isolation and actual playback
+checks. Visual inspection at 1440 × 1000 confirms the dock, expanded target rows,
+property markers, duration bands, and selection inspector render together.
+
+The language remains unchanged. The editor's bounded source operation replaces a
+whole edited property track, rejecting tracks with comments instead of assigning
+those comments new positions. Deleting the last directional frame retains explicit
+endpoints to suppress inherited intermediate frames; restoring inheritance is a
+separate action. See [editor behavior](editor.md) for these and other scope limits.

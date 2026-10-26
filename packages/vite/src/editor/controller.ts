@@ -15,6 +15,7 @@ export class EditorController {
   draft: Edit[] = [];
   stale = false;
   message = "Select an instance to inspect its motion.";
+  previewActive = false;
   private sequence = 0;
   private revision = 0;
   private saving = false;
@@ -57,8 +58,12 @@ export class EditorController {
 
       if (event === "unmount") {
         this.entries.delete(entry.id);
-        if (this.selected === entry) this.sequence++;
+        if (this.selected === entry) {
+          this.sequence++;
+          this.previewActive = false;
+        }
       } else if (this.selected === entry) {
+        this.previewActive = false;
         this.sequence++;
         if (binding.runtime.definition !== binding.definition)
           binding.runtime.replaceDefinition(binding.definition, binding.requestedState);
@@ -105,7 +110,7 @@ export class EditorController {
     this.notify();
   }
 
-  async preview(state: string) {
+  async preview(state: string, from?: string, general = false) {
     const selected = this.selected;
     const inspection = this.inspection;
     if (!selected || !inspection || !this.active(selected))
@@ -128,18 +133,46 @@ export class EditorController {
       this.stale
     )
       return;
-    selected.binding.runtime.replaceDefinition(reply.definition, selected.binding.requestedState);
-    selected.binding.runtime.setState(state);
+    const definition = general
+      ? { ...reply.definition, directionalTransitions: [] }
+      : reply.definition;
+    selected.binding.runtime.replaceDefinition(definition, from ?? selected.binding.requestedState);
+    const succeeded =
+      from === undefined
+        ? selected.binding.runtime.setState(state)
+        : selected.binding.runtime.setState(state, { paused: true });
+    this.previewActive = succeeded !== false;
+    if (!this.previewActive)
+      throw new Error(
+        "The runtime could not prepare this transition. Check its timing and easing.",
+      );
+
     this.message = "Previewing this instance only. Source is unchanged.";
     this.notify();
   }
 
+  seek(time: number) {
+    if (!this.previewActive || !Number.isFinite(time)) return;
+
+    for (const animation of this.selected?.binding.runtime.animations ?? []) {
+      animation.currentTime = Math.max(0, time);
+    }
+  }
+
+  endPreview() {
+    this.sequence++;
+    this.restoreSelected();
+    this.notify();
+  }
+
   private restoreSelected() {
+    this.previewActive = false;
     const selected = this.selected;
     if (
       selected &&
       this.active(selected) &&
-      selected.binding.runtime.definition !== selected.binding.definition
+      (selected.binding.runtime.definition !== selected.binding.definition ||
+        selected.binding.runtime.state !== selected.binding.requestedState)
     )
       selected.binding.runtime.replaceDefinition(
         selected.binding.definition,
