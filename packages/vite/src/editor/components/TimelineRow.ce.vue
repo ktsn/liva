@@ -1,71 +1,71 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import type { TimelineTrack } from "../timeline.ts";
-import { normalizedOffset, snapTime } from "../timeline.ts";
+import { computed, ref } from 'vue'
+import type { TimelineTrack } from '../timeline.ts'
+import { normalizedOffset, snapTime } from '../timeline.ts'
 
 const props = defineProps<{
-  track: TimelineTrack;
-  extent: number;
-  time: number;
-  selected?: number;
-  marks: number[];
-}>();
+  track: TimelineTrack
+  extent: number
+  time: number
+  selected?: number
+  marks: number[]
+}>()
 const emit = defineEmits<{
-  select: [offset?: number];
-  add: [offset: number];
-  move: [from: number, to: number];
-  duration: [duration: number];
-}>();
-const lane = ref<HTMLElement>();
-const drag = ref<{ kind: "frame" | "duration"; offset: number; start: number; time: number }>();
+  select: [offset?: number]
+  add: [offset: number]
+  move: [from: number, to: number]
+  duration: [duration: number]
+}>()
+const lane = ref<HTMLElement>()
+const drag = ref<{ kind: 'frame' | 'duration'; offset: number; start: number; time: number }>()
 const width = computed(
   () =>
-    ((drag.value?.kind === "duration" ? drag.value.time : props.track.duration) / props.extent) *
+    ((drag.value?.kind === 'duration' ? drag.value.time : props.track.duration) / props.extent) *
     100,
-);
+)
 
 function point(event: PointerEvent | MouseEvent) {
-  const rect = lane.value!.getBoundingClientRect();
-  const time = ((event.clientX - rect.left) / rect.width) * props.extent;
-  return Math.max(0, snapTime(time, props.extent, props.marks, rect.width, event.altKey));
+  const rect = lane.value!.getBoundingClientRect()
+  const time = ((event.clientX - rect.left) / rect.width) * props.extent
+  return Math.max(0, snapTime(time, props.extent, props.marks, rect.width, event.altKey))
 }
 
-function begin(event: PointerEvent, kind: "frame" | "duration", offset = 0) {
-  if (event.button !== 0) return;
-  event.preventDefault();
-  emit("select", kind === "frame" ? offset : undefined);
+function begin(event: PointerEvent, kind: 'frame' | 'duration', offset = 0) {
+  if (event.button !== 0) return
+  event.preventDefault()
+  emit('select', kind === 'frame' ? offset : undefined)
   drag.value = {
     kind,
     offset,
     start: event.clientX,
-    time: kind === "frame" ? offset * props.track.duration : props.track.duration,
-  };
-  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    time: kind === 'frame' ? offset * props.track.duration : props.track.duration,
+  }
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
 }
 
 function moving(event: PointerEvent) {
-  if (!drag.value) return;
+  if (!drag.value) return
   drag.value.time =
-    drag.value.kind === "frame" ? Math.min(props.track.duration, point(event)) : point(event);
+    drag.value.kind === 'frame' ? Math.min(props.track.duration, point(event)) : point(event)
 }
 
 function finish(event: PointerEvent) {
-  const current = drag.value;
-  drag.value = undefined;
-  if (!current || Math.abs(event.clientX - current.start) < 3) return;
-  if (current.kind === "duration") emit("duration", Math.round(current.time));
-  else emit("move", current.offset, normalizedOffset(current.time, props.track.duration));
+  const current = drag.value
+  drag.value = undefined
+  if (!current || Math.abs(event.clientX - current.start) < 3) return
+  if (current.kind === 'duration') emit('duration', Math.round(current.time))
+  else emit('move', current.offset, normalizedOffset(current.time, props.track.duration))
 }
 
 function add(event: MouseEvent) {
-  const time = point(event);
+  const time = point(event)
   if (
     time > props.track.duration ||
-    props.track.timing?.kind !== "tween" ||
+    props.track.timing?.kind !== 'tween' ||
     props.track.duration === 0
   )
-    return;
-  emit("add", normalizedOffset(time, props.track.duration));
+    return
+  emit('add', normalizedOffset(time, props.track.duration))
 }
 </script>
 

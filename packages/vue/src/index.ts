@@ -1,4 +1,4 @@
-import { createLivaPlugin } from "./runtime.ts";
+import { createLivaPlugin } from './runtime.ts'
 
-export * from "./runtime.ts";
-export default createLivaPlugin();
+export * from './runtime.ts'
+export default createLivaPlugin()

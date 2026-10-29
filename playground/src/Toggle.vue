@@ -6,8 +6,19 @@ const checked = ref(false)
 
 <template>
   <div class="toggle-row">
-    <div><strong>{{ label }}</strong><p>{{ checked ? 'On · keeping you connected' : 'Off · a little more quiet' }}</p></div>
-    <button v-liva:toggle="checked ? 'on' : 'off'" v-liva-target:track role="switch" :aria-label="label" :aria-checked="checked" @click="checked = !checked" class="switch">
+    <div>
+      <strong>{{ label }}</strong>
+      <p>{{ checked ? 'On · keeping you connected' : 'Off · a little more quiet' }}</p>
+    </div>
+    <button
+      v-liva:toggle="checked ? 'on' : 'off'"
+      v-liva-target:track
+      role="switch"
+      :aria-label="label"
+      :aria-checked="checked"
+      @click="checked = !checked"
+      class="switch"
+    >
       <span v-liva-target:thumb class="thumb" />
     </button>
   </div>

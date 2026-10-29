@@ -12,10 +12,16 @@ const child = ref(true)
   <button @click="inner = !inner">Inner</button>
   <div v-if="visible" id="outer" v-liva:a="outer ? 'on' : 'off'" v-liva-target:track>
     <span v-if="child" id="outer-thumb" v-liva-target:thumb>outer</span>
-    <div id="inner" v-liva:a="inner ? 'on' : 'off'" v-liva-target:track><span id="inner-thumb" v-liva-target:thumb>inner</span></div>
+    <div id="inner" v-liva:a="inner ? 'on' : 'off'" v-liva-target:track>
+      <span id="inner-thumb" v-liva-target:thumb>inner</span>
+    </div>
   </div>
 </template>
-<style>span { display: inline-block; }</style>
+<style>
+span {
+  display: inline-block;
+}
+</style>
 <liva>
 a {
   state off { track { opacity: 0.5 } thumb { translate: 0px } }

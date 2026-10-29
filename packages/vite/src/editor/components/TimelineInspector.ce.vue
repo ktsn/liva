@@ -1,63 +1,63 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import type { Frame, Timing } from "@liva/runtime";
-import type { TimelineTrack } from "../timeline.ts";
+import { computed, ref, watch } from 'vue'
+import type { Frame, Timing } from '@liva/runtime'
+import type { TimelineTrack } from '../timeline.ts'
 
 const props = defineProps<{
-  track: TimelineTrack;
-  offset?: number;
-  pending?: boolean;
-  from: string;
-  to: string;
-  general: boolean;
-}>();
+  track: TimelineTrack
+  offset?: number
+  pending?: boolean
+  from: string
+  to: string
+  general: boolean
+}>()
 const emit = defineEmits<{
-  frame: [frame: Frame];
-  remove: [];
-  timing: [timing: Timing];
-  resetFrames: [];
-  resetTiming: [];
-  state: [value: string];
-  add: [];
-  error: [message: string];
-}>();
-const frame = computed(() => props.track.frames.find((frame) => frame.offset === props.offset));
+  frame: [frame: Frame]
+  remove: []
+  timing: [timing: Timing]
+  resetFrames: []
+  resetTiming: []
+  state: [value: string]
+  add: []
+  error: [message: string]
+}>()
+const frame = computed(() => props.track.frames.find((frame) => frame.offset === props.offset))
 const implicit = computed(
   () =>
     !props.pending &&
     props.offset !== undefined &&
     !props.track.explicit.some((frame) => frame.offset === props.offset),
-);
-const value = ref("");
-const percent = ref(0);
-const easing = ref("");
-const kind = ref<Timing["kind"]>("tween");
-const duration = ref(350);
-const bounce = ref(0.25);
-const stiffness = ref(300);
-const damping = ref(20);
-const mass = ref(1);
-const defaultEasing = ref("linear");
+)
+const value = ref('')
+const percent = ref(0)
+const easing = ref('')
+const kind = ref<Timing['kind']>('tween')
+const duration = ref(350)
+const bounce = ref(0.25)
+const stiffness = ref(300)
+const damping = ref(20)
+const mass = ref(1)
+const defaultEasing = ref('linear')
 
 watch(
   () => [props.track, props.offset, props.pending],
   () => {
-    value.value = frame.value?.value ?? "";
-    percent.value = (props.offset ?? 0.5) * 100;
-    easing.value = frame.value?.easing ?? "";
-    const timing = props.track.timing;
-    kind.value = timing?.kind ?? "tween";
-    duration.value = timing && timing.kind !== "spring-physics" ? timing.durationMs : 350;
-    if (timing?.kind === "tween") defaultEasing.value = timing.easing;
-    if (timing?.kind === "spring-duration") bounce.value = timing.bounce;
-    if (timing?.kind === "spring-physics") {
-      stiffness.value = timing.stiffness;
-      damping.value = timing.damping;
-      mass.value = timing.mass;
+    value.value = frame.value?.value ?? ''
+    percent.value = (props.offset ?? 0.5) * 100
+    easing.value = frame.value?.easing ?? ''
+    const timing = props.track.timing
+    kind.value = timing?.kind ?? 'tween'
+    duration.value = timing && timing.kind !== 'spring-physics' ? timing.durationMs : 350
+    if (timing?.kind === 'tween') defaultEasing.value = timing.easing
+    if (timing?.kind === 'spring-duration') bounce.value = timing.bounce
+    if (timing?.kind === 'spring-physics') {
+      stiffness.value = timing.stiffness
+      damping.value = timing.damping
+      mass.value = timing.mass
     }
   },
   { immediate: true },
-);
+)
 
 function applyFrame() {
   if (
@@ -66,29 +66,29 @@ function applyFrame() {
     percent.value < 0 ||
     percent.value > 100
   ) {
-    emit("error", "Enter a value and a position between 0% and 100%.");
-    return;
+    emit('error', 'Enter a value and a position between 0% and 100%.')
+    return
   }
-  emit("frame", {
+  emit('frame', {
     offset: Math.round(percent.value * 10000) / 1000000,
     value: value.value,
     ...(easing.value ? { easing: easing.value } : {}),
-  });
+  })
 }
 
 function applyTiming() {
   const timing: Timing =
-    kind.value === "tween"
-      ? { kind: "tween", durationMs: duration.value, easing: defaultEasing.value }
-      : kind.value === "spring-duration"
-        ? { kind: "spring-duration", durationMs: duration.value, bounce: bounce.value }
+    kind.value === 'tween'
+      ? { kind: 'tween', durationMs: duration.value, easing: defaultEasing.value }
+      : kind.value === 'spring-duration'
+        ? { kind: 'spring-duration', durationMs: duration.value, bounce: bounce.value }
         : {
-            kind: "spring-physics",
+            kind: 'spring-physics',
             stiffness: stiffness.value,
             damping: damping.value,
             mass: mass.value,
-          };
-  emit("timing", timing);
+          }
+  emit('timing', timing)
 }
 </script>
 
@@ -101,10 +101,10 @@ function applyTiming() {
       <p v-else>
         {{
           pending
-            ? "New keyframe"
+            ? 'New keyframe'
             : track.inheritedFrames
-              ? "Inherited common keyframe"
-              : "Local keyframe"
+              ? 'Inherited common keyframe'
+              : 'Local keyframe'
         }}
       </p>
       <label>Value<input v-model="value" aria-label="Keyframe value" /></label>
@@ -137,7 +137,7 @@ function applyTiming() {
             placeholder="Use track easing"
             aria-label="Keyframe easing"
         /></label>
-        <button @click="applyFrame">{{ pending ? "Add keyframe" : "Apply keyframe" }}</button>
+        <button @click="applyFrame">{{ pending ? 'Add keyframe' : 'Apply keyframe' }}</button>
         <button v-if="!pending" @click="emit('remove')">Delete keyframe</button>
       </template>
       <template v-else>

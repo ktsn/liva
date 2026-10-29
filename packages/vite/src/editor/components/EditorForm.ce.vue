@@ -1,298 +1,297 @@
 <script setup lang="ts">
-import { computed, onScopeDispose, ref, shallowRef } from "vue";
-import type { Definition, Frame, PropertyTransition, Timing } from "@liva/runtime";
-import { sampleSpring } from "@liva/runtime";
-import type { EditorController } from "../controller.ts";
-import type { Edit, Inspection } from "../communication/protocol.ts";
-import { normalizedOffset, timelineTracks, timingText, type TimelineTrack } from "../timeline.ts";
-import TimelineRow from "./TimelineRow.ce.vue";
-import TimelineInspector from "./TimelineInspector.ce.vue";
+import { computed, onScopeDispose, ref, shallowRef } from 'vue'
+import type { Definition, Frame, PropertyTransition, Timing } from '@liva/runtime'
+import { sampleSpring } from '@liva/runtime'
+import type { EditorController } from '../controller.ts'
+import type { Edit, Inspection } from '../communication/protocol.ts'
+import { normalizedOffset, timelineTracks, timingText, type TimelineTrack } from '../timeline.ts'
+import TimelineRow from './TimelineRow.ce.vue'
+import TimelineInspector from './TimelineInspector.ce.vue'
 
-type Mutable<T> = T extends object ? { -readonly [K in keyof T]: Mutable<T[K]> } : T;
-type MutableDefinition = Mutable<Definition>;
+type Mutable<T> = T extends object ? { -readonly [K in keyof T]: Mutable<T[K]> } : T
+type MutableDefinition = Mutable<Definition>
 
 const props = defineProps<{
-  inspection: Inspection;
-  controller: EditorController;
-  active: boolean;
-  stale: boolean;
-}>();
-const model = shallowRef<Definition>(structuredClone(props.inspection.definition));
-const states = model.value.states.map((state) => state.name);
-const from = ref(states[0]);
-const to = ref(states[1] ?? states[0]);
-const scope = ref("directional");
-const expanded = ref<string[]>([]);
-const selected = ref<{ target: string; property: string; offset?: number; pending?: boolean }>();
-const time = ref(0);
-const playing = ref(false);
-const busy = ref(false);
-let frameId = 0;
-let timer: ReturnType<typeof setTimeout> | undefined;
-let generation = 0;
-const general = computed(() => scope.value === "general");
-const tracks = computed(() => timelineTracks(model.value, from.value, to.value, general.value));
-const duration = computed(() => Math.max(0, ...tracks.value.map((track) => track.duration)));
-const extent = computed(() => Math.max(100, Math.ceil(duration.value / 100) * 100));
-const targets = computed(() => [...new Set(tracks.value.map((track) => track.target))]);
+  inspection: Inspection
+  controller: EditorController
+  active: boolean
+  stale: boolean
+}>()
+const model = shallowRef<Definition>(structuredClone(props.inspection.definition))
+const states = model.value.states.map((state) => state.name)
+const from = ref(states[0])
+const to = ref(states[1] ?? states[0])
+const scope = ref('directional')
+const expanded = ref<string[]>([])
+const selected = ref<{ target: string; property: string; offset?: number; pending?: boolean }>()
+const time = ref(0)
+const playing = ref(false)
+const busy = ref(false)
+let frameId = 0
+let timer: ReturnType<typeof setTimeout> | undefined
+let generation = 0
+const general = computed(() => scope.value === 'general')
+const tracks = computed(() => timelineTracks(model.value, from.value, to.value, general.value))
+const duration = computed(() => Math.max(0, ...tracks.value.map((track) => track.duration)))
+const extent = computed(() => Math.max(100, Math.ceil(duration.value / 100) * 100))
+const targets = computed(() => [...new Set(tracks.value.map((track) => track.target))])
 const marks = computed(() =>
   tracks.value.flatMap((track) => track.frames.map((frame) => frame.offset * track.duration)),
-);
+)
 const selection = computed(() =>
   tracks.value.find(
     (track) =>
       track.target === selected.value?.target && track.property === selected.value?.property,
   ),
-);
+)
 
 function report(error: unknown) {
-  props.controller.report(error);
+  props.controller.report(error)
 }
 
 function stop() {
-  playing.value = false;
-  cancelAnimationFrame(frameId);
+  playing.value = false
+  cancelAnimationFrame(frameId)
 }
 
 function endPreview() {
-  generation++;
-  clearTimeout(timer);
-  stop();
-  busy.value = false;
-  props.controller.endPreview();
+  generation++
+  clearTimeout(timer)
+  stop()
+  busy.value = false
+  props.controller.endPreview()
 }
 
 async function prepare() {
-  const current = ++generation;
-  busy.value = true;
+  const current = ++generation
+  busy.value = true
   try {
-    await props.controller.preview(to.value, from.value, general.value);
-    if (current !== generation || !props.controller.previewActive) return false;
-    props.controller.seek(time.value);
-    return true;
+    await props.controller.preview(to.value, from.value, general.value)
+    if (current !== generation || !props.controller.previewActive) return false
+    props.controller.seek(time.value)
+    return true
   } catch (error) {
-    report(error);
-    return false;
+    report(error)
+    return false
   } finally {
-    if (current === generation) busy.value = false;
+    if (current === generation) busy.value = false
   }
 }
 
 async function seek(value: number) {
-  stop();
-  time.value = Math.max(0, Math.min(duration.value, value));
-  if (!props.controller.previewActive) await prepare();
-  props.controller.seek(time.value);
+  stop()
+  time.value = Math.max(0, Math.min(duration.value, value))
+  if (!props.controller.previewActive) await prepare()
+  props.controller.seek(time.value)
 }
 
 async function play() {
   if (playing.value) {
-    stop();
-    return;
+    stop()
+    return
   }
-  clearTimeout(timer);
-  if (time.value >= duration.value) time.value = 0;
-  if (!props.controller.previewActive && !(await prepare())) return;
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    await seek(duration.value);
-    return;
+  clearTimeout(timer)
+  if (time.value >= duration.value) time.value = 0
+  if (!props.controller.previewActive && !(await prepare())) return
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    await seek(duration.value)
+    return
   }
-  playing.value = true;
-  const start = performance.now() - time.value;
+  playing.value = true
+  const start = performance.now() - time.value
   const tick = (now: number) => {
     if (!playing.value || !props.controller.previewActive) {
-      stop();
-      return;
+      stop()
+      return
     }
-    time.value = matchMedia("(prefers-reduced-motion: reduce)").matches
+    time.value = matchMedia('(prefers-reduced-motion: reduce)').matches
       ? duration.value
-      : Math.min(duration.value, now - start);
-    props.controller.seek(time.value);
-    if (time.value < duration.value) frameId = requestAnimationFrame(tick);
-    else stop();
-  };
-  frameId = requestAnimationFrame(tick);
+      : Math.min(duration.value, now - start)
+    props.controller.seek(time.value)
+    if (time.value < duration.value) frameId = requestAnimationFrame(tick)
+    else stop()
+  }
+  frameId = requestAnimationFrame(tick)
 }
 
 function schedule(edit: Edit, definition: Definition) {
-  endPreview();
-  model.value = definition;
+  endPreview()
+  model.value = definition
   props.controller.setDraft([
     ...props.controller.draft.filter(
-      (old) => !("path" in old && old.path === ("path" in edit ? edit.path : "")),
+      (old) => !('path' in old && old.path === ('path' in edit ? edit.path : '')),
     ),
     edit,
-  ]);
-  timer = setTimeout(() => void prepare(), 150);
+  ])
+  timer = setTimeout(() => void prepare(), 150)
 }
 
 function updateTrack(track: TimelineTrack, patch: Partial<PropertyTransition>) {
-  const next = structuredClone(model.value) as MutableDefinition;
+  const next = structuredClone(model.value) as MutableDefinition
   let transition = general.value
     ? next.generalTransition
     : next.directionalTransitions.find((item) => item.from === from.value && item.to === to.value)
-        ?.transition;
+        ?.transition
   if (!transition) {
-    transition = { targets: [] };
-    if (general.value) next.generalTransition = transition;
-    else next.directionalTransitions.push({ from: from.value, to: to.value, transition });
+    transition = { targets: [] }
+    if (general.value) next.generalTransition = transition
+    else next.directionalTransitions.push({ from: from.value, to: to.value, transition })
   }
-  let target = transition.targets.find((item) => item.name === track.target);
+  let target = transition.targets.find((item) => item.name === track.target)
   if (!target) {
-    target = { name: track.target, properties: [] };
-    transition.targets.push(target);
+    target = { name: track.target, properties: [] }
+    transition.targets.push(target)
   }
   const property = structuredClone({
     ...track.local,
     name: track.property,
     ...patch,
-  }) as Mutable<PropertyTransition>;
-  const index = target.properties.findIndex((item) => item.name === track.property);
-  if (index < 0) target.properties.push(property);
-  else target.properties[index] = property;
+  }) as Mutable<PropertyTransition>
+  const index = target.properties.findIndex((item) => item.name === track.property)
+  if (index < 0) target.properties.push(property)
+  else target.properties[index] = property
   schedule(
     {
-      op: "track",
+      op: 'track',
       path: track.path,
       timing: property.timing ? timingText(property.timing) : undefined,
       frames: property.keyframes,
     },
     next,
-  );
+  )
 }
 
 function choose(track: TimelineTrack, offset?: number) {
-  selected.value = { target: track.target, property: track.property, offset };
+  selected.value = { target: track.target, property: track.property, offset }
 }
 
 function add(track: TimelineTrack, offset: number) {
-  if (track.timing?.kind !== "tween" || track.duration === 0 || offset < 0 || offset > 1) return;
-  choose(track, offset);
-  if (!track.frames.some((frame) => frame.offset === offset)) selected.value!.pending = true;
+  if (track.timing?.kind !== 'tween' || track.duration === 0 || offset < 0 || offset > 1) return
+  choose(track, offset)
+  if (!track.frames.some((frame) => frame.offset === offset)) selected.value!.pending = true
 }
 
 function changeFrame(track: TimelineTrack, frame: Frame) {
-  const old = selected.value?.offset;
+  const old = selected.value?.offset
   if (
     track.explicit.some(
       (item) => item.offset === frame.offset && (item.offset !== old || selected.value?.pending),
     )
   ) {
-    report("A keyframe already exists at this position.");
-    return;
+    report('A keyframe already exists at this position.')
+    return
   }
-  if (track.timing?.kind !== "tween" && ((frame.offset > 0 && frame.offset < 1) || frame.easing)) {
-    report("Spring tracks only support endpoints without easing.");
-    return;
+  if (track.timing?.kind !== 'tween' && ((frame.offset > 0 && frame.offset < 1) || frame.easing)) {
+    report('Spring tracks only support endpoints without easing.')
+    return
   }
-  const frames = track.explicit.filter((item) => item.offset !== old);
-  updateTrack(track, { keyframes: [...frames, frame].sort((a, b) => a.offset - b.offset) });
-  choose(track, frame.offset);
+  const frames = track.explicit.filter((item) => item.offset !== old)
+  updateTrack(track, { keyframes: [...frames, frame].sort((a, b) => a.offset - b.offset) })
+  choose(track, frame.offset)
 }
 
 function move(track: TimelineTrack, old: number, offset: number) {
   if (!track.explicit.some((frame) => frame.offset === old)) {
-    report("State endpoints cannot be moved. Create an endpoint override first.");
-    return;
+    report('State endpoints cannot be moved. Create an endpoint override first.')
+    return
   }
-  choose(track, old);
-  changeFrame(track, { ...track.explicit.find((frame) => frame.offset === old)!, offset });
+  choose(track, old)
+  changeFrame(track, { ...track.explicit.find((frame) => frame.offset === old)!, offset })
 }
 
 function remove(track: TimelineTrack) {
-  let frames = track.explicit.filter((frame) => frame.offset !== selected.value?.offset);
+  let frames = track.explicit.filter((frame) => frame.offset !== selected.value?.offset)
   // An empty source collection means inherit. Explicit endpoints suppress inherited intermediates.
   if (!general.value && frames.length === 0)
     frames = track.frames
       .filter((frame) => frame.offset === 0 || frame.offset === 1)
-      .map(({ offset, value }) => ({ offset, value }));
-  updateTrack(track, { keyframes: frames.length ? frames : undefined });
-  choose(track);
+      .map(({ offset, value }) => ({ offset, value }))
+  updateTrack(track, { keyframes: frames.length ? frames : undefined })
+  choose(track)
 }
 
 function timing(track: TimelineTrack, value: Timing) {
   try {
-    if (value.kind === "tween") {
+    if (value.kind === 'tween') {
       if (!Number.isFinite(value.durationMs) || value.durationMs < 0 || !value.easing.trim())
-        throw new Error("Enter a nonnegative duration and easing.");
-    } else sampleSpring(value);
+        throw new Error('Enter a nonnegative duration and easing.')
+    } else sampleSpring(value)
     if (
-      value.kind !== "tween" &&
+      value.kind !== 'tween' &&
       track.explicit.some((frame) => (frame.offset > 0 && frame.offset < 1) || frame.easing)
     )
-      throw new Error("Remove intermediate keyframes and frame easing before choosing Spring.");
-    updateTrack(track, { timing: value });
+      throw new Error('Remove intermediate keyframes and frame easing before choosing Spring.')
+    updateTrack(track, { timing: value })
   } catch (error) {
-    report(error);
+    report(error)
   }
 }
 
 function resize(track: TimelineTrack, value: number) {
-  if (track.timing && track.timing.kind !== "spring-physics")
-    timing(track, { ...track.timing, durationMs: value });
+  if (track.timing && track.timing.kind !== 'spring-physics')
+    timing(track, { ...track.timing, durationMs: value })
 }
 
 function stateValue(track: TimelineTrack, value: string) {
   if (!value.trim()) {
-    report("Enter a state value.");
-    return;
+    report('Enter a state value.')
+    return
   }
-  const name = selected.value?.offset === 0 ? from.value : to.value;
-  const next = structuredClone(model.value) as MutableDefinition;
+  const name = selected.value?.offset === 0 ? from.value : to.value
+  const next = structuredClone(model.value) as MutableDefinition
   next.states
     .find((state) => state.name === name)!
     .targets.find((target) => target.name === track.target)!
-    .properties.find((property) => property.name === track.property)!.value = value;
+    .properties.find((property) => property.name === track.property)!.value = value
   schedule(
     {
-      op: "set",
+      op: 'set',
       path: `${next.name}/state/${name}/target/${track.target}/${track.property}`,
       value,
     },
     next,
-  );
+  )
 }
 
 function changeDirection() {
-  if (from.value === to.value)
-    to.value = states.find((state) => state !== from.value) ?? from.value;
-  endPreview();
-  selected.value = undefined;
-  time.value = 0;
+  if (from.value === to.value) to.value = states.find((state) => state !== from.value) ?? from.value
+  endPreview()
+  selected.value = undefined
+  time.value = 0
 }
 
 async function save() {
-  endPreview();
+  endPreview()
   try {
-    await props.controller.commit();
+    await props.controller.commit()
   } catch (error) {
-    report(error);
+    report(error)
   }
 }
 async function discard() {
-  endPreview();
+  endPreview()
   try {
-    await props.controller.cancel();
+    await props.controller.cancel()
   } catch (error) {
-    report(error);
+    report(error)
   }
 }
 
 const unsubscribe = props.controller.subscribe(() => {
   if (!props.controller.previewActive) {
-    stop();
-    clearTimeout(timer);
-    generation++;
-    busy.value = false;
+    stop()
+    clearTimeout(timer)
+    generation++
+    busy.value = false
   }
-});
+})
 
 onScopeDispose(() => {
-  unsubscribe();
-  stop();
-  clearTimeout(timer);
-  generation++;
-});
+  unsubscribe()
+  stop()
+  clearTimeout(timer)
+  generation++
+})
 </script>
 
 <template>
@@ -318,7 +317,7 @@ onScopeDispose(() => {
       :disabled="busy || stale || from === to || tracks.some((track) => track.diagnostic)"
       @click="play"
     >
-      {{ playing ? "Pause" : "Play" }}
+      {{ playing ? 'Pause' : 'Play' }}
     </button>
     <button :disabled="stale" @click="seek(0)">To start</button>
     <button @click="endPreview">End preview</button>
@@ -361,7 +360,7 @@ onScopeDispose(() => {
                 : [...expanded, target]
             "
           >
-            {{ expanded.includes(target) ? "▾" : "▸" }} {{ target }}
+            {{ expanded.includes(target) ? '▾' : '▸' }} {{ target }}
           </button>
           <div class="summary">
             <span

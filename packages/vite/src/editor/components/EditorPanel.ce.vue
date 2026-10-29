@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onScopeDispose, ref, shallowRef } from "vue";
-import type { EditorController } from "../controller.ts";
-import EditorForm from "./EditorForm.ce.vue";
+import { nextTick, onMounted, onScopeDispose, ref, shallowRef } from 'vue'
+import type { EditorController } from '../controller.ts'
+import EditorForm from './EditorForm.ce.vue'
 
-defineOptions({ inheritAttrs: false });
+defineOptions({ inheritAttrs: false })
 
-const { controller } = defineProps<{ controller: EditorController }>();
-const open = ref(false);
-const inspectionVersion = ref(0);
-const panel = ref<HTMLElement>();
-const panelHeight = ref(0);
-let observer: ResizeObserver | undefined;
+const { controller } = defineProps<{ controller: EditorController }>()
+const open = ref(false)
+const inspectionVersion = ref(0)
+const panel = ref<HTMLElement>()
+const panelHeight = ref(0)
+let observer: ResizeObserver | undefined
 
 function snapshot() {
   return {
@@ -18,76 +18,76 @@ function snapshot() {
       id: entry.id,
       label: `${entry.label} · ${entry.binding.definition.name}`,
     })),
-    selectedId: controller.selected?.id ?? "",
+    selectedId: controller.selected?.id ?? '',
     requestedState: controller.selected?.binding.requestedState,
     inspection: controller.inspection,
     draft: controller.draft,
     message: controller.message,
     stale: controller.stale,
     active: controller.previewActive,
-  };
+  }
 }
 
 // Keep runtime and DOM objects out of Vue's deep reactive proxies.
-const state = shallowRef(snapshot());
+const state = shallowRef(snapshot())
 const unsubscribe = controller.subscribe(() => {
-  const next = snapshot();
+  const next = snapshot()
 
   if (next.inspection !== state.value.inspection) {
-    inspectionVersion.value++;
+    inspectionVersion.value++
   }
 
-  state.value = next;
-});
+  state.value = next
+})
 
 function run(operation: () => Promise<void>) {
-  void operation().catch((error) => controller.report(error));
+  void operation().catch((error) => controller.report(error))
 }
 
 function select(id: string) {
   run(async () => {
-    await controller.select(id);
-    revealInstance();
-  });
+    await controller.select(id)
+    revealInstance()
+  })
 }
 
 function toggle() {
-  open.value = !open.value;
+  open.value = !open.value
 
   if (!controller.selected && state.value.entries.length) {
-    select(state.value.entries[0].id);
+    select(state.value.entries[0].id)
   }
-  if (!open.value) controller.endPreview();
-  else revealInstance();
+  if (!open.value) controller.endPreview()
+  else revealInstance()
 }
 
 function revealInstance() {
   void nextTick(() =>
     requestAnimationFrame(() => {
-      const root = controller.selected?.binding.root;
-      if (!open.value || !root || !panel.value) return;
-      const available = window.innerHeight - panel.value.getBoundingClientRect().height;
-      const rect = root.getBoundingClientRect();
+      const root = controller.selected?.binding.root
+      if (!open.value || !root || !panel.value) return
+      const available = window.innerHeight - panel.value.getBoundingClientRect().height
+      const rect = root.getBoundingClientRect()
       if (rect.bottom > available || rect.top < 0)
-        window.scrollBy(0, rect.top - Math.max(0, (available - rect.height) / 2));
+        window.scrollBy(0, rect.top - Math.max(0, (available - rect.height) / 2))
     }),
-  );
+  )
 }
 
 onMounted(() => {
   observer = new ResizeObserver(() => {
-    const previous = panelHeight.value;
-    panelHeight.value = panel.value?.getBoundingClientRect().height ?? 0;
-    if (panelHeight.value > previous) revealInstance();
-  });
-  if (panel.value) observer.observe(panel.value);
-});
+    const previous = panelHeight.value
+    panelHeight.value = panel.value?.getBoundingClientRect().height ?? 0
+    if (panelHeight.value > previous) revealInstance()
+  })
+  if (panel.value) observer.observe(panel.value)
+})
 
 onScopeDispose(() => {
-  observer?.disconnect();
-  controller.endPreview();
-  unsubscribe();
-});
+  observer?.disconnect()
+  controller.endPreview()
+  unsubscribe()
+})
 </script>
 
 <template>

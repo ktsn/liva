@@ -5,28 +5,28 @@ import {
   type PropertyTransition,
   type Timing,
   type Transition,
-} from "@liva/runtime";
+} from '@liva/runtime'
 
 export interface TimelineTrack {
-  target: string;
-  property: string;
-  path: string;
-  local?: PropertyTransition;
-  timing?: Timing;
-  duration: number;
-  diagnostic?: string;
-  frames: readonly Frame[];
-  explicit: readonly Frame[];
-  inheritedFrames: boolean;
-  timingOrigin: string;
+  target: string
+  property: string
+  path: string
+  local?: PropertyTransition
+  timing?: Timing
+  duration: number
+  diagnostic?: string
+  frames: readonly Frame[]
+  explicit: readonly Frame[]
+  inheritedFrames: boolean
+  timingOrigin: string
 }
 
 export function timingText(timing: Timing): string {
-  if (timing.kind === "tween")
-    return `tween(duration: ${timing.durationMs}ms, easing: ${timing.easing})`;
-  if (timing.kind === "spring-duration")
-    return `spring(duration: ${timing.durationMs}ms, bounce: ${timing.bounce})`;
-  return `spring(stiffness: ${timing.stiffness}, damping: ${timing.damping}, mass: ${timing.mass})`;
+  if (timing.kind === 'tween')
+    return `tween(duration: ${timing.durationMs}ms, easing: ${timing.easing})`
+  if (timing.kind === 'spring-duration')
+    return `spring(duration: ${timing.durationMs}ms, bounce: ${timing.bounce})`
+  return `spring(stiffness: ${timing.stiffness}, damping: ${timing.damping}, mass: ${timing.mass})`
 }
 
 export function transitionAt(
@@ -38,11 +38,11 @@ export function transitionAt(
   return general
     ? definition.generalTransition
     : definition.directionalTransitions.find((item) => item.from === from && item.to === to)
-        ?.transition;
+        ?.transition
 }
 
 export function transitionPath(definition: Definition, from: string, to: string, general: boolean) {
-  return `${definition.name}/transition/${general ? "general" : `directional/${from}/${to}`}`;
+  return `${definition.name}/transition/${general ? 'general' : `directional/${from}/${to}`}`
 }
 
 export function timelineTracks(
@@ -51,41 +51,41 @@ export function timelineTracks(
   to: string,
   general: boolean,
 ): TimelineTrack[] {
-  const source = definition.states.find((state) => state.name === from);
-  const destination = definition.states.find((state) => state.name === to);
-  const common = definition.generalTransition;
-  const selected = transitionAt(definition, from, to, general);
+  const source = definition.states.find((state) => state.name === from)
+  const destination = definition.states.find((state) => state.name === to)
+  const common = definition.generalTransition
+  const selected = transitionAt(definition, from, to, general)
   const propertyAt = (transition: Transition | undefined, target: string, property: string) =>
     transition?.targets
       .find((item) => item.name === target)
-      ?.properties.find((item) => item.name === property);
+      ?.properties.find((item) => item.name === property)
 
   return (destination?.targets ?? []).flatMap((target) =>
     target.properties.map((property) => {
-      const local = propertyAt(selected, target.name, property.name);
-      const inherited = general ? undefined : propertyAt(common, target.name, property.name);
-      const timing = local?.timing ?? inherited?.timing ?? selected?.timing ?? common?.timing;
-      const explicit = local?.keyframes ?? inherited?.keyframes ?? [];
-      const frames = [...explicit];
+      const local = propertyAt(selected, target.name, property.name)
+      const inherited = general ? undefined : propertyAt(common, target.name, property.name)
+      const timing = local?.timing ?? inherited?.timing ?? selected?.timing ?? common?.timing
+      const explicit = local?.keyframes ?? inherited?.keyframes ?? []
+      const frames = [...explicit]
       const initial =
         source?.targets
           .find((item) => item.name === target.name)
-          ?.properties.find((item) => item.name === property.name)?.value ?? property.value;
+          ?.properties.find((item) => item.name === property.name)?.value ?? property.value
 
-      if (!frames.some((frame) => frame.offset === 0)) frames.push({ offset: 0, value: initial });
+      if (!frames.some((frame) => frame.offset === 0)) frames.push({ offset: 0, value: initial })
       if (!frames.some((frame) => frame.offset === 1))
-        frames.push({ offset: 1, value: property.value });
+        frames.push({ offset: 1, value: property.value })
 
-      let duration = 0;
-      let diagnostic: string | undefined;
+      let duration = 0
+      let diagnostic: string | undefined
       try {
         duration = timing
-          ? timing.kind === "spring-physics"
+          ? timing.kind === 'spring-physics'
             ? sampleSpring(timing).durationMs
             : timing.durationMs
-          : 0;
+          : 0
       } catch (error) {
-        diagnostic = String(error);
+        diagnostic = String(error)
       }
 
       return {
@@ -100,21 +100,21 @@ export function timelineTracks(
         explicit,
         inheritedFrames: !general && !local?.keyframes && !!inherited?.keyframes,
         timingOrigin: local?.timing
-          ? "Local property"
+          ? 'Local property'
           : inherited?.timing
-            ? "Inherited common property"
+            ? 'Inherited common property'
             : selected?.timing
-              ? "Transition default"
-              : "Inherited common default",
-      };
+              ? 'Transition default'
+              : 'Inherited common default',
+      }
     }),
-  );
+  )
 }
 
 export function normalizedOffset(time: number, duration: number): number {
   return duration > 0
     ? Math.round(Math.max(0, Math.min(1, time / duration)) * 1000000) / 1000000
-    : 0;
+    : 0
 }
 
 export function snapTime(
@@ -124,12 +124,12 @@ export function snapTime(
   pixels: number,
   bypass: boolean,
 ): number {
-  if (bypass) return time;
-  const step = extent / 10;
-  const candidates = [...marks, Math.round(time / step) * step];
+  if (bypass) return time
+  const step = extent / 10
+  const candidates = [...marks, Math.round(time / step) * step]
   const closest = candidates.reduce(
     (best, candidate) => (Math.abs(candidate - time) < Math.abs(best - time) ? candidate : best),
     time + extent,
-  );
-  return Math.abs(closest - time) <= (extent * 7) / Math.max(1, pixels) ? closest : time;
+  )
+  return Math.abs(closest - time) <= (extent * 7) / Math.max(1, pixels) ? closest : time
 }
