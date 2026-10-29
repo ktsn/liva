@@ -1,4 +1,5 @@
-import type { EditorReply, EditorRequest } from './protocol.ts'
+import { isEditorReply, type EditorReply, type EditorRequest } from './protocol.ts'
+import { isRecord } from '@liva/runtime'
 
 export function createEditorTransport(token: string) {
   return async (request: EditorRequest): Promise<EditorReply> => {
@@ -7,9 +8,16 @@ export function createEditorTransport(token: string) {
       headers: { 'Content-Type': 'application/json', 'X-Liva-Session': token },
       body: JSON.stringify(request),
     })
-    const result = (await response.json()) as EditorReply & { error?: string }
+    const result: unknown = await response.json()
 
-    if (!response.ok) throw new Error(result.error ?? `Editor failed: ${response.status}`)
+    if (!response.ok) {
+      throw new Error(
+        isRecord(result) && typeof result.error === 'string'
+          ? result.error
+          : `Editor failed: ${response.status}`,
+      )
+    }
+    if (!isEditorReply(result)) throw new Error('Invalid editor response')
 
     return result
   }

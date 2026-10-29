@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
 import { parse } from '@vue/compiler-sfc'
-import type { Definition } from '@liva/runtime'
+import { isArrayOf, isDefinition, isRecord, type Definition } from '@liva/runtime'
 
 export interface SourceRange {
   start: number
@@ -42,9 +42,9 @@ let wasm:
 
 export function compile(source: string, development: boolean): Compilation {
   wasm ??= require('../wasm/liva_wasm.js')
-  const result = JSON.parse(wasm!.compile(source, development)) as Compilation
+  const result: unknown = JSON.parse(wasm!.compile(source, development))
 
-  if (result.schemaVersion !== 1) throw new Error('Unsupported Liva compiler schema')
+  if (!isCompilation(result)) throw new Error('Unsupported Liva compiler schema')
   return result
 }
 
@@ -90,11 +90,46 @@ export function applyEdits(
   edits: unknown,
 ): { source: string; compilation: Compilation } {
   wasm ??= require('../wasm/liva_wasm.js')
-  const result = JSON.parse(wasm!.applyEdits(source, JSON.stringify(edits))) as {
-    source: string
-    compilation: Compilation
-    error?: string
+  const result: unknown = JSON.parse(wasm!.applyEdits(source, JSON.stringify(edits)))
+  if (isRecord(result) && typeof result.error === 'string') throw new Error(result.error)
+  if (
+    !isRecord(result) ||
+    typeof result.source !== 'string' ||
+    !isCompilation(result.compilation)
+  ) {
+    throw new Error('Invalid Liva edit result')
   }
-  if (result.error) throw new Error(result.error)
-  return result
+  return { source: result.source, compilation: result.compilation }
+}
+
+function isRange(value: unknown): value is SourceRange {
+  return isRecord(value) && typeof value.start === 'number' && typeof value.end === 'number'
+}
+
+function isDiagnostic(value: unknown): value is Diagnostic {
+  return (
+    isRecord(value) &&
+    typeof value.code === 'string' &&
+    typeof value.severity === 'string' &&
+    typeof value.message === 'string' &&
+    isRange(value.range) &&
+    (value.related === undefined || isArrayOf(value.related, isRange))
+  )
+}
+
+function isMapping(value: unknown): value is Mapping {
+  return (
+    isRecord(value) && (value.kind === 'block' || value.kind === 'value') && isRange(value.range)
+  )
+}
+
+function isCompilation(value: unknown): value is Compilation {
+  return (
+    isRecord(value) &&
+    value.schemaVersion === 1 &&
+    isArrayOf(value.definitions, isDefinition) &&
+    isArrayOf(value.diagnostics, isDiagnostic) &&
+    (value.mappings === undefined ||
+      (isRecord(value.mappings) && Object.values(value.mappings).every(isMapping)))
+  )
 }

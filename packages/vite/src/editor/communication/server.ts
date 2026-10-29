@@ -1,3 +1,4 @@
+import { isEditorRequest } from './protocol.ts'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { readFile, realpath, stat, writeFile, rename, unlink, mkdir } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path'
@@ -134,8 +135,8 @@ export class EditorService {
       const next = previous.then(() => this.execute(request))
       this.inFlight.set(request.requestId, { signature, promise: next })
       const barrier = next.then(
-        () => {},
-        () => {},
+        () => undefined,
+        () => undefined,
       )
       this.locks.set(known, barrier)
       try {
@@ -261,12 +262,14 @@ export class EditorService {
       chunks.push(bytes)
     }
 
-    let data: EditorRequest
+    let data: unknown
     try {
-      data = JSON.parse(Buffer.concat(chunks).toString()) as EditorRequest
+      data = JSON.parse(Buffer.concat(chunks).toString())
     } catch {
       throw new EditorError(400, 'Invalid JSON')
     }
+    if (!isEditorRequest(data)) throw new EditorError(400, 'Invalid editor request')
+
     const result = await this.request(data)
     response.setHeader('Content-Type', 'application/json')
     response.end(JSON.stringify(result))

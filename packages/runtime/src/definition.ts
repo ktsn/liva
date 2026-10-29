@@ -1,3 +1,5 @@
+import { isArrayOf, isDefinition, isRecord } from './validation.ts'
+
 export type Timing =
   | { readonly kind: 'tween'; readonly durationMs: number; readonly easing: string }
   | { readonly kind: 'spring-duration'; readonly durationMs: number; readonly bounce: number }
@@ -70,9 +72,13 @@ export function freezeDefinition<T>(value: T): T {
 
 /** Accepts serialized output from the trusted Rust compiler, not arbitrary user data. */
 export function decodeBundle(json: string): DefinitionBundle {
-  const bundle = JSON.parse(json) as DefinitionBundle
+  const bundle: unknown = JSON.parse(json)
 
-  if (bundle.schemaVersion !== 1 || !Array.isArray(bundle.definitions)) {
+  if (
+    !isRecord(bundle) ||
+    bundle.schemaVersion !== 1 ||
+    !isArrayOf(bundle.definitions, isDefinition)
+  ) {
     throw new Error('Unsupported Liva Definition IR schema')
   }
 

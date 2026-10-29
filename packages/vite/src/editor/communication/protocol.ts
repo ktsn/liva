@@ -1,4 +1,11 @@
-import type { Definition, Frame } from '@liva/runtime'
+import {
+  isArrayOf,
+  isDefinition,
+  isFrame,
+  isRecord,
+  type Definition,
+  type Frame,
+} from '@liva/runtime'
 
 export type Edit =
   | { op: 'track'; path: string; timing?: string; frames?: readonly Frame[] }
@@ -34,4 +41,69 @@ export interface Inspection {
 
 export interface EditorReply extends Inspection {
   sequence?: number
+}
+
+declare module 'vue' {
+  interface ComponentCustomOptions {
+    livaSource?: string
+  }
+}
+
+function isEdit(value: unknown): value is Edit {
+  if (!isRecord(value)) return false
+  if (value.op === 'override') {
+    return ['definition', 'from', 'to', 'target', 'property', 'timing'].every(
+      (key) => typeof value[key] === 'string',
+    )
+  }
+  if (typeof value.path !== 'string') return false
+
+  switch (value.op) {
+    case 'set':
+      return typeof value.value === 'string'
+    case 'removeFrame':
+      return true
+    case 'addFrame':
+      return isFrame(value)
+    case 'track':
+      return (
+        (value.timing === undefined || typeof value.timing === 'string') &&
+        (value.frames === undefined || isArrayOf(value.frames, isFrame))
+      )
+    default:
+      return false
+  }
+}
+
+export function isEditorRequest(value: unknown): value is EditorRequest {
+  return (
+    isRecord(value) &&
+    (value.action === 'inspect' || value.action === 'preview' || value.action === 'commit') &&
+    typeof value.sourceId === 'string' &&
+    typeof value.definition === 'string' &&
+    ['instanceId', 'baseHash', 'requestId'].every(
+      (key) => value[key] === undefined || typeof value[key] === 'string',
+    ) &&
+    (value.sequence === undefined || typeof value.sequence === 'number') &&
+    (value.edits === undefined || isArrayOf(value.edits, isEdit))
+  )
+}
+
+function isField(value: unknown): value is Inspection['fields'][number] {
+  return (
+    isRecord(value) &&
+    typeof value.path === 'string' &&
+    (value.kind === 'value' || value.kind === 'block') &&
+    typeof value.value === 'string'
+  )
+}
+
+export function isEditorReply(value: unknown): value is EditorReply {
+  return (
+    isRecord(value) &&
+    typeof value.hash === 'string' &&
+    isDefinition(value.definition) &&
+    isArrayOf(value.fields, isField) &&
+    (value.sequence === undefined || typeof value.sequence === 'number')
+  )
 }

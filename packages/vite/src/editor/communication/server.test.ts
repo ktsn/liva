@@ -73,9 +73,10 @@ describe('guarded source transactions', () => {
     const results = await Promise.allSettled([service.request(first), service.request(second)])
     expect(results.map((r) => r.status)).toEqual(['fulfilled', 'rejected'])
     const saved = await readFile(join(root, 'Toggle.vue'), 'utf8')
-    expect(await service.request(first)).toEqual(
-      (results[0] as PromiseFulfilledResult<unknown>).value,
-    )
+    const initial = results[0]
+    if (initial.status !== 'fulfilled') throw initial.reason
+
+    expect(await service.request(first)).toEqual(initial.value)
     expect(await readFile(join(root, 'Toggle.vue'), 'utf8')).toBe(saved)
     await expect(service.request({ ...first, edits: second.edits })).rejects.toMatchObject({
       status: 409,
