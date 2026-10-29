@@ -5,10 +5,10 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 sh scripts/build-wasm.sh
-node scripts/test-wasm.mjs
+node scripts/test-wasm.ts
 vp check
 vp test --run
 pnpm --dir playground exec vue-tsc --noEmit
 pnpm --dir playground exec vue-tsc --noEmit -p ../packages/vite/tsconfig.editor.json
 pnpm exec playwright test
-node scripts/test-production.mjs
+node scripts/test-production.ts

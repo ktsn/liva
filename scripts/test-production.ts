@@ -3,12 +3,12 @@ import { execFileSync, spawn } from 'node:child_process'
 import { readdir, readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
-import { chromium } from '@playwright/test'
+import { chromium, type Browser } from '@playwright/test'
 
 const cwd = resolve(import.meta.dirname, '../playground')
 const base = 'http://127.0.0.1:4181'
 
-async function inspect(directory) {
+async function inspect(directory: string): Promise<void> {
   for (const item of await readdir(directory, { withFileTypes: true })) {
     const path = resolve(directory, item.name)
     if (item.isDirectory()) {
@@ -49,7 +49,7 @@ for (const mode of ['production', 'development']) {
   server.stderr.on('data', (chunk) => {
     output += chunk
   })
-  let browser
+  let browser: Browser | undefined
   try {
     let ready = false
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -71,7 +71,7 @@ for (const mode of ['production', 'development']) {
     assert(response.status >= 400, `Editor route accepted POST: ${response.status}`)
     browser = await chromium.launch()
     const page = await browser.newPage()
-    const errors = []
+    const errors: string[] = []
     page.on('pageerror', (error) => errors.push(error.message))
     await page.goto(base)
     assert.equal(await page.locator('[data-liva-editor]').count(), 0)
@@ -91,7 +91,7 @@ for (const mode of ['production', 'development']) {
     console.log(`Production isolation and playback passed (${mode} mode).`)
   } finally {
     await browser?.close()
-    const stopped = new Promise((done) => server.once('exit', done))
+    const stopped = new Promise<void>((done) => server.once('exit', done))
     if (server.exitCode === null && server.pid !== undefined) {
       process.kill(-server.pid, 'SIGTERM')
       await stopped

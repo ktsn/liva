@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "wasm": "sh scripts/build-wasm.sh",
-    "test:wasm": "node scripts/test-wasm.mjs",
+    "test:wasm": "node scripts/test-wasm.ts",
     "check": "vp check",
     "test": "vp test --run",
     "test:browser": "playwright test",

@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
+import { compile } from '../packages/vite/wasm/liva_wasm.js'
+import type { Compilation } from '../packages/vite/src/compiler.ts'
 import { decodeBundle } from '../packages/runtime/src/definition.ts'
 
-const require = createRequire(import.meta.url)
-const { compile } = require('../packages/vite/wasm/liva_wasm.js')
 const source = readFileSync(new URL('../fixtures/toggle.liv', import.meta.url), 'utf8')
 const expected = JSON.parse(
   readFileSync(new URL('../fixtures/toggle.json', import.meta.url), 'utf8'),
@@ -17,8 +16,9 @@ assert.throws(() => decodeBundle('{"schemaVersion":2,"definitions":[]}'), /Unsup
 assert.equal('mappings' in bundle, false)
 
 const unicode = '// 😀\r\na { state on {} transition { timing: tween(duration: 1s) } }'
-const development = JSON.parse(compile(unicode, true))
+const development: Compilation = JSON.parse(compile(unicode, true))
 assert.deepEqual(development.diagnostics, [])
+assert(development.mappings)
 const range = development.mappings['a/transition/general/timing/duration'].range
 assert.equal(Buffer.from(unicode).subarray(range.start, range.end).toString(), ' 1s')
 console.log(

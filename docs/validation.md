@@ -28,7 +28,7 @@ associates them with the full-file revision. Production consumers retain only
 `schemaVersion` and `definitions`.
 
 `fixtures/toggle.json` fixes the schema against the language example. Run the Rust
-checks above, then `scripts/build-wasm.sh` and `node scripts/test-wasm.mjs`.
+checks above, then `scripts/build-wasm.sh` and `node scripts/test-wasm.ts`.
 The Node test loads the actual `wasm-bindgen --target nodejs` artifact, compares
 Rust serialization with the fixture, verifies the deeply frozen TypeScript view,
 rejects unsupported schemas, and slices Unicode source using UTF-8 mappings.
@@ -180,7 +180,7 @@ three engines.
 
 ## Production isolation (E7)
 
-`scripts/test-production.mjs` builds both `production` and `development` modes,
+`scripts/test-production.ts` builds both `production` and `development` modes,
 scans emitted files for editor/source/compiler markers and map/WASM artifacts, then
 runs actual playback and POST rejection against each static preview server. Both
 modes pass. The plugin keys development behavior on `configureServer`, not the mode
@@ -215,7 +215,7 @@ The checked-in GitHub Actions workflow uses the same verification entrypoint and
 the official [setup-vp integration](https://viteplus.dev/guide/ci), pinned to
 v1.22.0. Preview readiness strips ANSI terminal control sequences before matching
 the server URL; CI may colorize the host and port separately. The forced-color
-regression command `FORCE_COLOR=1 CI=1 node scripts/test-production.mjs` passes
+regression command `FORCE_COLOR=1 CI=1 node scripts/test-production.ts` passes
 for both build modes locally.
 
 ## Vue editor presentation

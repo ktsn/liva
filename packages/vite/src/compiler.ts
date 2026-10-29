@@ -1,4 +1,4 @@
-import { createRequire } from 'node:module'
+import * as wasm from '../wasm/liva_wasm.js'
 import { createHash } from 'node:crypto'
 import { parse } from '@vue/compiler-sfc'
 import { isArrayOf, isDefinition, isRecord, type Definition } from '@liva/runtime'
@@ -32,17 +32,8 @@ export interface SourceSnapshot {
   result: Compilation
 }
 
-const require = createRequire(import.meta.url)
-let wasm:
-  | {
-      compile(source: string, development: boolean): string
-      applyEdits(source: string, edits: string): string
-    }
-  | undefined
-
 export function compile(source: string, development: boolean): Compilation {
-  wasm ??= require('../wasm/liva_wasm.js')
-  const result: unknown = JSON.parse(wasm!.compile(source, development))
+  const result: unknown = JSON.parse(wasm.compile(source, development))
 
   if (!isCompilation(result)) throw new Error('Unsupported Liva compiler schema')
   return result
@@ -89,8 +80,7 @@ export function applyEdits(
   source: string,
   edits: unknown,
 ): { source: string; compilation: Compilation } {
-  wasm ??= require('../wasm/liva_wasm.js')
-  const result: unknown = JSON.parse(wasm!.applyEdits(source, JSON.stringify(edits)))
+  const result: unknown = JSON.parse(wasm.applyEdits(source, JSON.stringify(edits)))
   if (isRecord(result) && typeof result.error === 'string') throw new Error(result.error)
   if (
     !isRecord(result) ||
