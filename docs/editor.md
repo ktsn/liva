@@ -89,3 +89,14 @@ External source changes require discarding/reloading before further preview or s
 The editor does not add targets or CSS properties absent from the state declarations.
 Clips, delays, looping, curve graphs, automatic key recording, multiselection,
 undo/redo history, and a separate preview canvas are outside this implementation.
+
+## Reactive definitions
+
+The same instance selector includes draggable cards. Source updates supersede
+manual playback, and condition-selected states remain visible in the inspector.
+Timing edits serialize `@tween` / `@spring` declarations; keyframes serialize inline
+percentages with optional `@` easing. Sources and `when` expressions are edited in
+source, not through timeline controls. A preview uses the instance's current drag
+offset; zero offset means no translation until the card has been dragged. State
+endpoint fields show CSS templates as source text; replacing them is an explicit
+CSS-value edit, not a visual expression editor.

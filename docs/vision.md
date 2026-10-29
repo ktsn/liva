@@ -10,7 +10,7 @@ to coordinate multiple DOM elements and CSS properties in readable source, then
 adjust those animations while interacting with their real application.
 
 Vue and TypeScript retain component structure, application state, event handling,
-and business logic. Liva supplies named animation states, transition timing, and
+and business logic. Liva supplies reactive input sources, conditional states, transition timing, and
 property keyframes. It complements a frontend framework rather than replacing one.
 
 ## Confirmed decisions
@@ -48,7 +48,9 @@ The editor does not take ownership of Vue application state.
 
 ## First demonstration
 
-A real Vue page hosts at least two toggle switches using the same definition.
+A real Vue page hosts two toggle switches sharing one definition and a draggable
+card. Vue supplies Boolean inputs to the toggles; Pointer Events supply drag input
+to the card. Both use conditional state selection and the same animation executor.
 Each switch has `off` and `on` states, a track color, thumb translation, and thumb
 scale. The page demonstrates directional overrides, both spring configurations,
 tween keyframes, and rapid reversals. The editor selects one switch, previews a
@@ -80,6 +82,6 @@ system and no custom CSS value interpolation engine.
   editing protocol, and confirmed workspace plan.
 - [MVP plan](mvp.md): milestones, experiments, tests, and acceptance criteria.
 
-Language decisions L1–L10 and architecture decisions A1–A7 are confirmed. Complete
+The language specification and architecture decisions A1–A7 define the current scope. Complete
 each milestone’s validation before building dependent capabilities. Details not yet
 specified, such as spring calibration, are resolved through the planned experiments.

@@ -1,6 +1,6 @@
 # Liva
 
-Liva is a declarative animation language for interactive Web UI. Write states and
+Liva is a declarative animation language for interactive Web UI. Write sources, conditional states and
 transitions in a Vue `<liva>` block, drive them with Vue state, and adjust motion in
 the running application. Rust compiles definitions; the browser interpolates CSS
 through Web Animations. The in-page editor is available only during development.
@@ -28,7 +28,8 @@ vp dev --host 127.0.0.1
 Open the URL printed by Vite+. The **Notifications** and **Product updates** switches
 share one definition but have independent Vue and animation state. Click or use
 Space/Enter; reverse a switch before its motion finishes. The separate beacon
-illustrates a second definition.
+illustrates another definition. Drag the **Room to move** card and release it to
+return with a spring. The card and switches share source-driven state selection.
 
 Open **Motion editor** to show the docked timeline. Choose an instance and a
 transition, then expand a target to reveal its CSS property tracks. Double-click
@@ -72,6 +73,12 @@ types use ordinary package exports; no virtual-module declaration is needed.
 Without Vite interception, the package's default export is also runtime-only.
 For explicit plugin construction without the editor, import `createLivaPlugin`
 from `@liva/vue/runtime` and pass it the diagnostic/observation options you need.
+
+A component passes source values with `v-liva:toggle="{ checked }"`; it does not
+select state names. Declare `source checked = external(type: Boolean)`, a fallback
+`state off`, and `state on when checked`. Animation declarations use `@tween` /
+`@spring`; keyframes use `40%: 1.3 1 @ ease-in`. Complete examples are in
+[Toggle.vue](playground/src/Toggle.vue) and [DraggableCardDemo.vue](playground/src/DraggableCardDemo.vue).
 
 ## Verify and build
 

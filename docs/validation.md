@@ -1,5 +1,31 @@
 # Implementation decisions and validation
 
+## Source and conditional-state revision
+
+The revised compiler and runtime use external Boolean and drag sources, ordered
+conditional states, typed expression trees and CSS templates. Toggle and card
+fixtures round-trip through Rust, Node WASM and immutable TypeScript IR. Animation
+normalization covers shorthand resets, ordered longhands and both spring families.
+Inline-frame source edits preserve surrounding text and reject ambiguous comments.
+
+`sh scripts/verify.sh` passes Rust formatting, Clippy, 35 Rust tests, 52 TypeScript
+tests, both Vue type checks, the WASM contract, and the three-browser suite.
+The browser suite has 95 passing cases; four duplicate shared-file write cases are
+intentionally skipped outside Chromium. Browser versions are Chromium 156.0.8078.4,
+Firefox 157.0 and WebKit 27.2. Production playback and editor exclusion pass for both
+normal and `development`-named build modes.
+
+Reactive browser coverage includes external updates without effect restarts,
+movement while scale animates, spring return from the displayed position,
+interrupted/repeated drags, pointer cancellation/lost capture, target rebinding,
+disposal, editor selection/preview and recovery from non-finite dynamic expressions.
+The editor save test uses an external-source Vue fixture and checks revised timing
+and inline-frame output while preserving unrelated SFC text.
+
+Sources and condition expressions have no visual authoring controls. Keyframe
+runtime interpolation and omitted-state property sampling remain outside the
+implemented semantics; see [the language specification](language.md).
+
 ## Syntax (E1)
 
 The syntax crate uses Rowan 0.17 with whole-document parsing and typed `Ast` views.

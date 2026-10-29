@@ -1,5 +1,16 @@
 # Architecture and workspace setup
 
+The normative syntax and normalization rules are in [language.md](language.md).
+Source adapters own browser listeners and values. `sources.ts` implements input
+normalization and drag subscriptions; `expression.ts` evaluates typed trees;
+`instance.ts` coordinates selection and animation. A small typed expression evaluator
+selects the last matching state and renders CSS templates. The existing WAAPI
+executor retains property ownership, interruption snapshots and generation guards.
+Vue supplies external values; neither Definition IR nor expression evaluation depends
+on Vue or DOM. The drag adapter uses Pointer Events and capture; no inertia or
+velocity is propagated. The editor still selects instances separately from shared
+source definitions. Runtime source updates supersede manual preview playback.
+
 Status: implemented MVP architecture. Decisions A1–A7 are reflected in the code;
 [validation results](validation.md) record experiments, tested versions, numerical
 parameters, source-edit constraints, and production isolation.
@@ -24,8 +35,8 @@ DOM concepts. Editor source writes cross a development server boundary.
 | Module                 | Responsibility                                                                                              | Excludes                                     |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
 | `crates/liva_syntax`   | Tokenization, recovery parser, Rowan CST, typed AST views, syntax diagnostics and byte ranges               | CSS semantics, symbol resolution, DOM        |
-| `crates/liva_compiler` | Semantic validation, Definition IR, diagnostic/source-map output; later targeted edit planning              | Runtime state, Vue file discovery            |
-| `crates/liva_wasm`     | Thin versioned serialization boundary exposing compilation and later edit planning to Node                  | Business logic or duplicate parser           |
+| `crates/liva_compiler` | Semantic validation, Definition IR, diagnostic/source-map output and targeted edit planning                 | Runtime state, Vue file discovery            |
+| `crates/liva_wasm`     | Thin versioned serialization boundary exposing compilation and edit planning to Node                        | Business logic or duplicate parser           |
 | `packages/runtime`     | Pure track resolution, spring progress generation, per-instance state, DOM/WAAPI execution                  | Source parsing, framework state, file writes |
 | `packages/vue`         | Directive registration, definition lookup, target lifecycle, runtime instance disposal                      | Compiler or Vite dependency                  |
 | `packages/vite`        | SFC block transform, compiler loading, dev mapping cache, HMR, development editor/bridge and guarded writes | Production editor service                    |
@@ -69,13 +80,15 @@ DefinitionBundle {
 }
 Definition {
   name: string
+  sources?: Source[]
   states: State[]
   generalTransition?: Transition
   directionalTransitions: { from: string, to: string, transition: Transition }[]
 }
 State {
   name: string
-  targets: { name: string, properties: { name: string, value: string }[] }[]
+  when?: Expression
+  targets: { name: string, properties: { name: string, value: string, template?: (string | Expression)[] }[] }[]
 }
 Transition {
   timing?: Timing
@@ -91,6 +104,13 @@ Timing =
   | { kind: "spring-duration", durationMs: number, bounce: number }
   | { kind: "spring-physics", stiffness: number, damping: number, mass: number }
 ```
+
+`Source` is an external Boolean input or a drag target binding. `Expression` is a
+tagged scalar/reference/unary/binary tree, validated in Rust and evaluated without
+JavaScript code generation. CSS templates retain the original opaque `value` for
+inspection and expose text/expression segments for runtime rendering. Optional
+fields extend schema version 1; old static IR remains decodable. The compiler
+requires exactly one fallback, while low-level editor playback can choose states.
 
 Offsets normalize to `[0, 1]`; times normalize to milliseconds. CSS values and
 easing remain strings. Preserve definition/state/target/property source order for
@@ -134,8 +154,8 @@ Resolution order:
 
 1. Validate the requested state and target bindings; select the general and exact
    directional transition using the logical source state.
-2. Merge property settings and resolve timing using language decision L2. Schedule
-   state differences and explicitly keyed tracks under L3.
+2. Merge property settings and resolve timing using the language precedence rules. Schedule
+   state differences and explicitly keyed tracks, including equal-value pulses.
 3. Complete missing endpoints from source/destination state values. During an
    interruption, replace the first frame with the displayed value even if an
    explicit `0%` was authored. Preserve remaining frames and restart their full
@@ -166,11 +186,11 @@ interruption snapshot behavior does not decide those semantics.
 
 ## Runtime lifecycle and interruption
 
-An instance owns its root, target bindings, requested state, animation generation,
+An instance owns source values and subscriptions, target bindings, selected state, animation generation,
 active effects, and original inline property values/priorities. Instance lifecycle:
 `create -> bind -> apply initial state -> transition* -> dispose`.
 
-For each update, batch-read displayed values for the union of old active and new
+For each selected-state change, batch-read displayed values for the union of old active and new
 tracks using computed style before canceling anything. Validate Liva constraints
 and prepare the next tracks before disturbing current effects; do not validate
 CSS properties or values. Cancel old effects, retain captured
@@ -217,7 +237,7 @@ replaying old transitions. The reduced-motion policy settles immediately
 when `prefers-reduced-motion: reduce` is active; controls and application state
 continue working. Initial mount never animates from an unspecified state.
 
-The lifecycle policies, including L9 initial-state and repeated-state behavior,
+The lifecycle policies, including initial-state and repeated-state behavior,
 are confirmed. None of these behaviors is proven by a DOM mock. In particular,
 computed serialization, CSS variables, layout-dependent units, and cancellation
 ordering require real browser experiments.
@@ -248,7 +268,7 @@ all such execution choices outside Definition IR.
 
 WAAPI effect easing and keyframe easing have distinct roles in the
 [Web Animations specification](https://www.w3.org/TR/web-animations-1/).
-For tween tracks, the confirmed interval policy (L4) uses linear effect easing and
+For tween tracks, the confirmed interval policy uses linear effect easing and
 resolved per-keyframe easing. For springs with endpoints only, use the sampled
 progress curve as effect easing with linear endpoint intervals.
 
@@ -259,7 +279,7 @@ exports a function that receives and augments the compiled component. Follow thi
 pattern for a generated definition attachment instead of rewriting `<script setup>`.
 Match parsed custom-block request parameters, not a fragile substring/regex alone.
 Use the SFC descriptor to locate the inline block and derive ranges; reject `src`
-blocks under confirmed L10. Cache compilation by source hash and compiler version.
+blocks under the inline-only SFC policy. Cache compilation by source hash and compiler version.
 
 Integration design:
 
@@ -276,7 +296,7 @@ Integration design:
 4. Assign targets to the nearest registered root, including the root itself; never
    cross a nested root. One name binds one element within an instance. The same
    definition name on another root creates a separate instance.
-5. Directive updates submit new state strings. Unmount removes bindings, effects,
+5. Directive updates submit external-source value objects. The runtime selects states from conditions. Unmount removes bindings, effects,
    registry entries, and editor selections.
 
 [Vue directive hooks](https://vuejs.org/guide/reusability/custom-directives.html)
@@ -298,7 +318,7 @@ const checked = ref(false)
 
 <template>
   <button
-    v-liva:toggle="checked ? 'on' : 'off'"
+    v-liva:toggle="{ checked }"
     v-liva-target:track
     role="switch"
     :aria-checked="checked"
