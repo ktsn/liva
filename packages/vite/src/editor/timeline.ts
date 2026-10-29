@@ -21,6 +21,11 @@ export interface TimelineTrack {
   timingOrigin: string
 }
 
+const propertyAt = (transition: Transition | undefined, target: string, property: string) =>
+  transition?.targets
+    .find((item) => item.name === target)
+    ?.properties.find((item) => item.name === property)
+
 export function timingText(timing: Timing): string {
   if (timing.kind === 'tween')
     return `tween(duration: ${timing.durationMs}ms, easing: ${timing.easing})`
@@ -55,10 +60,6 @@ export function timelineTracks(
   const destination = definition.states.find((state) => state.name === to)
   const common = definition.generalTransition
   const selected = transitionAt(definition, from, to, general)
-  const propertyAt = (transition: Transition | undefined, target: string, property: string) =>
-    transition?.targets
-      .find((item) => item.name === target)
-      ?.properties.find((item) => item.name === property)
 
   return (destination?.targets ?? []).flatMap((target) =>
     target.properties.map((property) => {
@@ -96,7 +97,7 @@ export function timelineTracks(
         timing,
         duration,
         diagnostic,
-        frames: frames.sort((a, b) => a.offset - b.offset),
+        frames: frames.toSorted((a, b) => a.offset - b.offset),
         explicit,
         inheritedFrames: !general && !local?.keyframes && !!inherited?.keyframes,
         timingOrigin: local?.timing

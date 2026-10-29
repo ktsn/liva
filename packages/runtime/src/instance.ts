@@ -273,7 +273,10 @@ export class LivaInstance {
     // Read every displayed value before canceling any effect or writing styles.
     for (const { track, element } of [
       ...this.active,
-      ...tracks.map((track) => ({ track, element: this.targets.get(track.target)! })),
+      ...tracks.map((candidate) => ({
+        track: candidate,
+        element: this.targets.get(candidate.target)!,
+      })),
     ]) {
       let properties = snapshots.get(element)
 
@@ -346,10 +349,11 @@ export class LivaInstance {
 
         void animation.finished
           .then(() => {
-            if (this.disposed || generation !== this.generation) return
+            if (this.disposed || generation !== this.generation) return undefined
             this.write(element, track.property, track.destinationValue)
             animation.cancel()
             this.active = this.active.filter((a) => a !== entry)
+            return undefined
           })
           .catch(() => {})
       }

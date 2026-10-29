@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vite-plus/test'
-import { EditorController } from './controller.ts'
+import { EditorController, type EditorBinding } from './controller.ts'
 import type { EditorReply, EditorRequest, Edit } from './communication/protocol.ts'
 import type { InstanceBinding } from '@liva/vue'
 import type { Definition } from '@liva/runtime'
@@ -12,17 +12,19 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-const definition = { name: 'motion' } as Definition
+const definition: Definition = { name: 'motion', states: [], directionalTransitions: [] }
 const reply = { hash: 'original', definition, fields: [] } satisfies EditorReply
-const edits: Edit[] = [
+const edits = [
   { op: 'set', path: 'motion/transition/general/timing/duration', value: '200ms' },
-]
+] satisfies Edit[]
 
-const stateSpies = new WeakMap<InstanceBinding, ReturnType<typeof vi.fn>>()
+const stateSpies = new WeakMap<EditorBinding, ReturnType<typeof vi.fn>>()
 
 function binding(label: string) {
   const runtime = {
     definition,
+    state: 'off',
+    animations: [],
     replaceDefinition: vi.fn<InstanceBinding['runtime']['replaceDefinition']>(function (
       this: { definition: Definition },
       next: Definition,
@@ -32,12 +34,16 @@ function binding(label: string) {
     setState: vi.fn<InstanceBinding['runtime']['setState']>().mockReturnValue(true),
   }
   const result = {
-    root: { getAttribute: () => label },
+    root: {
+      getAttribute: () => label,
+      textContent: '',
+      getBoundingClientRect: vi.fn<HTMLElement['getBoundingClientRect']>(),
+    },
     component: { livaSource: 'source' },
     runtime,
     definition,
     requestedState: 'off',
-  } as unknown as InstanceBinding
+  } satisfies EditorBinding
   stateSpies.set(result, runtime.setState)
   return result
 }
@@ -102,7 +108,7 @@ describe('editor revision lifecycle', () => {
       controller.setDraft(edits)
       const saving = controller.commit()
       if (change === 'selection') await controller.select(b)
-      const newer: Edit[] = [{ ...edits[0], value: '300ms' } as Edit]
+      const newer: Edit[] = [{ ...edits[0], value: '300ms' }]
       controller.setDraft(newer)
 
       saved.resolve(reply)

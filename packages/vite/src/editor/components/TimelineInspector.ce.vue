@@ -21,7 +21,9 @@ const emit = defineEmits<{
   add: []
   error: [message: string]
 }>()
-const frame = computed(() => props.track.frames.find((frame) => frame.offset === props.offset))
+const selectedFrame = computed(() =>
+  props.track.frames.find((frame) => frame.offset === props.offset),
+)
 const implicit = computed(
   () =>
     !props.pending &&
@@ -42,9 +44,9 @@ const defaultEasing = ref('linear')
 watch(
   () => [props.track, props.offset, props.pending],
   () => {
-    value.value = frame.value?.value ?? ''
+    value.value = selectedFrame.value?.value ?? ''
     percent.value = (props.offset ?? 0.5) * 100
-    easing.value = frame.value?.easing ?? ''
+    easing.value = selectedFrame.value?.easing ?? ''
     const timing = props.track.timing
     kind.value = timing?.kind ?? 'tween'
     duration.value = timing && timing.kind !== 'spring-physics' ? timing.durationMs : 350

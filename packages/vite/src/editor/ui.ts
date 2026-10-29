@@ -9,8 +9,7 @@ if (!customElements.get(tag)) {
 }
 
 export function mountEditor(controller: EditorController) {
-  const host = document.createElement(tag) as HTMLElement & { controller: EditorController }
-  host.controller = controller
+  const host = Object.assign(document.createElement(tag), { controller })
   host.dataset.livaEditor = ''
   document.body.append(host)
 

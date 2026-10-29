@@ -18,6 +18,11 @@ export default defineConfig({
 
     categories: {
       correctness: 'error',
+      suspicious: 'error',
+    },
+
+    rules: {
+      'eslint/no-underscore-dangle': ['error', { allow: ['__LIVA_EDITOR__'] }],
     },
 
     options: {

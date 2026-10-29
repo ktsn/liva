@@ -186,7 +186,7 @@ function changeFrame(track: TimelineTrack, frame: Frame) {
     return
   }
   const frames = track.explicit.filter((item) => item.offset !== old)
-  updateTrack(track, { keyframes: [...frames, frame].sort((a, b) => a.offset - b.offset) })
+  updateTrack(track, { keyframes: [...frames, frame].toSorted((a, b) => a.offset - b.offset) })
   choose(track, frame.offset)
 }
 

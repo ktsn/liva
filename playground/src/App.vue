@@ -66,3 +66,5 @@ beacon {
   transition { timing: tween(duration: 450ms, easing: ease-in-out) }
 }
 </liva>
+
+<style src="./style.css"></style>

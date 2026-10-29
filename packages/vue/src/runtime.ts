@@ -54,7 +54,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
       }
 
       const mount = (element: HTMLElement, binding: DirectiveBinding<string>) => {
-        const component = binding.instance?.$options as ComponentCustomOptions | undefined
+        const component: ComponentCustomOptions | undefined = binding.instance?.$options
         const definition = component?.livaDefinitions?.find((d) => d.name === binding.arg)
 
         if (!component || !definition) {

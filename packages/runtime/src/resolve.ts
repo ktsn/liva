@@ -8,8 +8,11 @@ export interface ResolvedTrack {
   readonly destinationValue: string
 }
 
+const propertyAt = (transition: Transition | undefined, target: string, property: string) =>
+  transition?.targets.find((t) => t.name === target)?.properties.find((p) => p.name === property)
+
 export function getState(definition: Definition, name: string): State {
-  const state = definition.states.find((state) => state.name === name)
+  const state = definition.states.find((candidate) => candidate.name === name)
 
   if (!state) {
     throw new Error(`Unknown Liva state: ${name}`)
@@ -30,8 +33,7 @@ export function resolve(definition: Definition, fromName: string, toName: string
   const directional = definition.directionalTransitions.find(
     (t) => t.from === fromName && t.to === toName,
   )?.transition
-  const propertyAt = (transition: Transition | undefined, target: string, property: string) =>
-    transition?.targets.find((t) => t.name === target)?.properties.find((p) => p.name === property)
+
   const tracks: ResolvedTrack[] = []
 
   for (const target of to.targets) {
@@ -60,7 +62,7 @@ export function resolve(definition: Definition, fromName: string, toName: string
 
       const frames = (explicitFrames ?? [])
         .map((frame) => ({ ...frame }))
-        .sort((a, b) => a.offset - b.offset)
+        .toSorted((a, b) => a.offset - b.offset)
 
       if (
         frames.some(

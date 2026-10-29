@@ -37,6 +37,7 @@ export default function liva(): Plugin {
     },
     resolveId(id) {
       if (id === '@liva/vue') return '\0liva:vue-plugin'
+      return null
     },
     load(id) {
       if (id === '\0liva:vue-plugin' && editor) {
@@ -45,11 +46,12 @@ export default function liva(): Plugin {
       }
       if (id === '\0liva:vue-plugin')
         return `export * from "@liva/vue/runtime"; import { createLivaPlugin } from '@liva/vue/runtime'; export default createLivaPlugin();`
+      return null
     },
     async transform(_code, id) {
       const [file, query = ''] = id.split('?', 2)
       const parameters = new URLSearchParams(query)
-      if (!file.endsWith('.vue')) return
+      if (!file.endsWith('.vue')) return undefined
 
       if (!query) {
         // Validate the descriptor even when a second custom block would otherwise
@@ -65,10 +67,10 @@ export default function liva(): Plugin {
             })
           }
         }
-        return
+        return undefined
       }
 
-      if (!parameters.has('vue') || parameters.get('type') !== 'liva') return
+      if (!parameters.has('vue') || parameters.get('type') !== 'liva') return undefined
       let snapshot = await compileFile(file)
 
       if (hasErrors(snapshot)) {
@@ -100,9 +102,9 @@ export default function liva(): Plugin {
       }
     },
     async handleHotUpdate(context) {
-      if (!context.file.endsWith('.vue')) return
+      if (!context.file.endsWith('.vue')) return undefined
       const source = await context.read()
-      if (!hasLivaBlock(source, context.file)) return
+      if (!hasLivaBlock(source, context.file)) return undefined
 
       try {
         if (editor)
@@ -129,6 +131,7 @@ export default function liva(): Plugin {
         })
         return []
       }
+      return undefined
     },
   }
 }

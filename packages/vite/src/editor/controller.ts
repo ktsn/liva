@@ -1,11 +1,19 @@
 import type { InstanceBinding } from '@liva/vue'
 import type { EditorReply, EditorRequest, Edit, Inspection } from './communication/protocol.ts'
 
+export type EditorBinding = Pick<InstanceBinding, 'component' | 'definition' | 'requestedState'> & {
+  readonly root: Pick<HTMLElement, 'getAttribute' | 'textContent' | 'getBoundingClientRect'>
+  readonly runtime: Pick<
+    InstanceBinding['runtime'],
+    'definition' | 'state' | 'animations' | 'replaceDefinition' | 'setState'
+  >
+}
+
 export interface Entry {
   id: string
   sourceId: string
   label: string
-  binding: InstanceBinding
+  binding: EditorBinding
 }
 
 export class EditorController {
@@ -35,9 +43,9 @@ export class EditorController {
     return this.entries.get(entry.id) === entry
   }
 
-  observe(event: 'mount' | 'update' | 'unmount', binding: InstanceBinding) {
+  observe(event: 'mount' | 'update' | 'unmount', binding: EditorBinding) {
     if (event === 'mount') {
-      const sourceId = (binding.component as { livaSource?: string }).livaSource
+      const sourceId = binding.component.livaSource
       if (!sourceId) return
       const label =
         binding.root.getAttribute('aria-label') ??
@@ -53,7 +61,7 @@ export class EditorController {
       )
         this.selected = entry
     } else {
-      const entry = [...this.entries.values()].find((entry) => entry.binding === binding)
+      const entry = [...this.entries.values()].find((candidate) => candidate.binding === binding)
       if (!entry) return
 
       if (event === 'unmount') {
@@ -141,7 +149,7 @@ export class EditorController {
       from === undefined
         ? selected.binding.runtime.setState(state)
         : selected.binding.runtime.setState(state, { paused: true })
-    this.previewActive = succeeded !== false
+    this.previewActive = succeeded
     if (!this.previewActive)
       throw new Error('The runtime could not prepare this transition. Check its timing and easing.')
 

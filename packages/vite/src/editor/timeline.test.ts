@@ -8,6 +8,9 @@ const definition = compile(
   true,
 ).definitions[0]
 
+const reverseTranslation = (general: boolean) =>
+  timelineTracks(definition, 'on', 'off', general).find((track) => track.property === 'translate')!
+
 describe('timeline coordinates and inheritance', () => {
   it('keeps real-time coordinates distinct from per-property percentages', () => {
     const tracks = timelineTracks(definition, 'off', 'on', false)
@@ -23,14 +26,9 @@ describe('timeline coordinates and inheritance', () => {
   })
 
   it('shows common settings independently of directional timing', () => {
-    const property = (general: boolean) =>
-      timelineTracks(definition, 'on', 'off', general).find(
-        (track) => track.property === 'translate',
-      )!
-
-    expect(property(false).timing?.kind).toBe('spring-duration')
-    expect(property(true).timing?.kind).toBe('spring-physics')
-    expect(property(false).duration).toBe(350)
+    expect(reverseTranslation(false).timing?.kind).toBe('spring-duration')
+    expect(reverseTranslation(true).timing?.kind).toBe('spring-physics')
+    expect(reverseTranslation(false).duration).toBe(350)
   })
 
   it('snaps to real-time markers and bypasses snapping with the modifier', () => {

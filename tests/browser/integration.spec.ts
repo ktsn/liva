@@ -1,3 +1,11 @@
+import type { InstanceBinding } from '../../packages/vue/src/runtime.ts'
+
+declare global {
+  interface Window {
+    records: Set<InstanceBinding>
+    diagnostics: unknown[]
+  }
+}
 import { test, expect } from '@playwright/test'
 
 const base = 'http://127.0.0.1:4180'
@@ -47,9 +55,9 @@ test('real Vue switches remain independent and keyboard accessible through rapid
 
 test('nearest-root registration handles nested roots and conditional targets', async ({ page }) => {
   await page.goto(`${base}/tests/lifecycle.html`)
-  const count = () => page.evaluate(() => (window as any).records.size)
+  const count = () => page.evaluate(() => window.records.size)
   await expect.poll(count).toBe(2)
-  expect(await page.evaluate(() => (window as any).diagnostics)).toEqual([])
+  expect(await page.evaluate(() => window.diagnostics)).toEqual([])
   await page.getByRole('button', { name: 'Outer', exact: true }).click()
   await expect
     .poll(() =>

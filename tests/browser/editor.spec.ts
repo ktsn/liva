@@ -1,5 +1,12 @@
 import { test, expect, type Page } from '@playwright/test'
 import { readFile, writeFile } from 'node:fs/promises'
+import type { EditorController } from '../../packages/vite/src/editor/controller.ts'
+
+declare global {
+  interface Window {
+    __LIVA_EDITOR__: EditorController
+  }
+}
 
 const base = 'http://127.0.0.1:4180'
 test.describe.configure({ mode: 'serial' })
@@ -12,8 +19,9 @@ async function open(page: Page, fixture = false) {
 }
 
 async function seek(page: Page, time: number) {
-  await page.getByLabel('Playhead').evaluate((element, time) => {
-    ;(element as HTMLInputElement).value = String(time)
+  await page.getByLabel('Playhead').evaluate((element, position) => {
+    if (!(element instanceof HTMLInputElement)) throw new Error('Expected the playhead input')
+    element.value = String(position)
     element.dispatchEvent(new Event('input', { bubbles: true }))
   }, time)
   await expect(page.getByRole('status')).toContainText('Previewing')
@@ -246,7 +254,12 @@ test('selection, discard, close and application updates invalidate pending previ
   const options = await page
     .getByLabel('Preview instance')
     .locator('option')
-    .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value))
+    .evaluateAll((elements) =>
+      elements.map((option) => {
+        if (!(option instanceof HTMLOptionElement)) throw new Error('Expected an instance option')
+        return option.value
+      }),
+    )
   await page.getByLabel('Preview instance').selectOption(options[2])
   await expect(page.getByLabel('Playhead')).toBeVisible()
   await track(page, 'thumb', 'scale')
@@ -259,18 +272,18 @@ test('selection, discard, close and application updates invalidate pending previ
 
   for (const action of ['close', 'application'] as const) {
     await page.getByLabel('Track duration', { exact: true }).fill('600')
-    await page.evaluate((action) => {
+    await page.evaluate((operation) => {
       const shadow = document.querySelector('[data-liva-editor]')!.shadowRoot!
       const buttons = [...shadow.querySelectorAll('button')]
       buttons.find((button) => button.textContent?.trim() === 'Apply timing')!.click()
-      if (action === 'close')
+      if (operation === 'close')
         buttons.find((button) => button.textContent?.trim() === 'Close')!.click()
       else document.querySelector<HTMLButtonElement>('[aria-label="Product updates"]')!.click()
     }, action)
 
     // Observe beyond the 150ms debounce, so a canceled preview cannot pass early.
     await page.waitForTimeout(300)
-    expect(await page.evaluate(() => (window as any).__LIVA_EDITOR__.previewActive)).toBe(false)
+    expect(await page.evaluate(() => window.__LIVA_EDITOR__.previewActive)).toBe(false)
     if (action === 'close')
       await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
     await expect(page.getByLabel('Track duration', { exact: true })).toHaveValue('600')
@@ -293,7 +306,7 @@ test('manual scrubbing survives reduced-motion changes and unmount releases effe
     .getByRole('button', { name: 'Unmount switches', exact: true })
     .evaluate((element: HTMLButtonElement) => element.click())
   await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0)
-  expect(await page.evaluate(() => (window as any).__LIVA_EDITOR__.previewActive)).toBe(false)
+  expect(await page.evaluate(() => window.__LIVA_EDITOR__.previewActive)).toBe(false)
 })
 
 test('enabling reduced motion during Play settles immediately but still allows scrubbing', async ({
@@ -326,7 +339,7 @@ test('an unsettled spring keeps its parameter controls available for correction'
     if (route.request().postDataJSON().action === 'inspect') {
       const property = reply.definition.generalTransition.targets
         .find((target: any) => target.name === 'thumb')
-        .properties.find((property: any) => property.name === 'translate')
+        .properties.find((candidate: any) => candidate.name === 'translate')
       property.timing.damping = 0.000001
     }
     await route.fulfill({ response, json: reply })

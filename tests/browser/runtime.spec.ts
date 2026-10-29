@@ -13,6 +13,8 @@ declare global {
   }
 }
 
+const numbers = (text: string) => text.match(/-?\d*\.?\d+/g)!.map(Number)
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/tests/browser/')
   await page.waitForFunction(() => !!window.liva)
@@ -78,8 +80,25 @@ test('interpolates three properties, coordinates time, and cleans completed effe
 
 test('spring overshoot is evaluated by the browser', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const definition = structuredClone(window.definition) as any
-    definition.generalTransition.targets[1].properties[0].timing.damping = 10
+    const original = window.definition
+    const definition: Runtime.Definition = {
+      ...original,
+      generalTransition: {
+        ...original.generalTransition,
+        targets: original.generalTransition!.targets.map((target) => ({
+          ...target,
+          properties: target.properties.map((property) => ({
+            ...property,
+            timing:
+              target.name === 'thumb' &&
+              property.name === 'translate' &&
+              property.timing?.kind === 'spring-physics'
+                ? { ...property.timing, damping: 10 }
+                : property.timing,
+          })),
+        })),
+      },
+    }
     window.instance.replaceDefinition(definition)
     window.instance.setState('on')
     await Promise.all(window.instance.animations.map((a) => a.ready))
@@ -92,8 +111,9 @@ test('spring overshoot is evaluated by the browser', async ({ page }) => {
     const peak = curve.samples.reduce((a, b) => (a.value > b.value ? a : b))
     const animation = window.instance.animations.find(
       (a) =>
-        (a.effect as KeyframeEffect).target === window.thumb &&
-        'translate' in (a.effect as KeyframeEffect).getKeyframes()[0],
+        a.effect instanceof KeyframeEffect &&
+        a.effect.target === window.thumb &&
+        'translate' in a.effect.getKeyframes()[0],
     )!
     animation.pause()
     animation.currentTime = peak.time * curve.durationMs
@@ -109,14 +129,14 @@ test('spring overshoot is evaluated by the browser', async ({ page }) => {
 
 for (const progress of [0.25, 0.5, 0.75]) {
   test(`reversal at ${progress} preserves displayed values`, async ({ page }) => {
-    const result = await page.evaluate(async (progress) => {
+    const result = await page.evaluate(async (fraction) => {
       const { instance, thumb, track } = window
       instance.setState('on')
       await Promise.all(instance.animations.map((a) => a.ready))
 
       for (const animation of instance.animations) {
         animation.pause()
-        animation.currentTime = Number(animation.effect!.getTiming().duration) * progress
+        animation.currentTime = Number(animation.effect!.getTiming().duration) * fraction
       }
 
       const read = () => [
@@ -138,7 +158,6 @@ for (const progress of [0.25, 0.5, 0.75]) {
       return { before, after, remaining: instance.animations.length, final: read() }
     }, progress)
 
-    const numbers = (text: string) => text.match(/-?\d*\.?\d+/g)!.map(Number)
     result.before.forEach((value, i) => {
       const a = numbers(value)
       const b = numbers(result.after[i])
@@ -160,8 +179,11 @@ test('initial state, noops, invalid states, suspension, restoration, and indepen
     const noop = instance.animations.length
     const invalid = instance.setState('missing')
     const state = instance.state
-    const siblingThumb = thumb.cloneNode() as HTMLElement
-    const siblingTrack = track.cloneNode() as HTMLElement
+    const siblingThumb = thumb.cloneNode()
+    const siblingTrack = track.cloneNode()
+    if (!(siblingThumb instanceof HTMLElement) || !(siblingTrack instanceof HTMLElement)) {
+      throw new Error('Expected cloned HTML targets')
+    }
     siblingTrack.append(siblingThumb)
     document.body.append(siblingTrack)
     const sibling = new window.liva.LivaInstance(window.definition, 'off')
@@ -226,14 +248,18 @@ test('zero duration is synchronous and WAAPI exceptions leave a usable instance'
   page,
 }) => {
   const result = await page.evaluate(() => {
+    const targetName = window.definition.states[0].targets[0].name
     const make = (durationMs: number, easing: string) => ({
       name: 'a',
       states: [
         {
           name: 'off',
-          targets: [{ name: 'track', properties: [{ name: 'opacity', value: '0' }] }],
+          targets: [{ name: targetName, properties: [{ name: 'opacity', value: '0' }] }],
         },
-        { name: 'on', targets: [{ name: 'track', properties: [{ name: 'opacity', value: '1' }] }] },
+        {
+          name: 'on',
+          targets: [{ name: targetName, properties: [{ name: 'opacity', value: '1' }] }],
+        },
       ],
       generalTransition: { timing: { kind: 'tween' as const, durationMs, easing }, targets: [] },
       directionalTransitions: [],
