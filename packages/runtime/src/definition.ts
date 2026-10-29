@@ -16,7 +16,25 @@ export interface Frame {
   readonly easing?: string
 }
 
+export type Expression =
+  | { readonly kind: 'number'; readonly value: number }
+  | { readonly kind: 'boolean'; readonly value: boolean }
+  | { readonly kind: 'string'; readonly value: string }
+  | { readonly kind: 'reference'; readonly path: readonly string[] }
+  | { readonly kind: 'unary'; readonly operator: string; readonly operand: Expression }
+  | {
+      readonly kind: 'binary'
+      readonly operator: string
+      readonly left: Expression
+      readonly right: Expression
+    }
+
+export type Source =
+  | { readonly kind: 'external'; readonly name: string; readonly type: 'Boolean' }
+  | { readonly kind: 'drag'; readonly name: string; readonly target: string }
+
 export interface Property {
+  readonly template?: readonly (string | Expression)[]
   readonly name: string
   readonly value: string
 }
@@ -27,6 +45,7 @@ export interface Target<T> {
 }
 
 export interface State {
+  readonly when?: Expression
   readonly name: string
   readonly targets: readonly Target<Property>[]
 }
@@ -43,6 +62,7 @@ export interface Transition {
 }
 
 export interface Definition {
+  readonly sources?: readonly Source[]
   readonly name: string
   readonly states: readonly State[]
   readonly generalTransition?: Transition

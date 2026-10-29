@@ -1,5 +1,7 @@
 import type {
   Definition,
+  Expression,
+  Source,
   Frame,
   PropertyTransition,
   State,
@@ -69,10 +71,70 @@ function isTransition(value: unknown): value is Transition {
   )
 }
 
+function isExpression(value: unknown, depth = 0): value is Expression {
+  if (!isRecord(value) || depth > 256) return false
+
+  switch (value.kind) {
+    case 'number':
+      return typeof value.value === 'number' && Number.isFinite(value.value)
+    case 'boolean':
+      return typeof value.value === 'boolean'
+    case 'string':
+      return typeof value.value === 'string'
+    case 'reference':
+      return (
+        Array.isArray(value.path) &&
+        value.path.length > 0 &&
+        value.path.every((part: unknown) => typeof part === 'string')
+      )
+    case 'unary':
+      return (
+        typeof value.operator === 'string' &&
+        ['!', '+', '-'].includes(value.operator) &&
+        isExpression(value.operand, depth + 1)
+      )
+    case 'binary':
+      return (
+        typeof value.operator === 'string' &&
+        [
+          '+',
+          '-',
+          '*',
+          '/',
+          '%',
+          '<',
+          '<=',
+          '>',
+          '>=',
+          '==',
+          '!=',
+          '===',
+          '!==',
+          '&&',
+          '||',
+        ].includes(value.operator) &&
+        isExpression(value.left, depth + 1) &&
+        isExpression(value.right, depth + 1)
+      )
+    default:
+      return false
+  }
+}
+
+function isSource(value: unknown): value is Source {
+  return (
+    isRecord(value) &&
+    typeof value.name === 'string' &&
+    ((value.kind === 'external' && value.type === 'Boolean') ||
+      (value.kind === 'drag' && typeof value.target === 'string'))
+  )
+}
+
 function isState(value: unknown): value is State {
   return (
     isRecord(value) &&
     typeof value.name === 'string' &&
+    (value.when === undefined || isExpression(value.when)) &&
     Array.isArray(value.targets) &&
     value.targets.every(
       (target: unknown) =>
@@ -83,7 +145,12 @@ function isState(value: unknown): value is State {
           (property: unknown) =>
             isRecord(property) &&
             typeof property.name === 'string' &&
-            typeof property.value === 'string',
+            typeof property.value === 'string' &&
+            (property.template === undefined ||
+              (Array.isArray(property.template) &&
+                property.template.every(
+                  (part: unknown) => typeof part === 'string' || isExpression(part),
+                ))),
         ),
     )
   )
@@ -93,6 +160,7 @@ export function isDefinition(value: unknown): value is Definition {
   return (
     isRecord(value) &&
     typeof value.name === 'string' &&
+    (value.sources === undefined || isArrayOf(value.sources, isSource)) &&
     isArrayOf(value.states, isState) &&
     (value.generalTransition === undefined || isTransition(value.generalTransition)) &&
     Array.isArray(value.directionalTransitions) &&

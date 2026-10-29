@@ -53,7 +53,10 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
         })
       }
 
-      const mount = (element: HTMLElement, binding: DirectiveBinding<string>) => {
+      const mount = (
+        element: HTMLElement,
+        binding: DirectiveBinding<string | Record<string, unknown>>,
+      ) => {
         const component: ComponentCustomOptions | undefined = binding.instance?.$options
         const definition = component?.livaDefinitions?.find((d) => d.name === binding.arg)
 
@@ -67,12 +70,22 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
 
         try {
           const runtime = new LivaInstance(definition, binding.value, report)
+          let requestedState = runtime.state
           const record = {
             root: element,
             component,
             runtime,
             definition,
-            requestedState: binding.value,
+            get requestedState() {
+              return typeof binding.value === 'string' ? requestedState : runtime.sourceState
+            },
+            set requestedState(state: string) {
+              requestedState = state
+            },
+          }
+          runtime.onSourceState = (state) => {
+            record.requestedState = state
+            options.observe?.('update', record)
           }
           roots.set(element, record)
           owners.set(element, binding.instance!)
@@ -94,7 +107,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
         }
       }
 
-      const rootDirective: ObjectDirective<HTMLElement, string> = {
+      const rootDirective: ObjectDirective<HTMLElement, string | Record<string, unknown>> = {
         mounted: mount,
         updated(element, binding) {
           const record = roots.get(element)
@@ -105,7 +118,9 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
             return
           }
 
-          if (binding.value !== binding.oldValue) {
+          if (typeof binding.value !== 'string') {
+            record.runtime.updateSources(binding.value ?? {})
+          } else if (binding.value !== binding.oldValue) {
             if (!record.definition.states.some((state) => state.name === binding.value)) {
               record.runtime.setState(binding.value)
               return

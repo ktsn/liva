@@ -1,3 +1,5 @@
+import { externalValues, initialSources, bindDrag } from './sources.ts'
+import { renderDefinition, renderValue, selectState, type SourceValues } from './expression.ts'
 import type { Definition } from './definition.ts'
 import { getState, resolve, type ResolvedTrack } from './resolve.ts'
 import { sampleSpring } from './spring.ts'
@@ -49,6 +51,9 @@ export function waapiProperty(property: string): string {
 export class LivaInstance {
   definition: Definition
   state: string
+  private values: SourceValues = {}
+  private sourceCleanups: (() => void)[] = []
+  onSourceState?: (state: string) => void
   private targets = new Map<string, HTMLElement>()
   private active: ActiveTrack[] = []
   private owned: OwnedElement[] = []
@@ -62,15 +67,24 @@ export class LivaInstance {
 
   constructor(
     definition: Definition,
-    state: string,
+    state: string | Readonly<Record<string, unknown>> = {},
     report: (diagnostic: RuntimeDiagnostic) => void = console.warn,
   ) {
-    getState(definition, state)
+    this.values = externalValues(
+      definition.sources ?? [],
+      initialSources(definition.sources ?? []),
+      typeof state === 'string' ? {} : state,
+    )
     this.definition = definition
-    this.state = state
+    this.state = typeof state === 'string' ? state : selectState(definition, this.values)
+    getState(definition, this.state)
     this.report = report
     this.motion = matchMedia('(prefers-reduced-motion: reduce)')
     this.motion.addEventListener('change', this.motionChanged)
+  }
+
+  get sourceState(): string {
+    return selectState(this.definition, this.values)
   }
 
   get animations(): readonly Animation[] {
@@ -195,7 +209,11 @@ export class LivaInstance {
       const element = this.targets.get(target.name)!
 
       for (const property of target.properties) {
-        this.write(element, property.name, property.value)
+        try {
+          this.write(element, property.name, renderValue(property, this.values))
+        } catch (error) {
+          this.report({ code: 'runtime.expression', message: String(error), error })
+        }
       }
     }
   }
@@ -217,11 +235,17 @@ export class LivaInstance {
 
     if (unchanged) return
 
+    this.clearSources()
     this.cancel()
     this.restore()
     this.targets = next
     this.duplicateBindings = duplicate
     this.suspended = duplicate || missing
+
+    if (this.definition.sources?.length) {
+      this.state = selectState(this.definition, this.values)
+      this.onSourceState?.(this.state)
+    }
 
     if (this.suspended) {
       this.report({
@@ -229,6 +253,7 @@ export class LivaInstance {
         message: duplicate ? 'Duplicate target binding' : 'Missing target binding',
       })
     } else {
+      this.bindSources()
       this.settle()
     }
   }
@@ -236,23 +261,42 @@ export class LivaInstance {
   replaceDefinition(definition: Definition, state = this.state) {
     if (this.disposed) return
     getState(definition, state)
+    this.clearSources()
     this.cancel()
     this.restore()
+    this.values = { ...initialSources(definition.sources ?? []), ...this.values }
     this.definition = definition
     this.state = state
     this.suspended =
       this.duplicateBindings ||
       definition.states.some((s) => s.targets.some((t) => !this.targets.has(t.name)))
+    if (!this.suspended) this.bindSources()
     this.settle()
   }
 
   setState(state: string, options: { paused?: boolean } = {}): boolean {
+    return this.transitionTo(state, options, this.values)
+  }
+
+  private transitionTo(
+    state: string,
+    options: { paused?: boolean },
+    previousValues: SourceValues,
+  ): boolean {
     if (this.disposed) return false
 
     let tracks: ResolvedTrack[]
 
     try {
-      tracks = resolve(this.definition, this.state, state)
+      tracks = resolve(
+        renderDefinition(
+          renderDefinition(this.definition, previousValues, [this.state]),
+          this.values,
+          [state],
+        ),
+        this.state,
+        state,
+      )
     } catch (error) {
       this.report({ code: 'runtime.state', message: String(error), error })
       return false
@@ -267,7 +311,7 @@ export class LivaInstance {
       return true
     }
 
-    const interrupted = this.active.length > 0
+    const interrupted = this.active.length > 0 || (this.definition.sources?.length ?? 0) > 0
     const snapshots = new Map<HTMLElement, Map<string, string>>()
 
     // Read every displayed value before canceling any effect or writing styles.
@@ -349,7 +393,8 @@ export class LivaInstance {
 
         void animation.finished
           .then(() => {
-            if (this.disposed || generation !== this.generation) return undefined
+            if (this.disposed || generation !== this.generation || !this.active.includes(entry))
+              return undefined
             this.write(element, track.property, track.destinationValue)
             animation.cancel()
             this.active = this.active.filter((a) => a !== entry)
@@ -367,8 +412,90 @@ export class LivaInstance {
     return true
   }
 
+  updateSources(inputs: Readonly<Record<string, unknown>>) {
+    if (this.disposed) return
+
+    try {
+      this.applySources(externalValues(this.definition.sources ?? [], this.values, inputs))
+    } catch (error) {
+      this.report({ code: 'runtime.source', message: String(error), error })
+    }
+  }
+
+  private applySources(values: SourceValues) {
+    const previous = this.values
+
+    try {
+      const state = selectState(this.definition, values)
+      const properties = getState(this.definition, state).targets.flatMap((target) =>
+        target.properties
+          .filter((property) => property.template)
+          .map((property) => ({
+            target: target.name,
+            property,
+            value: renderValue(property, values),
+          })),
+      )
+      this.values = values
+
+      if (state !== this.state) {
+        if (!this.transitionTo(state, {}, previous)) {
+          this.values = previous
+          return
+        }
+      } else if (!this.suspended) {
+        for (const { target, property, value } of properties) {
+          let unchanged = false
+
+          try {
+            unchanged = value === renderValue(property, previous)
+          } catch {
+            // A valid update can recover a template that failed during initial settlement.
+          }
+
+          if (unchanged) continue
+          const replaced = this.active.filter(
+            (entry) => entry.track.target === target && entry.track.property === property.name,
+          )
+          this.active = this.active.filter((entry) => !replaced.includes(entry))
+          for (const entry of replaced) entry.animation.cancel()
+          this.write(this.targets.get(target)!, property.name, value)
+        }
+      }
+
+      this.onSourceState?.(state)
+    } catch (error) {
+      this.values = previous
+      this.report({ code: 'runtime.expression', message: String(error), error })
+    }
+  }
+
+  private clearSources() {
+    const cleanups = this.sourceCleanups
+    this.sourceCleanups = []
+    for (const cleanup of cleanups) cleanup()
+    this.values = Object.fromEntries(
+      Object.entries(this.values).map(([name, value]) => [
+        name,
+        typeof value === 'boolean' ? value : { ...value, active: false },
+      ]),
+    )
+  }
+
+  private bindSources() {
+    for (const source of this.definition.sources ?? []) {
+      if (source.kind !== 'drag') continue
+      const element = this.targets.get(source.target)
+      if (!element) continue
+      this.sourceCleanups.push(
+        bindDrag(element, (value) => this.applySources({ ...this.values, [source.name]: value })),
+      )
+    }
+  }
+
   dispose() {
     if (this.disposed) return
+    this.clearSources()
     this.cancel()
     this.restore()
     this.motion.removeEventListener('change', this.motionChanged)
