@@ -11,7 +11,7 @@ named targets to standard CSS property names and raw CSS values. Target names ar
 logical bindings, not selectors. Unnamed transitions apply to all state changes;
 `transition off -> on` applies only in that direction.
 
-```css
+```liva
 toggle {
   state off {
     track {
@@ -161,7 +161,7 @@ Commas inside `cubic-bezier(...)`, `var(...)`, or another parenthesized value re
 part of that value. The parser tracks structural boundaries without interpreting
 CSS functions, their parameters, or their meaning.
 
-```css
+```liva
 timing: tween(
   duration: 350ms,
   easing: cubic-bezier(0.2, 0.8, 0.2, 1)
@@ -170,13 +170,13 @@ timing: tween(
 
 The equivalent same-line form requires no separator before the closing `)`:
 
-```css
+```liva
 timing: tween(duration: 350ms, easing: cubic-bezier(0.2, 0.8, 0.2, 1))
 ```
 
 Nested values may also span lines because newlines do not separate arguments:
 
-```css
+```liva
 timing: tween(
   duration: 350ms,
   easing: cubic-bezier(
@@ -190,7 +190,7 @@ Prefer one property per line without semicolons, and one argument per line with
 commas between arguments. **Confirmed:** a trailing comma after the final argument
 is optional. Both forms are valid:
 
-```css
+```liva
 timing: tween(duration: 350ms, easing: ease-out)
 timing: tween(duration: 350ms, easing: ease-out,)
 ```
@@ -198,7 +198,7 @@ timing: tween(duration: 350ms, easing: ease-out,)
 **Confirmed:** reject leading commas and empty arguments between consecutive
 commas. A single trailing comma does not create an empty argument.
 
-```css
+```liva
 // Invalid: leading comma
 timing: tween(, duration: 350ms)
 
@@ -270,11 +270,11 @@ including keywords, `cubic-bezier()`, `steps()`, and `linear()`, must be preserv
 
 **Confirmed signatures (L5):**
 
-| Function/configuration | Arguments | Validation and defaults |
-| --- | --- | --- |
-| `tween` | `duration`, `easing` | Duration required, finite nonnegative `ms` or `s`; easing defaults to `linear` |
-| Duration `spring` | `duration`, `bounce` | Duration required and positive; bounce defaults to `0`, range `0 <= bounce < 1` |
-| Physics `spring` | `stiffness`, `damping`, `mass` | Stiffness and damping required and positive; mass positive, default `1`; all finite unitless numbers |
+| Function/configuration | Arguments                      | Validation and defaults                                                                              |
+| ---------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `tween`                | `duration`, `easing`           | Duration required, finite nonnegative `ms` or `s`; easing defaults to `linear`                       |
+| Duration `spring`      | `duration`, `bounce`           | Duration required and positive; bounce defaults to `0`, range `0 <= bounce < 1`                      |
+| Physics `spring`       | `stiffness`, `damping`, `mass` | Stiffness and damping required and positive; mass positive, default `1`; all finite unitless numbers |
 
 Presence of `duration` or `bounce` selects duration mode; physics arguments select
 physics mode. Mixed families, no family, negative values, unsupported units,
@@ -301,12 +301,12 @@ property then general property, falling back to the resolved transition-wide
 timing. Thus a general property override survives a directional global default.
 No resolved timing means a compile-time error for an animated property (L1).
 
-| General | Directional | Effective result under L2 |
-| --- | --- | --- |
-| Global tween 350ms; color tween 200ms | Global tween 500ms | Color 200ms; other tracks use 500ms |
-| Translate physics spring with mass 2 | Translate duration spring of 350ms | Duration spring only; no mass inherited |
-| Scale frames at 40%, 70% | Scale frame at 60% | Only 60% plus completed endpoints |
-| Color override | Translate override | Both property overrides retained |
+| General                               | Directional                        | Effective result under L2               |
+| ------------------------------------- | ---------------------------------- | --------------------------------------- |
+| Global tween 350ms; color tween 200ms | Global tween 500ms                 | Color 200ms; other tracks use 500ms     |
+| Translate physics spring with mass 2  | Translate duration spring of 350ms | Duration spring only; no mass inherited |
+| Scale frames at 40%, 70%              | Scale frame at 60%                 | Only 60% plus completed endpoints       |
+| Color override                        | Translate override                 | Both property overrides retained        |
 
 **Confirmed:** keyframes use blocks; missing `0%`/`100%` values derive from source/
 destination states. Easing on a frame applies from that frame to the next.
@@ -350,18 +350,18 @@ separately in the architecture document.
 
 ## Confirmed language decisions
 
-| ID | Decision |
-| --- | --- |
-| L1 | Require resolved timing for each animated track, supplied by a transition-wide default or property override. There is no implicit language-wide timing. Complete state property declarations are required only in the MVP. |
-| L2 | Resolve timing in this order: directional property, general property, directional transition-wide, general transition-wide. |
-| L3 | Animate unequal trimmed raw state values or any explicit keyframe collection, even when endpoints match. Unchanged properties without keyframes settle immediately. |
-| L4 | Timing easing supplies each interval's default. Explicit endpoints may differ from states, with a warning and final settlement to the destination state. |
-| L5 | Use the timing signatures, numeric ranges, and defaults above. Spring duration/bounce mapping and solver calibration are runtime design work, not additional language defaults. |
-| L6 | Reject duplicate definitions, states, targets within a state/transition, properties within a target, transitions for the same direction (including duplicate general transitions), and frame offsets within a property. Names reused across states/transitions are references to the same logical targets/properties, not duplicates. |
-| L7 | Use the identifier, comment, string/escape, and balanced-group rules above. Apply grouping to raw property and argument values. Arguments are comma-separated with one optional trailing comma; reject leading commas and empty arguments. |
-| L8 | Accept arbitrary CSS properties and values without CSS validation or support probes; delegate execution to WAAPI and allow no visible animation. |
-| L9 | A request for the active logical state is a no-op; apply the initial state immediately. On interruption, use the previously requested state for direction lookup and the displayed value for the start. |
-| L10 | Allow one inline block per SFC and multiple named definitions within it. Bind one DOM element per target per instance. |
+| ID  | Decision                                                                                                                                                                                                                                                                                                                              |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| L1  | Require resolved timing for each animated track, supplied by a transition-wide default or property override. There is no implicit language-wide timing. Complete state property declarations are required only in the MVP.                                                                                                            |
+| L2  | Resolve timing in this order: directional property, general property, directional transition-wide, general transition-wide.                                                                                                                                                                                                           |
+| L3  | Animate unequal trimmed raw state values or any explicit keyframe collection, even when endpoints match. Unchanged properties without keyframes settle immediately.                                                                                                                                                                   |
+| L4  | Timing easing supplies each interval's default. Explicit endpoints may differ from states, with a warning and final settlement to the destination state.                                                                                                                                                                              |
+| L5  | Use the timing signatures, numeric ranges, and defaults above. Spring duration/bounce mapping and solver calibration are runtime design work, not additional language defaults.                                                                                                                                                       |
+| L6  | Reject duplicate definitions, states, targets within a state/transition, properties within a target, transitions for the same direction (including duplicate general transitions), and frame offsets within a property. Names reused across states/transitions are references to the same logical targets/properties, not duplicates. |
+| L7  | Use the identifier, comment, string/escape, and balanced-group rules above. Apply grouping to raw property and argument values. Arguments are comma-separated with one optional trailing comma; reject leading commas and empty arguments.                                                                                            |
+| L8  | Accept arbitrary CSS properties and values without CSS validation or support probes; delegate execution to WAAPI and allow no visible animation.                                                                                                                                                                                      |
+| L9  | A request for the active logical state is a no-op; apply the initial state immediately. On interruption, use the previously requested state for direction lookup and the displayed value for the start.                                                                                                                               |
+| L10 | Allow one inline block per SFC and multiple named definitions within it. Bind one DOM element per target per instance.                                                                                                                                                                                                                |
 
 The future DOM fallback sampling/restoration policy and runtime spring calibration
 remain outside these confirmed MVP language rules. No pending language proposal

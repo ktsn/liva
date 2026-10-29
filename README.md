@@ -59,11 +59,11 @@ The bridge supports local HTTP sessions; remote/proxied editing is outside the M
 With the Liva Vite plugin configured, install the Vue plugin through its package:
 
 ```ts
-import { createApp } from "vue";
-import liva from "@liva/vue";
-import App from "./App.vue";
+import { createApp } from 'vue'
+import liva from '@liva/vue'
+import App from './App.vue'
 
-createApp(App).use(liva).mount("#app");
+createApp(App).use(liva).mount('#app')
 ```
 
 The Vite plugin resolves this package entry to the development integration while

@@ -60,11 +60,11 @@ is an error, never a silently substituted tween.
 
 Measured examples (`mass = 1`, stiffness 300):
 
-| Mode | Duration | Samples | Peak scalar progress |
-| --- | --- | --- | --- |
-| Physics, damping 10 | 1920.83 ms | 352 | 1.38775 |
-| Physics, damping 20 | 1062.50 ms | 192 | 1.10833 |
-| Duration 350 ms, bounce 0.25 | 350 ms | 96 | 1.02121 |
+| Mode                         | Duration   | Samples | Peak scalar progress |
+| ---------------------------- | ---------- | ------- | -------------------- |
+| Physics, damping 10          | 1920.83 ms | 352     | 1.38775              |
+| Physics, damping 20          | 1062.50 ms | 192     | 1.10833              |
+| Duration 350 ms, bounce 0.25 | 350 ms     | 96      | 1.02121              |
 
 `vp test --run` checks precedence, atomic frame replacement, equal-value pulses,
 endpoints, schema immutability, spring determinism, full-curve sample accuracy,
@@ -83,8 +83,9 @@ custom CSS interpolation is used.
 
 The pinned local Vite+ 1.4.0 contains Vite 8.3.5 and Vitest 5.0.5; the global `vp`
 launcher is 1.1.0. pnpm 12.4.2 reports Vitest's Vite peer range against the wrapper's
-1.4.0 version, although its bundled Vite is 8.3.5 and the tests pass. Vue SFCs are
-excluded from automatic formatting to preserve custom-block source.
+1.4.0 version, although its bundled Vite is 8.3.5 and the tests pass. Formatting uses
+single quotes and omits semicolons. Vue SFCs are included; the formatter preserves
+the contents of their custom `<liva>` blocks.
 
 ## Vue custom blocks, directives, and HMR (E5)
 
@@ -192,16 +193,16 @@ or build output passed `pnpm install --frozen-lockfile --offline` followed by
 `CI=1 sh scripts/verify.sh`. The dependency store and installed toolchains/browser
 binaries were reused; project build artifacts were rebuilt from scratch.
 
-| Check | Result |
-| --- | --- |
-| Rust formatting and Clippy with warnings denied | Pass |
-| Rust syntax / compiler / source edits | 23 tests passed |
-| Node WASM and immutable TypeScript schema contract | Pass |
-| Vite+ formatting, lint, and TypeScript checking | Pass, no warnings |
-| TypeScript runtime / compiler / editor tests | 23 tests passed |
-| Vue SFC and template checking | Pass |
-| Chromium / Firefox / WebKit browser suite | 57 passed; 6 deliberate skips |
-| Normal and development-named production builds | Isolation and playback passed |
+| Check                                              | Result                        |
+| -------------------------------------------------- | ----------------------------- |
+| Rust formatting and Clippy with warnings denied    | Pass                          |
+| Rust syntax / compiler / source edits              | 23 tests passed               |
+| Node WASM and immutable TypeScript schema contract | Pass                          |
+| Vite+ formatting, lint, and TypeScript checking    | Pass, no warnings             |
+| TypeScript runtime / compiler / editor tests       | 23 tests passed               |
+| Vue SFC and template checking                      | Pass                          |
+| Chromium / Firefox / WebKit browser suite          | 57 passed; 6 deliberate skips |
+| Normal and development-named production builds     | Isolation and playback passed |
 
 The six skips are the Firefox/WebKit copies of three shared-file-writing cases
 (invalid/fixed HMR, value save, override/frame save). Their transactions execute
@@ -216,7 +217,6 @@ v1.22.0. Preview readiness strips ANSI terminal control sequences before matchin
 the server URL; CI may colorize the host and port separately. The forced-color
 regression command `FORCE_COLOR=1 CI=1 node scripts/test-production.mjs` passes
 for both build modes locally.
-
 
 ## Vue editor presentation
 
@@ -237,7 +237,6 @@ verifies that a later application action supersedes the pending preview. Overrid
 and frame save tests operate the rendered Vue controls, including add/remove and
 shared-instance synchronization. `tsconfig.editor.json` checks editor scripts and
 templates through `vue-tsc` in the standard verification entrypoint.
-
 
 ## Public Vue plugin entry
 

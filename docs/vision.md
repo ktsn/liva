@@ -35,11 +35,11 @@ property keyframes. It complements a frontend framework rather than replacing on
 
 ## Editing model
 
-| Concept | Meaning |
-| --- | --- |
+| Concept               | Meaning                                                      |
+| --------------------- | ------------------------------------------------------------ |
 | Execution environment | The normal application served by its Vite development server |
-| Editing scope | One named Liva definition in a component source file |
-| Preview target | One mounted runtime instance of that definition |
+| Editing scope         | One named Liva definition in a component source file         |
+| Preview target        | One mounted runtime instance of that definition              |
 
 Dragging a timing control previews an in-memory override on the selected instance.
 Saving changes the shared source definition; after successful compilation and HMR,

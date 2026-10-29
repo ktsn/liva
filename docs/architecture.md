@@ -21,15 +21,15 @@ Arrows point from consumers to dependencies, except the explicitly labeled IR
 flow. The runtime never imports the compiler or Vite; Rust never imports Vue or
 DOM concepts. Editor source writes cross a development server boundary.
 
-| Module | Responsibility | Excludes |
-| --- | --- | --- |
-| `crates/liva_syntax` | Tokenization, recovery parser, Rowan CST, typed AST views, syntax diagnostics and byte ranges | CSS semantics, symbol resolution, DOM |
-| `crates/liva_compiler` | Semantic validation, Definition IR, diagnostic/source-map output; later targeted edit planning | Runtime state, Vue file discovery |
-| `crates/liva_wasm` | Thin versioned serialization boundary exposing compilation and later edit planning to Node | Business logic or duplicate parser |
-| `packages/runtime` | Pure track resolution, spring progress generation, per-instance state, DOM/WAAPI execution | Source parsing, framework state, file writes |
-| `packages/vue` | Directive registration, definition lookup, target lifecycle, runtime instance disposal | Compiler or Vite dependency |
-| `packages/vite` | SFC block transform, compiler loading, dev mapping cache, HMR, development editor/bridge and guarded writes | Production editor service |
-| `playground` | Normal Vue app demonstrating and testing the integrated workflow | Isolated preview environment |
+| Module                 | Responsibility                                                                                              | Excludes                                     |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `crates/liva_syntax`   | Tokenization, recovery parser, Rowan CST, typed AST views, syntax diagnostics and byte ranges               | CSS semantics, symbol resolution, DOM        |
+| `crates/liva_compiler` | Semantic validation, Definition IR, diagnostic/source-map output; later targeted edit planning              | Runtime state, Vue file discovery            |
+| `crates/liva_wasm`     | Thin versioned serialization boundary exposing compilation and later edit planning to Node                  | Business logic or duplicate parser           |
+| `packages/runtime`     | Pure track resolution, spring progress generation, per-instance state, DOM/WAAPI execution                  | Source parsing, framework state, file writes |
+| `packages/vue`         | Directive registration, definition lookup, target lifecycle, runtime instance disposal                      | Compiler or Vite dependency                  |
+| `packages/vite`        | SFC block transform, compiler loading, dev mapping cache, HMR, development editor/bridge and guarded writes | Production editor service                    |
+| `playground`           | Normal Vue app demonstrating and testing the integrated workflow                                            | Isolated preview environment                 |
 
 Keep the editor inside `packages/vite` initially, with distinct server/client
 entry points. Split a package only when a real dependency or reuse need appears.
@@ -337,12 +337,12 @@ application-requested state.
 
 Editor messages:
 
-| Message | Required data | Result |
-| --- | --- | --- |
-| Inspect | Instance ID | Definition/revision and editable field metadata |
-| Preview | Instance ID, base revision, sequence, semantic field edits | Validated transient override or diagnostics; no disk writes |
-| Cancel | Instance ID | Discard override and resynchronize |
-| Commit | Definition ID, full-file base hash, structured edits, request ID | New revision and HMR, or conflict/diagnostics |
+| Message | Required data                                                    | Result                                                      |
+| ------- | ---------------------------------------------------------------- | ----------------------------------------------------------- |
+| Inspect | Instance ID                                                      | Definition/revision and editable field metadata             |
+| Preview | Instance ID, base revision, sequence, semantic field edits       | Validated transient override or diagnostics; no disk writes |
+| Cancel  | Instance ID                                                      | Discard override and resynchronize                          |
+| Commit  | Definition ID, full-file base hash, structured edits, request ID | New revision and HMR, or conflict/diagnostics               |
 
 Validate preview edits through the compiler's semantic rules using transient
 source edits on the server, then send only validated IR to the chosen instance.
@@ -483,14 +483,14 @@ add another monorepo task framework.
 
 After the relevant members exist, define package scripts around these commands:
 
-| Purpose | Planned command |
-| --- | --- |
-| JS/TS formatting, lint, and type checks | `vp check` at the root |
-| JS unit tests | `vp test --run` with configured test projects |
-| Playground dev server | `vp dev` from `playground` |
-| Playground production build | `vp build` from `playground` |
-| Library packaging | `vp pack` in packages that need emitted artifacts |
-| Cross-package task orchestration | `vp run <task>` with explicit dependencies |
+| Purpose                                 | Planned command                                   |
+| --------------------------------------- | ------------------------------------------------- |
+| JS/TS formatting, lint, and type checks | `vp check` at the root                            |
+| JS unit tests                           | `vp test --run` with configured test projects     |
+| Playground dev server                   | `vp dev` from `playground`                        |
+| Playground production build             | `vp build` from `playground`                      |
+| Library packaging                       | `vp pack` in packages that need emitted artifacts |
+| Cross-package task orchestration        | `vp run <task>` with explicit dependencies        |
 
 Enable both `lint.options.typeAware` and `lint.options.typeCheck` for TypeScript
 checking, as documented in the [check guide](https://viteplus.dev/guide/check).
@@ -509,15 +509,15 @@ the same checks. WASM consumers run uncached after an explicit rebuild.
 
 ## Confirmed architecture decisions
 
-| ID | Confirmed choice | Tradeoff / fallback context | Validation gate |
-| --- | --- | --- | --- |
-| A1 | Rowan with whole-block reparsing | Custom CST adds maintenance; incremental parsing adds initial complexity | Syntax experiment |
-| A2 | JSON envelope through Node WASM; mirrored TS contract with fixtures | Native addon improves some deployment characteristics but adds platform builds | IR/WASM experiment |
-| A3 | Sample scalar spring progress into `linear()` | Browser-evaluated value sampling is more complex; CSS interpolation stays out of scope | Spring experiment |
-| A4 | Component augmentation and nearest-root directive binding | Explicit composable is less declarative; script injection couples compilation | Vue experiment |
-| A5 | One WAAPI effect per property with shared start time and exclusive ownership | Grouping effects saves objects but complicates different timing | Runtime experiment |
-| A6 | Server-validated instance-local preview and revision-checked targeted commits | Browser WASM reduces round trips but expands packaging; whole-block formatting violates preservation | Editor experiment |
-| A7 | Require a tested browser baseline; honor reduced motion by immediate settlement | Broad fallback support increases runtime scope | Browser matrix |
+| ID  | Confirmed choice                                                                | Tradeoff / fallback context                                                                          | Validation gate    |
+| --- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------ |
+| A1  | Rowan with whole-block reparsing                                                | Custom CST adds maintenance; incremental parsing adds initial complexity                             | Syntax experiment  |
+| A2  | JSON envelope through Node WASM; mirrored TS contract with fixtures             | Native addon improves some deployment characteristics but adds platform builds                       | IR/WASM experiment |
+| A3  | Sample scalar spring progress into `linear()`                                   | Browser-evaluated value sampling is more complex; CSS interpolation stays out of scope               | Spring experiment  |
+| A4  | Component augmentation and nearest-root directive binding                       | Explicit composable is less declarative; script injection couples compilation                        | Vue experiment     |
+| A5  | One WAAPI effect per property with shared start time and exclusive ownership    | Grouping effects saves objects but complicates different timing                                      | Runtime experiment |
+| A6  | Server-validated instance-local preview and revision-checked targeted commits   | Browser WASM reduces round trips but expands packaging; whole-block formatting violates preservation | Editor experiment  |
+| A7  | Require a tested browser baseline; honor reduced motion by immediate settlement | Broad fallback support increases runtime scope                                                       | Browser matrix     |
 
 Primary references were consulted on 2026-10-25; Vite+ references on 2026-10-26. Recheck tool APIs and pin
 tested versions when implementing; documentation is not a substitute for the
