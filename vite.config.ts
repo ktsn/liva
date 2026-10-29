@@ -4,6 +4,22 @@ export default defineConfig({
   optimizeDeps: { entries: ['tests/browser/index.html'] },
 
   lint: {
+    plugins: [
+      'oxc',
+      'eslint',
+      'typescript',
+      'unicorn',
+      'import',
+      'jsdoc',
+      'promise',
+      'vitest',
+      'vue',
+    ],
+
+    categories: {
+      correctness: 'error',
+    },
+
     options: {
       typeAware: true,
       typeCheck: true,

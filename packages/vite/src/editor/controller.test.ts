@@ -23,10 +23,13 @@ const stateSpies = new WeakMap<InstanceBinding, ReturnType<typeof vi.fn>>()
 function binding(label: string) {
   const runtime = {
     definition,
-    replaceDefinition: vi.fn(function (this: { definition: Definition }, next: Definition) {
+    replaceDefinition: vi.fn<InstanceBinding['runtime']['replaceDefinition']>(function (
+      this: { definition: Definition },
+      next: Definition,
+    ) {
       this.definition = next
     }),
-    setState: vi.fn(),
+    setState: vi.fn<InstanceBinding['runtime']['setState']>().mockReturnValue(true),
   }
   const result = {
     root: { getAttribute: () => label },
@@ -93,7 +96,7 @@ describe('editor revision lifecycle', () => {
     'retains newer %s while a previous save completes',
     async (change) => {
       const saved = deferred<EditorReply>()
-      const { controller, b } = await setup(async (request) =>
+      const { controller, a, b } = await setup(async (request) =>
         request.action === 'commit' ? saved.promise : reply,
       )
       controller.setDraft(edits)
@@ -105,7 +108,7 @@ describe('editor revision lifecycle', () => {
       saved.resolve(reply)
       await saving
       expect(controller.draft).toEqual(newer)
-      if (change === 'selection') expect(controller.selected?.id).toBe(b)
+      expect(controller.selected?.id).toBe(change === 'selection' ? b : a)
     },
   )
 
