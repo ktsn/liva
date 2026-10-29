@@ -33,6 +33,10 @@
         },
         {
           "name": "on",
+          "when": {
+            "kind": "boolean",
+            "value": true
+          },
           "targets": [
             {
               "name": "track",

@@ -14,6 +14,7 @@ pub enum Kind {
     Text,
     Trivia,
     Error,
+    Source,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -33,6 +34,7 @@ impl Language for Liva {
             6 => Kind::Argument,
             7 => Kind::Text,
             8 => Kind::Trivia,
+            10 => Kind::Source,
             _ => Kind::Error,
         }
     }
@@ -146,7 +148,37 @@ fn lex(source: &str, raw_value: bool) -> (Vec<Token<'_>>, Vec<Diagnostic>) {
         let c = rest.chars().next().unwrap();
         let mut trivia = false;
 
-        if let Some(comment) = rest.strip_prefix("/*") {
+        if rest.starts_with("${") {
+            i += 2;
+            let mut quote = None;
+
+            while i < source.len() {
+                let next = source[i..].chars().next().unwrap();
+                if quote.is_none() && matches!(next, '\n' | '\r') {
+                    break;
+                }
+                i += next.len_utf8();
+                if let Some(q) = quote {
+                    if next == '\\' && i < source.len() {
+                        i += source[i..].chars().next().unwrap().len_utf8();
+                    } else if next == q {
+                        quote = None;
+                    }
+                } else if matches!(next, '\'' | '"') {
+                    quote = Some(next);
+                } else if next == '}' {
+                    break;
+                }
+            }
+
+            if !source[start..i].ends_with('}') {
+                errors.push(Diagnostic::error(
+                    "syntax.interpolation",
+                    "Unclosed interpolation",
+                    Range { start, end: i },
+                ));
+            }
+        } else if let Some(comment) = rest.strip_prefix("/*") {
             trivia = true;
             i = comment
                 .find("*/")
@@ -212,6 +244,7 @@ fn lex(source: &str, raw_value: bool) -> (Vec<Token<'_>>, Vec<Diagnostic>) {
                     }
                 } else if next.is_whitespace()
                     || "{}():;,[]\"'".contains(next)
+                    || source[i..].starts_with("${")
                     || source[i..].starts_with("/*")
                 {
                     break;
@@ -327,6 +360,13 @@ impl Parser<'_> {
                 return;
             }
 
+            if self.at() == "source" {
+                self.start(Kind::Source);
+                self.raw(false, false);
+                self.end();
+                continue;
+            }
+
             let checkpoint = self.builder.checkpoint();
             let begin = self.index;
             self.start(Kind::Header);
@@ -344,7 +384,15 @@ impl Parser<'_> {
                     .iter()
                     .map(|t| t.text)
                     .collect::<String>();
-                if !is_property(semantic_text(&name).as_str()) {
+                if !(if in_state {
+                    is_property(&semantic_text(&name))
+                } else {
+                    is_property(semantic_text(&name).trim_start_matches('@'))
+                }) && (in_state
+                    || !semantic_text(&name)
+                        .strip_suffix('%')
+                        .is_some_and(|v| v.parse::<f64>().is_ok()))
+                {
                     self.error("Expected a property name");
                 }
                 self.bump();
@@ -531,6 +579,7 @@ fn validate_headers(node: &Ast, depth: usize, diagnostics: &mut Vec<Diagnostic>)
             0 | 2 => is_name(&header),
             1 => match words.as_slice() {
                 ["state", name] => is_name(name),
+                ["state", name, "when", ..] => is_name(name) && words.len() > 3,
                 ["transition"] => true,
                 ["transition", from, "->", to] => is_name(from) && is_name(to),
                 _ => false,

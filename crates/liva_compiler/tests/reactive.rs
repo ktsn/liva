@@ -1,0 +1,248 @@
+use liva_compiler::{compile, ir::Timing};
+
+fn valid(source: &str) -> liva_compiler::Compilation {
+    let result = compile(source, true);
+    assert!(
+        !result.diagnostics.iter().any(|d| d.severity == "error"),
+        "{:?}",
+        result.diagnostics
+    );
+    result
+}
+
+fn animation(timing: &str) -> String {
+    format!(
+        "a {{ source checked = external(type: Boolean); state off {{ t {{ opacity: 0 }} }} state on when checked {{ t {{ opacity: 1 }} }} transition {{ {timing}\n }} }}"
+    )
+}
+
+#[test]
+fn revised_examples_compile_to_ordered_sources_conditions_and_templates() {
+    let toggle = valid(include_str!("../../../fixtures/reactive-toggle.liv"));
+    assert_eq!(toggle.definitions[0].sources.len(), 1);
+    assert_eq!(toggle.definitions[0].states[1].name, "on");
+    assert!(toggle.definitions[0].states[1].when.is_some());
+
+    let card = valid(include_str!("../../../fixtures/card.liv"));
+    let property = &card.definitions[0].states[1].targets[0].properties[0];
+    assert_eq!(property.template.as_ref().unwrap().len(), 4);
+    assert_eq!(
+        property.value,
+        "${movement.offset.x}px ${movement.offset.y}px"
+    );
+}
+
+#[test]
+fn declaration_order_normalizes_complete_timing_families() {
+    for (input, expected) in [
+        (
+            "@tween: 350ms ease-out; @tween-duration: 200ms",
+            Timing::Tween {
+                duration_ms: 200.0,
+                easing: "ease-out".into(),
+            },
+        ),
+        (
+            "@tween-easing: ease-in; @tween: 0.5s",
+            Timing::Tween {
+                duration_ms: 500.0,
+                easing: "linear".into(),
+            },
+        ),
+        (
+            "@spring: 300 20 2; @spring: 350ms 0.2",
+            Timing::SpringDuration {
+                duration_ms: 350.0,
+                bounce: 0.2,
+            },
+        ),
+        (
+            "@spring-duration: 100ms; @spring: 300 20",
+            Timing::SpringPhysics {
+                stiffness: 300.0,
+                damping: 20.0,
+                mass: 1.0,
+            },
+        ),
+        (
+            "@spring: 350ms 0.2; @tween-duration: 200ms; @tween-easing: steps(4, end)",
+            Timing::Tween {
+                duration_ms: 200.0,
+                easing: "steps(4, end)".into(),
+            },
+        ),
+    ] {
+        let result = valid(&animation(input));
+        assert_eq!(
+            result.definitions[0]
+                .general_transition
+                .as_ref()
+                .unwrap()
+                .timing
+                .as_ref(),
+            Some(&expected),
+            "{input}"
+        );
+    }
+
+    for input in [
+        "@spring-duration: 100ms; @spring-stiffness: 200",
+        "@spring: 300 20 1; @spring-bounce: 0.2",
+        "@spring: 0ms",
+        "@spring: 100ms 1",
+        "@tween: -1ms",
+        "@tween: 10",
+    ] {
+        let result = compile(&animation(input), false);
+        assert!(result.definitions.is_empty(), "{input}");
+    }
+}
+
+#[test]
+fn expression_types_references_and_fallback_are_validated() {
+    for condition in [
+        "checked && !false",
+        "(1 + 2 * 3) == 7",
+        "'a' != \"b\"",
+        "checked || 1 / 0 > 0",
+    ] {
+        valid(&animation("@tween: 1ms").replace("when checked", &format!("when {condition}")));
+    }
+
+    for condition in [
+        "unknown",
+        "checked.value",
+        "checked + 1",
+        "movement.active",
+        "checked()",
+        "${checked}",
+        "1",
+    ] {
+        assert!(
+            compile(
+                &animation("@tween: 1ms").replace("when checked", &format!("when {condition}")),
+                false
+            )
+            .definitions
+            .is_empty(),
+            "{condition}"
+        );
+    }
+
+    for source in [
+        "a { state first {} state second {} }",
+        "a { state first when true {} }",
+        "a { source value = external(type: Number); state idle {} }",
+        "a { source movement = drag(target: missing); state idle {} }",
+    ] {
+        assert!(
+            compile(source, false)
+                .diagnostics
+                .iter()
+                .any(|d| d.severity == "error"),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn inline_frames_preserve_css_easing_and_replace_inheritance() {
+    let source = animation(
+        "@tween: 100ms linear(0, 0.3 50%, 1); t { opacity { 70%: 0.8 @ steps(2, end); 40%: 0.2 @ cubic-bezier(0.2, 0.8, 0.2, 1) } }",
+    );
+    let result = valid(&source);
+    let frames = result.definitions[0]
+        .general_transition
+        .as_ref()
+        .unwrap()
+        .targets[0]
+        .properties[0]
+        .keyframes
+        .as_ref()
+        .unwrap();
+    assert_eq!(frames[0].offset, 0.4);
+    assert_eq!(frames[1].easing.as_deref(), Some("steps(2, end)"));
+    assert!(
+        compile(
+            &source.replace("@tween: 100ms linear(0, 0.3 50%, 1)", "@spring: 300 20 1"),
+            false
+        )
+        .definitions
+        .is_empty()
+    );
+}
+
+#[test]
+fn revised_track_edits_preserve_surrounding_source() {
+    use liva_compiler::edits::{Edit, FrameEdit, apply_edits};
+    let source = include_str!("../../../fixtures/reactive-toggle.liv").replace('\n', "\r\n");
+    let path = "toggle/transition/general/target/thumb/property/scale";
+    let result = apply_edits(
+        &source,
+        &[Edit::Track {
+            path: path.into(),
+            timing: Some("@tween: 200ms ease-in".into()),
+            frames: Some(vec![FrameEdit {
+                offset: 0.5,
+                value: "1.2 1".into(),
+                easing: Some("steps(2, end)".into()),
+            }]),
+        }],
+    )
+    .unwrap();
+    let old = compile(&source, true).mappings.unwrap()[path].range.clone();
+    let new = result.compilation.mappings.unwrap()[path].range.clone();
+
+    assert_eq!(&source[..old.start], &result.source[..new.start]);
+    assert_eq!(&source[old.end..], &result.source[new.end..]);
+    assert!(result.source.contains("50%: 1.2 1 @ steps(2, end)"));
+}
+
+#[test]
+fn source_arguments_scope_and_whitespace_are_checked() {
+    valid(
+        &animation("@tween: 1ms")
+            .replace("source checked", "source\tchecked")
+            .replace("when checked", "when\tchecked"),
+    );
+
+    for source in [
+        "a { source checked = external(type: Boolean) junk; state idle {} }",
+        "a { source checked = external(type: Boolean, type: Boolean); state idle {} }",
+        "a { state idle { source checked = external(type: Boolean); } }",
+        "source checked = external(type: Boolean); a { state idle {} }",
+        "a { state idle {} transition { source checked = external(type: Boolean); } }",
+    ] {
+        assert!(
+            compile(source, false)
+                .diagnostics
+                .iter()
+                .any(|d| d.severity == "error"),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn inline_frame_field_edits_preserve_comments_or_reject() {
+    use liva_compiler::edits::{Edit, apply_edits};
+    let source = include_str!("../../../fixtures/reactive-toggle.liv");
+    let path = "toggle/transition/general/target/thumb/property/scale/frame/0.4/value";
+    let edit = Edit::Set {
+        path: path.into(),
+        value: "1.5 1".into(),
+    };
+    let result = apply_edits(source, &[edit]).unwrap();
+    assert_eq!(result.source, source.replacen("1.3 1", "1.5 1", 1));
+
+    let source = source.replace("40%: 1.3 1", "40%: /* 😀 preserve */ 1.3 1");
+    let edit = Edit::Set {
+        path: path.into(),
+        value: "1.5 1".into(),
+    };
+    assert!(
+        apply_edits(&source, &[edit])
+            .unwrap_err()
+            .contains("comments")
+    );
+}

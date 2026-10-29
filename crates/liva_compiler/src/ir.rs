@@ -1,9 +1,12 @@
+use crate::expression::{Expression, TemplatePart};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Definition {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<Source>,
     pub states: Vec<State>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub general_transition: Option<Transition>,
@@ -13,6 +16,8 @@ pub struct Definition {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct State {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when: Option<Expression>,
     pub targets: Vec<Target<Property>>,
 }
 
@@ -26,6 +31,8 @@ pub struct Target<T> {
 pub struct Property {
     pub name: String,
     pub value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub template: Option<Vec<TemplatePart>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -105,5 +112,27 @@ impl State {
                 .find(|p| p.name == property)?
                 .value,
         )
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Source {
+    External {
+        name: String,
+        #[serde(rename = "type")]
+        value_type: String,
+    },
+    Drag {
+        name: String,
+        target: String,
+    },
+}
+
+impl Source {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::External { name, .. } | Self::Drag { name, .. } => name,
+        }
     }
 }

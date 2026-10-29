@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "definitions": [
+    {
+      "name": "card",
+      "sources": [
+        {
+          "kind": "drag",
+          "name": "movement",
+          "target": "body"
+        }
+      ],
+      "states": [
+        {
+          "name": "idle",
+          "targets": [
+            {
+              "name": "body",
+              "properties": [
+                {
+                  "name": "translate",
+                  "value": "0 0"
+                },
+                {
+                  "name": "scale",
+                  "value": "1"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "dragging",
+          "when": {
+            "kind": "reference",
+            "path": ["movement", "active"]
+          },
+          "targets": [
+            {
+              "name": "body",
+              "properties": [
+                {
+                  "name": "translate",
+                  "value": "${movement.offset.x}px ${movement.offset.y}px",
+                  "template": [
+                    {
+                      "kind": "reference",
+                      "path": ["movement", "offset", "x"]
+                    },
+                    "px ",
+                    {
+                      "kind": "reference",
+                      "path": ["movement", "offset", "y"]
+                    },
+                    "px"
+                  ]
+                },
+                {
+                  "name": "scale",
+                  "value": "1.05"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "generalTransition": {
+        "timing": {
+          "kind": "tween",
+          "durationMs": 200.0,
+          "easing": "ease-out"
+        },
+        "targets": []
+      },
+      "directionalTransitions": [
+        {
+          "from": "dragging",
+          "to": "idle",
+          "transition": {
+            "targets": [
+              {
+                "name": "body",
+                "properties": [
+                  {
+                    "name": "translate",
+                    "timing": {
+                      "kind": "spring-physics",
+                      "stiffness": 300.0,
+                      "damping": 20.0,
+                      "mass": 1.0
+                    }
+                  },
+                  {
+                    "name": "scale",
+                    "timing": {
+                      "kind": "tween",
+                      "durationMs": 180.0,
+                      "easing": "ease-out"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "diagnostics": []
+}

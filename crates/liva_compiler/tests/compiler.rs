@@ -2,7 +2,7 @@ use liva_compiler::{compile, ir::Timing};
 
 fn fixture(timing: &str, extra: &str) -> String {
     format!(
-        "a {{ state off {{ t {{ translate: 0px; scale: 1 }} }} state on {{ t {{ translate: 24px; scale: 1 }} }} transition {{ timing: {timing}\n {extra} }} }}"
+        "a {{ state off {{ t {{ translate: 0px; scale: 1 }} }} state on when true {{ t {{ translate: 24px; scale: 1 }} }} transition {{ timing: {timing}\n {extra} }} }}"
     )
 }
 
@@ -83,10 +83,10 @@ fn references_duplicates_completeness_and_recovery() {
         "a { state on { t { color: red; color: blue } } }",
         "a { state on { t {} t {} } }",
         "a { state on {} transition off -> on {} }",
-        "a { state on { t { color: red } } state off { t {} } }",
+        "a { state on when true { t { color: red } } state off { t {} } }",
         "a { state on {} transition {} transition {} }",
         "a { state on {} } a { state on {} }",
-        "a { state on { t { color: red } } state off { t { color: blue } } }",
+        "a { state on when true { t { color: red } } state off { t { color: blue } } }",
         "a { state on {} transition { t { color { timing: tween(duration: 1ms) } } } }",
     ] {
         assert!(!errors(source).is_empty(), "{source}");
@@ -192,13 +192,13 @@ fn raw_css_and_byte_mappings() {
 
 #[test]
 fn same_state_noops_do_not_require_motion_timing() {
-    let source = "a { state off { t { scale: 1 } } state on { t { scale: 1 } } transition { t { scale { 40% { value: 2 } } } } transition off -> on { timing: tween(duration: 1s) } transition on -> off { timing: tween(duration: 1s) } }";
+    let source = "a { state off { t { scale: 1 } } state on when true { t { scale: 1 } } transition { t { scale { 40% { value: 2 } } } } transition off -> on { timing: tween(duration: 1s) } transition on -> off { timing: tween(duration: 1s) } }";
     assert!(errors(source).is_empty());
 }
 
 #[test]
 fn mapping_paths_do_not_collide_with_user_names() {
-    let source = "a { state general { timing { timing: 0 } } state timing { timing { timing: 1 } } transition { timing: tween(duration: 1s) } transition general -> timing { timing { timing { timing: tween(duration: 2s) } } } }";
+    let source = "a { state general { timing { timing: 0 } } state timing when true { timing { timing: 1 } } transition { timing: tween(duration: 1s) } transition general -> timing { timing { timing { timing: tween(duration: 2s) } } } }";
     let result = compile(source, true);
     assert!(result.diagnostics.is_empty());
     let mappings = result.mappings.unwrap();

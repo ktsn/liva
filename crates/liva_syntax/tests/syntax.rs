@@ -188,3 +188,39 @@ fn urls_are_opaque_after_other_raw_tokens() {
         "prefix https://example.com"
     );
 }
+
+#[test]
+fn reactive_syntax_is_lossless_even_when_truncated() {
+    for source in [
+        include_str!("../../../fixtures/card.liv"),
+        include_str!("../../../fixtures/reactive-toggle.liv"),
+    ] {
+        assert!(
+            parse(source).diagnostics.is_empty(),
+            "{:?}",
+            parse(source).diagnostics
+        );
+
+        for end in 0..=source.len() {
+            let parsed = parse(&source[..end]);
+            assert_eq!(parsed.root.text(), &source[..end]);
+            assert!(
+                parsed
+                    .diagnostics
+                    .iter()
+                    .all(|d| d.range.start <= d.range.end && d.range.end <= end)
+            );
+        }
+    }
+
+    let source = "a { state idle { t { translate: ${broken\nscale: 1\n} } }";
+    let parsed = parse(source);
+    assert_eq!(parsed.root.text(), source);
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "syntax.interpolation")
+    );
+    assert!(parsed.root.text().contains("scale: 1"));
+}

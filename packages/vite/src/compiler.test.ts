@@ -4,7 +4,7 @@ import { compileSfc, diagnosticLocation, hasErrors } from './compiler.ts'
 describe('SFC compiler boundary', () => {
   it('maps UTF-8 diagnostics to SFC lines and UTF-16 columns', () => {
     const source =
-      '<template><p>日本語😀</p></template>\r\n<liva>\r\na { state on { t { x: 1 } } state off { t {} } }\r\n</liva>'
+      '<template><p>日本語😀</p></template>\r\n<liva>\r\na { state on when true { t { x: 1 } } state off { t {} } }\r\n</liva>'
     const snapshot = compileSfc(source, 'Unicode.vue', true)
     expect(hasErrors(snapshot)).toBe(true)
     const diagnostic = snapshot.result.diagnostics.find((d) => d.code === 'semantic.completeness')!

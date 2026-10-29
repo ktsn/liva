@@ -4,16 +4,18 @@ import { compile } from '../packages/vite/wasm/liva_wasm.js'
 import type { Compilation } from '../packages/vite/src/compiler.ts'
 import { decodeBundle } from '../packages/runtime/src/definition.ts'
 
-const source = readFileSync(new URL('../fixtures/toggle.liv', import.meta.url), 'utf8')
-const expected = JSON.parse(
-  readFileSync(new URL('../fixtures/toggle.json', import.meta.url), 'utf8'),
-)
-const result = JSON.parse(compile(source, false))
-assert.deepEqual(result, expected)
-const bundle = decodeBundle(JSON.stringify(result))
-assert.equal(Object.isFrozen(bundle.definitions[0].states), true)
+for (const name of ['toggle', 'reactive-toggle', 'card']) {
+  const source = readFileSync(new URL(`../fixtures/${name}.liv`, import.meta.url), 'utf8')
+  const expected = JSON.parse(
+    readFileSync(new URL(`../fixtures/${name}.json`, import.meta.url), 'utf8'),
+  )
+  const result = JSON.parse(compile(source, false))
+  assert.deepEqual(result, expected)
+  const bundle = decodeBundle(JSON.stringify(result))
+  assert.equal(Object.isFrozen(bundle.definitions[0].states), true)
+  assert.equal('mappings' in bundle, false)
+}
 assert.throws(() => decodeBundle('{"schemaVersion":2,"definitions":[]}'), /Unsupported/)
-assert.equal('mappings' in bundle, false)
 
 const unicode = '// 😀\r\na { state on {} transition { timing: tween(duration: 1s) } }'
 const development: Compilation = JSON.parse(compile(unicode, true))

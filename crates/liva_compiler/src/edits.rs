@@ -234,8 +234,19 @@ fn replace_track(
     let mut declarations = Vec::new();
 
     if let Some(timing) = timing {
-        safe_value(timing)?;
-        declarations.push(format!("timing: {}", placeholder(timing)));
+        if timing.starts_with('@') {
+            let (name, value) = timing
+                .split_once(':')
+                .ok_or("Expected animation declaration")?;
+            if !["@tween", "@spring"].contains(&name) {
+                return Err("Expected tween or spring shorthand".into());
+            }
+            safe_value(value)?;
+            declarations.push(format!("{name}: {}", placeholder(value.trim())));
+        } else {
+            safe_value(timing)?;
+            declarations.push(format!("timing: {}", placeholder(timing)));
+        }
     }
 
     if let Some(frames) = frames {
@@ -249,12 +260,12 @@ fn replace_track(
             safe_value(&frame.value)?;
             let easing = if let Some(easing) = &frame.easing {
                 safe_value(easing)?;
-                format!("\n  easing: {}", placeholder(easing))
+                format!(" @ {}", placeholder(easing))
             } else {
                 String::new()
             };
             declarations.push(format!(
-                "{}% {{\n  value: {}{easing}\n}}",
+                "{}%: {}{easing}",
                 frame.offset * 100.0,
                 placeholder(&frame.value)
             ));
@@ -365,12 +376,10 @@ pub fn apply_edits(source: &str, edits: &[Edit]) -> Result<EditResult, String> {
                     return Err("Frames must belong to a property track".into());
                 }
                 let body = format!(
-                    "{}% {{\n  value: {}{}\n}}",
+                    "{}%: {}{}",
                     offset * 100.0,
                     value,
-                    easing
-                        .as_ref()
-                        .map_or(String::new(), |e| format!("\n  easing: {e}"))
+                    easing.as_ref().map_or(String::new(), |e| format!(" @ {e}"))
                 );
                 let result = insert(&current, mapping(&compiled, path, "block")?, &body)?;
                 let updated = compile(&result, true);

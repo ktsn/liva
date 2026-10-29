@@ -10,7 +10,7 @@ toggle {
     }
   }
 
-  state on {
+  state on when true {
     track {
       background-color: #34b27b
     }

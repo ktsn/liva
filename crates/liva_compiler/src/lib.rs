@@ -1,4 +1,5 @@
 pub mod edits;
+pub mod expression;
 pub mod ir;
 
 use ir::*;
@@ -28,6 +29,230 @@ struct Compiler {
 }
 
 impl Compiler {
+    fn sources(&mut self, node: &Ast) -> Vec<Source> {
+        let mut sources = vec![];
+        let mut seen = BTreeMap::new();
+
+        for source in node.children(Kind::Source) {
+            let text = semantic_text(&source.text());
+            let Some((name, call)) = text.strip_prefix("source").and_then(|v| v.split_once('='))
+            else {
+                self.error(
+                    "semantic.source",
+                    "Expected source name = sourceType(arguments)",
+                    &source,
+                );
+                continue;
+            };
+            let name = name.trim();
+            self.unique(&mut seen, name, &source);
+            if !expression::identifier(name) || matches!(name, "true" | "false") {
+                self.error("semantic.source", "Invalid source identifier", &source);
+            }
+            let expected = call.trim();
+            let parsed = parse(&format!("a {{ transition {{ timing: {expected} }} }}"));
+            let call = parsed
+                .root
+                .child(Kind::Block)
+                .and_then(|n| n.child(Kind::Block))
+                .and_then(|n| n.child(Kind::Declaration))
+                .and_then(|n| n.child(Kind::Value))
+                .and_then(|n| n.child(Kind::Call));
+            let Some(call) = call.filter(|call| {
+                parsed.diagnostics.is_empty() && semantic_text(&call.text()) == expected
+            }) else {
+                self.error("semantic.source", "Invalid source call", &source);
+                continue;
+            };
+            let args: Vec<_> = call.children(Kind::Argument).collect();
+            let value = args.first().and_then(Ast::value).unwrap_or_default();
+            let key = args.first().and_then(Ast::header).unwrap_or_default();
+            let kind = call.header().unwrap_or_default();
+            let result = match (kind.as_str(), key.as_str(), args.len()) {
+                ("external", "type", 1) if value == "Boolean" => Some(Source::External {
+                    name: name.into(),
+                    value_type: value,
+                }),
+                ("drag", "target", 1) if liva_syntax::is_name(&value) => Some(Source::Drag {
+                    name: name.into(),
+                    target: value,
+                }),
+                _ => None,
+            };
+            if let Some(result) = result {
+                sources.push(result);
+            } else {
+                self.error(
+                    "semantic.source",
+                    "Expected external(type: Boolean) or drag(target: name)",
+                    &source,
+                );
+            }
+        }
+
+        sources
+    }
+
+    fn css_template(
+        &mut self,
+        node: &Ast,
+        sources: &[Source],
+    ) -> Option<Vec<expression::TemplatePart>> {
+        let value = node.value().unwrap_or_default();
+        if !value.contains("${") {
+            return None;
+        }
+        match expression::template(&value).and_then(|parts| {
+            for part in &parts {
+                if let expression::TemplatePart::Expression(expr) = part {
+                    expression::check(expr, sources)?;
+                }
+            }
+            Ok(parts)
+        }) {
+            Ok(parts) => Some(parts),
+            Err(message) => {
+                self.error("semantic.expression", message, node);
+                None
+            }
+        }
+    }
+
+    fn animation_declarations(&mut self, node: &Ast, path: &str) -> Option<Timing> {
+        let mut family = String::new();
+        let mut args: BTreeMap<String, String> = BTreeMap::new();
+        let mut legacy = None;
+
+        for source in node.children(Kind::Source) {
+            self.error(
+                "semantic.structure",
+                "Sources belong directly to an animation definition",
+                &source,
+            );
+        }
+
+        for declaration in node.children(Kind::Declaration) {
+            let name = declaration.header().unwrap_or_default();
+            if name.ends_with('%') {
+                if !path.contains("/property/") {
+                    self.error(
+                        "semantic.structure",
+                        "Keyframes belong to property tracks",
+                        &declaration,
+                    );
+                }
+                continue;
+            }
+            if name == "timing" {
+                family.clear();
+                args.clear();
+                self.mapping(
+                    &format!("{path}/timing"),
+                    &declaration.child(Kind::Value).unwrap(),
+                    "value",
+                );
+                legacy = self.timing(&declaration, &format!("{path}/timing"));
+                continue;
+            }
+            let value = declaration.value().unwrap_or_default();
+            let (next_family, field) = if name == "@tween" {
+                ("tween", None)
+            } else if name == "@spring" {
+                ("spring", None)
+            } else if let Some(field) = name.strip_prefix("@tween-") {
+                ("tween", Some(field))
+            } else if let Some(field) = name.strip_prefix("@spring-") {
+                ("spring", Some(field))
+            } else {
+                self.error(
+                    "semantic.declaration",
+                    format!("Unknown animation declaration: {name}"),
+                    &declaration,
+                );
+                continue;
+            };
+
+            if family != next_family || field.is_none() {
+                args.clear();
+            }
+            family = next_family.into();
+            legacy = None;
+
+            if let Some(field) = field {
+                let allowed = if family == "tween" {
+                    &["duration", "easing"][..]
+                } else {
+                    &["duration", "bounce", "stiffness", "damping", "mass"][..]
+                };
+                if !allowed.contains(&field) {
+                    self.error(
+                        "semantic.declaration",
+                        format!("Unknown animation declaration: {name}"),
+                        &declaration,
+                    );
+                    continue;
+                }
+                args.insert(field.into(), value);
+                self.mapping(
+                    &format!("{path}/timing/{field}"),
+                    &declaration.child(Kind::Value).unwrap(),
+                    "value",
+                );
+            } else if family == "tween" {
+                let split = value.find(char::is_whitespace).unwrap_or(value.len());
+                args.insert("duration".into(), value[..split].into());
+                args.insert(
+                    "easing".into(),
+                    if value[split..].trim().is_empty() {
+                        "linear".into()
+                    } else {
+                        value[split..].trim().into()
+                    },
+                );
+            } else {
+                let values: Vec<_> = value.split_whitespace().collect();
+                let duration = values.first().is_some_and(|v| v.ends_with('s'));
+                let fields = if duration {
+                    &["duration", "bounce"][..]
+                } else {
+                    &["stiffness", "damping", "mass"][..]
+                };
+                if values.is_empty() || values.len() > fields.len() {
+                    self.error("semantic.timing", "Invalid spring shorthand", &declaration);
+                }
+                for (field, value) in fields.iter().zip(values) {
+                    args.insert((*field).into(), value.into());
+                }
+            }
+        }
+
+        if family.is_empty() {
+            return legacy;
+        }
+        let text = format!(
+            "a {{ transition {{ timing: {family}({}) }} }}",
+            args.iter()
+                .map(|(k, v)| format!("{k}: {v}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let parsed = parse(&text);
+        let declaration = parsed
+            .root
+            .child(Kind::Block)?
+            .child(Kind::Block)?
+            .child(Kind::Declaration)?;
+        let mut validator = Compiler {
+            diagnostics: parsed.diagnostics,
+            mappings: BTreeMap::new(),
+        };
+        let timing = validator.timing(&declaration, "");
+        for diagnostic in validator.diagnostics {
+            self.error(&diagnostic.code, diagnostic.message, node);
+        }
+        timing
+    }
+
     fn error(&mut self, code: &str, message: impl Into<String>, node: &Ast) {
         self.diagnostics
             .push(Diagnostic::error(code, message, node.range()));
@@ -65,6 +290,16 @@ impl Compiler {
     ) -> BTreeMap<String, Ast> {
         let mut seen = BTreeMap::new();
         let mut declarations = BTreeMap::new();
+
+        if path.is_empty() || path.contains('/') {
+            for source in node.children(Kind::Source) {
+                self.error(
+                    "semantic.structure",
+                    "Sources belong directly to an animation definition",
+                    &source,
+                );
+            }
+        }
 
         for declaration in node.children(Kind::Declaration) {
             let name = declaration.header().unwrap_or_default();
@@ -232,10 +467,7 @@ impl Compiler {
 
     fn transition(&mut self, node: &Ast, path: &str) -> Transition {
         self.mapping(path, node, "block");
-        let declarations = self.declarations(node, Some(&["timing"]), path);
-        let timing = declarations
-            .get("timing")
-            .and_then(|n| self.timing(n, &format!("{path}/timing")));
+        let timing = self.animation_declarations(node, path);
         let mut targets = vec![];
         let mut seen = BTreeMap::new();
 
@@ -253,10 +485,7 @@ impl Compiler {
                 self.unique(&mut property_names, &name, &property);
                 let property_path = format!("{target_path}/property/{name}");
                 self.mapping(&property_path, &property, "block");
-                let declarations = self.declarations(&property, Some(&["timing"]), &property_path);
-                let timing = declarations
-                    .get("timing")
-                    .and_then(|n| self.timing(n, &format!("{property_path}/timing")));
+                let timing = self.animation_declarations(&property, &property_path);
                 let mut frames = vec![];
                 let mut offsets = BTreeMap::new();
 
@@ -295,6 +524,78 @@ impl Compiler {
                     });
                 }
 
+                for frame in property
+                    .children(Kind::Declaration)
+                    .filter(|n| n.header().is_some_and(|h| h.ends_with('%')))
+                {
+                    let raw = frame.header().unwrap();
+                    let offset =
+                        raw.trim_end_matches('%').parse::<f64>().unwrap_or(f64::NAN) / 100.0;
+                    if !offset.is_finite() || !(0.0..=1.0).contains(&offset) {
+                        self.error(
+                            "semantic.offset",
+                            "Frame offset must be between 0% and 100%",
+                            &frame,
+                        );
+                        continue;
+                    }
+                    self.unique(&mut offsets, &offset.to_string(), &frame);
+                    let frame_path = format!("{property_path}/frame/{offset}");
+                    self.mapping(&frame_path, &frame, "block");
+                    self.mapping(
+                        &format!("{frame_path}/offset"),
+                        &frame.child(Kind::Header).unwrap(),
+                        "value",
+                    );
+                    let raw = frame.value().unwrap_or_default();
+                    let (value, easing) = split_frame(&raw);
+                    if value.is_empty() || easing.is_some_and(str::is_empty) {
+                        self.error(
+                            "semantic.frame",
+                            "Frame requires a value and nonempty easing",
+                            &frame,
+                        );
+                    }
+                    let value_node = frame.child(Kind::Value).unwrap();
+                    let text = value_node.text();
+                    let leading = text.len() - text.trim_start().len();
+                    let base = value_node.range().start + leading;
+                    self.mappings.insert(
+                        format!("{frame_path}/value"),
+                        Mapping {
+                            range: Range {
+                                start: base,
+                                end: base + value.len(),
+                            },
+                            kind: "value".into(),
+                        },
+                    );
+                    if let Some(easing) = easing {
+                        let end = value_node.range().end - (text.len() - text.trim_end().len());
+                        self.mappings.insert(
+                            format!("{frame_path}/easing"),
+                            Mapping {
+                                range: Range {
+                                    start: end - easing.len(),
+                                    end,
+                                },
+                                kind: "value".into(),
+                            },
+                        );
+                    }
+                    if liva_syntax::contains_comments(&text) {
+                        self.mapping(&format!("{frame_path}/value"), &value_node, "value");
+                        if easing.is_some() {
+                            self.mapping(&format!("{frame_path}/easing"), &value_node, "value");
+                        }
+                    }
+                    frames.push(Frame {
+                        offset,
+                        value: value.into(),
+                        easing: easing.map(str::to_string),
+                    });
+                }
+
                 frames.sort_by(|a, b| a.offset.total_cmp(&b.offset));
                 properties.push(PropertyTransition {
                     name,
@@ -319,6 +620,7 @@ impl Compiler {
         self.declarations(node, Some(&[]), &name);
         let mut definition = Definition {
             name: name.clone(),
+            sources: self.sources(node),
             states: vec![],
             general_transition: None,
             directional_transitions: vec![],
@@ -331,7 +633,7 @@ impl Compiler {
             let words: Vec<_> = header.split_whitespace().collect();
 
             match words.as_slice() {
-                ["state", state_name] => {
+                ["state", state_name, ..] => {
                     self.unique(&mut states, state_name, &child);
                     let state_path = format!("{name}/state/{state_name}");
                     self.mapping(&state_path, &child, "block");
@@ -356,6 +658,7 @@ impl Compiler {
                             .children(Kind::Declaration)
                             .map(|p| Property {
                                 name: p.header().unwrap_or_default(),
+                                template: self.css_template(&p, &definition.sources),
                                 value: p.value().unwrap_or_default(),
                             })
                             .collect();
@@ -365,7 +668,28 @@ impl Compiler {
                         });
                     }
 
+                    let when = header
+                        .strip_prefix("state")
+                        .and_then(|text| text.trim_start().strip_prefix(state_name))
+                        .and_then(|text| text.trim_start().strip_prefix("when"))
+                        .and_then(|text| {
+                            match expression::parse(text).and_then(|expr| {
+                                if expression::check(&expr, &definition.sources)?
+                                    != expression::Type::Boolean
+                                {
+                                    return Err("State condition must be Boolean".into());
+                                }
+                                Ok(expr)
+                            }) {
+                                Ok(expr) => Some(expr),
+                                Err(message) => {
+                                    self.error("semantic.expression", message, &child);
+                                    None
+                                }
+                            }
+                        });
                     definition.states.push(State {
+                        when,
                         name: (*state_name).into(),
                         targets,
                     });
@@ -392,6 +716,56 @@ impl Compiler {
             }
         }
 
+        if definition
+            .states
+            .iter()
+            .filter(|s| s.when.is_none())
+            .count()
+            != 1
+        {
+            self.error(
+                "semantic.fallback",
+                "Definition requires exactly one fallback state",
+                node,
+            );
+        }
+        for source in &definition.sources {
+            if let Source::Drag { target, .. } = source
+                && !definition
+                    .states
+                    .iter()
+                    .any(|s| s.targets.iter().any(|t| &t.name == target))
+            {
+                self.error(
+                    "semantic.source-target",
+                    format!("Unknown drag target: {target}"),
+                    node,
+                );
+            }
+        }
+        for transition in definition.general_transition.iter().chain(
+            definition
+                .directional_transitions
+                .iter()
+                .map(|t| &t.transition),
+        ) {
+            for target in &transition.targets {
+                for property in &target.properties {
+                    if property
+                        .keyframes
+                        .iter()
+                        .flatten()
+                        .any(|frame| frame.value.contains("${"))
+                    {
+                        self.error(
+                            "semantic.frame-template",
+                            "Runtime interpolation is supported only in state CSS values",
+                            node,
+                        );
+                    }
+                }
+            }
+        }
         self.validate(&definition, node);
         definition
     }
@@ -565,4 +939,36 @@ pub fn compile(source: &str, development: bool) -> Compilation {
         diagnostics: compiler.diagnostics,
         mappings: development.then_some(compiler.mappings),
     }
+}
+
+fn split_frame(text: &str) -> (&str, Option<&str>) {
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut escaped = false;
+
+    for (i, c) in text.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if c == '\\' {
+            escaped = true;
+            continue;
+        }
+        if let Some(q) = quote {
+            if c == q {
+                quote = None;
+            }
+            continue;
+        }
+        match c {
+            '\'' | '"' => quote = Some(c),
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            '@' if depth == 0 => return (text[..i].trim(), Some(text[i + 1..].trim())),
+            _ => {}
+        }
+    }
+
+    (text.trim(), None)
 }

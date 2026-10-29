@@ -144,7 +144,7 @@ fn frame_offsets_move_by_semantic_identity_and_reject_collisions() {
 
 #[test]
 fn new_comments_cannot_consume_neighbors() {
-    let source = "a { state off { t { x: 0 } } state on { t { x: 1 } } transition { timing: tween(duration: 1ms)\nt { x { 50% { value: 1; easing: ease-in\n} } } } }";
+    let source = "a { state off { t { x: 0 } } state on when true { t { x: 1 } } transition { timing: tween(duration: 1ms)\nt { x { 50% { value: 1; easing: ease-in\n} } } } }";
     assert!(
         apply_edits(
             source,
@@ -166,7 +166,7 @@ fn new_comments_cannot_consume_neighbors() {
 
 #[test]
 fn compact_insertions_preserve_crlf() {
-    let source = "// header\r\na { state off { t { x: 0 } } state on { t { x: 1 } } transition { timing: tween(duration: 1ms)\r\nt { x {} } } }\r\n";
+    let source = "// header\r\na { state off { t { x: 0 } } state on when true { t { x: 1 } } transition { timing: tween(duration: 1ms)\r\nt { x {} } } }\r\n";
     let result = apply_edits(
         source,
         &[
@@ -191,7 +191,7 @@ fn compact_insertions_preserve_crlf() {
         result.source.matches('\n').count(),
         result.source.matches("\r\n").count()
     );
-    assert!(result.source.starts_with("// header\r\na { state off { t { x: 0 } } state on { t { x: 1 } } transition { timing: tween(duration: 1ms)\r\nt { x {"));
+    assert!(result.source.starts_with("// header\r\na { state off { t { x: 0 } } state on when true { t { x: 1 } } transition { timing: tween(duration: 1ms)\r\nt { x {"));
 }
 
 #[test]
@@ -225,7 +225,7 @@ fn track_edits_copy_frames_and_restore_inheritance_independently() {
     .unwrap();
 
     assert!(copied.source.contains("transition off -> on"));
-    assert!(copied.source.contains("value: 1.4"));
+    assert!(copied.source.contains("40%: 1.4"));
     assert!(copied.source.contains("value: 1.3 1"));
 
     let restored = apply_edits(
