@@ -27,11 +27,9 @@ const propertyAt = (transition: Transition | undefined, target: string, property
     ?.properties.find((item) => item.name === property)
 
 export function timingText(timing: Timing): string {
-  if (timing.kind === 'tween')
-    return `tween(duration: ${timing.durationMs}ms, easing: ${timing.easing})`
-  if (timing.kind === 'spring-duration')
-    return `spring(duration: ${timing.durationMs}ms, bounce: ${timing.bounce})`
-  return `spring(stiffness: ${timing.stiffness}, damping: ${timing.damping}, mass: ${timing.mass})`
+  if (timing.kind === 'tween') return `@tween: ${timing.durationMs}ms ${timing.easing}`
+  if (timing.kind === 'spring-duration') return `@spring: ${timing.durationMs}ms ${timing.bounce}`
+  return `@spring: ${timing.stiffness} ${timing.damping} ${timing.mass}`
 }
 
 export function transitionAt(

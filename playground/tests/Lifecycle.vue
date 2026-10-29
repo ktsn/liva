@@ -25,7 +25,7 @@ span {
 <liva>
 a {
   state off { track { opacity: 0.5 } thumb { translate: 0px } }
-  state on { track { opacity: 1 } thumb { translate: 20px } }
+  state on when true { track { opacity: 1 } thumb { translate: 20px } }
   transition { timing: tween(duration: 200ms) }
 }
 </liva>

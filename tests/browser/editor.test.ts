@@ -160,9 +160,9 @@ test('timeline saves timing, new frames and endpoint state values with shared HM
 
     const saved = await readFile(file, 'utf8')
     expect(saved).toContain('transition off -> on')
-    expect(saved).toContain('duration: 200ms')
+    expect(saved).toContain('@tween: 200ms')
     expect(saved).toContain('50%')
-    expect(saved).toContain('value: purple')
+    expect(saved).toContain('%: purple')
     expect(saved.slice(0, saved.indexOf('<liva>'))).toBe(
       original.slice(0, original.indexOf('<liva>')),
     )

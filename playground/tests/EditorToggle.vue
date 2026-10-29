@@ -7,7 +7,7 @@ const active = ref(false)
   <button
     :aria-label="label"
     :aria-pressed="active"
-    v-liva:motion="active ? 'on' : 'off'"
+    v-liva:motion="{ checked: active }"
     v-liva-target:box
     @click="active = !active"
   >
@@ -16,8 +16,9 @@ const active = ref(false)
 </template>
 <liva>
 motion {
+  source checked = external(type: Boolean)
   state off { box { background-color: red } }
-  state on { box { background-color: blue } }
-  transition { timing: tween(duration: 50ms) }
+  state on when checked { box { background-color: blue } }
+  transition { @tween: 50ms }
 }
 </liva>

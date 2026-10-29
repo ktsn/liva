@@ -10,7 +10,7 @@ const active = ref(false)
 <liva>
 hmr {
   state off { box { background-color: red } }
-  state on { box { background-color: blue } }
+  state on when true { box { background-color: blue } }
   transition { timing: tween(duration: 50ms) }
 }
 </liva>

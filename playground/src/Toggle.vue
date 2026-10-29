@@ -11,7 +11,7 @@ const checked = ref(false)
       <p>{{ checked ? 'On · keeping you connected' : 'Off · a little more quiet' }}</p>
     </div>
     <button
-      v-liva:toggle="checked ? 'on' : 'off'"
+      v-liva:toggle="{ checked }"
       v-liva-target:track
       role="switch"
       :aria-label="label"
@@ -26,6 +26,7 @@ const checked = ref(false)
 
 <liva>
 toggle {
+  source checked = external(type: Boolean)
   state off {
     track {
       background-color: #888
@@ -37,7 +38,7 @@ toggle {
     }
   }
 
-  state on {
+  state on when checked {
     track {
       background-color: #34b27b
     }
@@ -49,38 +50,23 @@ toggle {
   }
 
   transition {
-    timing: tween(
-      duration: 350ms,
-      easing: ease-out
-    )
+    @tween: 350ms ease-out
 
     track {
       background-color {
-        timing: tween(
-          duration: 200ms,
-          easing: ease-in-out
-        )
+        @tween-duration: 200ms
+        @tween-easing: ease-in-out
       }
     }
 
     thumb {
       translate {
-        timing: spring(
-          stiffness: 300,
-          damping: 20
-        )
+        @spring: 300 20 1
       }
 
       scale {
-        40% {
-          value: 1.3 1
-          easing: ease-in
-        }
-
-        70% {
-          value: 0.95 1
-          easing: ease-out
-        }
+        40%: 1.3 1 @ ease-in
+        70%: 0.95 1 @ ease-out
       }
     }
   }
@@ -88,10 +74,7 @@ toggle {
   transition on -> off {
     thumb {
       translate {
-        timing: spring(
-          duration: 350ms,
-          bounce: 0.25
-        )
+        @spring: 350ms 0.2
       }
     }
   }
