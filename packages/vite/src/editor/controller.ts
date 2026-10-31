@@ -200,6 +200,12 @@ export class EditorController {
     }
   }
 
+  reportSourceDiagnostics(sourceId: string, message: string) {
+    if (this.selected?.sourceId !== sourceId) return
+
+    this.report(message)
+  }
+
   sourceChanged(sourceId: string) {
     if (this.selected?.sourceId !== sourceId) return
     this.sequence++

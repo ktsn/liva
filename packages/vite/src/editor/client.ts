@@ -9,7 +9,7 @@ export function createDevPlugin(token: string) {
   mountEditor(controller)
   const unsubscribe = subscribeToEditorEvents({
     sourceChanged: (sourceId) => controller.sourceChanged(sourceId),
-    diagnostics: (message) => controller.report(message),
+    diagnostics: (sourceId, message) => controller.reportSourceDiagnostics(sourceId, message),
   })
   import.meta.hot?.dispose(unsubscribe)
   Object.assign(window, { __LIVA_EDITOR__: controller })

@@ -60,6 +60,20 @@ async function setup(send: (request: EditorRequest) => Promise<EditorReply>) {
 }
 
 describe('editor revision lifecycle', () => {
+  it('only displays source diagnostics for the selected source', async () => {
+    const { controller } = await setup(async () => reply)
+    await controller.preview('on')
+    const message = controller.message
+
+    controller.reportSourceDiagnostics('other-source', 'Invalid duration')
+
+    expect(controller.message).toBe(message)
+
+    controller.reportSourceDiagnostics('source', 'Invalid duration')
+
+    expect(controller.message).toBe('Invalid duration')
+  })
+
   it('ignores out-of-order preview replies, external invalidation, and unmounted instances', async () => {
     const requests: {
       request: EditorRequest

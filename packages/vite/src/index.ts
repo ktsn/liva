@@ -106,19 +106,23 @@ export default function liva(): Plugin {
       const source = await context.read()
       if (!hasLivaBlock(source, context.file)) return undefined
 
+      let sourceId: string | undefined
+
       try {
-        if (editor)
+        sourceId = await editor?.register(context.file)
+
+        if (sourceId)
           server?.ws.send({
             type: 'custom',
             event: 'liva:source-changed',
-            data: { sourceId: await editor.register(context.file) },
+            data: { sourceId },
           })
         const snapshot = compileSfc(source, context.file, true)
         if (hasErrors(snapshot)) {
           server?.ws.send({
             type: 'custom',
             event: 'liva:diagnostics',
-            data: snapshot.result.diagnostics,
+            data: { sourceId, diagnostics: snapshot.result.diagnostics },
           })
           return []
         }
@@ -127,7 +131,7 @@ export default function liva(): Plugin {
         server?.ws.send({
           type: 'custom',
           event: 'liva:diagnostics',
-          data: [{ message: String(error) }],
+          data: { sourceId, diagnostics: [{ message: String(error) }] },
         })
         return []
       }

@@ -25,12 +25,14 @@ export function createEditorTransport(token: string) {
 
 export function subscribeToEditorEvents(handlers: {
   sourceChanged: (sourceId: string) => void
-  diagnostics: (message: string) => void
+  diagnostics: (sourceId: string, message: string) => void
 }) {
   const hot = import.meta.hot
   const sourceChanged = ({ sourceId }: { sourceId: string }) => handlers.sourceChanged(sourceId)
-  const diagnostics = (items: { message: string }[]) =>
-    handlers.diagnostics(items.map((item) => item.message).join('\n'))
+  const diagnostics = (event: { sourceId?: string; diagnostics: { message: string }[] }) => {
+    if (event.sourceId)
+      handlers.diagnostics(event.sourceId, event.diagnostics.map((item) => item.message).join('\n'))
+  }
 
   hot?.on('liva:source-changed', sourceChanged)
   hot?.on('liva:diagnostics', diagnostics)
