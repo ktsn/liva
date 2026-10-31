@@ -1,3 +1,4 @@
+pub mod analysis;
 pub mod builtins;
 pub mod edits;
 pub mod expression;

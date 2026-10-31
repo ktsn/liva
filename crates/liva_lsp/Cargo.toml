@@ -1,0 +1,16 @@
+[package]
+name = "liva_lsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "liva-lsp"
+path = "src/main.rs"
+
+[dependencies]
+liva_compiler = { path = "../liva_compiler" }
+liva_syntax = { path = "../liva_syntax" }
+lsp-server = "0.10"
+serde.workspace = true
+serde_json.workspace = true
