@@ -15,8 +15,7 @@ const active = ref(false)
   </button>
 </template>
 <liva>
-motion {
-  source checked = external(type: Boolean)
+motion motion(checked: boolean) {
   state off { box { background-color: red } }
   state on when checked { box { background-color: blue } }
   transition { @tween: 50ms }

@@ -24,8 +24,7 @@ const active = ref(false)
 </template>
 
 <liva>
-beacon {
-  source checked = external(type: Boolean)
+motion beacon(checked: boolean) {
   state off { light { opacity: 0.5; scale: 1 } }
   state on when checked { light { opacity: 1; scale: 1.04 } }
   transition { @tween: 450ms ease-in-out }

@@ -11,7 +11,7 @@
 </template>
 
 <liva>
-card {
+motion card {
   source movement = drag(target: body)
 
   state idle {

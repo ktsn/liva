@@ -119,7 +119,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
           }
 
           if (typeof binding.value !== 'string') {
-            record.runtime.updateSources(binding.value ?? {})
+            record.runtime.updateParameters(binding.value ?? {})
           } else if (binding.value !== binding.oldValue) {
             if (!record.definition.states.some((state) => state.name === binding.value)) {
               record.runtime.setState(binding.value)

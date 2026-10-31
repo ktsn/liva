@@ -1,5 +1,6 @@
 import type {
   Definition,
+  MotionParameter,
   Expression,
   Source,
   Frame,
@@ -125,8 +126,8 @@ function isSource(value: unknown): value is Source {
   return (
     isRecord(value) &&
     typeof value.name === 'string' &&
-    ((value.kind === 'external' && value.type === 'Boolean') ||
-      (value.kind === 'drag' && typeof value.target === 'string'))
+    value.kind === 'drag' &&
+    typeof value.target === 'string'
   )
 }
 
@@ -160,6 +161,16 @@ export function isDefinition(value: unknown): value is Definition {
   return (
     isRecord(value) &&
     typeof value.name === 'string' &&
+    (value.parameters === undefined ||
+      isArrayOf(
+        value.parameters,
+        (parameter): parameter is MotionParameter =>
+          isRecord(parameter) &&
+          typeof parameter.name === 'string' &&
+          (parameter.type === 'number' ||
+            parameter.type === 'boolean' ||
+            parameter.type === 'string'),
+      )) &&
     (value.sources === undefined || isArrayOf(value.sources, isSource)) &&
     isArrayOf(value.states, isState) &&
     (value.generalTransition === undefined || isTransition(value.generalTransition)) &&

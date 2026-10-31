@@ -29,9 +29,12 @@ export type Expression =
       readonly right: Expression
     }
 
-export type Source =
-  | { readonly kind: 'external'; readonly name: string; readonly type: 'Boolean' }
-  | { readonly kind: 'drag'; readonly name: string; readonly target: string }
+export interface MotionParameter {
+  readonly name: string
+  readonly type: 'number' | 'boolean' | 'string'
+}
+
+export type Source = { readonly kind: 'drag'; readonly name: string; readonly target: string }
 
 export interface Property {
   readonly template?: readonly (string | Expression)[]
@@ -62,6 +65,7 @@ export interface Transition {
 }
 
 export interface Definition {
+  readonly parameters?: readonly MotionParameter[]
   readonly sources?: readonly Source[]
   readonly name: string
   readonly states: readonly State[]

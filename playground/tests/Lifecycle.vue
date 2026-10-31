@@ -23,7 +23,7 @@ span {
 }
 </style>
 <liva>
-a {
+motion a {
   state off { track { opacity: 0.5 } thumb { translate: 0px } }
   state on when true { track { opacity: 1 } thumb { translate: 20px } }
   transition { timing: tween(duration: 200ms) }

@@ -138,7 +138,7 @@ test('pointer cancellation and disposal release capture and remove listeners', a
   await page.mouse.up()
 })
 
-test('external updates select states and repeated values retain running effects', async ({
+test('parameter updates select states and repeated values retain running effects', async ({
   page,
 }) => {
   await page.goto('/tests/browser/')
@@ -156,9 +156,9 @@ test('external updates select states and repeated values retain running effects'
       ['track', track],
       ['thumb', thumb],
     ])
-    instance.updateSources({ checked: true })
+    instance.updateParameters({ checked: true })
     const animations = [...instance.animations]
-    instance.updateSources({ checked: true })
+    instance.updateParameters({ checked: true })
     const snapshot = {
       state: instance.state,
       same: animations.every((animation, index) => instance.animations[index] === animation),
@@ -299,4 +299,151 @@ test('dynamic errors retain the last valid value and inactive templates do not b
   expect(
     await page.evaluate(() => window.errors.every((error) => error.code === 'runtime.expression')),
   ).toBe(true)
+})
+
+test('typed parameter instances update CSS independently and retain values after invalid updates', async ({
+  page,
+}) => {
+  await page.goto('/tests/browser/')
+  await page.waitForFunction(() => !!window.liva)
+  const result = await page.evaluate(() => {
+    const definition: import('../../packages/runtime/src/definition.ts').Definition = {
+      name: 'progress',
+      parameters: [
+        { name: 'progress', type: 'number' },
+        { name: 'label', type: 'string' },
+        { name: 'enabled', type: 'boolean' },
+      ],
+      states: [
+        {
+          name: 'idle',
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'translate',
+                  value: '${progress}px 0',
+                  template: [{ kind: 'reference', path: ['progress'] }, 'px 0'],
+                },
+                {
+                  name: '--label',
+                  value: '${label}',
+                  template: [{ kind: 'reference', path: ['label'] }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      directionalTransitions: [],
+    }
+    const elements = [document.createElement('div'), document.createElement('div')]
+    const errors: string[] = []
+    const instances = elements.map((element, index) => {
+      document.body.append(element)
+      const instance = new window.liva.LivaInstance(
+        definition,
+        { progress: index + 1, label: 'initial', enabled: false },
+        (error) => errors.push(error.code),
+      )
+      instance.bind([['body', element]])
+      return instance
+    })
+
+    instances[0].updateParameters({ progress: 25, label: 'updated', enabled: true })
+    instances[0].updateParameters({ progress: Infinity, label: 'invalid', enabled: true })
+    instances[0].updateParameters({ unknown: true })
+    instances[0].replaceDefinition(definition)
+    const snapshot = elements.map((element) => ({
+      translate: element.style.translate,
+      label: element.style.getPropertyValue('--label'),
+    }))
+
+    for (const instance of instances) instance.dispose()
+    for (const element of elements) element.remove()
+    return { snapshot, errors }
+  })
+
+  expect(result).toEqual({
+    snapshot: [
+      { translate: '25px', label: 'updated' },
+      { translate: '2px', label: 'initial' },
+    ],
+    errors: ['runtime.source', 'runtime.source'],
+  })
+})
+
+test('missing parameters reject creation, updates and incompatible replacements without disturbing effects', async ({
+  page,
+}) => {
+  await page.goto('/tests/browser/')
+  await page.waitForFunction(() => !!window.liva)
+  const result = await page.evaluate((fixture) => {
+    const definition = window.liva.decodeBundle(JSON.stringify(fixture)).definitions[0]
+    const failures: string[] = []
+
+    for (const input of [undefined, {}, 'off']) {
+      try {
+        const unexpected = new window.liva.LivaInstance(definition, input)
+        unexpected.dispose()
+      } catch (error) {
+        failures.push(String(error))
+      }
+    }
+
+    const track = document.createElement('div')
+    const thumb = document.createElement('div')
+    track.append(thumb)
+    document.body.append(track)
+    const diagnostics: string[] = []
+    const instance = new window.liva.LivaInstance(definition, { checked: false }, (error) =>
+      diagnostics.push(error.message),
+    )
+    instance.bind([
+      ['track', track],
+      ['thumb', thumb],
+    ])
+    instance.updateParameters({ checked: true })
+    const animations = [...instance.animations]
+
+    instance.updateParameters({})
+
+    for (const parameters of [
+      [...definition.parameters!, { name: 'added', type: 'number' as const }],
+      [{ name: 'checked', type: 'number' as const }],
+    ]) {
+      try {
+        instance.replaceDefinition({ ...definition, parameters })
+      } catch (error) {
+        failures.push(String(error))
+      }
+    }
+
+    const retained = {
+      definition: instance.definition === definition,
+      state: instance.state,
+      selected: instance.sourceState,
+      effects:
+        animations.length > 0 &&
+        animations.every((animation, index) => instance.animations[index] === animation),
+    }
+    instance.updateParameters({ checked: false })
+    const recovered = instance.state
+
+    instance.dispose()
+    track.remove()
+    return { failures, diagnostics, retained, recovered }
+  }, toggleFixture)
+
+  expect(result.failures).toEqual([
+    'Error: Missing motion parameter: checked',
+    'Error: Missing motion parameter: checked',
+    'Error: Missing motion parameter: checked',
+    'Error: Missing motion parameter: added',
+    'Error: Motion parameter checked requires number',
+  ])
+  expect(result.diagnostics).toEqual(['Error: Missing motion parameter: checked'])
+  expect(result.retained).toEqual({ definition: true, state: 'on', selected: 'on', effects: true })
+  expect(result.recovered).toBe('off')
 })

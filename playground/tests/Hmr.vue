@@ -8,7 +8,7 @@ const active = ref(false)
   </button>
 </template>
 <liva>
-hmr {
+motion hmr {
   state off { box { background-color: red } }
   state on when true { box { background-color: blue } }
   transition { timing: tween(duration: 50ms) }

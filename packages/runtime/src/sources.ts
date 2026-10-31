@@ -1,28 +1,42 @@
-import type { Source } from './definition.ts'
+import type { MotionParameter, Source } from './definition.ts'
 import type { DragValue, SourceValues } from './expression.ts'
 
-export function initialSources(sources: readonly Source[]): Record<string, boolean | DragValue> {
+export function initialSources(sources: readonly Source[]): Record<string, DragValue> {
   return Object.fromEntries(
-    sources.map((source) => [
-      source.name,
-      source.kind === 'external' ? false : { active: false, offset: { x: 0, y: 0 } },
-    ]),
+    sources.map((source) => [source.name, { active: false, offset: { x: 0, y: 0 } }]),
   )
 }
 
-export function externalValues(
-  sources: readonly Source[],
+export function parameterValues(
+  parameters: readonly MotionParameter[],
   values: SourceValues,
   inputs: Readonly<Record<string, unknown>>,
-): Record<string, boolean | DragValue> {
+): SourceValues {
   const next = { ...values }
 
-  for (const source of sources) {
-    if (source.kind !== 'external') continue
-    const value = Object.hasOwn(inputs, source.name) ? inputs[source.name] : false
-    if (typeof value !== 'boolean')
-      throw new Error(`External source ${source.name} requires Boolean`)
-    next[source.name] = value
+  for (const name of Object.keys(inputs)) {
+    if (!parameters.some((parameter) => parameter.name === name)) {
+      throw new Error(`Unknown motion parameter: ${name}`)
+    }
+  }
+
+  for (const parameter of parameters) {
+    if (!Object.hasOwn(inputs, parameter.name)) {
+      throw new Error(`Missing motion parameter: ${parameter.name}`)
+    }
+
+    const value = inputs[parameter.name]
+
+    if (typeof value !== parameter.type || (typeof value === 'number' && !Number.isFinite(value))) {
+      throw new Error(`Motion parameter ${parameter.name} requires ${parameter.type}`)
+    }
+
+    Object.defineProperty(next, parameter.name, {
+      value,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    })
   }
 
   return next

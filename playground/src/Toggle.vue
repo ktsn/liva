@@ -25,8 +25,7 @@ const checked = ref(false)
 </template>
 
 <liva>
-toggle {
-  source checked = external(type: Boolean)
+motion toggle(checked: boolean) {
   state off {
     track {
       background-color: #888

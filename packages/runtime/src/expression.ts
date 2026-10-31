@@ -1,6 +1,6 @@
 import type { Definition, Expression, Property } from './definition.ts'
 
-export type SourceValues = Readonly<Record<string, boolean | DragValue>>
+export type SourceValues = Readonly<Record<string, number | boolean | string | DragValue>>
 export interface DragValue {
   readonly active: boolean
   readonly offset: { readonly x: number; readonly y: number }
@@ -17,7 +17,11 @@ export function evaluate(expression: Expression, values: SourceValues): Scalar {
     case 'reference': {
       const [source, member, axis] = expression.path
       const value = values[source]
-      if (typeof value === 'boolean' && !member) return value
+      if (
+        expression.path.length === 1 &&
+        (typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string')
+      )
+        return value
       if (typeof value === 'object') {
         if (member === 'active' && !axis) return value.active
         if (member === 'offset' && (axis === 'x' || axis === 'y')) return value.offset[axis]

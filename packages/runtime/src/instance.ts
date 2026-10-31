@@ -1,4 +1,4 @@
-import { externalValues, initialSources, bindDrag } from './sources.ts'
+import { parameterValues, initialSources, bindDrag } from './sources.ts'
 import { renderDefinition, renderValue, selectState, type SourceValues } from './expression.ts'
 import type { Definition } from './definition.ts'
 import { getState, resolve, type ResolvedTrack } from './resolve.ts'
@@ -70,8 +70,8 @@ export class LivaInstance {
     state: string | Readonly<Record<string, unknown>> = {},
     report: (diagnostic: RuntimeDiagnostic) => void = console.warn,
   ) {
-    this.values = externalValues(
-      definition.sources ?? [],
+    this.values = parameterValues(
+      definition.parameters ?? [],
       initialSources(definition.sources ?? []),
       typeof state === 'string' ? {} : state,
     )
@@ -242,7 +242,7 @@ export class LivaInstance {
     this.duplicateBindings = duplicate
     this.suspended = duplicate || missing
 
-    if (this.definition.sources?.length) {
+    if (this.definition.sources?.length || this.definition.parameters?.length) {
       this.state = selectState(this.definition, this.values)
       this.onSourceState?.(this.state)
     }
@@ -261,10 +261,32 @@ export class LivaInstance {
   replaceDefinition(definition: Definition, state = this.state) {
     if (this.disposed) return
     getState(definition, state)
+    const inputs = Object.fromEntries(
+      (definition.parameters ?? [])
+        .filter((parameter) =>
+          this.definition.parameters?.some((previous) => previous.name === parameter.name),
+        )
+        .map((parameter) => [parameter.name, this.values[parameter.name]]),
+    )
+    const nextValues = parameterValues(
+      definition.parameters ?? [],
+      initialSources(definition.sources ?? []),
+      inputs,
+    )
+
     this.clearSources()
     this.cancel()
     this.restore()
-    this.values = { ...initialSources(definition.sources ?? []), ...this.values }
+
+    for (const source of definition.sources ?? []) {
+      const previous = this.definition.sources?.find((entry) => entry.name === source.name)
+
+      if (previous?.target === source.target) {
+        Object.assign(nextValues, { [source.name]: this.values[source.name] })
+      }
+    }
+
+    this.values = nextValues
     this.definition = definition
     this.state = state
     this.suspended =
@@ -311,7 +333,9 @@ export class LivaInstance {
       return true
     }
 
-    const interrupted = this.active.length > 0 || (this.definition.sources?.length ?? 0) > 0
+    const interrupted =
+      this.active.length > 0 ||
+      (this.definition.sources?.length ?? 0) + (this.definition.parameters?.length ?? 0) > 0
     const snapshots = new Map<HTMLElement, Map<string, string>>()
 
     // Read every displayed value before canceling any effect or writing styles.
@@ -412,11 +436,11 @@ export class LivaInstance {
     return true
   }
 
-  updateSources(inputs: Readonly<Record<string, unknown>>) {
+  updateParameters(inputs: Readonly<Record<string, unknown>>) {
     if (this.disposed) return
 
     try {
-      this.applySources(externalValues(this.definition.sources ?? [], this.values, inputs))
+      this.applySources(parameterValues(this.definition.parameters ?? [], this.values, inputs))
     } catch (error) {
       this.report({ code: 'runtime.source', message: String(error), error })
     }
@@ -477,7 +501,7 @@ export class LivaInstance {
     this.values = Object.fromEntries(
       Object.entries(this.values).map(([name, value]) => [
         name,
-        typeof value === 'boolean' ? value : { ...value, active: false },
+        typeof value === 'object' ? { ...value, active: false } : value,
       ]),
     )
   }
