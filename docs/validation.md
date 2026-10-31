@@ -14,10 +14,12 @@ Inline-frame source edits preserve surrounding text and reject ambiguous comment
 
 `sh scripts/verify.sh` passes Rust formatting, Clippy, 39 Rust tests, 56 TypeScript
 tests, both Vue type checks, the WASM contract, and the three-browser suite.
-The browser suite has 101 passing cases; four duplicate shared-file write cases are
+The browser suite has 104 passing cases; four duplicate shared-file write cases are
 intentionally skipped outside Chromium. Browser versions are Chromium 156.0.8078.4,
 Firefox 157.0 and WebKit 27.2. Production playback and editor exclusion pass for both
-normal and `development`-named build modes.
+normal and `development`-named build modes. Development coverage includes
+Vue Router navigation, browser back/reload, and direct demo URLs. Production checks
+also exercise demo navigation and direct URLs.
 
 Reactive browser coverage includes parameter updates without effect restarts,
 movement while scale animates, spring return from the displayed position,

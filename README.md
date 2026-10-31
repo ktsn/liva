@@ -25,11 +25,13 @@ cd playground
 vp dev --host 127.0.0.1
 ```
 
-Open the URL printed by Vite+. The **Notifications** and **Product updates** switches
-share one definition but have independent Vue and animation state. Click or use
-Space/Enter; reverse a switch before its motion finishes. The separate beacon
-illustrates another definition. Drag the **Room to move** card and release it to
-return with a spring. The card and switches share source-driven state selection.
+Open the URL printed by Vite+. Use the navigation to choose one demo:
+
+- **Toggle** (`/toggle`): two switches with independent Vue and animation state.
+- **Beacon** (`/beacon`): a button that changes opacity and scale.
+- **Drag** (`/drag`): a draggable card that returns with a spring.
+
+Vue Router mounts only the selected demo. `/` opens the toggle page.
 
 Open **Motion editor** to show the docked timeline. Choose an instance and a
 transition, then expand a target to reveal its CSS property tracks. Double-click

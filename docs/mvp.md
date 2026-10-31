@@ -41,7 +41,8 @@ behaviors. Run Chromium, Firefox and WebKit through Playwright.
 
 ## Vue and playground gate
 
-- The normal Vue page contains two independent toggle instances and a drag card.
+- Vue Router separates toggle, beacon, and drag into individual pages, mounting
+  one demo at a time. The toggle page contains two independent instances.
   Vue passes named parameter objects and never selects states for these examples.
 - Keep nearest-root target ownership, nested roots, conditional targets, unmount
   cleanup, compiler diagnostics and last-valid-definition HMR behavior.

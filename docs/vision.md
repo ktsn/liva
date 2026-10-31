@@ -48,8 +48,8 @@ The editor does not take ownership of Vue application state.
 
 ## First demonstration
 
-A real Vue page hosts two toggle switches sharing one definition and a draggable
-card. Vue supplies Boolean inputs to the toggles; Pointer Events supply drag input
+A Vue playground provides separate pages for toggle, beacon, and drag demos.
+The toggle page hosts two switches sharing one definition; the drag page hosts a card. Vue supplies Boolean inputs to the toggles; Pointer Events supply drag input
 to the card. Both use conditional state selection and the same animation executor.
 Each switch has `off` and `on` states, a track color, thumb translation, and thumb
 scale. The page demonstrates directional overrides, both spring configurations,
