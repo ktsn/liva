@@ -22,7 +22,7 @@ describe('editor message validation', () => {
       to: 'on',
       target: 'thumb',
       property: 'scale',
-      timing: 'tween(duration: 100ms)',
+      timing: '@tween: 100ms',
     },
   ])('accepts the structural shape of %j', (edit) => {
     expect(isEditorRequest({ ...request, edits: [edit] })).toBe(true)

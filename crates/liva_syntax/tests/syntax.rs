@@ -2,36 +2,6 @@ use liva_syntax::ast::{AstNode, HasItems, HasValue};
 use liva_syntax::{parse, semantic_text};
 
 #[test]
-fn generic_calls_and_boundaries() {
-    for args in [
-        "",
-        "duration: 350ms",
-        "duration: 350ms,",
-        "duration: 350ms, easing: cubic-bezier(.2, .8, .2, 1)",
-        "\r\n easing: fn([1,2], '),'),\r\n duration: 350ms,\r\n",
-    ] {
-        let source = format!("motion toggle {{ transition {{ timing: unknown({args}) }} }}");
-        let parsed = parse(&source);
-        assert!(
-            parsed.diagnostics.is_empty(),
-            "{args}: {:?}",
-            parsed.diagnostics
-        );
-        assert_eq!(parsed.root.text(), source);
-    }
-
-    for args in [
-        ", duration: 1ms",
-        "duration: 1ms,,",
-        "duration: 1ms,, easing: linear",
-        "duration: fn([1,2)",
-    ] {
-        let source = format!("motion a {{ timing: tween({args}) }}");
-        assert!(!parse(&source).diagnostics.is_empty(), "{args}");
-    }
-}
-
-#[test]
 fn block_names_follow_identifier_rules() {
     for name in ["Toggle", "toggle_2", "_toggle", "toggle-name"] {
         assert!(
@@ -113,8 +83,8 @@ fn comments_separate_headers_and_leave_following_declarations() {
 }
 
 #[test]
-fn css_values_remain_opaque_while_timing_calls_are_structured() {
-    let source = "motion a { state on { target { timing: var(--x, 1); content: \\); --x: \\, } } transition { timing /* note */: tween(duration: 1ms) } }";
+fn css_and_animation_values_remain_opaque() {
+    let source = "motion a { state on { target { timing: var(--x, 1); content: \\); --x: \\, } } transition { @tween /* note */: 1ms steps(2, end) } }";
     let parsed = parse(source);
     assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
     let motion = parsed.root.motions().next().unwrap();
@@ -128,7 +98,7 @@ fn css_values_remain_opaque_while_timing_calls_are_structured() {
         .properties()
         .next()
         .unwrap();
-    assert!(css.value_node().unwrap().timing_call().is_none());
+    assert_eq!(css.value_text().as_deref(), Some("var(--x, 1)"));
     let timing = motion
         .transitions()
         .next()
@@ -136,7 +106,7 @@ fn css_values_remain_opaque_while_timing_calls_are_structured() {
         .properties()
         .next()
         .unwrap();
-    assert!(timing.value_node().unwrap().timing_call().is_some());
+    assert_eq!(timing.value_text().as_deref(), Some("1ms steps(2, end)"));
 }
 
 #[test]

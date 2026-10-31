@@ -127,15 +127,13 @@ fn set(source: &str, compiled: &Compilation, path: &str, value: &str) -> Result<
             value.trim(),
         );
     } else {
-        let (parent, name) = path.rsplit_once('/').ok_or("Invalid field path")?;
-        if !["timing", "value", "easing"].contains(&name) {
-            return Err("Only timing, value, or easing declarations can be inserted".into());
-        }
-        result = insert(
-            source,
-            mapping(compiled, parent, "block")?,
-            &format!("{name}: {}", value.trim()),
-        )?;
+        let frame_path = path
+            .strip_suffix("/easing")
+            .ok_or("Unknown editable field")?;
+        let field = mapping(compiled, &format!("{frame_path}/value"), "value")?;
+        preserve_comments(&source[field.range.start..field.range.end])?;
+        preserve_comments(value)?;
+        result.insert_str(field.range.end, &format!(" @ {}", value.trim()));
     }
 
     let updated = compile(&result, true);
@@ -161,6 +159,37 @@ fn set(source: &str, compiled: &Compilation, path: &str, value: &str) -> Result<
         );
     }
     Ok(result)
+}
+
+fn safe_value(value: &str) -> Result<(), String> {
+    preserve_comments(value)?;
+    let parsed = liva_syntax::parse(&format!("motion t {{ value: {value}\n}}"));
+    let block = parsed.root.motions().next().ok_or("Invalid field value")?;
+    let fields: Vec<_> = block.properties().collect();
+    if !parsed.diagnostics.is_empty()
+        || parsed.root.syntax().children().count() != 1
+        || block.blocks().next().is_some()
+        || fields.len() != 1
+        || fields[0].value_text().as_deref() != Some(semantic_text(value).as_str())
+        || semantic_text(value).is_empty()
+    {
+        return Err("Track fields must contain exactly one value".into());
+    }
+    Ok(())
+}
+
+fn animation_shorthand(timing: &str) -> Result<(&str, &str), String> {
+    preserve_comments(timing)?;
+    let (name, value) = timing
+        .split_once(':')
+        .ok_or("Expected animation declaration")?;
+
+    if !["@tween", "@spring"].contains(&name) {
+        return Err("Expected tween or spring shorthand".into());
+    }
+
+    safe_value(value)?;
+    Ok((name, value.trim()))
 }
 
 // Track replacement is atomic: changing timing and frames together may have an
@@ -195,22 +224,6 @@ fn replace_track(
         return Err("Invalid track identifiers".into());
     }
 
-    let safe_value = |value: &str| -> Result<(), String> {
-        preserve_comments(value)?;
-        let parsed = liva_syntax::parse(&format!("motion t {{ value: {value}\n}}"));
-        let block = parsed.root.motions().next().ok_or("Invalid field value")?;
-        let fields: Vec<_> = block.properties().collect();
-        if !parsed.diagnostics.is_empty()
-            || parsed.root.syntax().children().count() != 1
-            || block.blocks().next().is_some()
-            || fields.len() != 1
-            || fields[0].value_text().as_deref() != Some(semantic_text(value).as_str())
-            || semantic_text(value).is_empty()
-        {
-            return Err("Track fields must contain exactly one value".into());
-        }
-        Ok(())
-    };
     let mut prefix = "__LIVA_TRACK_VALUE_".to_string();
     let inputs: Vec<&str> =
         timing
@@ -232,19 +245,8 @@ fn replace_track(
     let mut declarations = Vec::new();
 
     if let Some(timing) = timing {
-        if timing.starts_with('@') {
-            let (name, value) = timing
-                .split_once(':')
-                .ok_or("Expected animation declaration")?;
-            if !["@tween", "@spring"].contains(&name) {
-                return Err("Expected tween or spring shorthand".into());
-            }
-            safe_value(value)?;
-            declarations.push(format!("{name}: {}", placeholder(value.trim())));
-        } else {
-            safe_value(timing)?;
-            declarations.push(format!("timing: {}", placeholder(timing)));
-        }
+        let (name, value) = animation_shorthand(timing)?;
+        declarations.push(format!("{name}: {}", placeholder(value)));
     }
 
     if let Some(frames) = frames {
@@ -419,37 +421,26 @@ pub fn apply_edits(source: &str, edits: &[Edit]) -> Result<EditResult, String> {
                 let direction = format!("{definition}/transition/directional/{from}/{to}");
                 let target_path = format!("{direction}/target/{target}");
                 let property_path = format!("{target_path}/property/{property}");
-                if mapping(&compiled, &property_path, "block").is_ok() {
-                    set(
-                        &current,
-                        &compiled,
-                        &format!("{property_path}/timing"),
-                        timing,
-                    )?
+                let (name, value) = animation_shorthand(timing)?;
+                let declaration = format!("{name}: {value}");
+                let mut body = format!("{property} {{\n  {declaration}\n}}");
+                let parent = if mapping(&compiled, &property_path, "block").is_ok() {
+                    body = declaration;
+                    property_path
+                } else if mapping(&compiled, &target_path, "block").is_ok() {
+                    target_path
                 } else {
-                    let mut body = format!("{property} {{\n  timing: {timing}\n}}");
-                    let parent = if mapping(&compiled, &target_path, "block").is_ok() {
-                        target_path
+                    body = format!("{target} {{\n{}\n}}", indent(&body));
+
+                    if mapping(&compiled, &direction, "block").is_ok() {
+                        direction
                     } else {
-                        body = format!("{target} {{\n{}\n}}", indent(&body));
-                        if mapping(&compiled, &direction, "block").is_ok() {
-                            direction
-                        } else {
-                            body = format!("transition {from} -> {to} {{\n{}\n}}", indent(&body));
-                            definition.clone()
-                        }
-                    };
-                    let result = insert(&current, mapping(&compiled, &parent, "block")?, &body)?;
-                    let updated = compile(&result, true);
-                    check(&updated)?;
-                    let field = mapping(&updated, &format!("{property_path}/timing"), "value")?;
-                    if semantic_text(&result[field.range.start..field.range.end])
-                        != semantic_text(timing)
-                    {
-                        return Err("Timing contains extra declarations".into());
+                        body = format!("transition {from} -> {to} {{\n{}\n}}", indent(&body));
+                        definition.clone()
                     }
-                    result
-                }
+                };
+
+                insert(&current, mapping(&compiled, &parent, "block")?, &body)?
             }
         };
         compiled = compile(&current, true);

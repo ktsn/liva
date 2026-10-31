@@ -173,7 +173,7 @@ impl Parser<'_> {
                 }
                 self.bump();
                 self.start(Kind::Value);
-                self.raw(false, !in_state && name.trim() == "timing");
+                self.raw();
                 self.end();
                 self.end();
             } else if self.at() == "{" {
@@ -252,14 +252,12 @@ impl Parser<'_> {
         self.end();
     }
 
-    fn raw(&mut self, argument: bool, call: bool) {
+    fn raw(&mut self) {
         let mut stack = vec![];
-        let mut first = true;
 
         while !self.at().is_empty() {
             if self.at() == "${" {
                 self.interpolation();
-                first = false;
                 continue;
             }
             if !self.tokens[self.index].parts.is_empty() {
@@ -269,7 +267,6 @@ impl Parser<'_> {
                     &mut self.expression_diagnostics,
                 );
                 self.index += 1;
-                first = false;
                 continue;
             }
             self.validate_url();
@@ -279,38 +276,11 @@ impl Parser<'_> {
                 break;
             }
 
-            if stack.is_empty()
-                && (text == "}"
-                    || (!argument && matches!(text, ";" | "\n" | "\r"))
-                    || (argument && matches!(text, "," | ")")))
-            {
+            if stack.is_empty() && matches!(text, ";" | "\n" | "\r") {
                 break;
             }
 
-            if call && first && !self.tokens[self.index].trivia {
-                let next = self
-                    .tokens
-                    .iter()
-                    .enumerate()
-                    .skip(self.index + 1)
-                    .find(|(_, t)| !t.trivia)
-                    .map(|(i, _)| i);
-
-                if next.is_some_and(|i| self.tokens[i].text == "(") {
-                    self.call();
-                    first = false;
-                    continue;
-                }
-            }
-
-            if !self.tokens[self.index].trivia {
-                first = false;
-            }
-
             match text {
-                ";" if argument && stack.is_empty() => {
-                    self.error("Arguments must be separated by commas, not semicolons")
-                }
                 "(" => stack.push(")"),
                 "[" => stack.push("]"),
                 ")" | "]" => {
@@ -456,55 +426,6 @@ impl Parser<'_> {
         );
         self.index = end;
         self.bump();
-        self.end();
-    }
-
-    fn call(&mut self) {
-        self.start(Kind::Call);
-        self.start(Kind::Header);
-        self.bump();
-        self.end();
-        self.gap();
-        self.bump();
-        self.gap();
-
-        while !matches!(self.at(), "" | ")" | "}") {
-            let begin = self.index;
-            self.start(Kind::Argument);
-            self.start(Kind::Header);
-
-            while !matches!(self.at(), "" | ":" | "," | ")" | "}") {
-                self.bump();
-            }
-            self.end();
-
-            if self.at() == ":" {
-                self.bump();
-                self.start(Kind::Value);
-                self.raw(true, false);
-                self.end();
-            } else {
-                self.error("Expected named argument and colon");
-            }
-            self.end();
-
-            if self.at() == "," {
-                self.bump();
-                self.gap();
-            } else if !matches!(self.at(), "" | ")" | "}") {
-                self.error("Expected argument comma");
-            }
-
-            if self.index == begin {
-                break;
-            }
-        }
-
-        if self.at() == ")" {
-            self.bump();
-        } else {
-            self.error("Expected closing parenthesis");
-        }
         self.end();
     }
 }

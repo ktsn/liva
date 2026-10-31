@@ -43,7 +43,7 @@ it('contains spring solver failures within the affected track', () => {
   const source = readFileSync(
     new URL('../../../../fixtures/toggle.liv', import.meta.url),
     'utf8',
-  ).replace('damping: 20', 'damping: 0.000001')
+  ).replace('@spring: 300 20', '@spring: 300 0.000001')
   const compiled = compile(source, true)
   expect(compiled.diagnostics.filter((item) => item.severity === 'error')).toEqual([])
 

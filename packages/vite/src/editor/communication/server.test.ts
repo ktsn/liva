@@ -102,9 +102,7 @@ describe('guarded source transactions', () => {
 
   it('rejects cross-definition edits', async () => {
     const commit = await request('commit')
-    commit.edits = [
-      { op: 'set', path: 'other/transition/general/timing', value: 'tween(duration: 5ms)' },
-    ]
+    commit.edits = [{ op: 'set', path: 'other/transition/general/timing', value: '@tween: 5ms' }]
     await expect(service.request(commit)).rejects.toMatchObject({ status: 403 })
   })
   it('reserves request identities across concurrent files', async () => {

@@ -11,6 +11,6 @@ const active = ref(false)
 motion hmr {
   state off { box { background-color: red } }
   state on when true { box { background-color: blue } }
-  transition { timing: tween(duration: 50ms) }
+  transition { @tween: 50ms }
 }
 </liva>

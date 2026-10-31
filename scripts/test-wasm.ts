@@ -17,12 +17,12 @@ for (const name of ['toggle', 'reactive-toggle', 'card', 'derived']) {
 }
 assert.throws(() => decodeBundle('{"schemaVersion":2,"definitions":[]}'), /Unsupported/)
 
-const unicode = '// 😀\r\nmotion a { state on {} transition { timing: tween(duration: 1s) } }'
+const unicode = '// 😀\r\nmotion a { state on {} transition { @tween-duration: 1s } }'
 const development: Compilation = JSON.parse(compile(unicode, true))
 assert.deepEqual(development.diagnostics, [])
 assert(development.mappings)
 const range = development.mappings['a/transition/general/timing/duration'].range
-assert.equal(Buffer.from(unicode).subarray(range.start, range.end).toString(), ' 1s')
+assert.equal(Buffer.from(unicode).subarray(range.start, range.end).toString(), ' 1s ')
 console.log(
   'Node WASM golden contract, immutable TS view, schema rejection, and UTF-8 mappings passed',
 )

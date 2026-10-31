@@ -17,7 +17,7 @@ fn structural_views_expose_parameters_bindings_states_and_transition_tracks() {
     body {
       opacity {
         @tween: 100ms
-        0% { value: 0; easing: linear }
+        0%: 0 @ linear
         100%: 1
       }
     }
@@ -89,16 +89,13 @@ fn structural_views_expose_parameters_bindings_states_and_transition_tracks() {
     let frame = track.keyframes().next().unwrap();
     assert_eq!(track.header().as_deref(), Some("opacity"));
     assert_eq!(frame.header().as_deref(), Some("0%"));
-    assert_eq!(
-        frame.properties().next().unwrap().value_text().as_deref(),
-        Some("0")
-    );
+    assert_eq!(frame.value_text().as_deref(), Some("0 @ linear"));
     assert_eq!(
         track
             .properties()
             .map(|property| property.header().unwrap())
             .collect::<Vec<_>>(),
-        ["@tween", "100%"]
+        ["@tween", "0%", "100%"]
     );
 
     assert_range(source, &motion);

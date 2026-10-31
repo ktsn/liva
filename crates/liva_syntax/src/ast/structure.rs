@@ -45,8 +45,10 @@ node!(Target, |n: &SyntaxNode| n.kind() == Kind::Block
     && block_depth(n) == 2);
 node!(PropertyBlock, |n: &SyntaxNode| n.kind() == Kind::Block
     && block_depth(n) == 3);
-node!(Keyframe, |n: &SyntaxNode| n.kind() == Kind::Block
-    && block_depth(n) == 4);
+node!(Keyframe, |n: &SyntaxNode| n.kind() == Kind::Declaration
+    && block_depth(n) == 4
+    && n.child::<Header>()
+        .is_some_and(|h| h.semantic_text().ends_with('%')));
 node!(Property, |n: &SyntaxNode| n.kind() == Kind::Declaration);
 node!(LetBinding, |n: &SyntaxNode| n.kind() == Kind::Let);
 node!(Parameter, |n: &SyntaxNode| n.kind() == Kind::Parameter);
@@ -58,14 +60,13 @@ node!(Value, |n: &SyntaxNode| n.kind() == Kind::Value);
 node!(Condition, |n: &SyntaxNode| n.kind() == Kind::Condition);
 node!(Interpolation, |n: &SyntaxNode| n.kind()
     == Kind::Interpolation);
-node!(TimingCall, |n: &SyntaxNode| n.kind() == Kind::Call);
 
 macro_rules! implement {
     ($trait:ident: $($name:ident),+ $(,)?) => { $(impl $trait for $name {})+ };
 }
-implement!(HasHeader: Block, Motion, State, Transition, Target, PropertyBlock, Keyframe, Property, LetBinding, Parameter, TimingCall);
-implement!(HasValue: Property, LetBinding);
-implement!(HasItems: Document, Block, Motion, State, Transition, Target, PropertyBlock, Keyframe);
+implement!(HasHeader: Block, Motion, State, Transition, Target, PropertyBlock, Keyframe, Property, LetBinding, Parameter);
+implement!(HasValue: Property, LetBinding, Keyframe);
+implement!(HasItems: Document, Block, Motion, State, Transition, Target, PropertyBlock);
 
 impl Document {
     pub fn motions(&self) -> impl Iterator<Item = Motion> {
@@ -183,10 +184,6 @@ impl Value {
     pub fn interpolations(&self) -> impl Iterator<Item = Interpolation> {
         self.children()
     }
-
-    pub fn timing_call(&self) -> Option<TimingCall> {
-        self.child()
-    }
 }
 
 impl Condition {
@@ -198,12 +195,6 @@ impl Condition {
 impl Interpolation {
     pub fn expression(&self) -> Option<expression::Expr> {
         self.child()
-    }
-}
-
-impl TimingCall {
-    pub fn arguments(&self) -> impl Iterator<Item = expression::Argument> {
-        self.children()
     }
 }
 

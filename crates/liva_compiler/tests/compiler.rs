@@ -51,7 +51,7 @@ fn references_duplicates_completeness_and_recovery() {
         "motion a { state on {} transition {} transition {} }",
         "motion a { state on {} } motion a { state on {} }",
         "motion a { state on when true { t { color: red } } state off { t { color: blue } } }",
-        "motion a { state on {} transition { t { color { timing: tween(duration: 1ms) } } } }",
+        "motion a { state on {} transition { t { color { @tween: 1ms } } } }",
     ] {
         assert!(!errors(source).is_empty(), "{source}");
     }
@@ -79,7 +79,7 @@ fn references_duplicates_completeness_and_recovery() {
 
 #[test]
 fn raw_css_and_byte_mappings() {
-    let source = "// 😀\r\nmotion a { state on { t { --offset: var(--x, '日本語'); color: /* note */ imaginary !important; timing: var(--x, 1) } } transition { timing: tween(duration: 1s) } }";
+    let source = "// 😀\r\nmotion a { state on { t { --offset: var(--x, '日本語'); color: /* note */ imaginary !important; timing: var(--x, 1) } } transition { @tween-duration: 1s } }";
     let result = compile(source, true);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     assert_eq!(
@@ -87,7 +87,7 @@ fn raw_css_and_byte_mappings() {
         "imaginary !important"
     );
     let range = &result.mappings.unwrap()["a/transition/general/timing/duration"].range;
-    assert_eq!(&source[range.start..range.end], " 1s");
+    assert_eq!(&source[range.start..range.end], " 1s ");
     assert!(matches!(
         result.definitions[0]
             .general_transition
@@ -103,11 +103,14 @@ fn raw_css_and_byte_mappings() {
 
 #[test]
 fn mapping_paths_do_not_collide_with_user_names() {
-    let source = "motion a { state general { timing { timing: 0 } } state timing when true { timing { timing: 1 } } transition { timing: tween(duration: 1s) } transition general -> timing { timing { timing { timing: tween(duration: 2s) } } } }";
+    let source = "motion a { state general { timing { timing: 0 } } state timing when true { timing { timing: 1 } } transition { @tween-duration: 1s } transition general -> timing { timing { timing { @tween-duration: 2s } } } }";
     let result = compile(source, true);
     assert!(result.diagnostics.is_empty());
     let mappings = result.mappings.unwrap();
-    assert_eq!(mappings["a/transition/general/timing"].kind, "value");
+    assert_eq!(
+        mappings["a/transition/general/timing/duration"].kind,
+        "value"
+    );
     assert_eq!(
         mappings["a/transition/directional/general/timing"].kind,
         "block"

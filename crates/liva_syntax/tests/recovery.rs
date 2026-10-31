@@ -11,13 +11,13 @@ fn every_prefix_preserves_source_ranges_and_supports_ast_access() {
         include_str!("../../../fixtures/reactive-toggle.liv"),
         include_str!("../../../fixtures/derived.liv"),
         "日本語 {\r\n x: '\"😀' /* } */; y: var(--a, [a,b])\r\n}",
-        "motion a { timing: unknown(a: fn([1, 2], '),'), b: 1,) }",
-        "motion a { timing: x(a: \"unfinished",
+        "motion a { @tween: 1ms unknown( fn([1, 2], '),'), b: 1,) }",
+        "motion a { @tween: 1ms x( \"unfinished",
         "motion a { /* unterminated",
         "motion progress( /* 😀 */ value: number,\r\n enabled: boolean, label: string) { state idle {} }",
         "motion card { let movement=custom(\r\n target: /* 😀 */ body,\r\n)\r\n state idle { body { opacity: 1 } } }",
         "motion demo { let value = custom(label: '日本😀', value: -(other.member + 2)); state when {} state active when value > 0 { body { opacity: ${value * 2} } } }",
-        "motion demo( /* 😀 */ progress: number) { let value = progress + 1; state idle { body { opacity: ${value} } } transition { body { opacity { 0% { value: 0 } } } } }",
+        "motion demo( /* 😀 */ progress: number) { let value = progress + 1; state idle { body { opacity: ${value} } } transition { body { opacity { 0%: 0 } } } }",
         r#"motion demo(max-value: number) { let value = max-value - 1; state idle { body { width: 20px; content: "\41 ${'😀}'} ${value} \n" } } }"#,
     ] {
         for end in (0..=source.len()).filter(|end| source.is_char_boundary(*end)) {

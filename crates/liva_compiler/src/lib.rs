@@ -8,7 +8,7 @@ use expression::ExprExt;
 use ir::*;
 use liva_syntax::ast::expression::{Expr, from_container};
 use liva_syntax::ast::{self as syn, AstNode, HasHeader, HasItems, HasValue};
-use liva_syntax::{Diagnostic, Kind, Range, parse, semantic_text};
+use liva_syntax::{Diagnostic, Kind, Range, parse};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -189,7 +189,6 @@ impl Compiler {
     fn animation_declarations(&mut self, node: &impl HasItems, path: &str) -> Option<Timing> {
         let mut family = String::new();
         let mut args: BTreeMap<String, String> = BTreeMap::new();
-        let mut call_timing = None;
 
         for binding in node.bindings() {
             self.error(
@@ -209,17 +208,6 @@ impl Compiler {
                         &declaration,
                     );
                 }
-                continue;
-            }
-            if name == "timing" {
-                family.clear();
-                args.clear();
-                self.mapping(
-                    &format!("{path}/timing"),
-                    &declaration.value_node().unwrap(),
-                    "value",
-                );
-                call_timing = self.timing(&declaration, &format!("{path}/timing"));
                 continue;
             }
             let value = declaration.value_text().unwrap_or_default();
@@ -244,7 +232,6 @@ impl Compiler {
                 args.clear();
             }
             family = next_family.into();
-            call_timing = None;
 
             if let Some(field) = field {
                 let allowed = if family == "tween" {
@@ -295,39 +282,10 @@ impl Compiler {
         }
 
         if family.is_empty() {
-            return call_timing;
+            return None;
         }
-        let text = format!(
-            "motion a {{ transition {{ timing: {family}({}) }} }}",
-            args.iter()
-                .map(|(k, v)| format!("{k}: {v}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-        let parsed = parse(&text);
-        let declaration = parsed
-            .root
-            .child::<syn::Block>()?
-            .child::<syn::Block>()?
-            .child::<syn::Property>()?;
-        let mut validator = Compiler {
-            diagnostics: parsed
-                .diagnostics
-                .into_iter()
-                .map(|mut diagnostic| {
-                    if diagnostic.code == "syntax.expression" {
-                        diagnostic.code = "semantic.expression".into();
-                    }
-                    diagnostic
-                })
-                .collect(),
-            mappings: BTreeMap::new(),
-        };
-        let timing = validator.timing(&declaration, "");
-        for diagnostic in validator.diagnostics {
-            self.error(&diagnostic.code, diagnostic.message, node);
-        }
-        timing
+
+        self.timing(&family, &args, node)
     }
 
     fn error(&mut self, code: &str, message: impl Into<String>, node: &impl AstNode) {
@@ -411,49 +369,22 @@ impl Compiler {
         declarations
     }
 
-    fn timing(&mut self, declaration: &syn::Property, path: &str) -> Option<Timing> {
-        let value = declaration.value_node()?;
-        let Some(call) = value.timing_call() else {
-            self.error("semantic.timing", "Expected a named timing call", &value);
-            return None;
-        };
-        let remainder = value
-            .syntax()
-            .children_with_tokens()
-            .filter(|n| n.as_node().is_none_or(|n| n.kind() != Kind::Call))
-            .map(|n| n.to_string())
-            .collect::<String>();
-        if !semantic_text(&remainder).is_empty() {
-            self.error(
-                "semantic.timing",
-                "Unexpected text after timing call",
-                &value,
-            );
-        }
-
-        let name = call.header().unwrap_or_default();
-        let mut args = BTreeMap::new();
-        let mut seen = BTreeMap::new();
-
-        for argument in call.arguments() {
-            let key = argument.header().unwrap_or_default();
-            self.unique(&mut seen, &key, &argument);
-            if let Some(value) = argument.value_node() {
-                self.mapping(&format!("{path}/{key}"), &value, "value");
-            }
-            args.insert(key, argument.value_text().unwrap_or_default());
-        }
-
+    fn timing(
+        &mut self,
+        name: &str,
+        args: &BTreeMap<String, String>,
+        node: &impl AstNode,
+    ) -> Option<Timing> {
         let duration_mode = args.contains_key("duration") || args.contains_key("bounce");
-        let allowed: &[&str] = match name.as_str() {
+        let allowed: &[&str] = match name {
             "tween" => &["duration", "easing"],
             "spring" if duration_mode => &["duration", "bounce"],
             "spring" => &["stiffness", "damping", "mass"],
             _ => {
                 self.error(
                     "semantic.timing",
-                    format!("Unknown timing function: {name}"),
-                    &call,
+                    format!("Unknown timing family: {name}"),
+                    node,
                 );
                 return None;
             }
@@ -463,8 +394,8 @@ impl Compiler {
             if !allowed.contains(&key.as_str()) {
                 self.error(
                     "semantic.argument",
-                    format!("Unknown or mixed timing argument: {key}"),
-                    &call,
+                    format!("Unknown or mixed timing field: {key}"),
+                    node,
                 );
             }
         }
@@ -499,20 +430,20 @@ impl Compiler {
                 self.error(
                     "semantic.number",
                     format!(
-                        "Invalid or missing {key}; expected {}. Check commas between arguments.",
+                        "Invalid or missing {key}; expected {}.",
                         if time {
                             "finite time with ms or s units"
                         } else {
                             "finite number in range"
                         }
                     ),
-                    &call,
+                    node,
                 );
                 None
             }
         };
 
-        match name.as_str() {
+        match name {
             "tween" => {
                 let duration_ms = number("duration", None, true, 0.0, true)?;
                 let easing = args
@@ -520,11 +451,7 @@ impl Compiler {
                     .cloned()
                     .unwrap_or_else(|| "linear".into());
                 if easing.is_empty() {
-                    self.error(
-                        "semantic.easing",
-                        "Easing must be nonempty CSS text; check argument separators",
-                        &call,
-                    );
+                    self.error("semantic.easing", "Easing must be nonempty CSS text", node);
                 }
                 Some(Timing::Tween {
                     duration_ms,
@@ -535,7 +462,7 @@ impl Compiler {
                 let duration_ms = number("duration", None, true, 0.0, false)?;
                 let bounce = number("bounce", Some(0.0), false, 0.0, true)?;
                 if bounce >= 1.0 {
-                    self.error("semantic.bounce", "Bounce must be less than 1", &call);
+                    self.error("semantic.bounce", "Bounce must be less than 1", node);
                 }
                 Some(Timing::SpringDuration {
                     duration_ms,
@@ -574,48 +501,15 @@ impl Compiler {
                 let mut frames = vec![];
                 let mut offsets = BTreeMap::new();
 
-                for frame in property.keyframes() {
-                    let raw = frame.header().unwrap_or_default();
-                    let offset = raw
-                        .strip_suffix('%')
-                        .and_then(|v| v.parse::<f64>().ok())
-                        .map(|v| v / 100.0);
-                    let Some(offset) = offset.filter(|v| v.is_finite() && (0.0..=1.0).contains(v))
-                    else {
-                        self.error(
-                            "semantic.offset",
-                            "Frame offset must be between 0% and 100%",
-                            &frame,
-                        );
-                        continue;
-                    };
-                    let offset = if offset == 0.0 { 0.0 } else { offset };
-                    self.unique(&mut offsets, &offset.to_string(), &frame);
-                    let frame_path = format!("{property_path}/frame/{offset}");
-                    self.mapping(&frame_path, &frame, "block");
-                    if let Some(header) = frame.header_node() {
-                        self.mapping(&format!("{frame_path}/offset"), &header, "value");
-                    }
-                    let fields = self.declarations(&frame, Some(&["value", "easing"]), &frame_path);
-                    let value = fields
-                        .get("value")
-                        .and_then(HasValue::value_text)
-                        .unwrap_or_else(|| {
-                            self.error("semantic.frame", "Frame requires value", &frame);
-                            String::new()
-                        });
-                    let easing = fields.get("easing").and_then(HasValue::value_text);
-                    frames.push(Frame {
-                        offset,
-                        value,
-                        easing,
-                    });
+                for block in property.blocks() {
+                    self.error(
+                        "semantic.structure",
+                        "Property tracks accept animation declarations and inline keyframes",
+                        &block,
+                    );
                 }
 
-                for frame in property
-                    .properties()
-                    .filter(|n| n.header().is_some_and(|h| h.ends_with('%')))
-                {
+                for frame in property.keyframes() {
                     let raw = frame.header().unwrap();
                     let offset =
                         raw.trim_end_matches('%').parse::<f64>().unwrap_or(f64::NAN) / 100.0;
