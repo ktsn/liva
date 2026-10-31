@@ -73,3 +73,30 @@ motion test(value: number) {
     assert!(!found.iter().any(|hover| hover.label.starts_with("cycle:")));
     assert!(found.iter().any(|hover| hover.label == "quoted: string"));
 }
+
+#[test]
+fn hyphenated_names_have_whole_identifier_hover_ranges() {
+    let source = r#"motion demo(max-value: number) {
+  let adjusted-value = max-value - 1
+  let pointer-state = drag(target: main-body)
+  state idle { main-body { opacity: ${adjusted-value} } }
+  state active when pointer-state.active { main-body { opacity: ${max-value} } }
+  transition { @tween: 100ms }
+}"#;
+    let found = hovers(source);
+    for name in ["max-value", "adjusted-value", "main-body"] {
+        let expected: Vec<_> = source
+            .match_indices(name)
+            .map(|(offset, _)| offset)
+            .collect();
+        let actual: Vec<_> = found
+            .iter()
+            .filter(|hover| hover.label.starts_with(&format!("{name}:")))
+            .map(|hover| {
+                assert_eq!(&source[hover.range.start..hover.range.end], name);
+                hover.range.start
+            })
+            .collect();
+        assert_eq!(actual, expected, "{name}");
+    }
+}

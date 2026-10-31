@@ -4,8 +4,11 @@ pub mod edits;
 pub mod expression;
 pub mod ir;
 
+use expression::ExprExt;
 use ir::*;
-use liva_syntax::{Ast, Diagnostic, Kind, Range, parse, semantic_text};
+use liva_syntax::ast::expression::{Expr, from_container};
+use liva_syntax::ast::{self as syn, AstNode, HasHeader, HasItems, HasValue};
+use liva_syntax::{Diagnostic, Kind, Range, parse, semantic_text};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -25,10 +28,9 @@ pub struct Mapping {
     pub kind: String,
 }
 
-struct LocatedBinding {
+struct BindingView {
     name: String,
-    initializer: expression::Expression,
-    offset: usize,
+    initializer: Expr,
 }
 
 struct Compiler {
@@ -37,7 +39,7 @@ struct Compiler {
 }
 
 impl Compiler {
-    fn parameters(&mut self, node: &Ast) -> Vec<MotionParameter> {
+    fn parameters(&mut self, node: &syn::Motion) -> Vec<MotionParameter> {
         let mut parameters = vec![];
         let mut seen = BTreeMap::new();
 
@@ -53,18 +55,17 @@ impl Compiler {
                 );
             }
 
-            let reference = parameter.child(Kind::TypeReference);
-            let value_type = match reference
-                .as_ref()
-                .map(|n| semantic_text(&n.text()))
-                .as_deref()
-            {
+            let reference = parameter.type_reference();
+            let value_type = match reference.as_ref().map(AstNode::semantic_text).as_deref() {
                 Some("number") => PrimitiveType::Number,
                 Some("boolean") => PrimitiveType::Boolean,
                 Some("string") => PrimitiveType::String,
                 _ => {
-                    let syntax = reference.as_ref().unwrap_or(&parameter);
-                    let source = expression_source(syntax);
+                    let syntax = reference
+                        .as_ref()
+                        .map(AstNode::syntax)
+                        .unwrap_or(parameter.syntax());
+                    let source = type_annotation_source(syntax);
                     let start = source.len() - source.trim_start().len();
                     let end = source.trim_end().len();
                     self.diagnostics.push(Diagnostic::error(
@@ -85,11 +86,11 @@ impl Compiler {
         parameters
     }
 
-    fn let_bindings(&mut self, node: &Ast) -> Vec<LocatedBinding> {
+    fn let_bindings(&mut self, node: &syn::Motion) -> Vec<BindingView> {
         let mut bindings = vec![];
         let mut seen = BTreeMap::new();
 
-        for binding in node.children(Kind::Let) {
+        for binding in node.bindings() {
             let name = binding.header().unwrap_or_default();
             self.unique(&mut seen, &name, &binding);
 
@@ -97,18 +98,14 @@ impl Compiler {
                 self.error("semantic.binding", "Invalid let identifier", &binding);
             }
 
-            let Some(value) = binding.child(Kind::Value) else {
+            let Some(value) = binding.value_node() else {
                 continue;
             };
-            let result = expression::parse_with_diagnostics(&expression_source(&value));
+            let result = self.expression_view(&value);
 
             match result {
-                Ok(initializer) => bindings.push(LocatedBinding {
-                    name,
-                    initializer,
-                    offset: value.range().start,
-                }),
-                Err(error) => self.expression_error(error, value.range().start),
+                Some(initializer) => bindings.push(BindingView { name, initializer }),
+                None => continue,
             }
         }
 
@@ -117,30 +114,84 @@ impl Compiler {
 
     fn css_template(
         &mut self,
-        node: &Ast,
+        node: &syn::Property,
         scope: &expression::Scope,
     ) -> Option<Vec<expression::TemplatePart>> {
-        let value = node.value().unwrap_or_default();
+        let value = node.value_text().unwrap_or_default();
         if !value.contains("${") {
             return None;
         }
-        let syntax = node.child(Kind::Value).unwrap();
-        let source = expression_source(&syntax);
+        let syntax = node.value_node().unwrap();
+        let mut parts = vec![];
+        let mut text = String::new();
 
-        if let Err(error) = expression::check_template(&source, scope) {
-            self.expression_error(error, syntax.range().start);
-            return None;
+        for element in syntax.syntax().children_with_tokens() {
+            if let Some(interpolation) = element
+                .as_node()
+                .filter(|n| n.kind() == Kind::Interpolation)
+            {
+                if !text.is_empty() {
+                    parts.push(expression::TemplatePart::Text(std::mem::take(&mut text)));
+                }
+                let expr = self.expression_view(interpolation)?;
+                match expr.check(scope).and_then(|value_type| {
+                    if value_type.is_scalar() {
+                        expr.to_output()
+                    } else {
+                        Err(expr.error("CSS templates require scalar values"))
+                    }
+                }) {
+                    Ok(output) => parts.push(expression::TemplatePart::Expression(output)),
+                    Err(error) => {
+                        self.expression_error(error);
+                        return None;
+                    }
+                }
+            } else if let Some(token) = element.as_token() {
+                if token.kind() == Kind::Trivia
+                    && (token.text().starts_with("/*") || token.text().starts_with("//"))
+                {
+                    text.push(' ');
+                } else {
+                    text.push_str(token.text());
+                }
+            } else {
+                text.push_str(&element.to_string());
+            }
         }
-
-        expression::template(&value).ok()
+        if !text.is_empty() {
+            parts.push(expression::TemplatePart::Text(text));
+        }
+        if let Some(expression::TemplatePart::Text(text)) = parts.first_mut() {
+            *text = text.trim_start().into();
+        }
+        if let Some(expression::TemplatePart::Text(text)) = parts.last_mut() {
+            *text = text.trim_end().into();
+        }
+        parts.retain(
+            |part| !matches!(part, expression::TemplatePart::Text(text) if text.is_empty()),
+        );
+        Some(parts)
     }
 
-    fn animation_declarations(&mut self, node: &Ast, path: &str) -> Option<Timing> {
+    fn expression_view(&self, node: &impl AstNode) -> Option<Expr> {
+        let range = node.range();
+        if self.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "semantic.expression"
+                && diagnostic.range.start >= range.start
+                && diagnostic.range.end <= range.end
+        }) {
+            return None;
+        }
+        from_container(node)
+    }
+
+    fn animation_declarations(&mut self, node: &impl HasItems, path: &str) -> Option<Timing> {
         let mut family = String::new();
         let mut args: BTreeMap<String, String> = BTreeMap::new();
         let mut call_timing = None;
 
-        for binding in node.children(Kind::Let) {
+        for binding in node.bindings() {
             self.error(
                 "semantic.structure",
                 "Let declarations belong directly to a motion",
@@ -148,7 +199,7 @@ impl Compiler {
             );
         }
 
-        for declaration in node.children(Kind::Declaration) {
+        for declaration in node.properties() {
             let name = declaration.header().unwrap_or_default();
             if name.ends_with('%') {
                 if !path.contains("/property/") {
@@ -165,13 +216,13 @@ impl Compiler {
                 args.clear();
                 self.mapping(
                     &format!("{path}/timing"),
-                    &declaration.child(Kind::Value).unwrap(),
+                    &declaration.value_node().unwrap(),
                     "value",
                 );
                 call_timing = self.timing(&declaration, &format!("{path}/timing"));
                 continue;
             }
-            let value = declaration.value().unwrap_or_default();
+            let value = declaration.value_text().unwrap_or_default();
             let (next_family, field) = if name == "@tween" {
                 ("tween", None)
             } else if name == "@spring" {
@@ -212,7 +263,7 @@ impl Compiler {
                 args.insert(field.into(), value);
                 self.mapping(
                     &format!("{path}/timing/{field}"),
-                    &declaration.child(Kind::Value).unwrap(),
+                    &declaration.value_node().unwrap(),
                     "value",
                 );
             } else if family == "tween" {
@@ -256,11 +307,20 @@ impl Compiler {
         let parsed = parse(&text);
         let declaration = parsed
             .root
-            .child(Kind::Block)?
-            .child(Kind::Block)?
-            .child(Kind::Declaration)?;
+            .child::<syn::Block>()?
+            .child::<syn::Block>()?
+            .child::<syn::Property>()?;
         let mut validator = Compiler {
-            diagnostics: parsed.diagnostics,
+            diagnostics: parsed
+                .diagnostics
+                .into_iter()
+                .map(|mut diagnostic| {
+                    if diagnostic.code == "syntax.expression" {
+                        diagnostic.code = "semantic.expression".into();
+                    }
+                    diagnostic
+                })
+                .collect(),
             mappings: BTreeMap::new(),
         };
         let timing = validator.timing(&declaration, "");
@@ -270,23 +330,20 @@ impl Compiler {
         timing
     }
 
-    fn error(&mut self, code: &str, message: impl Into<String>, node: &Ast) {
+    fn error(&mut self, code: &str, message: impl Into<String>, node: &impl AstNode) {
         self.diagnostics
             .push(Diagnostic::error(code, message, node.range()));
     }
 
-    fn expression_error(&mut self, error: expression::TypeError, offset: usize) {
-        let mut range = error.range.expect("parsed expressions have source ranges");
-        range.start += offset;
-        range.end += offset;
+    fn expression_error(&mut self, error: expression::TypeError) {
         self.diagnostics.push(Diagnostic::error(
             "semantic.expression",
             error.message,
-            range,
+            error.range,
         ));
     }
 
-    fn mapping(&mut self, path: &str, node: &Ast, kind: &str) {
+    fn mapping(&mut self, path: &str, node: &impl AstNode, kind: &str) {
         self.mappings.insert(
             path.into(),
             Mapping {
@@ -296,7 +353,7 @@ impl Compiler {
         );
     }
 
-    fn unique(&mut self, seen: &mut BTreeMap<String, Range>, name: &str, node: &Ast) {
+    fn unique(&mut self, seen: &mut BTreeMap<String, Range>, name: &str, node: &impl AstNode) {
         if let Some(previous) = seen.get(name) {
             let mut diagnostic = Diagnostic::error(
                 "semantic.duplicate",
@@ -312,15 +369,15 @@ impl Compiler {
 
     fn declarations(
         &mut self,
-        node: &Ast,
+        node: &impl HasItems,
         allowed: Option<&[&str]>,
         path: &str,
-    ) -> BTreeMap<String, Ast> {
+    ) -> BTreeMap<String, syn::Property> {
         let mut seen = BTreeMap::new();
         let mut declarations = BTreeMap::new();
 
         if path.is_empty() || path.contains('/') {
-            for binding in node.children(Kind::Let) {
+            for binding in node.bindings() {
                 self.error(
                     "semantic.structure",
                     "Let declarations belong directly to a motion",
@@ -329,7 +386,7 @@ impl Compiler {
             }
         }
 
-        for declaration in node.children(Kind::Declaration) {
+        for declaration in node.properties() {
             let name = declaration.header().unwrap_or_default();
             self.unique(&mut seen, &name, &declaration);
 
@@ -341,9 +398,9 @@ impl Compiler {
                 );
             }
 
-            if let Some(value) = declaration.child(Kind::Value) {
+            if let Some(value) = declaration.value_node() {
                 self.mapping(&format!("{path}/{name}"), &value, "value");
-                if semantic_text(&value.text()).is_empty() {
+                if value.semantic_text().is_empty() {
                     self.error("semantic.value", "Value must not be empty", &value);
                 }
             }
@@ -354,14 +411,14 @@ impl Compiler {
         declarations
     }
 
-    fn timing(&mut self, declaration: &Ast, path: &str) -> Option<Timing> {
-        let value = declaration.child(Kind::Value)?;
-        let Some(call) = value.child(Kind::Call) else {
+    fn timing(&mut self, declaration: &syn::Property, path: &str) -> Option<Timing> {
+        let value = declaration.value_node()?;
+        let Some(call) = value.timing_call() else {
             self.error("semantic.timing", "Expected a named timing call", &value);
             return None;
         };
         let remainder = value
-            .0
+            .syntax()
             .children_with_tokens()
             .filter(|n| n.as_node().is_none_or(|n| n.kind() != Kind::Call))
             .map(|n| n.to_string())
@@ -378,13 +435,13 @@ impl Compiler {
         let mut args = BTreeMap::new();
         let mut seen = BTreeMap::new();
 
-        for argument in call.children(Kind::Argument) {
+        for argument in call.arguments() {
             let key = argument.header().unwrap_or_default();
             self.unique(&mut seen, &key, &argument);
-            if let Some(value) = argument.child(Kind::Value) {
+            if let Some(value) = argument.value_node() {
                 self.mapping(&format!("{path}/{key}"), &value, "value");
             }
-            args.insert(key, argument.value().unwrap_or_default());
+            args.insert(key, argument.value_text().unwrap_or_default());
         }
 
         let duration_mode = args.contains_key("duration") || args.contains_key("bounce");
@@ -493,13 +550,13 @@ impl Compiler {
         }
     }
 
-    fn transition(&mut self, node: &Ast, path: &str) -> Transition {
+    fn transition(&mut self, node: &syn::Transition, path: &str) -> Transition {
         self.mapping(path, node, "block");
         let timing = self.animation_declarations(node, path);
         let mut targets = vec![];
         let mut seen = BTreeMap::new();
 
-        for target in node.children(Kind::Block) {
+        for target in node.targets() {
             let name = target.header().unwrap_or_default();
             self.unique(&mut seen, &name, &target);
             let target_path = format!("{path}/target/{name}");
@@ -508,7 +565,7 @@ impl Compiler {
             let mut properties = vec![];
             let mut property_names = BTreeMap::new();
 
-            for property in target.children(Kind::Block) {
+            for property in target.property_blocks() {
                 let name = property.header().unwrap_or_default();
                 self.unique(&mut property_names, &name, &property);
                 let property_path = format!("{target_path}/property/{name}");
@@ -517,7 +574,7 @@ impl Compiler {
                 let mut frames = vec![];
                 let mut offsets = BTreeMap::new();
 
-                for frame in property.children(Kind::Block) {
+                for frame in property.keyframes() {
                     let raw = frame.header().unwrap_or_default();
                     let offset = raw
                         .strip_suffix('%')
@@ -536,15 +593,18 @@ impl Compiler {
                     self.unique(&mut offsets, &offset.to_string(), &frame);
                     let frame_path = format!("{property_path}/frame/{offset}");
                     self.mapping(&frame_path, &frame, "block");
-                    if let Some(header) = frame.child(Kind::Header) {
+                    if let Some(header) = frame.header_node() {
                         self.mapping(&format!("{frame_path}/offset"), &header, "value");
                     }
                     let fields = self.declarations(&frame, Some(&["value", "easing"]), &frame_path);
-                    let value = fields.get("value").and_then(Ast::value).unwrap_or_else(|| {
-                        self.error("semantic.frame", "Frame requires value", &frame);
-                        String::new()
-                    });
-                    let easing = fields.get("easing").and_then(Ast::value);
+                    let value = fields
+                        .get("value")
+                        .and_then(HasValue::value_text)
+                        .unwrap_or_else(|| {
+                            self.error("semantic.frame", "Frame requires value", &frame);
+                            String::new()
+                        });
+                    let easing = fields.get("easing").and_then(HasValue::value_text);
                     frames.push(Frame {
                         offset,
                         value,
@@ -553,7 +613,7 @@ impl Compiler {
                 }
 
                 for frame in property
-                    .children(Kind::Declaration)
+                    .properties()
                     .filter(|n| n.header().is_some_and(|h| h.ends_with('%')))
                 {
                     let raw = frame.header().unwrap();
@@ -572,10 +632,10 @@ impl Compiler {
                     self.mapping(&frame_path, &frame, "block");
                     self.mapping(
                         &format!("{frame_path}/offset"),
-                        &frame.child(Kind::Header).unwrap(),
+                        &frame.header_node().unwrap(),
                         "value",
                     );
-                    let raw = frame.value().unwrap_or_default();
+                    let raw = frame.value_text().unwrap_or_default();
                     let (value, easing) = split_frame(&raw);
                     if value.is_empty() || easing.is_some_and(str::is_empty) {
                         self.error(
@@ -584,7 +644,7 @@ impl Compiler {
                             &frame,
                         );
                     }
-                    let value_node = frame.child(Kind::Value).unwrap();
+                    let value_node = frame.value_node().unwrap();
                     let text = value_node.text();
                     let leading = text.len() - text.trim_start().len();
                     let base = value_node.range().start + leading;
@@ -644,9 +704,9 @@ impl Compiler {
 
     fn motion_scope(
         &mut self,
-        node: &Ast,
+        node: &syn::Motion,
         parameters: &[MotionParameter],
-        bindings: &[LocatedBinding],
+        bindings: &[BindingView],
     ) -> expression::Scope {
         use expression::Type;
         let mut scope = expression::Scope::new();
@@ -662,12 +722,8 @@ impl Compiler {
 
         let mut targets = BTreeMap::new();
 
-        for state in node.children(Kind::Block).filter(|block| {
-            block
-                .header()
-                .is_some_and(|header| header.split_whitespace().next() == Some("state"))
-        }) {
-            for target in state.children(Kind::Block) {
+        for state in node.states() {
+            for target in state.targets() {
                 targets
                     .entry(target.header().unwrap_or_default())
                     .or_insert(target);
@@ -705,7 +761,7 @@ impl Compiler {
         let initial_scope = scope.clone();
         let by_name: BTreeMap<_, _> = bindings
             .iter()
-            .map(|binding| (binding.name.clone(), (&binding.initializer, binding.offset)))
+            .map(|binding| (binding.name.clone(), &binding.initializer))
             .collect();
 
         for binding in bindings {
@@ -717,19 +773,19 @@ impl Compiler {
             if let Err(error) = infer_let_type(name, &by_name, &mut scope, &mut BTreeSet::new())
                 && !self.diagnostics.iter().any(|diagnostic| {
                     diagnostic.code == "semantic.expression"
-                        && Some(&diagnostic.range) == error.range.as_ref()
+                        && diagnostic.range == error.range
                         && diagnostic.message == error.message
                 })
             {
-                self.expression_error(error, 0);
+                self.expression_error(error);
             }
         }
 
         scope
     }
 
-    fn definition(&mut self, node: &Ast) -> Definition {
-        let name = node.motion_name().unwrap_or_default();
+    fn definition(&mut self, node: &syn::Motion) -> Definition {
+        let name = node.name().unwrap_or_default();
         self.mapping(&name, node, "block");
         self.declarations(node, Some(&[]), &name);
         let bindings = self.let_bindings(node);
@@ -741,7 +797,10 @@ impl Compiler {
                 .into_iter()
                 .map(|binding| LetBinding {
                     name: binding.name,
-                    initializer: binding.initializer,
+                    initializer: binding
+                        .initializer
+                        .to_output()
+                        .expect("syntax-checked initializer"),
                 })
                 .collect(),
             parameters,
@@ -754,26 +813,24 @@ impl Compiler {
         let mut fallback_count = 0;
         let mut transitions = BTreeMap::new();
 
-        for child in node.children(Kind::Block) {
-            let header = child.header().unwrap_or_default();
-            let words: Vec<_> = header.split_whitespace().collect();
-
-            match words.as_slice() {
-                ["state", state_name, ..] => {
-                    self.unique(&mut states, state_name, &child);
+        for item in node.items() {
+            match item {
+                syn::MotionItem::State(state) => {
+                    let state_name = state.name().unwrap();
+                    self.unique(&mut states, &state_name, &state);
                     let state_path = format!("{name}/state/{state_name}");
-                    self.mapping(&state_path, &child, "block");
-                    self.declarations(&child, Some(&[]), &state_path);
+                    self.mapping(&state_path, &state, "block");
+                    self.declarations(&state, Some(&[]), &state_path);
                     let mut targets = vec![];
                     let mut target_names = BTreeMap::new();
 
-                    for target in child.children(Kind::Block) {
+                    for target in state.targets() {
                         let target_name = target.header().unwrap_or_default();
                         self.unique(&mut target_names, &target_name, &target);
                         let target_path = format!("{state_path}/target/{target_name}");
                         self.mapping(&target_path, &target, "block");
                         self.declarations(&target, None, &target_path);
-                        if target.children(Kind::Block).next().is_some() {
+                        if target.blocks().next().is_some() {
                             self.error(
                                 "semantic.structure",
                                 "State targets contain declarations only",
@@ -781,11 +838,11 @@ impl Compiler {
                             );
                         }
                         let properties = target
-                            .children(Kind::Declaration)
+                            .properties()
                             .map(|p| Property {
                                 name: p.header().unwrap_or_default(),
                                 template: self.css_template(&p, &scope),
-                                value: p.value().unwrap_or_default(),
+                                value: p.value_text().unwrap_or_default(),
                             })
                             .collect();
                         targets.push(Target {
@@ -794,67 +851,62 @@ impl Compiler {
                         });
                     }
 
-                    let header_node = child.child(Kind::Header).unwrap();
-                    let header_source = expression_source(&header_node);
-                    let condition = header_source
-                        .trim_start()
-                        .strip_prefix("state")
-                        .and_then(|text| text.trim_start().strip_prefix(state_name))
-                        .and_then(|text| text.trim_start().strip_prefix("when"));
+                    let condition = state.condition();
                     if condition.is_none() {
                         fallback_count += 1;
                     }
-
-                    let when = condition.and_then(|text| {
-                        let offset = header_node.range().start + header_source.len() - text.len();
-                        let parsed = match expression::parse_with_diagnostics(text) {
-                            Ok(parsed) => parsed,
-                            Err(error) => {
-                                self.expression_error(error, offset);
-                                return None;
-                            }
-                        };
-                        let checked = parsed.check(&scope).and_then(|value_type| {
+                    let when = condition.and_then(|condition| {
+                        let parsed = self.expression_view(&condition)?;
+                        match parsed.check(&scope).and_then(|value_type| {
                             if value_type == expression::Type::Boolean {
-                                Ok(())
+                                parsed.to_output()
                             } else {
                                 Err(parsed.error("State condition must be Boolean"))
                             }
-                        });
-
-                        match checked {
-                            Ok(()) => Some(parsed),
+                        }) {
+                            Ok(expr) => Some(expr),
                             Err(error) => {
-                                self.expression_error(error, offset);
+                                self.expression_error(error);
                                 None
                             }
                         }
                     });
                     definition.states.push(State {
                         when,
-                        name: (*state_name).into(),
+                        name: state_name,
                         targets,
                     });
                 }
-                ["transition"] => {
-                    self.unique(&mut transitions, "general", &child);
-                    definition.general_transition =
-                        Some(self.transition(&child, &format!("{name}/transition/general")));
+                syn::MotionItem::Transition(transition) => match transition.selector() {
+                    Some(syn::TransitionSelector::General) => {
+                        self.unique(&mut transitions, "general", &transition);
+                        definition.general_transition = Some(
+                            self.transition(&transition, &format!("{name}/transition/general")),
+                        );
+                    }
+                    Some(syn::TransitionSelector::Directional { from, to }) => {
+                        self.unique(&mut transitions, &format!("{from}/{to}"), &transition);
+                        let value = self.transition(
+                            &transition,
+                            &format!("{name}/transition/directional/{from}/{to}"),
+                        );
+                        definition
+                            .directional_transitions
+                            .push(DirectionalTransition {
+                                from,
+                                to,
+                                transition: value,
+                            });
+                    }
+                    None => self.error(
+                        "semantic.structure",
+                        "Expected state or transition",
+                        &transition,
+                    ),
+                },
+                syn::MotionItem::Invalid(block) => {
+                    self.error("semantic.structure", "Expected state or transition", &block)
                 }
-                ["transition", from, "->", to] => {
-                    self.unique(&mut transitions, &format!("{from}/{to}"), &child);
-                    definition
-                        .directional_transitions
-                        .push(DirectionalTransition {
-                            from: (*from).into(),
-                            to: (*to).into(),
-                            transition: self.transition(
-                                &child,
-                                &format!("{name}/transition/directional/{from}/{to}"),
-                            ),
-                        });
-                }
-                _ => self.error("semantic.structure", "Expected state or transition", &child),
             }
         }
 
@@ -892,7 +944,7 @@ impl Compiler {
         definition
     }
 
-    fn validate(&mut self, def: &Definition, node: &Ast) {
+    fn validate(&mut self, def: &Definition, node: &syn::Motion) {
         if def.states.is_empty() {
             self.error(
                 "semantic.states",
@@ -1022,9 +1074,9 @@ impl Compiler {
     }
 }
 
-// Replace comments byte-for-byte so expression offsets still address the original source.
-fn expression_source(node: &Ast) -> String {
-    node.0
+// Preserve byte positions when locating a type annotation inside surrounding comments.
+fn type_annotation_source(node: &impl AstNode) -> String {
+    node.syntax()
         .descendants_with_tokens()
         .filter_map(|element| element.into_token())
         .map(|token| {
@@ -1048,7 +1100,7 @@ fn expression_source(node: &Ast) -> String {
 
 fn infer_let_type(
     name: &str,
-    bindings: &BTreeMap<String, (&expression::Expression, usize)>,
+    bindings: &BTreeMap<String, &Expr>,
     scope: &mut expression::Scope,
     visiting: &mut BTreeSet<String>,
 ) -> Result<expression::Type, expression::TypeError> {
@@ -1057,30 +1109,23 @@ fn infer_let_type(
     }
 
     visiting.insert(name.into());
-    let (binding, offset) = &bindings[name];
-    let absolute = |mut error: expression::TypeError| {
-        if let Some(range) = &mut error.range {
-            range.start += offset;
-            range.end += offset;
-        }
-        error
-    };
+    let binding = bindings[name];
     let result = (|| {
         for (dependency, range) in binding.dependencies() {
             if !bindings.contains_key(&dependency) || scope.contains_key(&dependency) {
                 continue;
             }
             if visiting.contains(&dependency) {
-                return Err(absolute(expression::TypeError {
+                return Err(expression::TypeError {
                     message: format!("Cyclic let binding dependency: {dependency}"),
                     range,
-                }));
+                });
             }
 
             infer_let_type(&dependency, bindings, scope, visiting)?;
         }
 
-        let value_type = binding.check(scope).map_err(absolute)?;
+        let value_type = binding.check(scope)?;
         scope.insert(name.into(), value_type);
         Ok(value_type)
     })();
@@ -1092,7 +1137,16 @@ fn infer_let_type(
 pub fn compile(source: &str, development: bool) -> Compilation {
     let parsed = parse(source);
     let mut compiler = Compiler {
-        diagnostics: parsed.diagnostics,
+        diagnostics: parsed
+            .diagnostics
+            .into_iter()
+            .map(|mut diagnostic| {
+                if diagnostic.code == "syntax.expression" {
+                    diagnostic.code = "semantic.expression".into();
+                }
+                diagnostic
+            })
+            .collect(),
         mappings: BTreeMap::new(),
     };
     let mut definitions = vec![];
@@ -1100,8 +1154,8 @@ pub fn compile(source: &str, development: bool) -> Compilation {
     let mut duplicates = BTreeSet::new();
     compiler.declarations(&parsed.root, Some(&[]), "");
 
-    for node in parsed.root.children(Kind::Block) {
-        let name = node.motion_name().unwrap_or_default();
+    for node in parsed.root.motions() {
+        let name = node.name().unwrap_or_default();
         if seen.contains_key(&name) {
             duplicates.insert(name.clone());
         }

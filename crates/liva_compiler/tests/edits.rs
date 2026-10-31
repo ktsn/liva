@@ -350,3 +350,55 @@ fn track_formatting_does_not_indent_inside_opaque_values() {
         );
     }
 }
+
+#[test]
+fn track_edits_preserve_surrounding_source() {
+    use liva_compiler::edits::{Edit, FrameEdit, apply_edits};
+    let source = include_str!("../../../fixtures/reactive-toggle.liv").replace('\n', "\r\n");
+    let path = "toggle/transition/general/target/thumb/property/scale";
+    let result = apply_edits(
+        &source,
+        &[Edit::Track {
+            path: path.into(),
+            timing: Some("@tween: 200ms ease-in".into()),
+            frames: Some(vec![FrameEdit {
+                offset: 0.5,
+                value: "1.2 1".into(),
+                easing: Some("steps(2, end)".into()),
+            }]),
+        }],
+    )
+    .unwrap();
+    let old = liva_compiler::compile(&source, true).mappings.unwrap()[path]
+        .range
+        .clone();
+    let new = result.compilation.mappings.unwrap()[path].range.clone();
+
+    assert_eq!(&source[..old.start], &result.source[..new.start]);
+    assert_eq!(&source[old.end..], &result.source[new.end..]);
+    assert!(result.source.contains("50%: 1.2 1 @ steps(2, end)"));
+}
+
+#[test]
+fn inline_frame_field_edits_preserve_comments_or_reject() {
+    use liva_compiler::edits::{Edit, apply_edits};
+    let source = include_str!("../../../fixtures/reactive-toggle.liv");
+    let path = "toggle/transition/general/target/thumb/property/scale/frame/0.4/value";
+    let edit = Edit::Set {
+        path: path.into(),
+        value: "1.5 1".into(),
+    };
+    let result = apply_edits(source, &[edit]).unwrap();
+    assert_eq!(result.source, source.replacen("1.3 1", "1.5 1", 1));
+
+    let source = source.replace("40%: 1.3 1", "40%: /* 😀 preserve */ 1.3 1");
+    let edit = Edit::Set {
+        path: path.into(),
+        value: "1.5 1".into(),
+    };
+    assert!(
+        apply_edits(&source, &[edit])
+            .unwrap_err()
+            .contains("comments")
+    );
+}

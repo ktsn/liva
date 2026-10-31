@@ -260,3 +260,21 @@ fn invalid_conditions_do_not_create_whole_motion_fallback_errors() {
         assert!(result.diagnostics[0].range.end <= start + condition.len());
     }
 }
+
+#[test]
+fn identifier_unit_escape_and_subtraction_errors_use_local_ranges() {
+    for (expression, message) in [
+        ("«not-defined»()", "Unknown function"),
+        (r#"«"\41"»"#, "Unsupported string escape"),
+        ("«20px»", "Unsupported expression token"),
+        ("10 «-»2", "Subtraction requires whitespace"),
+        ("10«-» 2", "Subtraction requires whitespace"),
+    ] {
+        for body in [
+            format!("let value = {expression}; state idle {{}}"),
+            format!("state idle {{ body {{ content: ${{{expression}}} }} }}"),
+        ] {
+            assert_error(&format!("motion a {{ /* 😀 */ {body} }}"), message);
+        }
+    }
+}

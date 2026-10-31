@@ -1,6 +1,8 @@
 //! Editor-facing type information, using the compiler's motion scope and checker.
 use crate::{Compiler, expression};
-use liva_syntax::{Ast, Kind, Range, parse};
+use liva_syntax::ast::expression::{Expr, ExprView};
+use liva_syntax::ast::{AstNode, HasHeader, HasItems, HasValue};
+use liva_syntax::{Range, parse};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone)]
@@ -31,13 +33,22 @@ pub fn type_name(value: expression::Type) -> String {
 pub fn hovers(source: &str) -> Vec<Hover> {
     let parsed = parse(source);
     let mut compiler = Compiler {
-        diagnostics: vec![],
+        diagnostics: parsed
+            .diagnostics
+            .into_iter()
+            .map(|mut diagnostic| {
+                if diagnostic.code == "syntax.expression" {
+                    diagnostic.code = "semantic.expression".into();
+                }
+                diagnostic
+            })
+            .collect(),
         mappings: BTreeMap::new(),
     };
     let mut result = vec![];
 
-    for motion in parsed.root.children(Kind::Block) {
-        if motion.motion_name().is_none() {
+    for motion in parsed.root.motions() {
+        if motion.name().is_none() {
             continue;
         }
 
@@ -46,47 +57,33 @@ pub fn hovers(source: &str) -> Vec<Hover> {
         let scope = compiler.motion_scope(&motion, &parameters, &bindings);
 
         for parameter in motion.parameters() {
-            if let Some(header) = parameter.child(Kind::Header) {
+            if let Some(header) = parameter.header_node() {
                 scan(&header.text(), header.range().start, &scope, &mut result);
             }
         }
 
-        for binding in motion.children(Kind::Let) {
-            for kind in [Kind::Header, Kind::Value] {
-                if let Some(node) = binding.child(kind) {
-                    scan(&node.text(), node.range().start, &scope, &mut result);
-                }
+        for binding in motion.bindings() {
+            if let Some(header) = binding.header_node() {
+                scan(&header.text(), header.range().start, &scope, &mut result);
+            }
+            if let Some(value) = binding.value_node() {
+                expression_hovers(&value, &scope, &mut result);
             }
         }
 
-        for state in motion.children(Kind::Block) {
-            let Some(header) = state.child(Kind::Header) else {
-                continue;
-            };
-            let text = header.text();
-            let words = words(&text);
-
-            if words.first().map(|(word, _)| *word) != Some("state") {
-                continue;
+        for state in motion.states() {
+            if let Some(condition) = state.condition() {
+                expression_hovers(&condition, &scope, &mut result);
             }
 
-            if let Some((_, start)) = words.iter().find(|(word, _)| *word == "when") {
-                scan(
-                    &text[start + 4..],
-                    header.range().start + start + 4,
-                    &scope,
-                    &mut result,
-                );
-            }
-
-            for target in state.children(Kind::Block) {
-                if let Some(header) = target.child(Kind::Header) {
+            for target in state.targets() {
+                if let Some(header) = target.header_node() {
                     scan(&header.text(), header.range().start, &scope, &mut result);
                 }
 
-                for property in target.children(Kind::Declaration) {
-                    if let Some(value) = property.child(Kind::Value) {
-                        interpolations(&value, &scope, &mut result);
+                for property in target.properties() {
+                    if let Some(value) = property.value_node() {
+                        expression_hovers(&value, &scope, &mut result);
                     }
                 }
             }
@@ -127,7 +124,8 @@ fn words(text: &str) -> Vec<(&str, usize)> {
             i += 1;
 
             while i < text.len()
-                && (text.as_bytes()[i].is_ascii_alphanumeric() || text.as_bytes()[i] == b'_')
+                && (text.as_bytes()[i].is_ascii_alphanumeric()
+                    || matches!(text.as_bytes()[i], b'_' | b'-'))
             {
                 i += 1;
             }
@@ -142,39 +140,11 @@ fn words(text: &str) -> Vec<(&str, usize)> {
 }
 
 fn scan(text: &str, base: usize, scope: &expression::Scope, result: &mut Vec<Hover>) {
-    let mut path = String::new();
-    let mut previous_end = 0;
-
     for (word, start) in words(text) {
-        if !path.is_empty() && text[previous_end..start].trim() == "." {
-            path.push('.');
-            path.push_str(word);
-        } else {
-            path = word.into();
-        }
-
-        previous_end = start + word.len();
-        let value_type =
-            expression::parse_with_diagnostics(&path).and_then(|value| value.check(scope));
-        let label = if let Ok(value_type) = value_type {
-            Some(format!("{path}: {}", type_name(value_type)))
-        } else if text[previous_end..].trim_start().starts_with('(') {
-            crate::builtins::lookup(word).ok().map(|function| {
-                format!(
-                    "{}({}): {}",
-                    function.name,
-                    function
-                        .parameters
-                        .iter()
-                        .map(|p| format!("{}: {}", p.name, type_name(p.value_type)))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    type_name(function.return_type)
-                )
-            })
-        } else {
-            None
-        };
+        let previous_end = start + word.len();
+        let label = scope
+            .get(word)
+            .map(|value_type| format!("{word}: {}", type_name(*value_type)));
 
         if let Some(label) = label {
             result.push(Hover {
@@ -188,25 +158,62 @@ fn scan(text: &str, base: usize, scope: &expression::Scope, result: &mut Vec<Hov
     }
 }
 
-fn interpolations(node: &Ast, scope: &expression::Scope, result: &mut Vec<Hover>) {
-    // The lossless lexer keeps each interpolation in a single text token.
-    for token in node
-        .0
-        .descendants_with_tokens()
-        .filter_map(|element| element.into_token())
-    {
-        let text = token.text();
+fn expression_hovers(node: &impl AstNode, scope: &expression::Scope, result: &mut Vec<Hover>) {
+    for expr in node.syntax().descendants().filter_map(Expr::cast) {
+        match expr.view() {
+            ExprView::Reference => {
+                let mut names = expr.names();
+                let Some(first) = names.next() else {
+                    continue;
+                };
+                let mut path = first.text();
+                let Some(mut value_type) = scope.get(&path).copied() else {
+                    continue;
+                };
+                result.push(Hover {
+                    range: first.range(),
+                    label: format!("{path}: {}", type_name(value_type)),
+                });
 
-        if let Some(expression) = text
-            .strip_prefix("${")
-            .and_then(|text| text.strip_suffix('}'))
-        {
-            scan(
-                expression,
-                u32::from(token.text_range().start()) as usize + 2,
-                scope,
-                result,
-            );
+                for name in names {
+                    let expression::Type::Record(fields) = value_type else {
+                        break;
+                    };
+                    let Some(field) = fields.iter().find(|field| field.name == name.text()) else {
+                        break;
+                    };
+                    value_type = field.value_type;
+                    path.push('.');
+                    path.push_str(&name.text());
+                    result.push(Hover {
+                        range: name.range(),
+                        label: format!("{path}: {}", type_name(value_type)),
+                    });
+                }
+            }
+            ExprView::Call => {
+                let Some(name) = expr.function() else {
+                    continue;
+                };
+                let Ok(function) = crate::builtins::lookup(&name.text()) else {
+                    continue;
+                };
+                result.push(Hover {
+                    range: name.range(),
+                    label: format!(
+                        "{}({}): {}",
+                        function.name,
+                        function
+                            .parameters
+                            .iter()
+                            .map(|p| format!("{}: {}", p.name, type_name(p.value_type)))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        type_name(function.return_type)
+                    ),
+                });
+            }
+            _ => {}
         }
     }
 }

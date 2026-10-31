@@ -1,4 +1,5 @@
 use crate::{Compilation, Mapping, compile};
+use liva_syntax::ast::{AstNode, HasItems, HasValue};
 use liva_syntax::{is_name, is_property, semantic_text};
 use serde::{Deserialize, Serialize};
 
@@ -197,16 +198,13 @@ fn replace_track(
     let safe_value = |value: &str| -> Result<(), String> {
         preserve_comments(value)?;
         let parsed = liva_syntax::parse(&format!("motion t {{ value: {value}\n}}"));
-        let block = parsed
-            .root
-            .child(liva_syntax::Kind::Block)
-            .ok_or("Invalid field value")?;
-        let fields: Vec<_> = block.children(liva_syntax::Kind::Declaration).collect();
+        let block = parsed.root.motions().next().ok_or("Invalid field value")?;
+        let fields: Vec<_> = block.properties().collect();
         if !parsed.diagnostics.is_empty()
-            || parsed.root.0.children().count() != 1
-            || block.children(liva_syntax::Kind::Block).next().is_some()
+            || parsed.root.syntax().children().count() != 1
+            || block.blocks().next().is_some()
             || fields.len() != 1
-            || fields[0].value().as_deref() != Some(semantic_text(value).as_str())
+            || fields[0].value_text().as_deref() != Some(semantic_text(value).as_str())
             || semantic_text(value).is_empty()
         {
             return Err("Track fields must contain exactly one value".into());
