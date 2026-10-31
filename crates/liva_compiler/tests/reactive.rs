@@ -400,27 +400,32 @@ fn let_initializers_use_function_calls_and_builtin_signatures() {
             "{call}: {}",
             diagnostic.message
         );
-        assert!(source[diagnostic.range.start..diagnostic.range.end].starts_with("let movement"));
     }
 }
 
 #[test]
 fn calls_parse_without_resolving_function_names() {
-    use liva_compiler::expression::{Expression, parse};
+    use liva_compiler::expression::{ExpressionKind, parse};
 
     let expression = parse("custom(value: 1 + 2, nested: other(flag: true),)").unwrap();
-    let Expression::Call {
+    let ExpressionKind::Call {
         function,
         arguments,
-    } = expression
+    } = expression.kind
     else {
         panic!("Expected a call")
     };
 
-    assert_eq!(function, "custom");
+    assert_eq!(function.text, "custom");
     assert_eq!(arguments.len(), 2);
-    assert!(matches!(arguments[0].value, Expression::Binary { .. }));
-    assert!(matches!(arguments[1].value, Expression::Call { .. }));
+    assert!(matches!(
+        arguments[0].value.kind,
+        ExpressionKind::Binary { .. }
+    ));
+    assert!(matches!(
+        arguments[1].value.kind,
+        ExpressionKind::Call { .. }
+    ));
 
     for text in [
         "custom(1)",

@@ -90,7 +90,11 @@ fn lifecycle_unsaved_changes_hover_diagnostics_and_close() {
             .iter()
             .any(
                 |error| error["message"] == "Incompatible expression operands"
-                    && error["range"]["start"]["line"] == 1
+                    && error["range"]
+                        == json!({
+                            "start": { "line": 1, "character": 21 },
+                            "end": { "line": 1, "character": 25 },
+                        })
             )
     );
 
@@ -185,4 +189,54 @@ fn utf16_positions_validate_boundaries_and_crlf() {
         ),
         Some(text.len())
     );
+}
+
+#[test]
+fn diagnostic_ranges_map_to_utf16_in_liva_and_vue() {
+    let (server, client) = Connection::memory();
+    let worker = thread::spawn(move || liva_lsp::run(server).unwrap());
+    request(&client, 1, "initialize", json!({ "capabilities": {} }));
+    notify(&client, "initialized", json!({}));
+
+    for (uri, text, expected) in [
+        (
+            "file:///range.liv",
+            "motion a {\r\n let value = /* 日本😀 */ 1 + true;\r\n state idle {}\r\n}",
+            json!({ "start": { "line": 1, "character": 28 }, "end": { "line": 1, "character": 32 } }),
+        ),
+        (
+            "file:///range.vue",
+            "<template>😀</template>\r\n<liva lang=\"liva\">\r\nmotion a {\r\n let value = /* 日本😀 */ 1 + true;\r\n state idle {}\r\n}\r\n</liva>",
+            json!({ "start": { "line": 3, "character": 28 }, "end": { "line": 3, "character": 32 } }),
+        ),
+        (
+            "file:///inline.vue",
+            "<template>😀</template><liva lang=\"liva\">motion a { let value = 1 + true; state idle {} }</liva>",
+            json!({ "start": { "line": 0, "character": 68 }, "end": { "line": 0, "character": 72 } }),
+        ),
+        (
+            "file:///multiline.liv",
+            "motion a {\n let value = drag(target: (1 +\n 2));\n state idle { body { opacity: 1 } }\n}",
+            json!({ "start": { "line": 1, "character": 26 }, "end": { "line": 2, "character": 3 } }),
+        ),
+    ] {
+        notify(
+            &client,
+            "textDocument/didOpen",
+            json!({ "textDocument": {
+            "uri": uri, "languageId": if uri.ends_with(".vue") { "vue" } else { "liva" }, "version": 1, "text": text,
+        } }),
+        );
+        let result = diagnostics(&client);
+        let errors = result["diagnostics"].as_array().unwrap();
+
+        assert_eq!(errors.len(), 1, "{uri}: {result}");
+        assert_eq!(errors[0]["range"], expected, "{uri}");
+        assert_eq!(errors[0]["severity"], 1);
+        assert_eq!(errors[0]["code"], "semantic.expression");
+    }
+
+    request(&client, 2, "shutdown", Value::Null);
+    notify(&client, "exit", Value::Null);
+    worker.join().unwrap();
 }

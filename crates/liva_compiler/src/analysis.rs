@@ -1,5 +1,5 @@
 //! Editor-facing type information, using the compiler's motion scope and checker.
-use crate::{Compiler, expression, ir::Definition};
+use crate::{Compiler, expression};
 use liva_syntax::{Ast, Kind, Range, parse};
 use std::collections::BTreeMap;
 
@@ -41,15 +41,9 @@ pub fn hovers(source: &str) -> Vec<Hover> {
             continue;
         }
 
-        let definition = Definition {
-            name: motion.motion_name().unwrap(),
-            parameters: compiler.parameters(&motion),
-            let_bindings: compiler.let_bindings(&motion),
-            states: vec![],
-            general_transition: None,
-            directional_transitions: vec![],
-        };
-        let scope = compiler.motion_scope(&motion, &definition);
+        let parameters = compiler.parameters(&motion);
+        let bindings = compiler.let_bindings(&motion);
+        let scope = compiler.motion_scope(&motion, &parameters, &bindings);
 
         for parameter in motion.parameters() {
             if let Some(header) = parameter.child(Kind::Header) {
@@ -161,7 +155,7 @@ fn scan(text: &str, base: usize, scope: &expression::Scope, result: &mut Vec<Hov
 
         previous_end = start + word.len();
         let value_type =
-            expression::parse(&path).and_then(|value| expression::check(&value, scope));
+            expression::parse_with_diagnostics(&path).and_then(|value| value.check(scope));
         let label = if let Ok(value_type) = value_type {
             Some(format!("{path}: {}", type_name(value_type)))
         } else if text[previous_end..].trim_start().starts_with('(') {
