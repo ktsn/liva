@@ -1,10 +1,32 @@
-import type { MotionParameter, Source } from './definition.ts'
-import type { DragValue, SourceValues } from './expression.ts'
+import type { Definition, MotionParameter, Source } from './definition.ts'
+import { invokeSource, type RuntimeSource } from './builtins/index.ts'
+import type { SourceValues } from './expression.ts'
 
-export function initialSources(sources: readonly Source[]): Record<string, DragValue> {
-  return Object.fromEntries(
-    sources.map((source) => [source.name, { active: false, offset: { x: 0, y: 0 } }]),
+export function targetValues(definition: Definition, previous: SourceValues = {}): SourceValues {
+  const names = new Set(
+    definition.states.flatMap((state) => state.targets.map((target) => target.name)),
   )
+
+  return Object.fromEntries(
+    [...names].map((name) => {
+      const retained = Object.hasOwn(previous, name) ? previous[name] : undefined
+      const value =
+        typeof retained === 'object' && retained.name === name ? retained : Object.freeze({ name })
+
+      return [name, value]
+    }),
+  )
+}
+
+export function createSources(
+  sources: readonly Source[],
+  values: SourceValues,
+): ReadonlyMap<string, RuntimeSource> {
+  return new Map(sources.map((source) => [source.name, invokeSource(source.initializer, values)]))
+}
+
+export function sourceValues(sources: ReadonlyMap<string, RuntimeSource>): SourceValues {
+  return Object.fromEntries([...sources].map(([name, source]) => [name, source.value]))
 }
 
 export function parameterValues(
@@ -40,56 +62,4 @@ export function parameterValues(
   }
 
   return next
-}
-
-export function bindDrag(element: HTMLElement, update: (value: DragValue) => void): () => void {
-  let pointer: number | undefined
-  let origin = { x: 0, y: 0 }
-  let offset = { x: 0, y: 0 }
-
-  const finish = (event?: PointerEvent) => {
-    if (pointer === undefined || (event && event.pointerId !== pointer)) return
-    const captured = pointer
-    pointer = undefined
-    if (element.hasPointerCapture(captured)) element.releasePointerCapture(captured)
-    update({ active: false, offset })
-  }
-
-  const down = (event: PointerEvent) => {
-    if (pointer !== undefined || !event.isPrimary || event.button !== 0) return
-    element.setPointerCapture(event.pointerId)
-    pointer = event.pointerId
-    origin = { x: event.clientX, y: event.clientY }
-    offset = { x: 0, y: 0 }
-    update({ active: true, offset })
-  }
-
-  const move = (event: PointerEvent) => {
-    if (event.pointerId !== pointer) return
-    offset = { x: event.clientX - origin.x, y: event.clientY - origin.y }
-    update({ active: true, offset })
-  }
-
-  const up = (event: PointerEvent) => {
-    if (event.pointerId !== pointer) return
-    move(event)
-    finish(event)
-  }
-
-  element.addEventListener('pointerdown', down)
-  element.addEventListener('pointermove', move)
-  element.addEventListener('pointerup', up)
-  element.addEventListener('pointercancel', finish)
-  element.addEventListener('lostpointercapture', finish)
-
-  return () => {
-    element.removeEventListener('pointerdown', down)
-    element.removeEventListener('pointermove', move)
-    element.removeEventListener('pointerup', up)
-    element.removeEventListener('pointercancel', finish)
-    element.removeEventListener('lostpointercapture', finish)
-    if (pointer !== undefined && element.hasPointerCapture(pointer))
-      element.releasePointerCapture(pointer)
-    pointer = undefined
-  }
 }

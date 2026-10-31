@@ -16,7 +16,14 @@ export interface Frame {
   readonly easing?: string
 }
 
+export interface CallExpression {
+  readonly kind: 'call'
+  readonly function: string
+  readonly arguments: readonly { readonly name: string; readonly value: Expression }[]
+}
+
 export type Expression =
+  | CallExpression
   | { readonly kind: 'number'; readonly value: number }
   | { readonly kind: 'boolean'; readonly value: boolean }
   | { readonly kind: 'string'; readonly value: string }
@@ -34,7 +41,10 @@ export interface MotionParameter {
   readonly type: 'number' | 'boolean' | 'string'
 }
 
-export type Source = { readonly kind: 'drag'; readonly name: string; readonly target: string }
+export interface Source {
+  readonly name: string
+  readonly initializer: CallExpression
+}
 
 export interface Property {
   readonly template?: readonly (string | Expression)[]

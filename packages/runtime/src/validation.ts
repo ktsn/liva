@@ -76,6 +76,17 @@ function isExpression(value: unknown, depth = 0): value is Expression {
   if (!isRecord(value) || depth > 256) return false
 
   switch (value.kind) {
+    case 'call':
+      return (
+        typeof value.function === 'string' &&
+        Array.isArray(value.arguments) &&
+        value.arguments.every(
+          (argument: unknown) =>
+            isRecord(argument) &&
+            typeof argument.name === 'string' &&
+            isExpression(argument.value, depth + 1),
+        )
+      )
     case 'number':
       return typeof value.value === 'number' && Number.isFinite(value.value)
     case 'boolean':
@@ -126,8 +137,8 @@ function isSource(value: unknown): value is Source {
   return (
     isRecord(value) &&
     typeof value.name === 'string' &&
-    value.kind === 'drag' &&
-    typeof value.target === 'string'
+    isExpression(value.initializer) &&
+    value.initializer.kind === 'call'
   )
 }
 

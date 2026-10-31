@@ -5,6 +5,7 @@ import toggleFixture from '../../fixtures/reactive-toggle.json' with { type: 'js
 declare global {
   interface Window {
     dragScale: Animation
+    sourceInstances: import('../../packages/runtime/src/instance.ts').LivaInstance[]
   }
 }
 
@@ -446,4 +447,65 @@ test('missing parameters reject creation, updates and incompatible replacements 
   expect(result.diagnostics).toEqual(['Error: Missing motion parameter: checked'])
   expect(result.retained).toEqual({ definition: true, state: 'on', selected: 'on', effects: true })
   expect(result.recovered).toBe('off')
+})
+
+test('built-in sources keep instance-local values across definition replacement', async ({
+  page,
+}) => {
+  await page.goto('/tests/browser/')
+  await page.waitForFunction(() => !!window.liva)
+  await page.evaluate((fixture) => {
+    const definition = structuredClone(
+      window.liva.decodeBundle(JSON.stringify(fixture)).definitions[0],
+    )
+    Object.assign(
+      definition.states[0].targets[0].properties[0],
+      definition.states[1].targets[0].properties[0],
+    )
+    const instances = [0, 1].map((index) => {
+      const element = document.createElement('div')
+      element.id = `source-card-${index}`
+      element.style.cssText = 'width:150px;height:100px;margin:30px;touch-action:none'
+      document.body.append(element)
+      const instance = new window.liva.LivaInstance(definition, {}, (error) =>
+        window.errors.push(error),
+      )
+      instance.bind([['body', element]])
+      return instance
+    })
+    Object.assign(window, { sourceInstances: instances })
+  }, cardFixture)
+  const first = page.locator('#source-card-0')
+  const second = page.locator('#source-card-1')
+  const box = (await first.boundingBox())!
+
+  await page.mouse.move(box.x + 20, box.y + 20)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 90, box.y + 50)
+  await expect(first).toHaveCSS('translate', '70px 30px')
+  await expect(second).toHaveCSS('translate', '0px')
+
+  await page.evaluate(() => {
+    const instance = window.sourceInstances[0]
+    instance.replaceDefinition(instance.definition, 'idle')
+  })
+  await page.mouse.up()
+
+  await expect(first).toHaveCSS('translate', '70px 30px')
+  expect(
+    await page.evaluate(() => window.sourceInstances.map((instance) => instance.sourceState)),
+  ).toEqual(['idle', 'idle'])
+
+  const secondBox = (await second.boundingBox())!
+  await page.mouse.move(secondBox.x + 20, secondBox.y + 20)
+  await page.mouse.down()
+  await page.mouse.move(secondBox.x + 50, secondBox.y + 30)
+  await expect(second).toHaveCSS('translate', '30px 10px')
+  await expect(first).toHaveCSS('translate', '70px 30px')
+  await page.mouse.up()
+
+  await page.evaluate(() => {
+    for (const instance of window.sourceInstances) instance.dispose()
+  })
+  expect(await page.evaluate(() => window.errors)).toEqual([])
 })

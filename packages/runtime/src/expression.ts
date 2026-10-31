@@ -1,43 +1,40 @@
 import type { Definition, Expression, Property } from './definition.ts'
 
-export type SourceValues = Readonly<Record<string, number | boolean | string | DragValue>>
-export interface DragValue {
-  readonly active: boolean
-  readonly offset: { readonly x: number; readonly y: number }
-}
+import type { RuntimeValue, Scalar } from './builtins/types.ts'
 
-type Scalar = number | boolean | string
+export type SourceValues = Readonly<Record<string, RuntimeValue>>
 
-export function evaluate(expression: Expression, values: SourceValues): Scalar {
+export function evaluate(expression: Expression, values: SourceValues): RuntimeValue {
   switch (expression.kind) {
     case 'number':
     case 'boolean':
     case 'string':
       return expression.value
     case 'reference': {
-      const [source, member, axis] = expression.path
-      const value = values[source]
-      if (
-        expression.path.length === 1 &&
-        (typeof value === 'boolean' || typeof value === 'number' || typeof value === 'string')
-      )
-        return value
-      if (typeof value === 'object') {
-        if (member === 'active' && !axis) return value.active
-        if (member === 'offset' && (axis === 'x' || axis === 'y')) return value.offset[axis]
+      const [name, ...members] = expression.path
+      let value: RuntimeValue | undefined = Object.hasOwn(values, name) ? values[name] : undefined
+
+      for (const member of members) {
+        value =
+          typeof value === 'object' && Object.hasOwn(value, member) ? value[member] : undefined
       }
-      throw new Error(`Unknown source reference: ${expression.path.join('.')}`)
+
+      if (value !== undefined) return value
+
+      throw new Error(`Unknown variable reference: ${expression.path.join('.')}`)
     }
     case 'unary': {
-      const value = evaluate(expression.operand, values)
+      const value = evaluateScalar(expression.operand, values)
       if (expression.operator === '!') return !value
       return finite(expression.operator === '-' ? -Number(value) : Number(value))
     }
     case 'binary': {
-      const left = evaluate(expression.left, values)
-      if (expression.operator === '&&') return Boolean(left && evaluate(expression.right, values))
-      if (expression.operator === '||') return Boolean(left || evaluate(expression.right, values))
-      const right = evaluate(expression.right, values)
+      const left = evaluateScalar(expression.left, values)
+      if (expression.operator === '&&')
+        return Boolean(left && evaluateScalar(expression.right, values))
+      if (expression.operator === '||')
+        return Boolean(left || evaluateScalar(expression.right, values))
+      const right = evaluateScalar(expression.right, values)
       switch (expression.operator) {
         case '==':
         case '===':
@@ -72,6 +69,14 @@ export function evaluate(expression: Expression, values: SourceValues): Scalar {
   }
 }
 
+export function evaluateScalar(expression: Expression, values: SourceValues): Scalar {
+  const value = evaluate(expression, values)
+
+  if (typeof value === 'object') throw new Error('Expression requires a scalar value')
+
+  return value
+}
+
 function finite(value: number): number {
   if (!Number.isFinite(value)) throw new Error('Expression result must be finite')
   return value
@@ -91,7 +96,7 @@ export function selectState(definition: Definition, values: SourceValues): strin
 export function renderValue(property: Property, values: SourceValues): string {
   return property.template
     ? property.template
-        .map((part) => (typeof part === 'string' ? part : String(evaluate(part, values))))
+        .map((part) => (typeof part === 'string' ? part : String(evaluateScalar(part, values))))
         .join('')
     : property.value
 }

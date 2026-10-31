@@ -1,5 +1,6 @@
-import { parameterValues, initialSources, bindDrag } from './sources.ts'
+import { parameterValues, createSources, sourceValues, targetValues } from './sources.ts'
 import { renderDefinition, renderValue, selectState, type SourceValues } from './expression.ts'
+import type { RuntimeSource } from './builtins/index.ts'
 import type { Definition } from './definition.ts'
 import { getState, resolve, type ResolvedTrack } from './resolve.ts'
 import { sampleSpring } from './spring.ts'
@@ -52,6 +53,7 @@ export class LivaInstance {
   definition: Definition
   state: string
   private values: SourceValues = {}
+  private sources: ReadonlyMap<string, RuntimeSource>
   private sourceCleanups: (() => void)[] = []
   onSourceState?: (state: string) => void
   private targets = new Map<string, HTMLElement>()
@@ -70,11 +72,13 @@ export class LivaInstance {
     state: string | Readonly<Record<string, unknown>> = {},
     report: (diagnostic: RuntimeDiagnostic) => void = console.warn,
   ) {
-    this.values = parameterValues(
+    const variables = parameterValues(
       definition.parameters ?? [],
-      initialSources(definition.sources ?? []),
+      targetValues(definition),
       typeof state === 'string' ? {} : state,
     )
+    this.sources = createSources(definition.sources ?? [], variables)
+    this.values = { ...variables, ...sourceValues(this.sources) }
     this.definition = definition
     this.state = typeof state === 'string' ? state : selectState(definition, this.values)
     getState(definition, this.state)
@@ -268,25 +272,32 @@ export class LivaInstance {
         )
         .map((parameter) => [parameter.name, this.values[parameter.name]]),
     )
-    const nextValues = parameterValues(
+    const variables = parameterValues(
       definition.parameters ?? [],
-      initialSources(definition.sources ?? []),
+      targetValues(definition, this.values),
       inputs,
+    )
+    const sources = new Map(
+      (definition.sources ?? []).map((source) => {
+        const previous = this.definition.sources?.find((entry) => entry.name === source.name)
+        const retained =
+          previous && JSON.stringify(previous.initializer) === JSON.stringify(source.initializer)
+            ? this.sources.get(source.name)
+            : undefined
+
+        return [
+          source.name,
+          retained ?? createSources([source], variables).get(source.name)!,
+        ] as const
+      }),
     )
 
     this.clearSources()
     this.cancel()
     this.restore()
 
-    for (const source of definition.sources ?? []) {
-      const previous = this.definition.sources?.find((entry) => entry.name === source.name)
-
-      if (previous?.target === source.target) {
-        Object.assign(nextValues, { [source.name]: this.values[source.name] })
-      }
-    }
-
-    this.values = nextValues
+    this.sources = sources
+    this.values = { ...variables, ...sourceValues(sources) }
     this.definition = definition
     this.state = state
     this.suspended =
@@ -498,21 +509,13 @@ export class LivaInstance {
     const cleanups = this.sourceCleanups
     this.sourceCleanups = []
     for (const cleanup of cleanups) cleanup()
-    this.values = Object.fromEntries(
-      Object.entries(this.values).map(([name, value]) => [
-        name,
-        typeof value === 'object' ? { ...value, active: false } : value,
-      ]),
-    )
+    this.values = { ...this.values, ...sourceValues(this.sources) }
   }
 
   private bindSources() {
-    for (const source of this.definition.sources ?? []) {
-      if (source.kind !== 'drag') continue
-      const element = this.targets.get(source.target)
-      if (!element) continue
+    for (const [name, source] of this.sources) {
       this.sourceCleanups.push(
-        bindDrag(element, (value) => this.applySources({ ...this.values, [source.name]: value })),
+        source.bind(this.targets, (value) => this.applySources({ ...this.values, [name]: value })),
       )
     }
   }
