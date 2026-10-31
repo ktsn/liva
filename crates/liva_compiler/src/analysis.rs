@@ -44,6 +44,8 @@ pub fn hovers(source: &str) -> Vec<Hover> {
             })
             .collect(),
         mappings: BTreeMap::new(),
+        sources: BTreeMap::new(),
+        timing_origins: BTreeMap::new(),
     };
     let mut result = vec![];
 

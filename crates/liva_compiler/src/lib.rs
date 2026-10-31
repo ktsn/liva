@@ -1,9 +1,11 @@
 pub mod analysis;
 pub mod builtins;
+mod diagnostic_source;
 pub mod edits;
 pub mod expression;
 pub mod ir;
 
+use diagnostic_source::{SourceText, header_range, name_range, significant_range};
 use expression::ExprExt;
 use ir::*;
 use liva_syntax::ast::expression::{Expr, from_container};
@@ -31,11 +33,14 @@ pub struct Mapping {
 struct BindingView {
     name: String,
     initializer: Expr,
+    name_range: Range,
 }
 
 struct Compiler {
     diagnostics: Vec<Diagnostic>,
     mappings: BTreeMap<String, Mapping>,
+    sources: BTreeMap<String, liva_syntax::SyntaxNode>,
+    timing_origins: BTreeMap<String, Range>,
 }
 
 impl Compiler {
@@ -61,21 +66,23 @@ impl Compiler {
                 Some("boolean") => PrimitiveType::Boolean,
                 Some("string") => PrimitiveType::String,
                 _ => {
-                    let syntax = reference
-                        .as_ref()
-                        .map(AstNode::syntax)
-                        .unwrap_or(parameter.syntax());
-                    let source = type_annotation_source(syntax);
-                    let start = source.len() - source.trim_start().len();
-                    let end = source.trim_end().len();
-                    self.diagnostics.push(Diagnostic::error(
+                    let range = if let Some(reference) = &reference {
+                        let source = type_annotation_source(reference);
+                        let start = source.len() - source.trim_start().len();
+                        let end = source.trim_end().len();
+                        Range {
+                            start: reference.range().start + start,
+                            end: reference.range().start + end.max(start),
+                        }
+                    } else {
+                        let end = name_range(&parameter).end;
+                        Range { start: end, end }
+                    };
+                    self.error_range(
                         "semantic.type",
                         "Expected primitive type number, boolean, or string",
-                        Range {
-                            start: syntax.range().start + start,
-                            end: syntax.range().start + end.max(start),
-                        },
-                    ));
+                        range,
+                    );
                     continue;
                 }
             };
@@ -104,7 +111,11 @@ impl Compiler {
             let result = self.expression_view(&value);
 
             match result {
-                Some(initializer) => bindings.push(BindingView { name, initializer }),
+                Some(initializer) => bindings.push(BindingView {
+                    name,
+                    initializer,
+                    name_range: name_range(&binding),
+                }),
                 None => continue,
             }
         }
@@ -189,6 +200,9 @@ impl Compiler {
     fn animation_declarations(&mut self, node: &impl HasItems, path: &str) -> Option<Timing> {
         let mut family = String::new();
         let mut args: BTreeMap<String, String> = BTreeMap::new();
+        let mut ranges = BTreeMap::new();
+        let mut names = BTreeMap::new();
+        let mut origin = header_range(node);
 
         for binding in node.bindings() {
             self.error(
@@ -210,7 +224,9 @@ impl Compiler {
                 }
                 continue;
             }
-            let value = declaration.value_text().unwrap_or_default();
+            let value_node = declaration.value_node().unwrap();
+            let source = SourceText::new(&value_node);
+            let value = source.text.trim();
             let (next_family, field) = if name == "@tween" {
                 ("tween", None)
             } else if name == "@spring" {
@@ -230,8 +246,11 @@ impl Compiler {
 
             if family != next_family || field.is_none() {
                 args.clear();
+                ranges.clear();
+                names.clear();
             }
             family = next_family.into();
+            origin = name_range(&declaration);
 
             if let Some(field) = field {
                 let allowed = if family == "tween" {
@@ -247,7 +266,9 @@ impl Compiler {
                     );
                     continue;
                 }
-                args.insert(field.into(), value);
+                args.insert(field.into(), value.to_owned());
+                ranges.insert(field.into(), source.range(value));
+                names.insert(field.into(), origin.clone());
                 self.mapping(
                     &format!("{path}/timing/{field}"),
                     &declaration.value_node().unwrap(),
@@ -256,6 +277,8 @@ impl Compiler {
             } else if family == "tween" {
                 let split = value.find(char::is_whitespace).unwrap_or(value.len());
                 args.insert("duration".into(), value[..split].into());
+                ranges.insert("duration".into(), source.range(&value[..split]));
+                ranges.insert("easing".into(), source.range(value[split..].trim()));
                 args.insert(
                     "easing".into(),
                     if value[split..].trim().is_empty() {
@@ -273,10 +296,22 @@ impl Compiler {
                     &["stiffness", "damping", "mass"][..]
                 };
                 if values.is_empty() || values.len() > fields.len() {
-                    self.error("semantic.timing", "Invalid spring shorthand", &declaration);
+                    let range = if values.len() > fields.len() {
+                        let first = source.range(values[fields.len()]);
+                        let last = source.range(values.last().unwrap());
+                        Range {
+                            start: first.start,
+                            end: last.end,
+                        }
+                    } else {
+                        source.range(value)
+                    };
+                    self.error_range("semantic.timing", "Invalid spring shorthand", range);
                 }
                 for (field, value) in fields.iter().zip(values) {
                     args.insert((*field).into(), value.into());
+                    ranges.insert((*field).into(), source.range(value));
+                    names.insert((*field).into(), origin.clone());
                 }
             }
         }
@@ -285,12 +320,30 @@ impl Compiler {
             return None;
         }
 
-        self.timing(&family, &args, node)
+        self.timing_origins.insert(path.into(), origin.clone());
+        self.timing(&family, &args, &ranges, &names, origin)
     }
 
     fn error(&mut self, code: &str, message: impl Into<String>, node: &impl AstNode) {
+        let range = if code == "semantic.structure" {
+            if node.syntax().kind() == Kind::Let {
+                significant_range(node)
+            } else {
+                header_range(node)
+            }
+        } else {
+            name_range(node)
+        };
+        self.error_range(code, message, range);
+    }
+
+    fn error_range(&mut self, code: &str, message: impl Into<String>, range: Range) {
         self.diagnostics
-            .push(Diagnostic::error(code, message, node.range()));
+            .push(Diagnostic::error(code, message, range));
+    }
+
+    fn source_header(&self, path: &str) -> Range {
+        header_range(&self.sources[path])
     }
 
     fn expression_error(&mut self, error: expression::TypeError) {
@@ -302,6 +355,7 @@ impl Compiler {
     }
 
     fn mapping(&mut self, path: &str, node: &impl AstNode, kind: &str) {
+        self.sources.insert(path.into(), node.syntax().clone());
         self.mappings.insert(
             path.into(),
             Mapping {
@@ -316,12 +370,12 @@ impl Compiler {
             let mut diagnostic = Diagnostic::error(
                 "semantic.duplicate",
                 format!("Duplicate declaration: {name}"),
-                node.range(),
+                name_range(node),
             );
             diagnostic.related.push(previous.clone());
             self.diagnostics.push(diagnostic);
         } else {
-            seen.insert(name.into(), node.range());
+            seen.insert(name.into(), name_range(node));
         }
     }
 
@@ -373,7 +427,9 @@ impl Compiler {
         &mut self,
         name: &str,
         args: &BTreeMap<String, String>,
-        node: &impl AstNode,
+        ranges: &BTreeMap<String, Range>,
+        names: &BTreeMap<String, Range>,
+        origin: Range,
     ) -> Option<Timing> {
         let duration_mode = args.contains_key("duration") || args.contains_key("bounce");
         let allowed: &[&str] = match name {
@@ -381,10 +437,10 @@ impl Compiler {
             "spring" if duration_mode => &["duration", "bounce"],
             "spring" => &["stiffness", "damping", "mass"],
             _ => {
-                self.error(
+                self.error_range(
                     "semantic.timing",
                     format!("Unknown timing family: {name}"),
-                    node,
+                    origin.clone(),
                 );
                 return None;
             }
@@ -392,10 +448,10 @@ impl Compiler {
 
         for key in args.keys() {
             if !allowed.contains(&key.as_str()) {
-                self.error(
+                self.error_range(
                     "semantic.argument",
                     format!("Unknown or mixed timing field: {key}"),
-                    node,
+                    names.get(key).cloned().unwrap_or_else(|| origin.clone()),
                 );
             }
         }
@@ -427,7 +483,7 @@ impl Compiler {
             {
                 Some(n)
             } else {
-                self.error(
+                self.error_range(
                     "semantic.number",
                     format!(
                         "Invalid or missing {key}; expected {}.",
@@ -437,7 +493,7 @@ impl Compiler {
                             "finite number in range"
                         }
                     ),
-                    node,
+                    ranges.get(key).cloned().unwrap_or_else(|| origin.clone()),
                 );
                 None
             }
@@ -451,7 +507,14 @@ impl Compiler {
                     .cloned()
                     .unwrap_or_else(|| "linear".into());
                 if easing.is_empty() {
-                    self.error("semantic.easing", "Easing must be nonempty CSS text", node);
+                    self.error_range(
+                        "semantic.easing",
+                        "Easing must be nonempty CSS text",
+                        ranges
+                            .get("easing")
+                            .cloned()
+                            .unwrap_or_else(|| origin.clone()),
+                    );
                 }
                 Some(Timing::Tween {
                     duration_ms,
@@ -462,7 +525,14 @@ impl Compiler {
                 let duration_ms = number("duration", None, true, 0.0, false)?;
                 let bounce = number("bounce", Some(0.0), false, 0.0, true)?;
                 if bounce >= 1.0 {
-                    self.error("semantic.bounce", "Bounce must be less than 1", node);
+                    self.error_range(
+                        "semantic.bounce",
+                        "Bounce must be less than 1",
+                        ranges
+                            .get("bounce")
+                            .cloned()
+                            .unwrap_or_else(|| origin.clone()),
+                    );
                 }
                 Some(Timing::SpringDuration {
                     duration_ms,
@@ -529,16 +599,46 @@ impl Compiler {
                         &frame.header_node().unwrap(),
                         "value",
                     );
-                    let raw = frame.value_text().unwrap_or_default();
-                    let (value, easing) = split_frame(&raw);
+                    let value_node = frame.value_node().unwrap();
+                    let source = SourceText::new(&value_node);
+                    let (value, easing) = split_frame(source.text.trim());
+
                     if value.is_empty() || easing.is_some_and(str::is_empty) {
-                        self.error(
+                        self.error_range(
                             "semantic.frame",
                             "Frame requires a value and nonempty easing",
-                            &frame,
+                            source.range(if value.is_empty() {
+                                value
+                            } else {
+                                easing.unwrap()
+                            }),
                         );
                     }
-                    let value_node = frame.value_node().unwrap();
+
+                    if value.contains("${") {
+                        let interpolations: Vec<_> = value_node
+                            .syntax()
+                            .descendants()
+                            .filter_map(syn::Interpolation::cast)
+                            .collect();
+
+                        if interpolations.is_empty() {
+                            let start = value.find("${").unwrap();
+                            self.error_range(
+                                "semantic.frame-template",
+                                "Runtime interpolation is supported only in state CSS values",
+                                source.range(&value[start..]),
+                            );
+                        } else {
+                            for interpolation in interpolations {
+                                self.error_range(
+                                    "semantic.frame-template",
+                                    "Runtime interpolation is supported only in state CSS values",
+                                    significant_range(&interpolation),
+                                );
+                            }
+                        }
+                    }
                     let text = value_node.text();
                     let leading = text.len() - text.trim_start().len();
                     let base = value_node.range().start + leading;
@@ -604,6 +704,15 @@ impl Compiler {
     ) -> expression::Scope {
         use expression::Type;
         let mut scope = expression::Scope::new();
+        let mut declared: BTreeMap<_, _> = node
+            .parameters()
+            .map(|parameter| {
+                (
+                    parameter.header().unwrap_or_default(),
+                    name_range(&parameter),
+                )
+            })
+            .collect();
 
         for parameter in parameters {
             let value_type = match parameter.value_type {
@@ -634,21 +743,28 @@ impl Compiler {
             }
 
             if scope.insert(name.clone(), Type::Target).is_some() {
-                self.error(
+                let mut diagnostic = Diagnostic::error(
                     "semantic.duplicate",
                     format!("Duplicate variable: {name}"),
-                    &target,
+                    name_range(&target),
                 );
+                diagnostic.related.extend(declared.get(&name).cloned());
+                self.diagnostics.push(diagnostic);
             }
+            declared.entry(name).or_insert_with(|| name_range(&target));
         }
 
         for binding in bindings {
             if scope.contains_key(&binding.name) {
-                self.error(
+                let mut diagnostic = Diagnostic::error(
                     "semantic.duplicate",
                     format!("Duplicate variable: {}", binding.name),
-                    node,
+                    binding.name_range.clone(),
                 );
+                diagnostic
+                    .related
+                    .extend(declared.get(&binding.name).cloned());
+                self.diagnostics.push(diagnostic);
             }
         }
 
@@ -724,11 +840,11 @@ impl Compiler {
                         let target_path = format!("{state_path}/target/{target_name}");
                         self.mapping(&target_path, &target, "block");
                         self.declarations(&target, None, &target_path);
-                        if target.blocks().next().is_some() {
+                        for block in target.blocks() {
                             self.error(
                                 "semantic.structure",
                                 "State targets contain declarations only",
-                                &target,
+                                &block,
                             );
                         }
                         let properties = target
@@ -805,34 +921,27 @@ impl Compiler {
         }
 
         if fallback_count != 1 {
-            self.error(
+            let fallbacks: Vec<_> = node
+                .states()
+                .filter(|state| state.condition().is_none())
+                .collect();
+            let mut diagnostic = Diagnostic::error(
                 "semantic.fallback",
                 "Definition requires exactly one fallback state",
-                node,
+                fallbacks
+                    .get(1)
+                    .map_or_else(|| header_range(node), header_range),
             );
-        }
-        for transition in definition.general_transition.iter().chain(
-            definition
-                .directional_transitions
-                .iter()
-                .map(|t| &t.transition),
-        ) {
-            for target in &transition.targets {
-                for property in &target.properties {
-                    if property
-                        .keyframes
-                        .iter()
-                        .flatten()
-                        .any(|frame| frame.value.contains("${"))
-                    {
-                        self.error(
-                            "semantic.frame-template",
-                            "Runtime interpolation is supported only in state CSS values",
-                            node,
-                        );
-                    }
-                }
-            }
+            diagnostic.related.extend(
+                fallbacks
+                    .first()
+                    .filter(|_| fallbacks.len() > 1)
+                    .map(header_range),
+            );
+            diagnostic
+                .related
+                .extend(fallbacks.iter().skip(2).map(header_range));
+            self.diagnostics.push(diagnostic);
         }
         self.validate(&definition, node);
         definition
@@ -840,10 +949,10 @@ impl Compiler {
 
     fn validate(&mut self, def: &Definition, node: &syn::Motion) {
         if def.states.is_empty() {
-            self.error(
+            self.error_range(
                 "semantic.states",
                 "Definition needs at least one state",
-                node,
+                header_range(node),
             );
         }
         let mut pairs = BTreeSet::new();
@@ -869,9 +978,21 @@ impl Compiler {
         }
 
         for direction in &def.directional_transitions {
-            for name in [&direction.from, &direction.to] {
+            let path = format!(
+                "{}/transition/directional/{}/{}",
+                def.name, direction.from, direction.to
+            );
+            let header = self.sources[&path].child::<syn::Header>().unwrap();
+            let source = SourceText::new(&header);
+            let words: Vec<_> = source.text.split_whitespace().collect();
+
+            for (index, name) in [(1, &direction.from), (3, &direction.to)] {
                 if !def.states.iter().any(|s| &s.name == name) {
-                    self.error("semantic.reference", format!("Unknown state: {name}"), node);
+                    self.error_range(
+                        "semantic.reference",
+                        format!("Unknown state: {name}"),
+                        source.range(words[index]),
+                    );
                 }
             }
         }
@@ -879,10 +1000,17 @@ impl Compiler {
         for state in &def.states {
             for (target, property) in &pairs {
                 if state.value(target, property).is_none() {
-                    self.error(
+                    let state_path = format!("{}/state/{}", def.name, state.name);
+                    let target_path = format!("{state_path}/target/{target}");
+                    let path = if self.sources.contains_key(&target_path) {
+                        &target_path
+                    } else {
+                        &state_path
+                    };
+                    self.error_range(
                         "semantic.completeness",
                         format!("MVP requires {target}.{property} in state {}", state.name),
-                        node,
+                        self.source_header(path),
                     );
                 }
             }
@@ -894,6 +1022,11 @@ impl Compiler {
                     continue;
                 }
 
+                let general_path = format!("{}/transition/general", def.name);
+                let directional_path = format!(
+                    "{}/transition/directional/{}/{}",
+                    def.name, from.name, to.name
+                );
                 let general = def.general_transition.as_ref();
                 let directional = def
                     .directional_transitions
@@ -902,6 +1035,8 @@ impl Compiler {
                     .map(|t| &t.transition);
 
                 for (target, property) in &pairs {
+                    let gp_path = format!("{general_path}/target/{target}/property/{property}");
+                    let dp_path = format!("{directional_path}/target/{target}/property/{property}");
                     let gp = general.and_then(|t| t.property(target, property));
                     let dp = directional.and_then(|t| t.property(target, property));
                     let frames = dp
@@ -919,45 +1054,99 @@ impl Compiler {
                         continue;
                     }
                     let Some(timing) = timing else {
-                        self.error(
+                        let state_path = format!("{}/state/{}", def.name, to.name);
+                        let path = [&dp_path, &gp_path, &directional_path, &general_path]
+                            .into_iter()
+                            .find(|path| self.sources.contains_key(*path))
+                            .unwrap_or(&state_path);
+                        self.error_range(
                             "semantic.timing-missing",
                             format!(
                                 "Missing timing for {target}.{property}: {} -> {}",
                                 from.name, to.name
                             ),
-                            node,
+                            self.source_header(path),
                         );
                         continue;
                     };
 
                     if let Some(frames) = frames {
-                        if !matches!(timing, Timing::Tween { .. })
-                            && frames
-                                .iter()
-                                .any(|f| (f.offset > 0.0 && f.offset < 1.0) || f.easing.is_some())
-                        {
-                            self.error("semantic.spring-frames", format!("Spring {target}.{property} cannot have intermediate frames or frame easing: {} -> {}", from.name, to.name), node);
-                        }
+                        let frame_track = if dp.is_some_and(|p| p.keyframes.is_some()) {
+                            &dp_path
+                        } else {
+                            &gp_path
+                        };
+                        let timing_path = if dp.is_some_and(|p| p.timing.is_some()) {
+                            &dp_path
+                        } else if gp.is_some_and(|p| p.timing.is_some()) {
+                            &gp_path
+                        } else if directional.is_some_and(|t| t.timing.is_some()) {
+                            &directional_path
+                        } else {
+                            &general_path
+                        };
 
                         for frame in frames {
-                            let endpoint = if frame.offset == 0.0 {
-                                from.value(target, property)
+                            let frame_path = format!("{frame_track}/frame/{}", frame.offset);
+                            let frame_node = &self.sources[&frame_path];
+                            let value_node = frame_node.child::<syn::Value>().unwrap();
+                            let source = SourceText::new(&value_node);
+                            let (value, easing) = split_frame(source.text.trim());
+                            let intermediate = frame.offset > 0.0 && frame.offset < 1.0;
+
+                            if !matches!(timing, Timing::Tween { .. })
+                                && (intermediate || easing.is_some())
+                            {
+                                let range = if intermediate {
+                                    name_range(frame_node)
+                                } else {
+                                    source.range(easing.unwrap())
+                                };
+                                let mut diagnostic = Diagnostic::error(
+                                    "semantic.spring-frames",
+                                    format!(
+                                        "Spring {target}.{property} cannot have intermediate frames or frame easing: {} -> {}",
+                                        from.name, to.name
+                                    ),
+                                    range,
+                                );
+                                diagnostic
+                                    .related
+                                    .extend(self.timing_origins.get(timing_path).cloned());
+                                self.diagnostics.push(diagnostic);
+                            }
+
+                            let endpoint_state = if frame.offset == 0.0 {
+                                Some(from)
                             } else if frame.offset == 1.0 {
-                                to.value(target, property)
+                                Some(to)
                             } else {
                                 None
                             };
-                            if endpoint.is_some_and(|v| v != frame.value)
-                                || (frame.offset == 1.0 && frame.easing.is_some())
-                            {
+                            let endpoint =
+                                endpoint_state.and_then(|state| state.value(target, property));
+                            let mismatch = endpoint.is_some_and(|v| v != frame.value);
+
+                            if mismatch || (frame.offset == 1.0 && easing.is_some()) {
                                 let mut warning = Diagnostic::error(
                                     "semantic.endpoint",
                                     format!(
                                         "{target}.{property}: explicit endpoint differs from state or final easing has no interval"
                                     ),
-                                    node.range(),
+                                    source.range(if mismatch { value } else { easing.unwrap() }),
                                 );
                                 warning.severity = "warning".into();
+
+                                if mismatch {
+                                    let state = endpoint_state.unwrap();
+                                    let path = format!(
+                                        "{}/state/{}/target/{target}/{property}",
+                                        def.name, state.name
+                                    );
+                                    warning
+                                        .related
+                                        .extend(self.sources.get(&path).map(significant_range));
+                                }
                                 self.diagnostics.push(warning);
                             }
                         }
@@ -1042,6 +1231,8 @@ pub fn compile(source: &str, development: bool) -> Compilation {
             })
             .collect(),
         mappings: BTreeMap::new(),
+        sources: BTreeMap::new(),
+        timing_origins: BTreeMap::new(),
     };
     let mut definitions = vec![];
     let mut seen = BTreeMap::new();

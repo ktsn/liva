@@ -3,12 +3,19 @@ import { compileSfc, diagnosticLocation, hasErrors } from './compiler.ts'
 
 describe('SFC compiler boundary', () => {
   it('maps UTF-8 diagnostics to SFC lines and UTF-16 columns', () => {
-    const source =
-      '<template><p>日本語😀</p></template>\r\n<liva>\r\nmotion a { state on when true { t { x: 1 } } state off { t {} } }\r\n</liva>'
+    const motion =
+      'motion a { state on when true { t { x: 1 } } /* 日本語😀 */ state off { t {} } }'
+    const source = `<template><p>日本語😀</p></template>\r\n<liva>\r\n${motion}\r\n</liva>`
     const snapshot = compileSfc(source, 'Unicode.vue', true)
     expect(hasErrors(snapshot)).toBe(true)
     const diagnostic = snapshot.result.diagnostics.find((d) => d.code === 'semantic.completeness')!
-    expect(diagnosticLocation(snapshot, diagnostic)).toEqual({ line: 3, column: 0 })
+    expect(diagnosticLocation(snapshot, diagnostic)).toEqual({
+      line: 3,
+      column: motion.lastIndexOf('t {}'),
+    })
+    expect(
+      Buffer.from(snapshot.block).subarray(diagnostic.range.start, diagnostic.range.end).toString(),
+    ).toBe('t')
     expect(snapshot.blockStart).toBe(
       Buffer.byteLength(source.slice(0, source.indexOf('\r\nmotion'))),
     )
