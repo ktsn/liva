@@ -47,10 +47,47 @@ entry points. Split a package only when a real dependency or reuse need appears.
 
 ## Rust syntax infrastructure
 
-Use Rowan as the first CST candidate. A hand-written recovery parser emits nodes,
+The Rowan CST is the source of truth for syntax and byte ranges. A hand-written recovery parser emits nodes,
 tokens, and diagnostics while preserving trivia. Typed AST views wrap syntax nodes
 and return optional fields for incomplete input. Semantic analysis consumes these
 views and emits validated data without putting semantic state into the tree.
+All views implement `liva_syntax::ast::AstNode`, which provides checked casts,
+access to the underlying Rowan node, text, and absolute byte ranges. `Document`
+exposes `Motion` views; motions expose parameters, let bindings, states, and
+transitions. Targets contain property declarations or property blocks with
+keyframes. Expression views (`ast::expression::Expr`, `Name`, and `Argument`)
+use the same interface.
+
+Casts classify syntax without requiring semantic validity. Structural roles use
+block position and header keywords; incomplete fields return `Option`. Generic
+`Block` views and `MotionItem::Invalid` preserve unrecognized items for diagnostics.
+Shared `HasHeader`, `HasValue`, and `HasItems` interfaces support validation across
+constructs, including misplaced declarations and bindings.
+
+A single lexer produces source-backed tokens for document structure and expressions.
+Identifiers include hyphens; numbers with units are dimension tokens. Quoted strings
+retain their spelling, with embedded template tokens using the same lexer and absolute
+byte ranges. Expression literals decode escapes during lowering; CSS text retains them.
+
+The document parser passes slices of this token stream to the expression parser for
+let initializers, state conditions, and interpolations. Both parsers write directly to
+the same Rowan builder. No intermediate document tree or expression retokenization is
+needed. Interpolation recovery belongs to the parser and stops at an unquoted newline
+when the closing brace is missing. The compiler reads the completed CST through typed
+views; output-only `liva_compiler::expression::Expression` carries no source locations.
+
+The syntax crate separates these responsibilities:
+
+| Location                                     | Responsibility                                                 |
+| -------------------------------------------- | -------------------------------------------------------------- |
+| `lib.rs`                                     | Public entry points and parse results                          |
+| `kind.rs`, `diagnostic.rs`                   | Rowan kinds, byte ranges, and diagnostic data                  |
+| `lexer.rs`                                   | Shared token vocabulary and source-preserving lexical scanning |
+| `literal.rs`                                 | Quoted-string boundaries and expression escape decoding        |
+| `parser/mod.rs`                              | Structural parsing, recovery, and header validation            |
+| `parser/expression.rs`, `parser/template.rs` | Expression parsing and quoted CSS template assembly            |
+| `ast/`                                       | Common view interfaces and structural/expression accessors     |
+
 Motion headers contain parameter and type-reference CST nodes, distinct from call
 arguments and runtime expressions. Semantic analysis resolves parameters, let bindings, and targets
 in one motion-local namespace; instance initialization validates host parameters

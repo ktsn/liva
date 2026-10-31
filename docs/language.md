@@ -177,7 +177,20 @@ templates are diagnosed; their evaluation timing remains future design work.
 Declarations are separated by newline or optional semicolon. Balanced CSS groups
 may span lines. Strings, escapes, `//` and `/* */` comments are preserved. Motion,
 state names follow `[A-Za-z_][A-Za-z0-9_-]*`. Variable names (targets, let bindings,
-and parameters) follow `[A-Za-z_][A-Za-z0-9_]*`, so subtraction is unambiguous. CSS property names also allow custom properties.
+and parameters), function names, and expression member names follow
+`[A-Za-z_][A-Za-z0-9_-]*`. A hyphen without surrounding whitespace belongs to the
+identifier: `max-min` is one name. Binary subtraction requires whitespace on both
+sides, as in `max - min`; unary minus remains valid in `-1` and `-value`. CSS property names also allow custom properties.
+
+Numbers with units, such as `20px` and `100ms`, are single lexical tokens.
+They remain opaque CSS/timing values; unit-bearing arithmetic in Liva expressions
+is unsupported. URLs must be quoted, including arguments to `url()`, for example
+`url("https://example.com/image.png")` or `url("image.png")`.
+
+String spelling is preserved by the lexer. Expression strings decode `\n`, `\r`,
+`\t`, `\\`, `\'`, and `\"`; unsupported escapes are diagnosed. CSS strings retain
+all escapes verbatim for the browser. Interpolation parsing recovers at an unquoted
+newline if `}` is missing, so subsequent declarations remain available to tooling.
 
 The Rowan CST preserves every byte, trivia and UTF-8 ranges, including malformed
 input. Diagnostics prevent execution of invalid definitions while development
