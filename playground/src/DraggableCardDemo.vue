@@ -12,7 +12,7 @@
 
 <liva>
 motion card {
-  source movement = drag(target: body)
+  let movement = drag(target: body)
 
   state idle {
     body {

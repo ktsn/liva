@@ -1,10 +1,16 @@
-import type { Definition, Expression, Property } from './definition.ts'
+import type { CallExpression, Definition, Expression, Property } from './definition.ts'
 
-import type { RuntimeValue, Scalar } from './builtins/types.ts'
+import type { RuntimeValue, Scalar } from './reactive-value.ts'
 
-export type SourceValues = Readonly<Record<string, RuntimeValue>>
+export type VariableValues = Readonly<Record<string, RuntimeValue>>
 
-export function evaluate(expression: Expression, values: SourceValues): RuntimeValue {
+type InvokeCall = (call: CallExpression, values: VariableValues) => RuntimeValue
+
+export function evaluate(
+  expression: Expression,
+  values: VariableValues,
+  invoke?: InvokeCall,
+): RuntimeValue {
   switch (expression.kind) {
     case 'number':
     case 'boolean':
@@ -23,18 +29,21 @@ export function evaluate(expression: Expression, values: SourceValues): RuntimeV
 
       throw new Error(`Unknown variable reference: ${expression.path.join('.')}`)
     }
+    case 'call':
+      if (!invoke) throw new Error('Function call requires a let initializer context')
+      return invoke(expression, values)
     case 'unary': {
-      const value = evaluateScalar(expression.operand, values)
+      const value = evaluateScalar(expression.operand, values, invoke)
       if (expression.operator === '!') return !value
       return finite(expression.operator === '-' ? -Number(value) : Number(value))
     }
     case 'binary': {
-      const left = evaluateScalar(expression.left, values)
+      const left = evaluateScalar(expression.left, values, invoke)
       if (expression.operator === '&&')
-        return Boolean(left && evaluateScalar(expression.right, values))
+        return Boolean(left && evaluateScalar(expression.right, values, invoke))
       if (expression.operator === '||')
-        return Boolean(left || evaluateScalar(expression.right, values))
-      const right = evaluateScalar(expression.right, values)
+        return Boolean(left || evaluateScalar(expression.right, values, invoke))
+      const right = evaluateScalar(expression.right, values, invoke)
       switch (expression.operator) {
         case '==':
         case '===':
@@ -69,8 +78,12 @@ export function evaluate(expression: Expression, values: SourceValues): RuntimeV
   }
 }
 
-export function evaluateScalar(expression: Expression, values: SourceValues): Scalar {
-  const value = evaluate(expression, values)
+export function evaluateScalar(
+  expression: Expression,
+  values: VariableValues,
+  invoke?: InvokeCall,
+): Scalar {
+  const value = evaluate(expression, values, invoke)
 
   if (typeof value === 'object') throw new Error('Expression requires a scalar value')
 
@@ -82,7 +95,7 @@ function finite(value: number): number {
   return value
 }
 
-export function selectState(definition: Definition, values: SourceValues): string {
+export function selectState(definition: Definition, values: VariableValues): string {
   let selected = definition.states.find((state) => !state.when)?.name
 
   for (const state of definition.states) {
@@ -93,7 +106,7 @@ export function selectState(definition: Definition, values: SourceValues): strin
   return selected
 }
 
-export function renderValue(property: Property, values: SourceValues): string {
+export function renderValue(property: Property, values: VariableValues): string {
   return property.template
     ? property.template
         .map((part) => (typeof part === 'string' ? part : String(evaluateScalar(part, values))))
@@ -103,7 +116,7 @@ export function renderValue(property: Property, values: SourceValues): string {
 
 export function renderDefinition(
   definition: Definition,
-  values: SourceValues,
+  values: VariableValues,
   states: readonly string[],
 ): Definition {
   return {

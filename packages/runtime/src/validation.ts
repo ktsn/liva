@@ -2,7 +2,7 @@ import type {
   Definition,
   MotionParameter,
   Expression,
-  Source,
+  LetBinding,
   Frame,
   PropertyTransition,
   State,
@@ -133,13 +133,8 @@ function isExpression(value: unknown, depth = 0): value is Expression {
   }
 }
 
-function isSource(value: unknown): value is Source {
-  return (
-    isRecord(value) &&
-    typeof value.name === 'string' &&
-    isExpression(value.initializer) &&
-    value.initializer.kind === 'call'
-  )
+function isLetBinding(value: unknown): value is LetBinding {
+  return isRecord(value) && typeof value.name === 'string' && isExpression(value.initializer)
 }
 
 function isState(value: unknown): value is State {
@@ -182,7 +177,7 @@ export function isDefinition(value: unknown): value is Definition {
             parameter.type === 'boolean' ||
             parameter.type === 'string'),
       )) &&
-    (value.sources === undefined || isArrayOf(value.sources, isSource)) &&
+    (value.letBindings === undefined || isArrayOf(value.letBindings, isLetBinding)) &&
     isArrayOf(value.states, isState) &&
     (value.generalTransition === undefined || isTransition(value.generalTransition)) &&
     Array.isArray(value.directionalTransitions) &&

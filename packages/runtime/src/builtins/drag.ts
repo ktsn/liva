@@ -1,11 +1,11 @@
-import type { RuntimeSource, RuntimeValue } from './types.ts'
+import type { ReactiveSubscription, RuntimeValue } from '../reactive-value.ts'
 
 interface DragValue {
   readonly active: boolean
   readonly offset: { readonly x: number; readonly y: number }
 }
 
-export function drag(args: Readonly<Record<string, RuntimeValue>>): RuntimeSource {
+export function drag(args: Readonly<Record<string, RuntimeValue>>): ReactiveSubscription {
   const target = args.target
 
   if (typeof target !== 'object' || typeof target.name !== 'string') {

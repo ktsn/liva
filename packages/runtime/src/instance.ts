@@ -1,6 +1,5 @@
-import { parameterValues, createSources, sourceValues, targetValues } from './sources.ts'
-import { renderDefinition, renderValue, selectState, type SourceValues } from './expression.ts'
-import type { RuntimeSource } from './builtins/index.ts'
+import { parameterValues, LetBindingGraph, targetValues } from './let-bindings.ts'
+import { renderDefinition, renderValue, selectState, type VariableValues } from './expression.ts'
 import type { Definition } from './definition.ts'
 import { getState, resolve, type ResolvedTrack } from './resolve.ts'
 import { sampleSpring } from './spring.ts'
@@ -52,10 +51,10 @@ export function waapiProperty(property: string): string {
 export class LivaInstance {
   definition: Definition
   state: string
-  private values: SourceValues = {}
-  private sources: ReadonlyMap<string, RuntimeSource>
-  private sourceCleanups: (() => void)[] = []
-  onSourceState?: (state: string) => void
+  private values: VariableValues = {}
+  private letBindings: LetBindingGraph
+  private letBindingCleanups: (() => void)[] = []
+  onReactiveState?: (state: string) => void
   private targets = new Map<string, HTMLElement>()
   private active: ActiveTrack[] = []
   private owned: OwnedElement[] = []
@@ -77,8 +76,8 @@ export class LivaInstance {
       targetValues(definition),
       typeof state === 'string' ? {} : state,
     )
-    this.sources = createSources(definition.sources ?? [], variables)
-    this.values = { ...variables, ...sourceValues(this.sources) }
+    this.letBindings = new LetBindingGraph(definition.letBindings ?? [], variables)
+    this.values = this.letBindings.evaluate(variables)
     this.definition = definition
     this.state = typeof state === 'string' ? state : selectState(definition, this.values)
     getState(definition, this.state)
@@ -87,7 +86,7 @@ export class LivaInstance {
     this.motion.addEventListener('change', this.motionChanged)
   }
 
-  get sourceState(): string {
+  get reactiveState(): string {
     return selectState(this.definition, this.values)
   }
 
@@ -239,16 +238,16 @@ export class LivaInstance {
 
     if (unchanged) return
 
-    this.clearSources()
+    this.clearLetBindings()
     this.cancel()
     this.restore()
     this.targets = next
     this.duplicateBindings = duplicate
     this.suspended = duplicate || missing
 
-    if (this.definition.sources?.length || this.definition.parameters?.length) {
+    if (this.definition.letBindings?.length || this.definition.parameters?.length) {
       this.state = selectState(this.definition, this.values)
-      this.onSourceState?.(this.state)
+      this.onReactiveState?.(this.state)
     }
 
     if (this.suspended) {
@@ -257,7 +256,7 @@ export class LivaInstance {
         message: duplicate ? 'Duplicate target binding' : 'Missing target binding',
       })
     } else {
-      this.bindSources()
+      this.bindLetBindings()
       this.settle()
     }
   }
@@ -277,33 +276,24 @@ export class LivaInstance {
       targetValues(definition, this.values),
       inputs,
     )
-    const sources = new Map(
-      (definition.sources ?? []).map((source) => {
-        const previous = this.definition.sources?.find((entry) => entry.name === source.name)
-        const retained =
-          previous && JSON.stringify(previous.initializer) === JSON.stringify(source.initializer)
-            ? this.sources.get(source.name)
-            : undefined
-
-        return [
-          source.name,
-          retained ?? createSources([source], variables).get(source.name)!,
-        ] as const
-      }),
+    const letBindings = new LetBindingGraph(
+      definition.letBindings ?? [],
+      variables,
+      this.letBindings,
     )
 
-    this.clearSources()
+    this.clearLetBindings()
     this.cancel()
     this.restore()
 
-    this.sources = sources
-    this.values = { ...variables, ...sourceValues(sources) }
+    this.letBindings = letBindings
+    this.values = letBindings.evaluate(variables)
     this.definition = definition
     this.state = state
     this.suspended =
       this.duplicateBindings ||
       definition.states.some((s) => s.targets.some((t) => !this.targets.has(t.name)))
-    if (!this.suspended) this.bindSources()
+    if (!this.suspended) this.bindLetBindings()
     this.settle()
   }
 
@@ -314,7 +304,7 @@ export class LivaInstance {
   private transitionTo(
     state: string,
     options: { paused?: boolean },
-    previousValues: SourceValues,
+    previousValues: VariableValues,
   ): boolean {
     if (this.disposed) return false
 
@@ -346,7 +336,7 @@ export class LivaInstance {
 
     const interrupted =
       this.active.length > 0 ||
-      (this.definition.sources?.length ?? 0) + (this.definition.parameters?.length ?? 0) > 0
+      (this.definition.letBindings?.length ?? 0) + (this.definition.parameters?.length ?? 0) > 0
     const snapshots = new Map<HTMLElement, Map<string, string>>()
 
     // Read every displayed value before canceling any effect or writing styles.
@@ -451,16 +441,19 @@ export class LivaInstance {
     if (this.disposed) return
 
     try {
-      this.applySources(parameterValues(this.definition.parameters ?? [], this.values, inputs))
+      this.applyVariableValues(
+        parameterValues(this.definition.parameters ?? [], this.values, inputs),
+      )
     } catch (error) {
-      this.report({ code: 'runtime.source', message: String(error), error })
+      this.report({ code: 'runtime.parameter', message: String(error), error })
     }
   }
 
-  private applySources(values: SourceValues) {
+  private applyVariableValues(values: VariableValues) {
     const previous = this.values
 
     try {
+      values = this.letBindings.evaluate(values)
       const state = selectState(this.definition, values)
       const properties = getState(this.definition, state).targets.flatMap((target) =>
         target.properties
@@ -498,31 +491,34 @@ export class LivaInstance {
         }
       }
 
-      this.onSourceState?.(state)
+      this.onReactiveState?.(state)
     } catch (error) {
       this.values = previous
       this.report({ code: 'runtime.expression', message: String(error), error })
     }
   }
 
-  private clearSources() {
-    const cleanups = this.sourceCleanups
-    this.sourceCleanups = []
+  private clearLetBindings() {
+    const cleanups = this.letBindingCleanups
+    this.letBindingCleanups = []
     for (const cleanup of cleanups) cleanup()
-    this.values = { ...this.values, ...sourceValues(this.sources) }
+
+    try {
+      this.values = this.letBindings.evaluate(this.values)
+    } catch (error) {
+      this.report({ code: 'runtime.expression', message: String(error), error })
+    }
   }
 
-  private bindSources() {
-    for (const [name, source] of this.sources) {
-      this.sourceCleanups.push(
-        source.bind(this.targets, (value) => this.applySources({ ...this.values, [name]: value })),
-      )
-    }
+  private bindLetBindings() {
+    this.letBindingCleanups.push(
+      ...this.letBindings.bind(this.targets, () => this.applyVariableValues(this.values)),
+    )
   }
 
   dispose() {
     if (this.disposed) return
-    this.clearSources()
+    this.clearLetBindings()
     this.cancel()
     this.restore()
     this.motion.removeEventListener('change', this.motionChanged)

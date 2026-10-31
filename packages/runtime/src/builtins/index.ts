@@ -1,23 +1,20 @@
-import type { CallExpression } from '../definition.ts'
 import { drag } from './drag.ts'
-import { evaluate, type SourceValues } from '../expression.ts'
-import type { RuntimeSource, RuntimeValue } from './types.ts'
+import type { FunctionResult, RuntimeValue } from '../reactive-value.ts'
 
-export type { RuntimeSource, RuntimeValue } from './types.ts'
+export type { FunctionResult, RuntimeValue } from '../reactive-value.ts'
 
 const functions: ReadonlyMap<
   string,
-  (args: Readonly<Record<string, RuntimeValue>>) => RuntimeSource
+  (args: Readonly<Record<string, RuntimeValue>>) => FunctionResult
 > = new Map([['drag', drag]])
 
-export function invokeSource(call: CallExpression, values: SourceValues): RuntimeSource {
-  const implementation = functions.get(call.function)
+export function callBuiltin(
+  name: string,
+  args: Readonly<Record<string, RuntimeValue>>,
+): FunctionResult {
+  const implementation = functions.get(name)
 
-  if (!implementation) throw new Error(`Unknown function: ${call.function}`)
-
-  const args = Object.fromEntries(
-    call.arguments.map((argument) => [argument.name, evaluate(argument.value, values)]),
-  )
+  if (!implementation) throw new Error(`Unknown function: ${name}`)
 
   return implementation(args)
 }

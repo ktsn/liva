@@ -77,13 +77,13 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
             runtime,
             definition,
             get requestedState() {
-              return typeof binding.value === 'string' ? requestedState : runtime.sourceState
+              return typeof binding.value === 'string' ? requestedState : runtime.reactiveState
             },
             set requestedState(state: string) {
               requestedState = state
             },
           }
-          runtime.onSourceState = (state) => {
+          runtime.onReactiveState = (state) => {
             record.requestedState = state
             options.observe?.('update', record)
           }

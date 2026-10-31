@@ -3,7 +3,7 @@ import cardFixture from '../../../fixtures/card.json'
 import toggleFixture from '../../../fixtures/reactive-toggle.json'
 import { decodeBundle, type Definition, type Expression } from './definition.ts'
 import { evaluate, renderValue, selectState } from './expression.ts'
-import { parameterValues } from './sources.ts'
+import { parameterValues } from './let-bindings.ts'
 
 const toggle = decodeBundle(JSON.stringify(toggleFixture)).definitions[0]
 const card = decodeBundle(JSON.stringify(cardFixture)).definitions[0]

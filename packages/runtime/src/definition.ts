@@ -41,9 +41,9 @@ export interface MotionParameter {
   readonly type: 'number' | 'boolean' | 'string'
 }
 
-export interface Source {
+export interface LetBinding {
   readonly name: string
-  readonly initializer: CallExpression
+  readonly initializer: Expression
 }
 
 export interface Property {
@@ -76,7 +76,7 @@ export interface Transition {
 
 export interface Definition {
   readonly parameters?: readonly MotionParameter[]
-  readonly sources?: readonly Source[]
+  readonly letBindings?: readonly LetBinding[]
   readonly name: string
   readonly states: readonly State[]
   readonly generalTransition?: Transition

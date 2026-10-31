@@ -1,11 +1,12 @@
 import { test, expect } from '@playwright/test'
+import derivedFixture from '../../fixtures/derived.json' with { type: 'json' }
 import cardFixture from '../../fixtures/card.json' with { type: 'json' }
 import toggleFixture from '../../fixtures/reactive-toggle.json' with { type: 'json' }
 
 declare global {
   interface Window {
     dragScale: Animation
-    sourceInstances: import('../../packages/runtime/src/instance.ts').LivaInstance[]
+    letInstances: import('../../packages/runtime/src/instance.ts').LivaInstance[]
   }
 }
 
@@ -235,13 +236,13 @@ test('lost capture, target rebinding and editor replacement do not retain draggi
       } else {
         instance.replaceDefinition(instance.definition, 'idle')
       }
-      return { captured: track.hasPointerCapture(id), selected: instance.sourceState }
+      return { captured: track.hasPointerCapture(id), selected: instance.reactiveState }
     }, operation)
     expect(snapshot.captured).toBe(false)
     if (operation !== 'lost') expect(snapshot.selected).toBe('idle')
 
     await page.mouse.up()
-    await expect.poll(() => page.evaluate(() => window.instance.sourceState)).toBe('idle')
+    await expect.poll(() => page.evaluate(() => window.instance.reactiveState)).toBe('idle')
     await expect.poll(() => page.evaluate(() => window.instance.animations.length)).toBe(0)
   }
 })
@@ -371,7 +372,7 @@ test('typed parameter instances update CSS independently and retain values after
       { translate: '25px', label: 'updated' },
       { translate: '2px', label: 'initial' },
     ],
-    errors: ['runtime.source', 'runtime.source'],
+    errors: ['runtime.parameter', 'runtime.parameter'],
   })
 })
 
@@ -424,7 +425,7 @@ test('missing parameters reject creation, updates and incompatible replacements 
     const retained = {
       definition: instance.definition === definition,
       state: instance.state,
-      selected: instance.sourceState,
+      selected: instance.reactiveState,
       effects:
         animations.length > 0 &&
         animations.every((animation, index) => instance.animations[index] === animation),
@@ -449,7 +450,7 @@ test('missing parameters reject creation, updates and incompatible replacements 
   expect(result.recovered).toBe('off')
 })
 
-test('built-in sources keep instance-local values across definition replacement', async ({
+test('built-in subscriptions keep instance-local values across definition replacement', async ({
   page,
 }) => {
   await page.goto('/tests/browser/')
@@ -473,7 +474,7 @@ test('built-in sources keep instance-local values across definition replacement'
       instance.bind([['body', element]])
       return instance
     })
-    Object.assign(window, { sourceInstances: instances })
+    Object.assign(window, { letInstances: instances })
   }, cardFixture)
   const first = page.locator('#source-card-0')
   const second = page.locator('#source-card-1')
@@ -486,14 +487,14 @@ test('built-in sources keep instance-local values across definition replacement'
   await expect(second).toHaveCSS('translate', '0px')
 
   await page.evaluate(() => {
-    const instance = window.sourceInstances[0]
+    const instance = window.letInstances[0]
     instance.replaceDefinition(instance.definition, 'idle')
   })
   await page.mouse.up()
 
   await expect(first).toHaveCSS('translate', '70px 30px')
   expect(
-    await page.evaluate(() => window.sourceInstances.map((instance) => instance.sourceState)),
+    await page.evaluate(() => window.letInstances.map((instance) => instance.reactiveState)),
   ).toEqual(['idle', 'idle'])
 
   const secondBox = (await second.boundingBox())!
@@ -505,7 +506,67 @@ test('built-in sources keep instance-local values across definition replacement'
   await page.mouse.up()
 
   await page.evaluate(() => {
-    for (const instance of window.sourceInstances) instance.dispose()
+    for (const instance of window.letInstances) instance.dispose()
   })
   expect(await page.evaluate(() => window.errors)).toEqual([])
+})
+
+test('derived let bindings follow parameters and drag through aliases and preserve valid updates', async ({
+  page,
+}) => {
+  await page.goto('/tests/browser/')
+  await page.waitForFunction(() => !!window.liva)
+  await page.evaluate((fixture) => {
+    const definition = window.liva.decodeBundle(JSON.stringify(fixture)).definitions[0]
+    const instances = [0, 1].map((index) => {
+      const element = document.createElement('div')
+      element.id = `derived-${index}`
+      element.style.cssText = 'width:150px;height:100px;margin:30px;touch-action:none'
+      document.body.append(element)
+      const instance = new window.liva.LivaInstance(
+        definition,
+        { progress: 10, divisor: 1 },
+        (error) => window.errors.push(error),
+      )
+      instance.bind([['body', element]])
+      return instance
+    })
+    Object.assign(window, { letInstances: instances })
+  }, derivedFixture)
+  const first = page.locator('#derived-0')
+  const second = page.locator('#derived-1')
+  await expect(first).toHaveCSS('translate', '10px')
+  const box = (await first.boundingBox())!
+
+  await page.mouse.move(box.x + 20, box.y + 20)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 60, box.y + 20)
+  await expect(first).toHaveCSS('translate', '50px')
+  expect(await page.evaluate(() => window.letInstances[0].state)).toBe('dragging')
+
+  await page.evaluate(() => window.letInstances[0].updateParameters({ progress: 20, divisor: 1 }))
+  await expect(first).toHaveCSS('translate', '60px')
+  await page.mouse.move(box.x + 70, box.y + 20)
+  await expect(first).toHaveCSS('translate', '70px')
+
+  await page.evaluate(() => window.letInstances[0].updateParameters({ progress: 20, divisor: 0 }))
+  await expect(first).toHaveCSS('translate', '70px')
+  await page.evaluate(() => window.letInstances[0].updateParameters({ progress: 30, divisor: 1 }))
+  await expect(first).toHaveCSS('translate', '80px')
+  await page.mouse.up()
+  expect(await page.evaluate(() => window.letInstances[0].state)).toBe('idle')
+
+  await page.evaluate(() => {
+    const instance = window.letInstances[0]
+    instance.replaceDefinition(instance.definition)
+  })
+  await expect(first).toHaveCSS('translate', '80px')
+  await expect(second).toHaveCSS('translate', '10px')
+  expect(await page.evaluate(() => window.errors.map((error) => error.code))).toEqual([
+    'runtime.expression',
+  ])
+
+  await page.evaluate(() => {
+    for (const instance of window.letInstances) instance.dispose()
+  })
 })

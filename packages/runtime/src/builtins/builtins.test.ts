@@ -2,22 +2,28 @@ import { expect, it } from 'vite-plus/test'
 import cardFixture from '../../../../fixtures/card.json'
 import { decodeBundle } from '../definition.ts'
 import { evaluate, evaluateScalar } from '../expression.ts'
-import { createSources, sourceValues, targetValues } from '../sources.ts'
-import { invokeSource } from './index.ts'
+import { LetBindingGraph, targetValues } from '../let-bindings.ts'
+import { isReactiveSubscription } from '../reactive-value.ts'
+import { callBuiltin } from './index.ts'
 
-it('dispatches call IR to independently initialized built-in sources', () => {
+it('dispatches call IR to independently initialized built-in subscriptions', () => {
   const definition = decodeBundle(JSON.stringify(cardFixture)).definitions[0]
-  const first = createSources(definition.sources!, targetValues(definition))
-  const second = createSources(definition.sources!, targetValues(definition))
+  const firstVariables = targetValues(definition)
+  const secondVariables = targetValues(definition)
+  const first = new LetBindingGraph(definition.letBindings!, firstVariables)
+  const second = new LetBindingGraph(definition.letBindings!, secondVariables)
 
-  expect(first.get('movement')).not.toBe(second.get('movement'))
-  expect(sourceValues(first)).toEqual({ movement: { active: false, offset: { x: 0, y: 0 } } })
-  expect(() => invokeSource({ kind: 'call', function: 'missing', arguments: [] }, {})).toThrow(
-    'Unknown function: missing',
+  expect(first.evaluate(firstVariables).movement).not.toBe(
+    second.evaluate(secondVariables).movement,
   )
+  expect(first.evaluate(firstVariables).movement).toEqual({
+    active: false,
+    offset: { x: 0, y: 0 },
+  })
+  expect(() => callBuiltin('missing', {})).toThrow('Unknown function: missing')
 })
 
-it('resolves scalar members without source-specific field names', () => {
+it('resolves scalar members without built-in-specific field names', () => {
   const values = { custom: { nested: { value: 7 }, label: 'ready' } }
 
   expect(evaluate({ kind: 'reference', path: ['custom', 'nested', 'value'] }, values)).toBe(7)
@@ -47,18 +53,15 @@ it('evaluates target variables using the same environment as other argument valu
   expect(evaluate(reference, variables)).toBe(variables.body)
   expect(targetValues(definition).body).not.toBe(variables.body)
   expect(targetValues(definition, variables).body).toBe(variables.body)
-  expect(() => invokeSource(definition.sources![0].initializer, {})).toThrow(
+  expect(() => new LetBindingGraph(definition.letBindings!, {})).toThrow(
     'Unknown variable reference: body',
   )
 
-  const source = invokeSource(
-    {
-      kind: 'call',
-      function: 'drag',
-      arguments: [{ name: 'target', value: { kind: 'reference', path: ['selected'] } }],
-    },
-    { selected: variables.body },
-  )
+  const subscription = callBuiltin('drag', {
+    target: evaluate({ kind: 'reference', path: ['selected'] }, { selected: variables.body }),
+  })
 
-  expect(source.value).toEqual({ active: false, offset: { x: 0, y: 0 } })
+  if (!isReactiveSubscription(subscription)) throw new Error('Expected a reactive subscription')
+
+  expect(subscription.value).toEqual({ active: false, offset: { x: 0, y: 0 } })
 })
