@@ -118,16 +118,14 @@ impl State {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum Source {
-    Drag { name: String, target: String },
+pub struct Source {
+    pub name: String,
+    pub initializer: Expression,
 }
 
 impl Source {
     pub fn name(&self) -> &str {
-        match self {
-            Self::Drag { name, .. } => name,
-        }
+        &self.name
     }
 }
 

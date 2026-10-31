@@ -1,9 +1,13 @@
-use crate::ir::{MotionParameter, PrimitiveType, Source};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Expression {
+    Call {
+        function: String,
+        arguments: Vec<Argument>,
+    },
     Number {
         value: f64,
     },
@@ -28,17 +32,25 @@ pub enum Expression {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Argument {
+    pub name: String,
+    pub value: Expression,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum TemplatePart {
     Text(String),
     Expression(Expression),
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Type {
     Number,
     Boolean,
     String,
+    Target,
+    Record(&'static [crate::builtins::Field]),
 }
 
 struct Parser {
@@ -88,7 +100,7 @@ fn tokenize(text: &str) -> Result<Vec<String>, String> {
             }
         } else if let Some(op) = [
             "===", "!==", "&&", "||", "==", "!=", "<=", ">=", "+", "-", "*", "/", "%", "!", "<",
-            ">", "(", ")", ".",
+            ">", "(", ")", ".", ",", ":",
         ]
         .iter()
         .find(|op| text[i..].starts_with(**op))
@@ -168,7 +180,54 @@ impl Parser {
                     }
                     path.push(member);
                 }
-                Expression::Reference { path }
+                if self
+                    .tokens
+                    .get(self.index)
+                    .is_some_and(|token| token == "(")
+                {
+                    if path.len() != 1 {
+                        return Err("Expected function name".into());
+                    }
+
+                    self.index += 1;
+                    let mut arguments = vec![];
+
+                    while self
+                        .tokens
+                        .get(self.index)
+                        .is_some_and(|token| token != ")")
+                    {
+                        let name = self.take()?;
+
+                        if !identifier(&name) || self.take()? != ":" {
+                            return Err("Expected named argument and colon".into());
+                        }
+
+                        let value = self.expression(0)?;
+                        arguments.push(Argument { name, value });
+
+                        if !self
+                            .tokens
+                            .get(self.index)
+                            .is_some_and(|token| token == ",")
+                        {
+                            break;
+                        }
+
+                        self.index += 1;
+                    }
+
+                    if self.take()? != ")" {
+                        return Err("Expected closing call parenthesis".into());
+                    }
+
+                    Expression::Call {
+                        function: path.remove(0),
+                        arguments,
+                    }
+                } else {
+                    Expression::Reference { path }
+                }
             }
             _ => return Err("Expected expression operand".into()),
         };
@@ -219,47 +278,40 @@ pub fn parse(text: &str) -> Result<Expression, String> {
     Ok(expression)
 }
 
-pub fn check(
-    expression: &Expression,
-    sources: &[Source],
-    parameters: &[MotionParameter],
-) -> Result<Type, String> {
+pub type Scope = BTreeMap<String, Type>;
+
+impl Type {
+    pub fn is_scalar(self) -> bool {
+        matches!(self, Self::Number | Self::Boolean | Self::String)
+    }
+}
+
+pub fn check(expression: &Expression, scope: &Scope) -> Result<Type, String> {
     match expression {
         Expression::Number { value } if value.is_finite() => Ok(Type::Number),
         Expression::Boolean { .. } => Ok(Type::Boolean),
         Expression::String { .. } => Ok(Type::String),
         Expression::Reference { path } => {
-            if let Some(parameter) = parameters.iter().find(|p| p.name == path[0]) {
-                if path.len() != 1 {
-                    return Err(format!(
-                        "Primitive parameter has no members: {}",
-                        path.join(".")
-                    ));
-                }
+            let mut value_type = *scope
+                .get(&path[0])
+                .ok_or_else(|| format!("Unknown variable: {}", path[0]))?;
 
-                return Ok(match parameter.value_type {
-                    PrimitiveType::Number => Type::Number,
-                    PrimitiveType::Boolean => Type::Boolean,
-                    PrimitiveType::String => Type::String,
-                });
-            }
-
-            let source = sources
-                .iter()
-                .find(|s| s.name() == path[0])
-                .ok_or_else(|| format!("Unknown parameter or source: {}", path[0]))?;
-            match (
-                source,
-                path[1..]
+            for member in &path[1..] {
+                let Type::Record(fields) = value_type else {
+                    return Err(format!("Unknown variable member: {}", path.join(".")));
+                };
+                value_type = fields
                     .iter()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>()
-                    .as_slice(),
-            ) {
-                (Source::Drag { .. }, ["active"]) => Ok(Type::Boolean),
-                (Source::Drag { .. }, ["offset", "x" | "y"]) => Ok(Type::Number),
-                _ => Err(format!("Unknown source member: {}", path.join("."))),
+                    .find(|field| field.name == member)
+                    .ok_or_else(|| format!("Unknown variable member: {}", path.join(".")))?
+                    .value_type;
             }
+
+            Ok(value_type)
+        }
+        Expression::Call { function, .. } => {
+            crate::builtins::lookup(function)?;
+            Err("Source-producing function calls belong in source initializers".into())
         }
         Expression::Unary { operator, operand } => {
             let expected = if operator == "!" {
@@ -267,7 +319,7 @@ pub fn check(
             } else {
                 Type::Number
             };
-            if check(operand, sources, parameters)? != expected {
+            if check(operand, scope)? != expected {
                 return Err("Invalid unary operand type".into());
             }
             Ok(expected)
@@ -277,14 +329,14 @@ pub fn check(
             left,
             right,
         } => {
-            let a = check(left, sources, parameters)?;
-            let b = check(right, sources, parameters)?;
+            let a = check(left, scope)?;
+            let b = check(right, scope)?;
             let expected = match operator.as_str() {
                 "&&" | "||" => Type::Boolean,
                 "+" | "-" | "*" | "/" | "%" => Type::Number,
                 _ => a,
             };
-            if a != b || a != expected {
+            if !a.is_scalar() || a != b || a != expected {
                 return Err("Incompatible expression operands".into());
             }
             Ok(

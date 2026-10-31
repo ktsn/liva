@@ -286,3 +286,35 @@ fn parameter_types_have_lossless_nodes_and_recover_at_the_body() {
         );
     }
 }
+
+#[test]
+fn source_initializers_have_generic_call_nodes_and_original_ranges() {
+    for name in ["drag", "custom"] {
+        let source = format!(
+            "motion card {{ source movement={name}(\r\n target: /* 😀 */ body,\r\n)\r\n state idle {{ body {{ opacity: 1 }} }} }}"
+        );
+        let parsed = parse(&source);
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        assert_eq!(parsed.root.text(), source);
+
+        let declaration = parsed
+            .root
+            .child(Kind::Block)
+            .unwrap()
+            .child(Kind::Source)
+            .unwrap();
+        assert_eq!(declaration.header().as_deref(), Some("movement"));
+        let call = declaration
+            .child(Kind::Value)
+            .unwrap()
+            .child(Kind::Call)
+            .unwrap();
+        assert_eq!(call.header().as_deref(), Some(name));
+        assert_eq!(&source[call.range().start..call.range().end], call.text());
+        assert_eq!(call.children(Kind::Argument).count(), 1);
+
+        for end in (0..=source.len()).filter(|end| source.is_char_boundary(*end)) {
+            assert_eq!(parse(&source[..end]).root.text(), &source[..end]);
+        }
+    }
+}

@@ -353,3 +353,155 @@ fn definition_names_are_unique_independently_of_parameters() {
             .any(|diagnostic| diagnostic.code == "semantic.duplicate")
     );
 }
+
+#[test]
+fn source_initializers_use_function_calls_and_builtin_signatures() {
+    let result = valid(
+        "motion card { source movement=drag(\n target: card_body,\n)\n state idle { card_body { translate: ${movement.offset.x}px 0 } } }",
+    );
+    let initializer = serde_json::to_value(&result.definitions[0].sources[0]).unwrap();
+
+    assert_eq!(
+        initializer,
+        serde_json::json!({
+            "name": "movement",
+            "initializer": {
+                "kind": "call",
+                "function": "drag",
+                "arguments": [{ "name": "target", "value": { "kind": "reference", "path": ["card_body"] } }],
+            },
+        })
+    );
+
+    for (call, message) in [
+        ("unknown(target: body)", "Unknown function"),
+        ("drag()", "Missing argument"),
+        ("drag(element: body)", "Unknown argument"),
+        ("drag(target: body, target: body)", "Duplicate argument"),
+        ("drag(target: 1)", "Invalid argument type"),
+        ("drag(target: true)", "Invalid argument type"),
+        ("drag(target: 'body')", "Invalid argument type"),
+        ("drag(target: absent)", "Unknown variable"),
+        ("drag(target: enabled)", "Invalid argument type"),
+        ("drag(target: body.active)", "Unknown variable member"),
+        (
+            "drag(target: drag(target: body))",
+            "Source-producing function calls",
+        ),
+        ("42", "must be a function call"),
+    ] {
+        let source = format!(
+            "motion card(enabled: boolean) {{ source movement = {call}; state idle {{ body {{ opacity: 1 }} }} }}"
+        );
+        let result = compile(&source, true);
+
+        assert!(result.definitions.is_empty(), "{call}");
+        let diagnostic = result
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "semantic.call")
+            .unwrap();
+        assert!(
+            diagnostic.message.contains(message),
+            "{call}: {}",
+            diagnostic.message
+        );
+        assert!(
+            source[diagnostic.range.start..diagnostic.range.end].starts_with("source movement")
+        );
+    }
+}
+
+#[test]
+fn calls_parse_without_resolving_function_names() {
+    use liva_compiler::expression::{Expression, parse};
+
+    let expression = parse("custom(value: 1 + 2, nested: other(flag: true),)").unwrap();
+    let Expression::Call {
+        function,
+        arguments,
+    } = expression
+    else {
+        panic!("Expected a call")
+    };
+
+    assert_eq!(function, "custom");
+    assert_eq!(arguments.len(), 2);
+    assert!(matches!(arguments[0].value, Expression::Binary { .. }));
+    assert!(matches!(arguments[1].value, Expression::Call { .. }));
+
+    for text in [
+        "custom(1)",
+        "custom(value:)",
+        "custom(value: 1,,)",
+        "custom(value: 1) suffix",
+    ] {
+        assert!(parse(text).is_err(), "{text}");
+    }
+}
+
+#[test]
+fn target_variables_share_motion_scope_and_use_reference_expressions() {
+    let result = valid(
+        "motion card { source movement = drag(target: (body)); state idle { body { opacity: 1 } } }",
+    );
+    let initializer = serde_json::to_value(&result.definitions[0].sources[0].initializer).unwrap();
+
+    assert_eq!(
+        initializer["arguments"][0]["value"],
+        serde_json::json!({ "kind": "reference", "path": ["body"] })
+    );
+
+    for (source, code) in [
+        (
+            "motion card(body: string) { state idle { body { opacity: 1 } } }",
+            "semantic.duplicate",
+        ),
+        (
+            "motion card { source body = drag(target: other); state idle { body { opacity: 1 } other { opacity: 1 } } }",
+            "semantic.duplicate",
+        ),
+        (
+            "motion card(body: string) { source movement = drag(target: body); state idle { other { opacity: 1 } } }",
+            "semantic.call",
+        ),
+        (
+            "motion card { state idle { body { opacity: ${body} } } }",
+            "semantic.expression",
+        ),
+        (
+            "motion card { state idle { body { opacity: ${body + 1} } } }",
+            "semantic.expression",
+        ),
+        (
+            "motion card { state idle {} state active when body { body { opacity: 1 } } }",
+            "semantic.expression",
+        ),
+    ] {
+        let result = compile(source, false);
+
+        assert!(result.definitions.is_empty(), "{source}");
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == code),
+            "{source}: {:?}",
+            result.diagnostics
+        );
+    }
+
+    let result = compile(
+        "motion first { state idle { body { opacity: 1 } } } motion second { source movement = drag(target: body); state idle { other { opacity: 1 } } }",
+        false,
+    );
+
+    assert_eq!(result.definitions.len(), 1);
+    assert_eq!(result.definitions[0].name, "first");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message == "Unknown variable: body")
+    );
+}

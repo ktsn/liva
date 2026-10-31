@@ -1,3 +1,4 @@
+pub mod builtins;
 pub mod edits;
 pub mod expression;
 pub mod ir;
@@ -73,59 +74,19 @@ impl Compiler {
     fn sources(&mut self, node: &Ast) -> Vec<Source> {
         let mut sources = vec![];
         let mut seen = BTreeMap::new();
-
         for source in node.children(Kind::Source) {
-            let text = semantic_text(&source.text());
-            let Some((name, call)) = text.strip_prefix("source").and_then(|v| v.split_once('='))
-            else {
-                self.error(
-                    "semantic.source",
-                    "Expected source name = sourceType(arguments)",
-                    &source,
-                );
-                continue;
-            };
-            let name = name.trim();
-            self.unique(&mut seen, name, &source);
-            if !expression::identifier(name) || matches!(name, "true" | "false") {
+            let name = source.header().unwrap_or_default();
+            self.unique(&mut seen, &name, &source);
+
+            if !expression::identifier(&name) || matches!(name.as_str(), "true" | "false") {
                 self.error("semantic.source", "Invalid source identifier", &source);
             }
-            let expected = call.trim();
-            let parsed = parse(&format!(
-                "motion a {{ transition {{ timing: {expected} }} }}"
-            ));
-            let call = parsed
-                .root
-                .child(Kind::Block)
-                .and_then(|n| n.child(Kind::Block))
-                .and_then(|n| n.child(Kind::Declaration))
-                .and_then(|n| n.child(Kind::Value))
-                .and_then(|n| n.child(Kind::Call));
-            let Some(call) = call.filter(|call| {
-                parsed.diagnostics.is_empty() && semantic_text(&call.text()) == expected
-            }) else {
-                self.error("semantic.source", "Invalid source call", &source);
-                continue;
-            };
-            let args: Vec<_> = call.children(Kind::Argument).collect();
-            let value = args.first().and_then(Ast::value).unwrap_or_default();
-            let key = args.first().and_then(Ast::header).unwrap_or_default();
-            let kind = call.header().unwrap_or_default();
-            let result = match (kind.as_str(), key.as_str(), args.len()) {
-                ("drag", "target", 1) if liva_syntax::is_name(&value) => Some(Source::Drag {
-                    name: name.into(),
-                    target: value,
-                }),
-                _ => None,
-            };
-            if let Some(result) = result {
-                sources.push(result);
-            } else {
-                self.error(
-                    "semantic.source",
-                    "Expected drag(target: name); host inputs must be motion parameters",
-                    &source,
-                );
+
+            let result = expression::parse(&source.value().unwrap_or_default());
+
+            match result {
+                Ok(initializer) => sources.push(Source { name, initializer }),
+                Err(message) => self.error("semantic.call", message, &source),
             }
         }
 
@@ -135,8 +96,7 @@ impl Compiler {
     fn css_template(
         &mut self,
         node: &Ast,
-        sources: &[Source],
-        parameters: &[MotionParameter],
+        scope: &expression::Scope,
     ) -> Option<Vec<expression::TemplatePart>> {
         let value = node.value().unwrap_or_default();
         if !value.contains("${") {
@@ -144,8 +104,10 @@ impl Compiler {
         }
         match expression::template(&value).and_then(|parts| {
             for part in &parts {
-                if let expression::TemplatePart::Expression(expr) = part {
-                    expression::check(expr, sources, parameters)?;
+                if let expression::TemplatePart::Expression(expr) = part
+                    && !expression::check(expr, scope)?.is_scalar()
+                {
+                    return Err("CSS templates require scalar values".into());
                 }
             }
             Ok(parts)
@@ -654,6 +616,70 @@ impl Compiler {
         Transition { timing, targets }
     }
 
+    fn motion_scope(&mut self, node: &Ast, definition: &Definition) -> expression::Scope {
+        use expression::Type;
+        let mut scope = expression::Scope::new();
+
+        for parameter in &definition.parameters {
+            let value_type = match parameter.value_type {
+                PrimitiveType::Number => Type::Number,
+                PrimitiveType::Boolean => Type::Boolean,
+                PrimitiveType::String => Type::String,
+            };
+            scope.insert(parameter.name.clone(), value_type);
+        }
+
+        for source in &definition.sources {
+            if scope.contains_key(&source.name) {
+                self.error(
+                    "semantic.duplicate",
+                    format!("Duplicate variable: {}", source.name),
+                    node,
+                );
+            }
+
+            if let expression::Expression::Call { function, .. } = &source.initializer
+                && let Ok(signature) = builtins::lookup(function)
+            {
+                scope.insert(source.name.clone(), signature.return_type);
+            }
+        }
+
+        let mut targets = BTreeMap::new();
+
+        for state in node.children(Kind::Block).filter(|block| {
+            block
+                .header()
+                .is_some_and(|header| header.split_whitespace().next() == Some("state"))
+        }) {
+            for target in state.children(Kind::Block) {
+                targets
+                    .entry(target.header().unwrap_or_default())
+                    .or_insert(target);
+            }
+        }
+
+        for (name, target) in targets {
+            if !expression::identifier(&name) || matches!(name.as_str(), "true" | "false") {
+                self.error(
+                    "semantic.variable",
+                    "Target variables require expression identifiers",
+                    &target,
+                );
+            }
+
+            if scope.insert(name.clone(), Type::Target).is_some() {
+                self.error(
+                    "semantic.duplicate",
+                    format!("Duplicate variable: {name}"),
+                    &target,
+                );
+            }
+        }
+
+        scope
+    }
+
     fn definition(&mut self, node: &Ast) -> Definition {
         let name = node.motion_name().unwrap_or_default();
         self.mapping(&name, node, "block");
@@ -666,17 +692,16 @@ impl Compiler {
             general_transition: None,
             directional_transitions: vec![],
         };
-        for parameter in &definition.parameters {
-            if definition
+        let scope = self.motion_scope(node, &definition);
+
+        for syntax in node.children(Kind::Source) {
+            if let Some(source) = definition
                 .sources
                 .iter()
-                .any(|source| source.name() == parameter.name)
+                .find(|source| Some(&source.name) == syntax.header().as_ref())
+                && let Err(message) = builtins::check_initializer(&source.initializer, &scope)
             {
-                self.error(
-                    "semantic.duplicate",
-                    format!("Parameter and source share name: {}", parameter.name),
-                    node,
-                );
+                self.error("semantic.call", message, &syntax);
             }
         }
 
@@ -713,11 +738,7 @@ impl Compiler {
                             .children(Kind::Declaration)
                             .map(|p| Property {
                                 name: p.header().unwrap_or_default(),
-                                template: self.css_template(
-                                    &p,
-                                    &definition.sources,
-                                    &definition.parameters,
-                                ),
+                                template: self.css_template(&p, &scope),
                                 value: p.value().unwrap_or_default(),
                             })
                             .collect();
@@ -733,12 +754,7 @@ impl Compiler {
                         .and_then(|text| text.trim_start().strip_prefix("when"))
                         .and_then(|text| {
                             match expression::parse(text).and_then(|expr| {
-                                if expression::check(
-                                    &expr,
-                                    &definition.sources,
-                                    &definition.parameters,
-                                )? != expression::Type::Boolean
-                                {
+                                if expression::check(&expr, &scope)? != expression::Type::Boolean {
                                     return Err("State condition must be Boolean".into());
                                 }
                                 Ok(expr)
@@ -790,20 +806,6 @@ impl Compiler {
                 "Definition requires exactly one fallback state",
                 node,
             );
-        }
-        for source in &definition.sources {
-            if let Source::Drag { target, .. } = source
-                && !definition
-                    .states
-                    .iter()
-                    .any(|s| s.targets.iter().any(|t| &t.name == target))
-            {
-                self.error(
-                    "semantic.source-target",
-                    format!("Unknown drag target: {target}"),
-                    node,
-                );
-            }
         }
         for transition in definition.general_transition.iter().chain(
             definition

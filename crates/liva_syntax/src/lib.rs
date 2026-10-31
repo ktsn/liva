@@ -275,7 +275,7 @@ fn lex(source: &str, raw_value: bool) -> (Vec<Token<'_>>, Vec<Diagnostic>) {
         } else if c.is_whitespace() {
             trivia = true;
             i += c.len_utf8();
-        } else if "{}():;,[]".contains(c) {
+        } else if "{}():;,[]=".contains(c) {
             i += 1;
         } else {
             i += c.len_utf8();
@@ -291,7 +291,7 @@ fn lex(source: &str, raw_value: bool) -> (Vec<Token<'_>>, Vec<Diagnostic>) {
                         i += source[i..].chars().next().unwrap().len_utf8();
                     }
                 } else if next.is_whitespace()
-                    || "{}():;,[]\"'".contains(next)
+                    || "{}():;,[]=\"'".contains(next)
                     || source[i..].starts_with("${")
                     || source[i..].starts_with("/*")
                 {
@@ -410,7 +410,23 @@ impl Parser<'_> {
 
             if self.at() == "source" {
                 self.start(Kind::Source);
-                self.raw(false, false);
+                self.bump();
+                self.gap();
+                self.start(Kind::Header);
+
+                while !matches!(self.at(), "" | "=" | "{" | "}" | ";" | "\n" | "\r") {
+                    self.bump();
+                }
+                self.end();
+
+                if self.at() == "=" {
+                    self.bump();
+                    self.start(Kind::Value);
+                    self.raw(false, true);
+                    self.end();
+                } else {
+                    self.error("Expected source initializer after =");
+                }
                 self.end();
                 continue;
             }

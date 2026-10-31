@@ -5,9 +5,20 @@
       "name": "card",
       "sources": [
         {
-          "kind": "drag",
           "name": "movement",
-          "target": "body"
+          "initializer": {
+            "kind": "call",
+            "function": "drag",
+            "arguments": [
+              {
+                "name": "target",
+                "value": {
+                  "kind": "reference",
+                  "path": ["body"]
+                }
+              }
+            ]
+          }
         }
       ],
       "states": [
