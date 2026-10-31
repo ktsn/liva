@@ -17,7 +17,7 @@ for (const name of ['toggle', 'reactive-toggle', 'card']) {
 }
 assert.throws(() => decodeBundle('{"schemaVersion":2,"definitions":[]}'), /Unsupported/)
 
-const unicode = '// 😀\r\na { state on {} transition { timing: tween(duration: 1s) } }'
+const unicode = '// 😀\r\nmotion a { state on {} transition { timing: tween(duration: 1s) } }'
 const development: Compilation = JSON.parse(compile(unicode, true))
 assert.deepEqual(development.diagnostics, [])
 assert(development.mappings)

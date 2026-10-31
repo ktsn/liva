@@ -2,7 +2,7 @@ use liva_compiler::{compile, ir::Timing};
 
 fn fixture(timing: &str, extra: &str) -> String {
     format!(
-        "a {{ state off {{ t {{ translate: 0px; scale: 1 }} }} state on when true {{ t {{ translate: 24px; scale: 1 }} }} transition {{ timing: {timing}\n {extra} }} }}"
+        "motion a {{ state off {{ t {{ translate: 0px; scale: 1 }} }} state on when true {{ t {{ translate: 24px; scale: 1 }} }} transition {{ timing: {timing}\n {extra} }} }}"
     )
 }
 
@@ -78,22 +78,22 @@ fn timing_signatures_and_argument_order() {
 #[test]
 fn references_duplicates_completeness_and_recovery() {
     for source in [
-        "a {}",
-        "a { state on {} state on {} }",
-        "a { state on { t { color: red; color: blue } } }",
-        "a { state on { t {} t {} } }",
-        "a { state on {} transition off -> on {} }",
-        "a { state on when true { t { color: red } } state off { t {} } }",
-        "a { state on {} transition {} transition {} }",
-        "a { state on {} } a { state on {} }",
-        "a { state on when true { t { color: red } } state off { t { color: blue } } }",
-        "a { state on {} transition { t { color { timing: tween(duration: 1ms) } } } }",
+        "motion a {}",
+        "motion a { state on {} state on {} }",
+        "motion a { state on { t { color: red; color: blue } } }",
+        "motion a { state on { t {} t {} } }",
+        "motion a { state on {} transition off -> on {} }",
+        "motion a { state on when true { t { color: red } } state off { t {} } }",
+        "motion a { state on {} transition {} transition {} }",
+        "motion a { state on {} } motion a { state on {} }",
+        "motion a { state on when true { t { color: red } } state off { t { color: blue } } }",
+        "motion a { state on {} transition { t { color { timing: tween(duration: 1ms) } } } }",
     ] {
         assert!(!errors(source).is_empty(), "{source}");
     }
 
     let result = compile(
-        "bad { state on { t { x: fn( } } } good { state on {} }",
+        "motion bad { state on { t { x: fn( } } } motion good { state on {} }",
         true,
     );
     assert_eq!(
@@ -104,7 +104,7 @@ fn references_duplicates_completeness_and_recovery() {
             .collect::<Vec<_>>(),
         ["good"]
     );
-    let duplicate = compile("a { state on {} state on {} }", false);
+    let duplicate = compile("motion a { state on {} state on {} }", false);
     assert!(
         duplicate
             .diagnostics
@@ -168,7 +168,7 @@ fn frame_rules_and_effective_inheritance() {
 
 #[test]
 fn raw_css_and_byte_mappings() {
-    let source = "// 😀\r\na { state on { t { --offset: var(--x, '日本語'); color: /* note */ imaginary !important; timing: var(--x, 1) } } transition { timing: tween(duration: 1s) } }";
+    let source = "// 😀\r\nmotion a { state on { t { --offset: var(--x, '日本語'); color: /* note */ imaginary !important; timing: var(--x, 1) } } transition { timing: tween(duration: 1s) } }";
     let result = compile(source, true);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     assert_eq!(
@@ -192,13 +192,13 @@ fn raw_css_and_byte_mappings() {
 
 #[test]
 fn same_state_noops_do_not_require_motion_timing() {
-    let source = "a { state off { t { scale: 1 } } state on when true { t { scale: 1 } } transition { t { scale { 40% { value: 2 } } } } transition off -> on { timing: tween(duration: 1s) } transition on -> off { timing: tween(duration: 1s) } }";
+    let source = "motion a { state off { t { scale: 1 } } state on when true { t { scale: 1 } } transition { t { scale { 40% { value: 2 } } } } transition off -> on { timing: tween(duration: 1s) } transition on -> off { timing: tween(duration: 1s) } }";
     assert!(errors(source).is_empty());
 }
 
 #[test]
 fn mapping_paths_do_not_collide_with_user_names() {
-    let source = "a { state general { timing { timing: 0 } } state timing when true { timing { timing: 1 } } transition { timing: tween(duration: 1s) } transition general -> timing { timing { timing { timing: tween(duration: 2s) } } } }";
+    let source = "motion a { state general { timing { timing: 0 } } state timing when true { timing { timing: 1 } } transition { timing: tween(duration: 1s) } transition general -> timing { timing { timing { timing: tween(duration: 2s) } } } }";
     let result = compile(source, true);
     assert!(result.diagnostics.is_empty());
     let mappings = result.mappings.unwrap();

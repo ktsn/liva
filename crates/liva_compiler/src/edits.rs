@@ -196,7 +196,7 @@ fn replace_track(
 
     let safe_value = |value: &str| -> Result<(), String> {
         preserve_comments(value)?;
-        let parsed = liva_syntax::parse(&format!("t {{ value: {value}\n}}"));
+        let parsed = liva_syntax::parse(&format!("motion t {{ value: {value}\n}}"));
         let block = parsed
             .root
             .child(liva_syntax::Kind::Block)

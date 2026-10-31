@@ -1,4 +1,4 @@
-toggle {
+motion toggle {
   state off {
     track {
       background-color: #888

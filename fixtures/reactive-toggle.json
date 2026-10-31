@@ -3,13 +3,6 @@
   "definitions": [
     {
       "name": "toggle",
-      "sources": [
-        {
-          "kind": "external",
-          "name": "checked",
-          "type": "Boolean"
-        }
-      ],
       "states": [
         {
           "name": "off",
@@ -142,6 +135,12 @@
               }
             ]
           }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "checked",
+          "type": "boolean"
         }
       ]
     }

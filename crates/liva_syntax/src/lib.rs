@@ -15,6 +15,9 @@ pub enum Kind {
     Trivia,
     Error,
     Source,
+    Parameters,
+    Parameter,
+    TypeReference,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -35,6 +38,9 @@ impl Language for Liva {
             7 => Kind::Text,
             8 => Kind::Trivia,
             10 => Kind::Source,
+            11 => Kind::Parameters,
+            12 => Kind::Parameter,
+            13 => Kind::TypeReference,
             _ => Kind::Error,
         }
     }
@@ -100,6 +106,48 @@ impl Ast {
 
     pub fn header(&self) -> Option<String> {
         self.child(Kind::Header).map(|n| semantic_text(&n.text()))
+    }
+
+    pub fn motion_name(&self) -> Option<String> {
+        let header = self.child(Kind::Header)?;
+        let mut before = String::new();
+        let mut after = String::new();
+        let mut parameter_lists = 0;
+
+        for element in header.0.children_with_tokens() {
+            match element {
+                rowan::NodeOrToken::Node(node) if node.kind() == Kind::Parameters => {
+                    parameter_lists += 1;
+                }
+                rowan::NodeOrToken::Token(token) => {
+                    if parameter_lists == 0 {
+                        before.push_str(token.text());
+                    } else {
+                        after.push_str(token.text());
+                    }
+                }
+                _ => return None,
+            }
+        }
+
+        let text = semantic_text(&before);
+        let words: Vec<_> = text.split_whitespace().collect();
+
+        match words.as_slice() {
+            ["motion", name]
+                if is_name(name) && parameter_lists <= 1 && semantic_text(&after).is_empty() =>
+            {
+                Some((*name).into())
+            }
+            _ => None,
+        }
+    }
+
+    pub fn parameters(&self) -> impl Iterator<Item = Ast> {
+        self.child(Kind::Header)
+            .and_then(|header| header.child(Kind::Parameters))
+            .into_iter()
+            .flat_map(|list| list.children(Kind::Parameter).collect::<Vec<_>>())
     }
 
     pub fn value(&self) -> Option<String> {
@@ -373,7 +421,11 @@ impl Parser<'_> {
 
             while !self.at().is_empty() && !matches!(self.at(), "{" | "}" | ":" | ";" | "\n" | "\r")
             {
-                self.bump();
+                if depth == 0 && self.tokens[begin].text == "motion" && self.at() == "(" {
+                    self.parameters();
+                } else {
+                    self.bump();
+                }
             }
             self.end();
 
@@ -428,6 +480,48 @@ impl Parser<'_> {
                 }
             }
         }
+    }
+
+    fn parameters(&mut self) {
+        self.start(Kind::Parameters);
+        self.bump();
+        self.gap();
+
+        while !matches!(self.at(), "" | ")" | "{" | "}") {
+            self.start(Kind::Parameter);
+            self.start(Kind::Header);
+
+            while !matches!(self.at(), "" | ":" | "," | ")" | "{" | "}") {
+                self.bump();
+            }
+            self.end();
+
+            if self.at() == ":" {
+                self.bump();
+                self.start(Kind::TypeReference);
+
+                while !matches!(self.at(), "" | "," | ")" | "{" | "}") {
+                    self.bump();
+                }
+                self.end();
+            } else {
+                self.error("Expected parameter type annotation");
+            }
+            self.end();
+
+            if self.at() != "," {
+                break;
+            }
+            self.bump();
+            self.gap();
+        }
+
+        if self.at() == ")" {
+            self.bump();
+        } else {
+            self.error("Expected closing parameter parenthesis");
+        }
+        self.end();
     }
 
     fn raw(&mut self, argument: bool, call: bool) {
@@ -576,7 +670,8 @@ fn validate_headers(node: &Ast, depth: usize, diagnostics: &mut Vec<Diagnostic>)
         let header = block.header().unwrap_or_default();
         let words: Vec<_> = header.split_whitespace().collect();
         let valid = match depth {
-            0 | 2 => is_name(&header),
+            0 => block.motion_name().is_some(),
+            2 => is_name(&header),
             1 => match words.as_slice() {
                 ["state", name] => is_name(name),
                 ["state", name, "when", ..] => is_name(name) && words.len() > 3,

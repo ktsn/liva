@@ -5,9 +5,9 @@ fn lossless_prefixes_and_safe_ast() {
     let fixtures = [
         include_str!("../../../fixtures/toggle.liv"),
         "日本語 {\r\n x: '\"😀' /* } */; y: var(--a, [a,b])\r\n}",
-        "a { timing: unknown(a: fn([1, 2], '),'), b: 1,) }",
-        "a { timing: x(a: \"unfinished",
-        "a { /* unterminated",
+        "motion a { timing: unknown(a: fn([1, 2], '),'), b: 1,) }",
+        "motion a { timing: x(a: \"unfinished",
+        "motion a { /* unterminated",
     ];
 
     for source in fixtures {
@@ -39,7 +39,7 @@ fn generic_calls_and_boundaries() {
         "duration: 350ms, easing: cubic-bezier(.2, .8, .2, 1)",
         "\r\n easing: fn([1,2], '),'),\r\n duration: 350ms,\r\n",
     ] {
-        let source = format!("toggle {{ transition {{ timing: unknown({args}) }} }}");
+        let source = format!("motion toggle {{ transition {{ timing: unknown({args}) }} }}");
         let parsed = parse(&source);
         assert!(
             parsed.diagnostics.is_empty(),
@@ -55,7 +55,7 @@ fn generic_calls_and_boundaries() {
         "duration: 1ms,, easing: linear",
         "duration: fn([1,2)",
     ] {
-        let source = format!("a {{ timing: tween({args}) }}");
+        let source = format!("motion a {{ timing: tween({args}) }}");
         assert!(!parse(&source).diagnostics.is_empty(), "{args}");
     }
 
@@ -77,7 +77,7 @@ fn comments_and_strings_keep_opaque_values() {
 
 #[test]
 fn recovery_retains_later_blocks() {
-    let parsed = parse("broken\nvalid { state on { target { color: red } } }");
+    let parsed = parse("broken\nmotion valid { state on { target { color: red } } }");
     assert!(!parsed.diagnostics.is_empty());
     assert_eq!(
         parsed
@@ -87,7 +87,7 @@ fn recovery_retains_later_blocks() {
             .unwrap()
             .header()
             .as_deref(),
-        Some("valid")
+        Some("motion valid")
     );
 }
 
@@ -96,7 +96,7 @@ fn names_are_ascii_and_case_sensitive() {
     for name in ["Toggle", "toggle_2", "_toggle", "toggle-name"] {
         assert!(
             parse(&format!(
-                "{name} {{ state On {{ thumb {{ --offset: 2px }} }} }}"
+                "motion {name} {{ state On {{ thumb {{ --offset: 2px }} }} }}"
             ))
             .diagnostics
             .is_empty()
@@ -104,14 +104,14 @@ fn names_are_ascii_and_case_sensitive() {
     }
 
     for name in ["日本語", "--toggle", "1toggle", "a.b"] {
-        assert!(!parse(&format!("{name} {{}}")).diagnostics.is_empty());
+        assert!(!parse(&format!("motion {name} {{}}")).diagnostics.is_empty());
         assert!(
-            !parse(&format!("toggle {{ state {name} {{}} }}"))
+            !parse(&format!("motion toggle {{ state {name} {{}} }}"))
                 .diagnostics
                 .is_empty()
         );
         assert!(
-            !parse(&format!("toggle {{ state on {{ {name} {{}} }} }}"))
+            !parse(&format!("motion toggle {{ state on {{ {name} {{}} }} }}"))
                 .diagnostics
                 .is_empty()
         );
@@ -120,7 +120,7 @@ fn names_are_ascii_and_case_sensitive() {
 
 #[test]
 fn context_comments_escapes_and_group_recovery() {
-    let source = "a { state on { target { timing: var(--x, 1); content: \\); --x: \\, } } transition { timing /* note */: tween(duration: 1ms) } }";
+    let source = "motion a { state on { target { timing: var(--x, 1); content: \\); --x: \\, } } transition { timing /* note */: tween(duration: 1ms) } }";
     let parsed = parse(source);
     assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
     assert_eq!(
@@ -133,7 +133,8 @@ fn context_comments_escapes_and_group_recovery() {
         1
     );
 
-    let parsed = parse("a { state on { t { x: fn(1 } } } b { state on { t { x: 1 } } }");
+    let parsed =
+        parse("motion a { state on { t { x: fn(1 } } } motion b { state on { t { x: 1 } } }");
     assert!(!parsed.diagnostics.is_empty());
     assert_eq!(parsed.root.children(Kind::Block).count(), 2);
 }
@@ -151,14 +152,15 @@ fn comment_terminators_do_not_overlap_openers() {
 #[test]
 fn token_boundary_comments_and_state_whitespace() {
     for gap in [" ", "\t", " /* comment */ "] {
-        let source = format!("a {{ state{gap}on {{ t {{ timing: var(--x, 1) }} }} }}");
+        let source = format!("motion a {{ state{gap}on {{ t {{ timing: var(--x, 1) }} }} }}");
         assert!(parse(&source).diagnostics.is_empty(), "{source}");
     }
 
     assert_eq!(semantic_text("/* first */// second"), "");
     assert_eq!(semantic_text("[]// second"), "[]");
     assert_eq!(semantic_text("'x'// second"), "'x'");
-    let parsed = parse("a { state on { t { color:// comment\nred: https://example.com } } }");
+    let parsed =
+        parse("motion a { state on { t { color:// comment\nred: https://example.com } } }");
     assert!(parsed.diagnostics.is_empty());
     let values: Vec<_> = parsed
         .root
@@ -176,7 +178,7 @@ fn urls_are_opaque_after_other_raw_tokens() {
         semantic_text("prefix https://example.com"),
         "prefix https://example.com"
     );
-    let parsed = parse("a { state on { t { custom: prefix https://example.com } } }");
+    let parsed = parse("motion a { state on { t { custom: prefix https://example.com } } }");
     let value = parsed
         .root
         .0
@@ -213,7 +215,7 @@ fn reactive_syntax_is_lossless_even_when_truncated() {
         }
     }
 
-    let source = "a { state idle { t { translate: ${broken\nscale: 1\n} } }";
+    let source = "motion a { state idle { t { translate: ${broken\nscale: 1\n} } }";
     let parsed = parse(source);
     assert_eq!(parsed.root.text(), source);
     assert!(
@@ -223,4 +225,64 @@ fn reactive_syntax_is_lossless_even_when_truncated() {
             .any(|d| d.code == "syntax.interpolation")
     );
     assert!(parsed.root.text().contains("scale: 1"));
+}
+
+#[test]
+fn parameter_types_have_lossless_nodes_and_recover_at_the_body() {
+    let source = "motion progress( /* 😀 */ value: number,\r\n enabled: boolean, label: string) { state idle {} }";
+    let parsed = parse(source);
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    let motion = parsed.root.child(Kind::Block).unwrap();
+    assert_eq!(motion.motion_name().as_deref(), Some("progress"));
+    assert_eq!(motion.parameters().count(), 3);
+    assert_eq!(
+        parsed
+            .root
+            .0
+            .descendants()
+            .filter(|node| node.kind() == Kind::TypeReference)
+            .count(),
+        3
+    );
+    assert_eq!(
+        parsed
+            .root
+            .0
+            .descendants()
+            .filter(|node| node.kind() == Kind::Call)
+            .count(),
+        0
+    );
+
+    for end in (0..=source.len()).filter(|end| source.is_char_boundary(*end)) {
+        let parsed = parse(&source[..end]);
+        assert_eq!(parsed.root.text(), &source[..end]);
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .all(|d| d.range.start <= d.range.end && d.range.end <= end)
+        );
+    }
+
+    for header in [
+        "motion broken(value:",
+        "motion broken(value",
+        "motion broken(,)",
+    ] {
+        let source = format!("{header} {{ state idle {{}} }} motion valid {{ state idle {{}} }}");
+        let parsed = parse(&source);
+        assert_eq!(parsed.root.text(), source);
+        assert!(!parsed.diagnostics.is_empty());
+        assert_eq!(
+            parsed
+                .root
+                .children(Kind::Block)
+                .last()
+                .unwrap()
+                .motion_name()
+                .as_deref(),
+            Some("valid")
+        );
+    }
 }

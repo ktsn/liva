@@ -12,14 +12,14 @@ fn valid(source: &str) -> liva_compiler::Compilation {
 
 fn animation(timing: &str) -> String {
     format!(
-        "a {{ source checked = external(type: Boolean); state off {{ t {{ opacity: 0 }} }} state on when checked {{ t {{ opacity: 1 }} }} transition {{ {timing}\n }} }}"
+        "motion a(checked: boolean) {{ state off {{ t {{ opacity: 0 }} }} state on when checked {{ t {{ opacity: 1 }} }} transition {{ {timing}\n }} }}"
     )
 }
 
 #[test]
-fn revised_examples_compile_to_ordered_sources_conditions_and_templates() {
+fn motion_examples_compile_to_ordered_sources_conditions_and_templates() {
     let toggle = valid(include_str!("../../../fixtures/reactive-toggle.liv"));
-    assert_eq!(toggle.definitions[0].sources.len(), 1);
+    assert_eq!(toggle.definitions[0].parameters.len(), 1);
     assert_eq!(toggle.definitions[0].states[1].name, "on");
     assert!(toggle.definitions[0].states[1].when.is_some());
 
@@ -130,10 +130,9 @@ fn expression_types_references_and_fallback_are_validated() {
     }
 
     for source in [
-        "a { state first {} state second {} }",
-        "a { state first when true {} }",
-        "a { source value = external(type: Number); state idle {} }",
-        "a { source movement = drag(target: missing); state idle {} }",
+        "motion a { state first {} state second {} }",
+        "motion a { state first when true {} }",
+        "motion a { source movement = drag(target: missing); state idle {} }",
     ] {
         assert!(
             compile(source, false)
@@ -173,7 +172,7 @@ fn inline_frames_preserve_css_easing_and_replace_inheritance() {
 }
 
 #[test]
-fn revised_track_edits_preserve_surrounding_source() {
+fn track_edits_preserve_surrounding_source() {
     use liva_compiler::edits::{Edit, FrameEdit, apply_edits};
     let source = include_str!("../../../fixtures/reactive-toggle.liv").replace('\n', "\r\n");
     let path = "toggle/transition/general/target/thumb/property/scale";
@@ -202,16 +201,18 @@ fn revised_track_edits_preserve_surrounding_source() {
 fn source_arguments_scope_and_whitespace_are_checked() {
     valid(
         &animation("@tween: 1ms")
-            .replace("source checked", "source\tchecked")
+            .replace("checked: boolean", "checked /* input */ :\tboolean")
             .replace("when checked", "when\tchecked"),
     );
 
+    valid(
+        &include_str!("../../../fixtures/card.liv").replace("source movement", "source\tmovement"),
+    );
+
     for source in [
-        "a { source checked = external(type: Boolean) junk; state idle {} }",
-        "a { source checked = external(type: Boolean, type: Boolean); state idle {} }",
-        "a { state idle { source checked = external(type: Boolean); } }",
-        "source checked = external(type: Boolean); a { state idle {} }",
-        "a { state idle {} transition { source checked = external(type: Boolean); } }",
+        "motion a { state idle { source movement = drag(target: body); } }",
+        "source movement = drag(target: body); motion a { state idle {} }",
+        "motion a { state idle {} transition { source movement = drag(target: body); } }",
     ] {
         assert!(
             compile(source, false)
@@ -244,5 +245,111 @@ fn inline_frame_field_edits_preserve_comments_or_reject() {
         apply_edits(&source, &[edit])
             .unwrap_err()
             .contains("comments")
+    );
+}
+
+#[test]
+fn typed_parameters_are_declarations_and_share_expression_scope_with_sources() {
+    let result = valid(
+        r#"motion progress(
+        progress: number,
+        enabled: boolean,
+        label: string,
+    ) {
+        source movement = drag(target: body)
+        state idle { body { translate: ${progress + movement.offset.x}px 0; content: ${label} } }
+        state active when enabled && label != "" { body { translate: ${progress}px 0; content: ${label} } }
+        transition { @tween: 100ms }
+    }"#,
+    );
+    let json = serde_json::to_value(&result.definitions[0]).unwrap();
+
+    assert_eq!(
+        json["parameters"],
+        serde_json::json!([
+            {"name": "progress", "type": "number"},
+            {"name": "enabled", "type": "boolean"},
+            {"name": "label", "type": "string"},
+        ])
+    );
+    assert_eq!(result.definitions[0].sources.len(), 1);
+
+    for header in [
+        "motion empty",
+        "motion empty()",
+        "motion empty(motion: number)",
+    ] {
+        let result = valid(&format!("{header} {{ state idle {{}} }}"));
+        assert_eq!(
+            result.definitions[0].parameters.len(),
+            usize::from(header.contains("number"))
+        );
+    }
+}
+
+#[test]
+fn invalid_parameter_declarations_are_diagnosed() {
+    for header in [
+        "fn example(value: number)",
+        "motion a(value)",
+        "motion a(value:)",
+        "motion a(: number)",
+        "motion a(value: unknown)",
+        "motion a(value: number, value: boolean)",
+        "motion a(value: number enabled: boolean)",
+        "motion a(value: number,,)",
+        "motion a(true: boolean)",
+        "motion a(bad-name: number)",
+        "motion a(value: number = 1)",
+        "motion a(value: number)(other: string)",
+        "motion a()suffix",
+        "motion ()a",
+    ] {
+        let result = compile(&format!("{header} {{ state idle {{}} }}"), false);
+
+        assert!(result.definitions.is_empty(), "{header}");
+        assert!(
+            result.diagnostics.iter().any(|d| d.severity == "error"),
+            "{header}"
+        );
+    }
+
+    for body in [
+        "source value = drag(target: body); state idle { body { opacity: 1 } }",
+        "state idle when number {}",
+        "state idle { body { opacity: ${missing} } }",
+        "state idle { body { opacity: ${value.member} } }",
+    ] {
+        let result = compile(&format!("motion a(value: number) {{ {body} }}"), false);
+        assert!(result.definitions.is_empty(), "{body}");
+    }
+
+    let result = compile(
+        "motion a(value: boolean) { state idle {} } motion b { state idle {} state active when value {} }",
+        false,
+    );
+    assert_eq!(result.definitions.len(), 1);
+    assert_eq!(result.definitions[0].name, "a");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "semantic.expression")
+    );
+}
+
+#[test]
+fn definition_names_are_unique_independently_of_parameters() {
+    let result = compile(
+        "motion a(value: number) { state idle {} } motion a(flag: boolean) { state idle {} }",
+        false,
+    );
+
+    assert!(result.definitions.is_empty());
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "semantic.duplicate")
     );
 }

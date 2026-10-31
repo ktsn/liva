@@ -7,6 +7,8 @@ pub struct Definition {
     pub name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<Source>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameters: Vec<MotionParameter>,
     pub states: Vec<State>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub general_transition: Option<Transition>,
@@ -118,21 +120,28 @@ impl State {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Source {
-    External {
-        name: String,
-        #[serde(rename = "type")]
-        value_type: String,
-    },
-    Drag {
-        name: String,
-        target: String,
-    },
+    Drag { name: String, target: String },
 }
 
 impl Source {
     pub fn name(&self) -> &str {
         match self {
-            Self::External { name, .. } | Self::Drag { name, .. } => name,
+            Self::Drag { name, .. } => name,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MotionParameter {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub value_type: PrimitiveType,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PrimitiveType {
+    Number,
+    Boolean,
+    String,
 }

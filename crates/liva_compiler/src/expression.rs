@@ -1,4 +1,4 @@
-use crate::ir::Source;
+use crate::ir::{MotionParameter, PrimitiveType, Source};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -219,16 +219,35 @@ pub fn parse(text: &str) -> Result<Expression, String> {
     Ok(expression)
 }
 
-pub fn check(expression: &Expression, sources: &[Source]) -> Result<Type, String> {
+pub fn check(
+    expression: &Expression,
+    sources: &[Source],
+    parameters: &[MotionParameter],
+) -> Result<Type, String> {
     match expression {
         Expression::Number { value } if value.is_finite() => Ok(Type::Number),
         Expression::Boolean { .. } => Ok(Type::Boolean),
         Expression::String { .. } => Ok(Type::String),
         Expression::Reference { path } => {
+            if let Some(parameter) = parameters.iter().find(|p| p.name == path[0]) {
+                if path.len() != 1 {
+                    return Err(format!(
+                        "Primitive parameter has no members: {}",
+                        path.join(".")
+                    ));
+                }
+
+                return Ok(match parameter.value_type {
+                    PrimitiveType::Number => Type::Number,
+                    PrimitiveType::Boolean => Type::Boolean,
+                    PrimitiveType::String => Type::String,
+                });
+            }
+
             let source = sources
                 .iter()
                 .find(|s| s.name() == path[0])
-                .ok_or_else(|| format!("Unknown source: {}", path[0]))?;
+                .ok_or_else(|| format!("Unknown parameter or source: {}", path[0]))?;
             match (
                 source,
                 path[1..]
@@ -237,9 +256,7 @@ pub fn check(expression: &Expression, sources: &[Source]) -> Result<Type, String
                     .collect::<Vec<_>>()
                     .as_slice(),
             ) {
-                (Source::External { .. }, []) | (Source::Drag { .. }, ["active"]) => {
-                    Ok(Type::Boolean)
-                }
+                (Source::Drag { .. }, ["active"]) => Ok(Type::Boolean),
                 (Source::Drag { .. }, ["offset", "x" | "y"]) => Ok(Type::Number),
                 _ => Err(format!("Unknown source member: {}", path.join("."))),
             }
@@ -250,7 +267,7 @@ pub fn check(expression: &Expression, sources: &[Source]) -> Result<Type, String
             } else {
                 Type::Number
             };
-            if check(operand, sources)? != expected {
+            if check(operand, sources, parameters)? != expected {
                 return Err("Invalid unary operand type".into());
             }
             Ok(expected)
@@ -260,8 +277,8 @@ pub fn check(expression: &Expression, sources: &[Source]) -> Result<Type, String
             left,
             right,
         } => {
-            let a = check(left, sources)?;
-            let b = check(right, sources)?;
+            let a = check(left, sources, parameters)?;
+            let b = check(right, sources, parameters)?;
             let expected = match operator.as_str() {
                 "&&" | "||" => Type::Boolean,
                 "+" | "-" | "*" | "/" | "%" => Type::Number,

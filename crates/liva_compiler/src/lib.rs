@@ -29,6 +29,47 @@ struct Compiler {
 }
 
 impl Compiler {
+    fn parameters(&mut self, node: &Ast) -> Vec<MotionParameter> {
+        let mut parameters = vec![];
+        let mut seen = BTreeMap::new();
+
+        for parameter in node.parameters() {
+            let name = parameter.header().unwrap_or_default();
+            self.unique(&mut seen, &name, &parameter);
+
+            if !expression::identifier(&name) || matches!(name.as_str(), "true" | "false") {
+                self.error(
+                    "semantic.parameter",
+                    "Invalid parameter identifier",
+                    &parameter,
+                );
+            }
+
+            let reference = parameter.child(Kind::TypeReference);
+            let value_type = match reference
+                .as_ref()
+                .map(|n| semantic_text(&n.text()))
+                .as_deref()
+            {
+                Some("number") => PrimitiveType::Number,
+                Some("boolean") => PrimitiveType::Boolean,
+                Some("string") => PrimitiveType::String,
+                _ => {
+                    self.error(
+                        "semantic.type",
+                        "Expected primitive type number, boolean, or string",
+                        reference.as_ref().unwrap_or(&parameter),
+                    );
+                    continue;
+                }
+            };
+
+            parameters.push(MotionParameter { name, value_type });
+        }
+
+        parameters
+    }
+
     fn sources(&mut self, node: &Ast) -> Vec<Source> {
         let mut sources = vec![];
         let mut seen = BTreeMap::new();
@@ -50,7 +91,9 @@ impl Compiler {
                 self.error("semantic.source", "Invalid source identifier", &source);
             }
             let expected = call.trim();
-            let parsed = parse(&format!("a {{ transition {{ timing: {expected} }} }}"));
+            let parsed = parse(&format!(
+                "motion a {{ transition {{ timing: {expected} }} }}"
+            ));
             let call = parsed
                 .root
                 .child(Kind::Block)
@@ -69,10 +112,6 @@ impl Compiler {
             let key = args.first().and_then(Ast::header).unwrap_or_default();
             let kind = call.header().unwrap_or_default();
             let result = match (kind.as_str(), key.as_str(), args.len()) {
-                ("external", "type", 1) if value == "Boolean" => Some(Source::External {
-                    name: name.into(),
-                    value_type: value,
-                }),
                 ("drag", "target", 1) if liva_syntax::is_name(&value) => Some(Source::Drag {
                     name: name.into(),
                     target: value,
@@ -84,7 +123,7 @@ impl Compiler {
             } else {
                 self.error(
                     "semantic.source",
-                    "Expected external(type: Boolean) or drag(target: name)",
+                    "Expected drag(target: name); host inputs must be motion parameters",
                     &source,
                 );
             }
@@ -97,6 +136,7 @@ impl Compiler {
         &mut self,
         node: &Ast,
         sources: &[Source],
+        parameters: &[MotionParameter],
     ) -> Option<Vec<expression::TemplatePart>> {
         let value = node.value().unwrap_or_default();
         if !value.contains("${") {
@@ -105,7 +145,7 @@ impl Compiler {
         match expression::template(&value).and_then(|parts| {
             for part in &parts {
                 if let expression::TemplatePart::Expression(expr) = part {
-                    expression::check(expr, sources)?;
+                    expression::check(expr, sources, parameters)?;
                 }
             }
             Ok(parts)
@@ -121,7 +161,7 @@ impl Compiler {
     fn animation_declarations(&mut self, node: &Ast, path: &str) -> Option<Timing> {
         let mut family = String::new();
         let mut args: BTreeMap<String, String> = BTreeMap::new();
-        let mut legacy = None;
+        let mut call_timing = None;
 
         for source in node.children(Kind::Source) {
             self.error(
@@ -151,7 +191,7 @@ impl Compiler {
                     &declaration.child(Kind::Value).unwrap(),
                     "value",
                 );
-                legacy = self.timing(&declaration, &format!("{path}/timing"));
+                call_timing = self.timing(&declaration, &format!("{path}/timing"));
                 continue;
             }
             let value = declaration.value().unwrap_or_default();
@@ -176,7 +216,7 @@ impl Compiler {
                 args.clear();
             }
             family = next_family.into();
-            legacy = None;
+            call_timing = None;
 
             if let Some(field) = field {
                 let allowed = if family == "tween" {
@@ -227,10 +267,10 @@ impl Compiler {
         }
 
         if family.is_empty() {
-            return legacy;
+            return call_timing;
         }
         let text = format!(
-            "a {{ transition {{ timing: {family}({}) }} }}",
+            "motion a {{ transition {{ timing: {family}({}) }} }}",
             args.iter()
                 .map(|(k, v)| format!("{k}: {v}"))
                 .collect::<Vec<_>>()
@@ -615,16 +655,31 @@ impl Compiler {
     }
 
     fn definition(&mut self, node: &Ast) -> Definition {
-        let name = node.header().unwrap_or_default();
+        let name = node.motion_name().unwrap_or_default();
         self.mapping(&name, node, "block");
         self.declarations(node, Some(&[]), &name);
         let mut definition = Definition {
             name: name.clone(),
             sources: self.sources(node),
+            parameters: self.parameters(node),
             states: vec![],
             general_transition: None,
             directional_transitions: vec![],
         };
+        for parameter in &definition.parameters {
+            if definition
+                .sources
+                .iter()
+                .any(|source| source.name() == parameter.name)
+            {
+                self.error(
+                    "semantic.duplicate",
+                    format!("Parameter and source share name: {}", parameter.name),
+                    node,
+                );
+            }
+        }
+
         let mut states = BTreeMap::new();
         let mut transitions = BTreeMap::new();
 
@@ -658,7 +713,11 @@ impl Compiler {
                             .children(Kind::Declaration)
                             .map(|p| Property {
                                 name: p.header().unwrap_or_default(),
-                                template: self.css_template(&p, &definition.sources),
+                                template: self.css_template(
+                                    &p,
+                                    &definition.sources,
+                                    &definition.parameters,
+                                ),
                                 value: p.value().unwrap_or_default(),
                             })
                             .collect();
@@ -674,8 +733,11 @@ impl Compiler {
                         .and_then(|text| text.trim_start().strip_prefix("when"))
                         .and_then(|text| {
                             match expression::parse(text).and_then(|expr| {
-                                if expression::check(&expr, &definition.sources)?
-                                    != expression::Type::Boolean
+                                if expression::check(
+                                    &expr,
+                                    &definition.sources,
+                                    &definition.parameters,
+                                )? != expression::Type::Boolean
                                 {
                                     return Err("State condition must be Boolean".into());
                                 }
@@ -912,7 +974,7 @@ pub fn compile(source: &str, development: bool) -> Compilation {
     compiler.declarations(&parsed.root, Some(&[]), "");
 
     for node in parsed.root.children(Kind::Block) {
-        let name = node.header().unwrap_or_default();
+        let name = node.motion_name().unwrap_or_default();
         if seen.contains_key(&name) {
             duplicates.insert(name.clone());
         }
