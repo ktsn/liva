@@ -1,8 +1,8 @@
 # Architecture and workspace setup
 
 The normative syntax and normalization rules are in [language.md](language.md).
-Source adapters own browser listeners and values. `sources.ts` implements parameter
-validation and drag subscriptions; `expression.ts` evaluates typed trees;
+Built-in source functions own browser listeners and values. `sources.ts` implements
+parameter validation and source instance creation; `expression.ts` evaluates typed trees;
 `instance.ts` coordinates selection and animation. A small typed expression evaluator
 selects the last matching state and renders CSS templates. The existing WAAPI
 executor retains property ownership, interruption snapshots and generation guards.
@@ -52,7 +52,7 @@ tokens, and diagnostics while preserving trivia. Typed AST views wrap syntax nod
 and return optional fields for incomplete input. Semantic analysis consumes these
 views and emits validated data without putting semantic state into the tree.
 Motion headers contain parameter and type-reference CST nodes, distinct from call
-arguments and runtime expressions. Semantic analysis resolves parameters and sources
+arguments and runtime expressions. Semantic analysis resolves parameters, sources, and targets
 in one motion-local namespace; instance initialization validates host parameters
 separately from creating drag values and browser subscriptions.
 
@@ -65,6 +65,29 @@ references, not dependencies on their full language tooling stacks.
 
 Start with whole-block reparsing and hand-written typed views. Incremental parsing,
 generated grammars, formatter infrastructure, and an LSP are not prerequisites.
+
+## Built-in functions
+
+`crates/liva_compiler/src/builtins/` registers function signatures. Each function
+has its own module; `drag.rs` declares its target argument and return fields.
+The compiler builds one typed variable scope from parameters, source return types,
+and the targets declared across states. The generic call checker evaluates argument
+types through the expression checker and compares them with the signature.
+Expression member checking follows the variable's declared type. The syntax parser
+uses ordinary call/argument nodes without knowing any built-in function names.
+
+`packages/runtime/src/builtins/` registers the implementations. `drag.ts` defines
+`drag`, its per-instance value, and Pointer Events handling. A built-in source
+returns a value and a binding function whose cleanup releases browser resources.
+`LivaInstance` creates, binds, and cleans up these handles without source-specific
+branches. Replacing a definition retains handles for matching initializers;
+cleanup releases gestures before reattachment while preserving retained offsets.
+Before evaluating source initializers, the runtime creates target values from the
+motion's declared targets and merges them with host parameter values. All argument
+expressions evaluate against this environment. Target values identify bindings in
+the current instance, so two instances can resolve the same name to different DOM
+elements. The expression evaluator returns variable values and traverses record
+members; operators and CSS templates require scalar values.
 
 ## Compiler boundary and Definition IR
 
@@ -111,8 +134,10 @@ Timing =
 ```
 
 `MotionParameter` contains a name and a lowercase `number`, `boolean`, or `string`
-type. It contains no runtime value. `Source` is a drag target binding. `Expression` is a
-tagged scalar/reference/unary/binary tree, validated in Rust and evaluated without
+type. It contains no runtime value. `Source` contains a name and a call initializer
+with a function name and named argument expressions. Target variables use ordinary
+`{ kind: "reference", path: ["body"] }` expressions. `Expression` is a
+tagged scalar/reference/call/unary/binary tree, validated in Rust and evaluated without
 JavaScript code generation. CSS templates retain the original opaque `value` for
 inspection and expose text/expression segments for runtime rendering. The IR uses schema version 1. The compiler
 requires exactly one fallback, while low-level editor playback can choose states.

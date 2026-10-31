@@ -11,10 +11,16 @@ header recovery, reactive CSS, and instance isolation.
 Missing parameters reject creation and updates; incompatible definition replacements
 leave the previous definition, values, and running effects intact.
 Inline-frame source edits preserve surrounding text and reject ambiguous comments.
+Built-in call coverage checks generic parsing, named argument diagnostics, target
+variable scope and collision diagnostics, typed return members, and serialized
+call initializers. Target arguments remain variable references through compilation
+and evaluate against per-instance target values.
+Browser tests verify source instance isolation and retained offsets after definition
+replacement, alongside capture and listener cleanup.
 
-`sh scripts/verify.sh` passes Rust formatting, Clippy, 39 Rust tests, 56 TypeScript
+`sh scripts/verify.sh` passes Rust formatting, Clippy, 43 Rust tests, 59 TypeScript
 tests, both Vue type checks, the WASM contract, and the three-browser suite.
-The browser suite has 104 passing cases; four duplicate shared-file write cases are
+The browser suite has 107 passing cases; four duplicate shared-file write cases are
 intentionally skipped outside Chromium. Browser versions are Chromium 156.0.8078.4,
 Firefox 157.0 and WebKit 27.2. Production playback and editor exclusion pass for both
 normal and `development`-named build modes. Development coverage includes

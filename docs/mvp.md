@@ -9,7 +9,7 @@ Run `sh scripts/verify.sh` to reproduce the checks below. The
 ## Language and compiler gate
 
 - Preserve CST bytes, comments, whitespace, UTF-8 ranges and malformed-prefix recovery.
-- Parse mandatory `motion` declarations, optional typed parameter lists, source calls, conditional state headers, CSS templates, `@` animation
+- Parse mandatory `motion` declarations, optional typed parameter lists, function-call initializers, conditional state headers, CSS templates, `@` animation
   declarations and inline keyframes. Keep CSS text separate from typed expressions.
 - Validate lowercase primitive types, parameter uniqueness/scope, source signatures, references/member paths, expression types and exactly
   one fallback. Preserve state order and normalize timing/offsets only.
@@ -28,7 +28,9 @@ Implemented in `liva_syntax`, `liva_compiler` and `liva_wasm`.
   Initial selection settles directly; repeated selection never restarts effects.
 - CSS templates use explicit units. Same-state changes update affected properties
   and cancel only their stale effects, preserving unrelated animations.
-- The drag adapter owns pointer capture/listeners separately from state selection.
+- Built-in function signatures and implementations live in dedicated `builtins/`
+  directories. Test generic call parsing, argument type checks, return-field resolution,
+  and per-instance initialization. The drag function owns pointer capture/listeners.
   Verify movement, release, cancellation, lost capture, disposal and target rebinding.
 - Release transitions sample the displayed position and return to idle without
   release-velocity propagation. Verify interrupted/repeated interactions and cleanup.

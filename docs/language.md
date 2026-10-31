@@ -33,11 +33,13 @@ The parameter list is optional; `motion card()` is also valid. Parameters requir
 `name: type` annotations, separated by commas; a trailing comma is allowed.
 The primitive types are exactly `number`, `boolean`, and `string`. Type references
 are declaration-time metadata, separate from runtime expression nodes. Annotations
-are never function arguments or runtime values. Functions and advanced types are outside scope.
+are never function arguments or runtime values. User-defined functions and advanced parameter types are outside scope.
 
-Parameters and runtime sources share one expression namespace throughout their
-motion, regardless of declaration order. Duplicate parameter names and collisions
-with sources are errors. Names are local to each motion. Unknown types, invalid
+Parameters, sources, and targets share one variable namespace throughout their
+motion, regardless of declaration order. Each target declared in a state's target
+block introduces a target-valued variable; the same target across states is one
+variable. Duplicate declarations and collisions between variable kinds are errors.
+Names are local to each motion. Unknown types, invalid
 parameter declarations, unresolved references, and primitive member access are errors.
 
 ## Parameters, sources, and selection
@@ -52,9 +54,31 @@ Explicit `0`, `false`, and `""` are valid values. Unknown names, wrong types, an
 non-finite numbers are rejected without coercion. Invalid updates report a runtime diagnostic and retain the last
 valid values; invalid initial inputs reject instance creation.
 
-`source` is reserved for runtime-generated input, currently
-`source movement = drag(target: body)`. Parameters and sources use the same
-expression evaluator but separate initialization.
+A `source` declaration binds the result of a function call:
+
+```css
+source movement = drag(target: body)
+```
+
+Calls use `functionName(argumentName: expression, ...)`, with named arguments and
+an optional trailing comma. The parser represents calls independently of function
+names. The compiler resolves names against its built-in function signatures and
+checks required arguments, duplicate/unknown arguments, and argument types.
+
+The built-in `drag` function accepts one required `target` argument of target type.
+In `drag(target: body)`, `body` is an ordinary variable reference resolved in the
+motion's scope. Its value refers to the `body` target declared in that motion's
+states. Argument expressions use the same name resolution and type checking as
+other expressions. A string-valued variable does not satisfy a target parameter.
+The return value has
+`active: boolean` and `offset: { x: number, y: number }`. These fields belong to
+the built-in return type; object-valued motion parameters are outside scope.
+Source-producing calls are initialized once per instance and bind browser resources
+when targets become available. Conditions and CSS templates read the resulting
+values without invoking the source function again. Each instance creates target
+values and receives host parameters before evaluating source initializers. These
+values belong to the instance, while the Definition IR contains variable references.
+
 Drag sources expose `active`, `offset.x`, and `offset.y`. Offsets are pixel
 displacements from the current pointer-down, reset on each new gesture and retained
 on release until the next gesture. Only the primary left-button pointer is tracked.
@@ -77,7 +101,8 @@ Expressions support finite decimal numbers, Booleans, quoted strings, parameter 
 member access, parentheses, unary `!`, `+`, `-`, arithmetic `+ - * / %`, comparison
 `< <= > >=`, equality `== != === !==`, and logical `&& ||`. Operators use normal
 precedence; arithmetic requires numbers, logical operations require Booleans, and
-comparison requires matching scalar types. There are no calls, assignments,
+comparison requires matching scalar types. Function calls are parsed as expressions;
+source-producing built-ins are used in source initializers. There are no assignments,
 computed member accesses, objects, arrays, or implicit unit conversions.
 
 CSS values remain opaque text except for `${expression}` templates:
@@ -138,9 +163,8 @@ templates are diagnosed; their evaluation timing remains future design work.
 
 Declarations are separated by newline or optional semicolon. Balanced CSS groups
 may span lines. Strings, escapes, `//` and `/* */` comments are preserved. Motion,
-state and target names follow `[A-Za-z_][A-Za-z0-9_-]*`; expression identifiers use
-letters, digits and underscores, so subtraction is unambiguous. Sources and parameters use
-expression identifiers. CSS property names also allow custom properties.
+state names follow `[A-Za-z_][A-Za-z0-9_-]*`. Variable names (targets, sources,
+and parameters) follow `[A-Za-z_][A-Za-z0-9_]*`, so subtraction is unambiguous. CSS property names also allow custom properties.
 
 The Rowan CST preserves every byte, trivia and UTF-8 ranges, including malformed
 input. Diagnostics prevent execution of invalid definitions while development
