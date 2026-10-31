@@ -1,6 +1,6 @@
 # Language specification
 
-A motion declares states, transitions, runtime sources, and host parameters. Rust
+A motion declares states, transitions, let bindings, and host parameters. Rust
 compiles lossless CST into serializable Definition IR; the browser interpolates
 CSS through WAAPI.
 
@@ -10,7 +10,7 @@ Every top-level definition starts with `motion`:
 
 ```css
 motion card {
-  source movement = drag(target: body)
+  let movement = drag(target: body)
   state idle { body { translate: 0 0 } }
   state dragging when movement.active {
     body { translate: ${movement.offset.x}px 0 }
@@ -35,14 +35,14 @@ The primitive types are exactly `number`, `boolean`, and `string`. Type referenc
 are declaration-time metadata, separate from runtime expression nodes. Annotations
 are never function arguments or runtime values. User-defined functions and advanced parameter types are outside scope.
 
-Parameters, sources, and targets share one variable namespace throughout their
+Parameters, let bindings, and targets share one variable namespace throughout their
 motion, regardless of declaration order. Each target declared in a state's target
 block introduces a target-valued variable; the same target across states is one
 variable. Duplicate declarations and collisions between variable kinds are errors.
 Names are local to each motion. Unknown types, invalid
 parameter declarations, unresolved references, and primitive member access are errors.
 
-## Parameters, sources, and selection
+## Parameters, let bindings, and selection
 
 Motion parameters receive host application values. The object in
 `v-liva:toggle="{ checked }"` supplies the named parameter of
@@ -54,11 +54,20 @@ Explicit `0`, `false`, and `""` are valid values. Unknown names, wrong types, an
 non-finite numbers are rejected without coercion. Invalid updates report a runtime diagnostic and retain the last
 valid values; invalid initial inputs reject instance creation.
 
-A `source` declaration binds the result of a function call:
+A `let` declaration binds the value of an expression:
 
 ```css
-source movement = drag(target: body)
+let movement = drag(target: body)
+let doubled = progress * 2
+let horizontal = movement.offset.x + doubled
 ```
+
+The compiler infers each `let` binding's type from its initializer. Bindings can refer to
+parameters, targets, and other let bindings, including bindings declared later in the
+motion. Cyclic let dependencies are compile errors. Initializers are evaluated
+in dependency order. Parameter and built-in value changes reevaluate let
+expressions before conditions and CSS templates. Evaluation errors retain the last
+valid values and rendered state, and report a runtime diagnostic.
 
 Calls use `functionName(argumentName: expression, ...)`, with named arguments and
 an optional trailing comma. The parser represents calls independently of function
@@ -73,13 +82,17 @@ other expressions. A string-valued variable does not satisfy a target parameter.
 The return value has
 `active: boolean` and `offset: { x: number, y: number }`. These fields belong to
 the built-in return type; object-valued motion parameters are outside scope.
-Source-producing calls are initialized once per instance and bind browser resources
-when targets become available. Conditions and CSS templates read the resulting
-values without invoking the source function again. Each instance creates target
-values and receives host parameters before evaluating source initializers. These
-values belong to the instance, while the Definition IR contains variable references.
+Function implementations return either an ordinary value or a reactive subscription.
+The runtime classifies each result by its value, not by the function's name.
+Ordinary results are reused while argument values are unchanged and recomputed when
+arguments change. A subscription exposes a current value and a binding operation;
+its current value is read on updates without calling the function again. Changed
+arguments invoke the function again and replace any active subscription. Each
+instance creates target values and receives host parameters before evaluating
+`let` initializers. These values belong to the instance, while the Definition IR
+contains variable references.
 
-Drag sources expose `active`, `offset.x`, and `offset.y`. Offsets are pixel
+Drag values expose `active`, `offset.x`, and `offset.y`. Offsets are pixel
 displacements from the current pointer-down, reset on each new gesture and retained
 on release until the next gesture. Only the primary left-button pointer is tracked.
 Cancellation and lost capture release the gesture just like pointer-up. Target
@@ -89,7 +102,7 @@ none` on draggable targets; the adapter does not change application CSS.
 Each definition has exactly one unconditional fallback state. Conditions use
 `state on when checked { ... }`, without interpolation delimiters. Conditions are
 Boolean; the last declared true condition wins. Declaration order is significant.
-Initial selection settles without animation. Same-state source updates update
+Initial selection settles without animation. Same-state variable updates update
 only affected dynamic values, without replaying a transition. Dynamic properties
 follow input immediately: a newer value cancels that property's running effect,
 while unrelated effects (such as scale) continue. State changes start from displayed
@@ -97,12 +110,12 @@ values, including interrupted return springs, without carrying release velocity.
 
 ## Expressions and CSS templates
 
-Expressions support finite decimal numbers, Booleans, quoted strings, parameter and source identifiers,
+Expressions support finite decimal numbers, Booleans, quoted strings, parameter and let identifiers,
 member access, parentheses, unary `!`, `+`, `-`, arithmetic `+ - * / %`, comparison
 `< <= > >=`, equality `== != === !==`, and logical `&& ||`. Operators use normal
 precedence; arithmetic requires numbers, logical operations require Booleans, and
 comparison requires matching scalar types. Function calls are parsed as expressions;
-source-producing built-ins are used in source initializers. There are no assignments,
+subscription-producing built-ins are used in `let` initializers. There are no assignments,
 computed member accesses, objects, arrays, or implicit unit conversions.
 
 CSS values remain opaque text except for `${expression}` templates:
@@ -163,7 +176,7 @@ templates are diagnosed; their evaluation timing remains future design work.
 
 Declarations are separated by newline or optional semicolon. Balanced CSS groups
 may span lines. Strings, escapes, `//` and `/* */` comments are preserved. Motion,
-state names follow `[A-Za-z_][A-Za-z0-9_-]*`. Variable names (targets, sources,
+state names follow `[A-Za-z_][A-Za-z0-9_-]*`. Variable names (targets, let bindings,
 and parameters) follow `[A-Za-z_][A-Za-z0-9_]*`, so subtraction is unambiguous. CSS property names also allow custom properties.
 
 The Rowan CST preserves every byte, trivia and UTF-8 ranges, including malformed
@@ -176,7 +189,7 @@ No velocity input, inertia, retained states, state-change persistence events,
 simultaneous state layers, scroll/orientation sources, user functions, custom CSS
 interpolation, or standalone preview environment. Omitted-state CSS sampling and
 additional source types remain unresolved future design work. The editor edits
-existing transition parameters and frames; source/condition authoring is textual.
+existing transition parameters and frames; let/condition authoring is textual.
 
 ## Toggle example
 

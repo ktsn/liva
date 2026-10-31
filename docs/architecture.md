@@ -1,15 +1,15 @@
 # Architecture and workspace setup
 
 The normative syntax and normalization rules are in [language.md](language.md).
-Built-in source functions own browser listeners and values. `sources.ts` implements
-parameter validation and source instance creation; `expression.ts` evaluates typed trees;
+Subscription-producing built-ins own browser listeners and values. `let-bindings.ts` implements
+parameter validation, let dependency ordering, and let evaluation; `expression.ts` evaluates typed trees;
 `instance.ts` coordinates selection and animation. A small typed expression evaluator
 selects the last matching state and renders CSS templates. The existing WAAPI
 executor retains property ownership, interruption snapshots and generation guards.
 Vue supplies external values; neither Definition IR nor expression evaluation depends
 on Vue or DOM. The drag adapter uses Pointer Events and capture; no inertia or
 velocity is propagated. The editor still selects instances separately from shared
-source definitions. Runtime source updates supersede manual preview playback.
+source definitions. Runtime variable updates supersede manual preview playback.
 
 Status: implemented MVP architecture. Decisions A1–A7 are reflected in the code;
 [validation results](validation.md) record experiments, tested versions, numerical
@@ -52,7 +52,7 @@ tokens, and diagnostics while preserving trivia. Typed AST views wrap syntax nod
 and return optional fields for incomplete input. Semantic analysis consumes these
 views and emits validated data without putting semantic state into the tree.
 Motion headers contain parameter and type-reference CST nodes, distinct from call
-arguments and runtime expressions. Semantic analysis resolves parameters, sources, and targets
+arguments and runtime expressions. Semantic analysis resolves parameters, let bindings, and targets
 in one motion-local namespace; instance initialization validates host parameters
 separately from creating drag values and browser subscriptions.
 
@@ -70,19 +70,28 @@ generated grammars, formatter infrastructure, and an LSP are not prerequisites.
 
 `crates/liva_compiler/src/builtins/` registers function signatures. Each function
 has its own module; `drag.rs` declares its target argument and return fields.
-The compiler builds one typed variable scope from parameters, source return types,
+The compiler builds one typed variable scope from parameters, inferred let expression types,
 and the targets declared across states. The generic call checker evaluates argument
 types through the expression checker and compares them with the signature.
-Expression member checking follows the variable's declared type. The syntax parser
+Let type inference follows dependencies and rejects cycles. Expression member checking
+follows the variable's inferred type. The syntax parser
 uses ordinary call/argument nodes without knowing any built-in function names.
 
 `packages/runtime/src/builtins/` registers the implementations. `drag.ts` defines
-`drag`, its per-instance value, and Pointer Events handling. A built-in source
+`drag`, its per-instance value, and Pointer Events handling. A built-in subscription
 returns a value and a binding function whose cleanup releases browser resources.
-`LivaInstance` creates, binds, and cleans up these handles without source-specific
-branches. Replacing a definition retains handles for matching initializers;
+`LivaInstance` creates, binds, and cleans up these handles without built-in-specific
+branches. The let binding graph reevaluates expressions in dependency order before
+state selection and template rendering. `FunctionResult` is either `RuntimeValue` or `ReactiveSubscription`, defined in
+`reactive-value.ts`. The runtime recognizes subscriptions by their `value` and
+callable `bind` members. Ordinary records remain ordinary values. Each call site
+caches its evaluated arguments and result; unchanged arguments reuse that result.
+Subscription results expose their latest value, while changed arguments invoke the
+function again. Nested calls use the same evaluation rules. Active subscriptions
+are bound and cleaned up when branches or returned results change. Call-site caches
+are committed only after the complete graph evaluates successfully. Replacing a definition retains handles for matching initializers and arguments;
 cleanup releases gestures before reattachment while preserving retained offsets.
-Before evaluating source initializers, the runtime creates target values from the
+Before evaluating let initializers, the runtime creates target values from the
 motion's declared targets and merges them with host parameter values. All argument
 expressions evaluate against this environment. Target values identify bindings in
 the current instance, so two instances can resolve the same name to different DOM
@@ -108,7 +117,7 @@ DefinitionBundle {
 Definition {
   name: string
   parameters?: MotionParameter[]
-  sources?: Source[]
+  letBindings?: LetBinding[]
   states: State[]
   generalTransition?: Transition
   directionalTransitions: { from: string, to: string, transition: Transition }[]
@@ -134,8 +143,8 @@ Timing =
 ```
 
 `MotionParameter` contains a name and a lowercase `number`, `boolean`, or `string`
-type. It contains no runtime value. `Source` contains a name and a call initializer
-with a function name and named argument expressions. Target variables use ordinary
+type. It contains no runtime value. `LetBinding` represents a `let` binding and contains a name and an `Expression`
+initializer. Call expressions contain a function name and named argument expressions. Target variables use ordinary
 `{ kind: "reference", path: ["body"] }` expressions. `Expression` is a
 tagged scalar/reference/call/unary/binary tree, validated in Rust and evaluated without
 JavaScript code generation. CSS templates retain the original opaque `value` for
@@ -216,7 +225,7 @@ interruption snapshot behavior does not decide those semantics.
 
 ## Runtime lifecycle and interruption
 
-An instance owns parameter values, source values and subscriptions, target bindings, selected state, animation generation,
+An instance owns parameter values, let values and built-in subscriptions, target bindings, selected state, animation generation,
 active effects, and original inline property values/priorities. Instance lifecycle:
 `create -> bind -> apply initial state -> transition* -> dispose`.
 

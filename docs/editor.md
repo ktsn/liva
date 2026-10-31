@@ -92,10 +92,10 @@ undo/redo history, and a separate preview canvas are outside this implementation
 
 ## Reactive definitions
 
-The same instance selector includes draggable cards. Source updates supersede
+The same instance selector includes draggable cards. Variable updates supersede
 manual playback, and condition-selected states remain visible in the inspector.
 Timing edits serialize `@tween` / `@spring` declarations; keyframes serialize inline
-percentages with optional `@` easing. Sources and `when` expressions are edited in
+percentages with optional `@` easing. Let bindings and `when` expressions are edited in
 source, not through timeline controls. A preview uses the instance's current drag
 offset; zero offset means no translation until the card has been dragged. State
 endpoint fields show CSS templates as source text; replacing them is an explicit

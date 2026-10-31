@@ -2,7 +2,7 @@
 
 ## Motion parameters and conditional states
 
-The compiler and runtime use typed motion parameters and drag sources, ordered
+The compiler and runtime use typed motion parameters and drag subscriptions, ordered
 conditional states, typed expression trees and CSS templates. Toggle and card
 fixtures round-trip through Rust, Node WASM and immutable TypeScript IR. Animation
 normalization covers shorthand resets, ordered longhands and both spring families.
@@ -15,12 +15,17 @@ Built-in call coverage checks generic parsing, named argument diagnostics, targe
 variable scope and collision diagnostics, typed return members, and serialized
 call initializers. Target arguments remain variable references through compilation
 and evaluate against per-instance target values.
-Browser tests verify source instance isolation and retained offsets after definition
-replacement, alongside capture and listener cleanup.
+Browser tests verify let binding instance isolation and retained offsets after definition
+replacement, alongside capture and listener cleanup. Derived-let coverage includes
+forward dependencies, inferred scalar and record types, target aliases, cycle
+errors, parameter and drag updates, and recovery after non-finite arithmetic.
+Function-result tests cover ordinary-value caching, nested calls, live subscription
+values, result-kind changes, branch cleanup, and failed-evaluation rollback.
+The derived fixture also round-trips through the WASM and TypeScript boundary.
 
-`sh scripts/verify.sh` passes Rust formatting, Clippy, 43 Rust tests, 59 TypeScript
+`sh scripts/verify.sh` passes Rust formatting, Clippy, 44 Rust tests, 67 TypeScript
 tests, both Vue type checks, the WASM contract, and the three-browser suite.
-The browser suite has 107 passing cases; four duplicate shared-file write cases are
+The browser suite has 110 passing cases; four duplicate shared-file write cases are
 intentionally skipped outside Chromium. Browser versions are Chromium 156.0.8078.4,
 Firefox 157.0 and WebKit 27.2. Production playback and editor exclusion pass for both
 normal and `development`-named build modes. Development coverage includes
@@ -34,7 +39,7 @@ disposal, editor selection/preview and recovery from non-finite dynamic expressi
 The editor save test uses a typed-parameter Vue fixture and checks animation declarations
 and inline-frame output while preserving unrelated SFC text.
 
-Sources and condition expressions have no visual authoring controls. Keyframe
+Let bindings and condition expressions have no visual authoring controls. Keyframe
 runtime interpolation and omitted-state property sampling remain outside the
 implemented semantics; see [the language specification](language.md).
 

@@ -2,7 +2,7 @@
 
 The repository implements Rust syntax/semantics, Definition IR, WAAPI execution,
 Vue/Vite integration and an in-page editor. These subsystems support the
-Motion/Parameter/Source/State/Transition language; specifications alone do not establish validation.
+Motion/Parameter/Let/State/Transition language; specifications alone do not establish validation.
 Run `sh scripts/verify.sh` to reproduce the checks below. The
 [validation record](validation.md) records the browser baseline and bounded choices.
 
@@ -11,7 +11,7 @@ Run `sh scripts/verify.sh` to reproduce the checks below. The
 - Preserve CST bytes, comments, whitespace, UTF-8 ranges and malformed-prefix recovery.
 - Parse mandatory `motion` declarations, optional typed parameter lists, function-call initializers, conditional state headers, CSS templates, `@` animation
   declarations and inline keyframes. Keep CSS text separate from typed expressions.
-- Validate lowercase primitive types, parameter uniqueness/scope, source signatures, references/member paths, expression types and exactly
+- Validate lowercase primitive types, parameter uniqueness/scope, let expression inference, dependency cycles, call signatures, references/member paths, expression types and exactly
   one fallback. Preserve state order and normalize timing/offsets only.
 - Test shorthand resets, longhand order, both spring families, mixed-family errors,
   CSS easing text, frame replacement and inherited spring/frame errors.
@@ -22,7 +22,7 @@ Run `sh scripts/verify.sh` to reproduce the checks below. The
 
 Implemented in `liva_syntax`, `liva_compiler` and `liva_wasm`.
 
-## Sources and runtime gate
+## Let bindings and runtime gate
 
 - Typed parameter updates select the last matching state, otherwise the fallback.
   Initial selection settles directly; repeated selection never restarts effects.
@@ -63,9 +63,9 @@ behaviors. Run Chromium, Firefox and WebKit through Playwright.
 - Verify stale revisions, session/origin checks, bounded requests, path confinement,
   atomic writes, HMR synchronization and independent sibling instances.
 
-The editor does not author sources or conditions. Dynamic state endpoint templates
+The editor does not author let bindings or conditions. Dynamic state endpoint templates
 remain visible as source text; manually editing one replaces its expression with
-the entered CSS value. Card preview uses current source values, so an idle card's
+the entered CSS value. Card preview uses current variable values, so an idle card's
 zero drag offset produces no preview translation; interacting with the card supplies
 real offsets. Editing the gesture itself is outside this iteration.
 
@@ -75,5 +75,5 @@ No velocity propagation, inertia, retained states, persistence events, simultane
 state layers, scroll/orientation sources, arbitrary functions, custom CSS
 interpolation, or isolated preview environment. Missing state properties still
 fail completeness checks. DOM fallback and runtime keyframe interpolation require
-separate semantic design. The local longhand/default policy and source lifecycle
+separate semantic design. The local longhand/default policy and built-in subscription lifecycle
 choices are specified in [language.md](language.md), not inferred by the editor.
