@@ -1,8 +1,8 @@
 # Architecture and workspace setup
 
 The normative syntax and normalization rules are in [language.md](language.md).
-Source adapters own browser listeners and values. `sources.ts` implements input
-normalization and drag subscriptions; `expression.ts` evaluates typed trees;
+Source adapters own browser listeners and values. `sources.ts` implements parameter
+validation and drag subscriptions; `expression.ts` evaluates typed trees;
 `instance.ts` coordinates selection and animation. A small typed expression evaluator
 selects the last matching state and renders CSS templates. The existing WAAPI
 executor retains property ownership, interruption snapshots and generation guards.
@@ -51,6 +51,10 @@ Use Rowan as the first CST candidate. A hand-written recovery parser emits nodes
 tokens, and diagnostics while preserving trivia. Typed AST views wrap syntax nodes
 and return optional fields for incomplete input. Semantic analysis consumes these
 views and emits validated data without putting semantic state into the tree.
+Motion headers contain parameter and type-reference CST nodes, distinct from call
+arguments and runtime expressions. Semantic analysis resolves parameters and sources
+in one motion-local namespace; instance initialization validates host parameters
+separately from creating drag values and browser subscriptions.
 
 [Rowan](https://docs.rs/rowan/latest/rowan/) provides generic lossless tree
 primitives. [rust-analyzer's syntax design](https://rust-analyzer.github.io/book/contributing/syntax.html)
@@ -80,6 +84,7 @@ DefinitionBundle {
 }
 Definition {
   name: string
+  parameters?: MotionParameter[]
   sources?: Source[]
   states: State[]
   generalTransition?: Transition
@@ -105,11 +110,11 @@ Timing =
   | { kind: "spring-physics", stiffness: number, damping: number, mass: number }
 ```
 
-`Source` is an external Boolean input or a drag target binding. `Expression` is a
+`MotionParameter` contains a name and a lowercase `number`, `boolean`, or `string`
+type. It contains no runtime value. `Source` is a drag target binding. `Expression` is a
 tagged scalar/reference/unary/binary tree, validated in Rust and evaluated without
 JavaScript code generation. CSS templates retain the original opaque `value` for
-inspection and expose text/expression segments for runtime rendering. Optional
-fields extend schema version 1; old static IR remains decodable. The compiler
+inspection and expose text/expression segments for runtime rendering. The IR uses schema version 1. The compiler
 requires exactly one fallback, while low-level editor playback can choose states.
 
 Offsets normalize to `[0, 1]`; times normalize to milliseconds. CSS values and
@@ -186,9 +191,16 @@ interruption snapshot behavior does not decide those semantics.
 
 ## Runtime lifecycle and interruption
 
-An instance owns source values and subscriptions, target bindings, selected state, animation generation,
+An instance owns parameter values, source values and subscriptions, target bindings, selected state, animation generation,
 active effects, and original inline property values/priorities. Instance lifecycle:
 `create -> bind -> apply initial state -> transition* -> dispose`.
+
+`updateParameters` accepts a complete named parameter snapshot and reevaluates
+selection and templates.
+Definition replacement retains values for parameters with matching names and types
+and removes obsolete values. A new required parameter or incompatible type rejects
+the replacement before changing the instance or its effects; no defaults are supplied.
+Matching drag bindings retain offsets while releasing active gestures.
 
 For each selected-state change, batch-read displayed values for the union of old active and new
 tracks using computed style before canceling anything. Validate Liva constraints
@@ -296,7 +308,7 @@ Integration design:
 4. Assign targets to the nearest registered root, including the root itself; never
    cross a nested root. One name binds one element within an instance. The same
    definition name on another root creates a separate instance.
-5. Directive updates submit external-source value objects. The runtime selects states from conditions. Unmount removes bindings, effects,
+5. Directive updates submit named parameter objects. The runtime selects states from conditions. Unmount removes bindings, effects,
    registry entries, and editor selections.
 
 [Vue directive hooks](https://vuejs.org/guide/reusability/custom-directives.html)

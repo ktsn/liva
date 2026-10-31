@@ -1,30 +1,30 @@
 # MVP implementation plan
 
 The repository implements Rust syntax/semantics, Definition IR, WAAPI execution,
-Vue/Vite integration and an in-page editor. These subsystems support the revised
-Source/State/Transition language; specifications alone do not establish validation.
+Vue/Vite integration and an in-page editor. These subsystems support the
+Motion/Parameter/Source/State/Transition language; specifications alone do not establish validation.
 Run `sh scripts/verify.sh` to reproduce the checks below. The
 [validation record](validation.md) records the browser baseline and bounded choices.
 
 ## Language and compiler gate
 
 - Preserve CST bytes, comments, whitespace, UTF-8 ranges and malformed-prefix recovery.
-- Parse source calls, conditional state headers, CSS templates, `@` animation
+- Parse mandatory `motion` declarations, optional typed parameter lists, source calls, conditional state headers, CSS templates, `@` animation
   declarations and inline keyframes. Keep CSS text separate from typed expressions.
-- Validate source signatures, references/member paths, expression types and exactly
+- Validate lowercase primitive types, parameter uniqueness/scope, source signatures, references/member paths, expression types and exactly
   one fallback. Preserve state order and normalize timing/offsets only.
 - Test shorthand resets, longhand order, both spring families, mixed-family errors,
   CSS easing text, frame replacement and inherited spring/frame errors.
 - Maintain Rust/JSON/TypeScript fixtures, including reactive toggle and drag card.
   Keep DOM, Vue, source mappings and mutable values outside Definition IR.
+- Verify type references remain separate from expressions and malformed parameters
+  recover.
 
-Implemented in `liva_syntax`, `liva_compiler` and `liva_wasm`. Existing timing-call
-and block-frame regression fixtures remain as compatibility coverage; new examples
-and editor track saves use revised syntax. The fallback invariant applies to both.
+Implemented in `liva_syntax`, `liva_compiler` and `liva_wasm`.
 
 ## Sources and runtime gate
 
-- External Boolean updates select the last matching state, otherwise the fallback.
+- Typed parameter updates select the last matching state, otherwise the fallback.
   Initial selection settles directly; repeated selection never restarts effects.
 - CSS templates use explicit units. Same-state changes update affected properties
   and cancel only their stale effects, preserving unrelated animations.
@@ -42,7 +42,7 @@ behaviors. Run Chromium, Firefox and WebKit through Playwright.
 ## Vue and playground gate
 
 - The normal Vue page contains two independent toggle instances and a drag card.
-  Vue passes source objects and never selects states for these examples.
+  Vue passes named parameter objects and never selects states for these examples.
 - Keep nearest-root target ownership, nested roots, conditional targets, unmount
   cleanup, compiler diagnostics and last-valid-definition HMR behavior.
 - Production keeps immutable definitions and runtime only. Verify both normal and
@@ -55,7 +55,7 @@ behaviors. Run Chromium, Firefox and WebKit through Playwright.
   current states and transition tracks, including the card.
 - Edit tween/spring parameters and inline keyframes through the existing timeline.
   Preview remains instance-local; cancel restores application-selected state.
-- Save atomic property-track edits with revised syntax, retaining unrelated source
+- Save atomic property-track edits with `@` declarations and inline keyframes, retaining unrelated source
   bytes, comments and newline style. Ambiguous comment-containing replacements fail.
 - Verify stale revisions, session/origin checks, bounded requests, path confinement,
   atomic writes, HMR synchronization and independent sibling instances.

@@ -1,19 +1,61 @@
 # Language specification
 
-Liva has three concepts: sources supply reactive input, states declare CSS values,
-and transitions animate changes of the selected state. Rust compiles lossless CST
-into serializable Definition IR; the browser interpolates CSS through WAAPI.
+A motion declares states, transitions, runtime sources, and host parameters. Rust
+compiles lossless CST into serializable Definition IR; the browser interpolates
+CSS through WAAPI.
 
-## Sources and selection
+## Motion declarations and types
+
+Every top-level definition starts with `motion`:
 
 ```css
-source checked = external(type: Boolean)
-source movement = drag(target: body)
+motion card {
+  source movement = drag(target: body)
+  state idle { body { translate: 0 0 } }
+  state dragging when movement.active {
+    body { translate: ${movement.offset.x}px 0 }
+  }
+  transition { @spring: 300 20 1 }
+}
+
+motion progressIndicator(
+  progress: number,
+  enabled: boolean,
+  label: string
+) {
+  state idle {
+    body { opacity: ${progress}; --label: ${label} }
+  }
+}
 ```
 
-External Boolean inputs are passed as `v-liva:toggle="{ checked }"`. Missing inputs
-start at false; invalid types report a runtime diagnostic and retain the last valid
-value. Drag sources expose `active`, `offset.x`, and `offset.y`. Offsets are pixel
+The parameter list is optional; `motion card()` is also valid. Parameters require
+`name: type` annotations, separated by commas; a trailing comma is allowed.
+The primitive types are exactly `number`, `boolean`, and `string`. Type references
+are declaration-time metadata, separate from runtime expression nodes. Annotations
+are never function arguments or runtime values. Functions and advanced types are outside scope.
+
+Parameters and runtime sources share one expression namespace throughout their
+motion, regardless of declaration order. Duplicate parameter names and collisions
+with sources are errors. Names are local to each motion. Unknown types, invalid
+parameter declarations, unresolved references, and primitive member access are errors.
+
+## Parameters, sources, and selection
+
+Motion parameters receive host application values. The object in
+`v-liva:toggle="{ checked }"` supplies the named parameter of
+`motion toggle(checked: boolean)`. Each instance retains its own values, separate
+from the immutable Definition IR. Updates reevaluate conditions and CSS templates.
+Every declared parameter is required; the object is a full parameter snapshot.
+Missing parameters are errors, including on updates; no implicit defaults are used.
+Explicit `0`, `false`, and `""` are valid values. Unknown names, wrong types, and
+non-finite numbers are rejected without coercion. Invalid updates report a runtime diagnostic and retain the last
+valid values; invalid initial inputs reject instance creation.
+
+`source` is reserved for runtime-generated input, currently
+`source movement = drag(target: body)`. Parameters and sources use the same
+expression evaluator but separate initialization.
+Drag sources expose `active`, `offset.x`, and `offset.y`. Offsets are pixel
 displacements from the current pointer-down, reset on each new gesture and retained
 on release until the next gesture. Only the primary left-button pointer is tracked.
 Cancellation and lost capture release the gesture just like pointer-up. Target
@@ -31,7 +73,7 @@ values, including interrupted return springs, without carrying release velocity.
 
 ## Expressions and CSS templates
 
-Expressions support finite decimal numbers, Booleans, quoted strings, source identifiers,
+Expressions support finite decimal numbers, Booleans, quoted strings, parameter and source identifiers,
 member access, parentheses, unary `!`, `+`, `-`, arithmetic `+ - * / %`, comparison
 `< <= > >=`, equality `== != === !==`, and logical `&& ||`. Operators use normal
 precedence; arithmetic requires numbers, logical operations require Booleans, and
@@ -95,9 +137,9 @@ templates are diagnosed; their evaluation timing remains future design work.
 ## Syntax and recovery
 
 Declarations are separated by newline or optional semicolon. Balanced CSS groups
-may span lines. Strings, escapes, `//` and `/* */` comments are preserved. Animation,
+may span lines. Strings, escapes, `//` and `/* */` comments are preserved. Motion,
 state and target names follow `[A-Za-z_][A-Za-z0-9_-]*`; expression identifiers use
-letters, digits and underscores, so subtraction is unambiguous. Sources use
+letters, digits and underscores, so subtraction is unambiguous. Sources and parameters use
 expression identifiers. CSS property names also allow custom properties.
 
 The Rowan CST preserves every byte, trivia and UTF-8 ranges, including malformed
@@ -112,11 +154,61 @@ interpolation, or standalone preview environment. Omitted-state CSS sampling and
 additional source types remain unresolved future design work. The editor edits
 existing transition parameters and frames; source/condition authoring is textual.
 
-## Compatibility
+## Toggle example
 
-The compiler continues reading legacy `timing: tween(...)` / `spring(...)` calls
-and block keyframes for existing source and regression fixtures. Newly authored
-examples and editor track saves use `@` declarations and inline keyframes. The
-single-fallback rule applies to every definition, including legacy timing syntax.
-The low-level runtime state-selection method remains available for editor playback
-and older programmatic callers; new Vue components pass source-value objects.
+```css
+motion toggle(checked: boolean) {
+  state off {
+    track {
+      background-color: #888
+    }
+
+    thumb {
+      translate: 0 0
+      scale: 1
+    }
+  }
+
+  state on when checked {
+    track {
+      background-color: #34b27b
+    }
+
+    thumb {
+      translate: 24px 0
+      scale: 1
+    }
+  }
+
+  transition {
+    @tween: 350ms ease-out
+
+    track {
+      background-color {
+        @tween-duration: 200ms
+        @tween-easing: ease-in-out
+      }
+    }
+
+    thumb {
+      translate {
+        @spring: 300 20 1
+      }
+
+      scale {
+        40%: 1.3 1 @ ease-in
+
+        70%: 0.95 1 @ ease-out
+      }
+    }
+  }
+
+  transition on -> off {
+    thumb {
+      translate {
+        @spring: 350ms 0.2
+      }
+    }
+  }
+}
+```

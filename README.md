@@ -74,8 +74,8 @@ Without Vite interception, the package's default export is also runtime-only.
 For explicit plugin construction without the editor, import `createLivaPlugin`
 from `@liva/vue/runtime` and pass it the diagnostic/observation options you need.
 
-A component passes source values with `v-liva:toggle="{ checked }"`; it does not
-select state names. Declare `source checked = external(type: Boolean)`, a fallback
+A component passes named parameter values with `v-liva:toggle="{ checked }"`; it does not
+select state names. Declare `motion toggle(checked: boolean)`, a fallback
 `state off`, and `state on when checked`. Animation declarations use `@tween` /
 `@spring`; keyframes use `40%: 1.3 1 @ ease-in`. Complete examples are in
 [Toggle.vue](playground/src/Toggle.vue) and [DraggableCardDemo.vue](playground/src/DraggableCardDemo.vue).

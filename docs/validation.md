@@ -1,25 +1,29 @@
 # Implementation decisions and validation
 
-## Source and conditional-state revision
+## Motion parameters and conditional states
 
-The revised compiler and runtime use external Boolean and drag sources, ordered
+The compiler and runtime use typed motion parameters and drag sources, ordered
 conditional states, typed expression trees and CSS templates. Toggle and card
 fixtures round-trip through Rust, Node WASM and immutable TypeScript IR. Animation
 normalization covers shorthand resets, ordered longhands and both spring families.
+Parameter tests cover primitive types, duplicate names, motion-local scope, malformed
+header recovery, reactive CSS, and instance isolation.
+Missing parameters reject creation and updates; incompatible definition replacements
+leave the previous definition, values, and running effects intact.
 Inline-frame source edits preserve surrounding text and reject ambiguous comments.
 
-`sh scripts/verify.sh` passes Rust formatting, Clippy, 35 Rust tests, 52 TypeScript
+`sh scripts/verify.sh` passes Rust formatting, Clippy, 39 Rust tests, 56 TypeScript
 tests, both Vue type checks, the WASM contract, and the three-browser suite.
-The browser suite has 95 passing cases; four duplicate shared-file write cases are
+The browser suite has 101 passing cases; four duplicate shared-file write cases are
 intentionally skipped outside Chromium. Browser versions are Chromium 156.0.8078.4,
 Firefox 157.0 and WebKit 27.2. Production playback and editor exclusion pass for both
 normal and `development`-named build modes.
 
-Reactive browser coverage includes external updates without effect restarts,
+Reactive browser coverage includes parameter updates without effect restarts,
 movement while scale animates, spring return from the displayed position,
 interrupted/repeated drags, pointer cancellation/lost capture, target rebinding,
 disposal, editor selection/preview and recovery from non-finite dynamic expressions.
-The editor save test uses an external-source Vue fixture and checks revised timing
+The editor save test uses a typed-parameter Vue fixture and checks animation declarations
 and inline-frame output while preserving unrelated SFC text.
 
 Sources and condition expressions have no visual authoring controls. Keyframe
