@@ -163,8 +163,8 @@ test('timeline saves timing, new frames and endpoint state values with shared HM
     expect(saved).toContain('@tween: 200ms')
     expect(saved).toContain('50%')
     expect(saved).toContain('%: purple')
-    expect(saved.slice(0, saved.indexOf('<liva>'))).toBe(
-      original.slice(0, original.indexOf('<liva>')),
+    expect(saved.slice(0, saved.indexOf('<liva'))).toBe(
+      original.slice(0, original.indexOf('<liva')),
     )
     await track(page, 'box', 'background-color')
     await page.getByRole('button', { name: 'box.background-color 50%', exact: true }).click()
