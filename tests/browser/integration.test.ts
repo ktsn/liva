@@ -35,12 +35,6 @@ test('real Vue switches remain independent and keyboard accessible through rapid
   await expect
     .poll(() => thumb.evaluate((element) => parseFloat(getComputedStyle(element).translate)))
     .toBe(0)
-  await page.getByRole('button', { name: 'Activate', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Active', exact: true })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  )
-
   for (let i = 0; i < 3; i++) {
     await first.click()
     await page.getByRole('button', { name: 'Unmount switches' }).click()
@@ -50,6 +44,56 @@ test('real Vue switches remain independent and keyboard accessible through rapid
     await expect(first).toHaveAttribute('aria-checked', 'false')
   }
 
+  expect(errors).toEqual([])
+})
+
+test('demo routes mount one demo at a time and support browser navigation', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  const definitions = () =>
+    page.evaluate(() =>
+      [...window.__LIVA_EDITOR__.entries.values()]
+        .map((entry) => entry.binding.definition.name)
+        .toSorted(),
+    )
+
+  await page.goto(base)
+  await expect(page).toHaveURL(`${base}/toggle`)
+  await expect(page.getByRole('heading', { name: 'Toggle', exact: true })).toBeVisible()
+  await expect.poll(definitions).toEqual(['toggle', 'toggle'])
+
+  await page.getByRole('link', { name: 'Beacon', exact: true }).click()
+  await expect(page).toHaveURL(`${base}/beacon`)
+  await expect(page.getByRole('link', { name: 'Beacon', exact: true })).toHaveAttribute(
+    'aria-current',
+    'page',
+  )
+  await expect(page.getByRole('switch')).toHaveCount(0)
+  await expect.poll(definitions).toEqual(['beacon'])
+  await page.getByRole('button', { name: 'Activate', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Active', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+
+  await page.getByRole('link', { name: 'Drag', exact: true }).click()
+  await expect(page).toHaveURL(`${base}/drag`)
+  await expect(page.getByTestId('draggable-card')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Active', exact: true })).toHaveCount(0)
+  await expect.poll(definitions).toEqual(['card'])
+
+  await page.goBack()
+  await expect(page).toHaveURL(`${base}/beacon`)
+  await expect(page.getByRole('button', { name: 'Activate', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  )
+  await expect(page.getByTestId('draggable-card')).toHaveCount(0)
+  await expect.poll(definitions).toEqual(['beacon'])
+
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Beacon', exact: true })).toBeVisible()
+  await expect.poll(definitions).toEqual(['beacon'])
   expect(errors).toEqual([])
 })
 

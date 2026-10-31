@@ -6,10 +6,7 @@ const checked = ref(false)
 
 <template>
   <div class="toggle-row">
-    <div>
-      <strong>{{ label }}</strong>
-      <p>{{ checked ? 'On · keeping you connected' : 'Off · a little more quiet' }}</p>
-    </div>
+    <strong>{{ label }}</strong>
     <button
       v-liva:toggle="{ checked }"
       v-liva-target:track

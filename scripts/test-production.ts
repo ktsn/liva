@@ -87,6 +87,18 @@ for (const mode of ['production', 'development']) {
       )
     })
     assert.equal(await toggle.getAttribute('aria-checked'), 'true')
+    await page.getByRole('link', { name: 'Beacon', exact: true }).click()
+    await page.getByRole('button', { name: 'Activate', exact: true }).click()
+    assert.equal(await page.getByRole('switch').count(), 0)
+    assert.equal(
+      await page.getByRole('button', { name: 'Active', exact: true }).getAttribute('aria-pressed'),
+      'true',
+    )
+
+    await page.goto(`${base}/drag`)
+    await page.getByTestId('draggable-card').waitFor()
+    assert.equal(await page.getByRole('switch').count(), 0)
+    assert.equal(await page.evaluate(() => '__LIVA_EDITOR__' in window), false)
     assert.deepEqual(errors, [])
     console.log(`Production isolation and playback passed (${mode} mode).`)
   } finally {

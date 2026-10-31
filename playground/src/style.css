@@ -1,135 +1,120 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap');
 :root {
-  font-family: 'DM Sans', sans-serif;
+  font-family: system-ui, sans-serif;
   color: #173d36;
   background: #f6f5ef;
   font-synthesis: none;
 }
+
 * {
   box-sizing: border-box;
 }
+
 body {
   margin: 0;
 }
+
 button,
 a {
   -webkit-tap-highlight-color: transparent;
 }
+
 button {
   cursor: pointer;
   font: inherit;
 }
+
 button:focus-visible,
 a:focus-visible {
   outline: 3px solid #cf6c3f;
   outline-offset: 5px;
 }
+
 main {
-  max-width: 1040px;
+  max-width: 800px;
   margin: auto;
-  padding: 36px 48px;
+  padding: 32px;
 }
+
 header,
-footer {
+nav {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 20px;
 }
+
+header {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
 .wordmark {
   color: inherit;
-  font-size: 30px;
+  font-size: 28px;
   font-weight: 700;
   text-decoration: none;
-  letter-spacing: -1.4px;
+  letter-spacing: -1px;
 }
+
 .wordmark span {
   font-size: 13px;
   font-weight: 400;
   letter-spacing: 0;
   color: #64766f;
-  margin-left: 12px;
 }
-.tag {
-  border: 1px solid #cbd5cc;
-  border-radius: 30px;
-  padding: 9px 15px;
-  font-size: 12px;
-}
-.intro {
-  padding: 74px 0 36px;
-}
-.eyebrow {
-  text-transform: uppercase;
-  font-size: 10px;
-  letter-spacing: 2px;
-  font-weight: 600;
-  color: #63796e;
-}
-h1 {
-  font-family: 'Instrument Serif', Georgia, serif;
-  font-size: clamp(52px, 7vw, 80px);
-  line-height: 1.02;
-  font-weight: 400;
-  letter-spacing: -2px;
-  margin: 25px 0;
-}
-h1 em {
-  font-weight: 400;
-  color: #6b866e;
-}
-.lead {
-  color: #62746b;
+
+nav a {
+  color: #64766f;
   font-size: 14px;
-  line-height: 1.9;
+  text-decoration: none;
+  padding: 8px 0;
 }
-.demo-card {
+
+nav a.router-link-active {
+  color: #173d36;
+  box-shadow: 0 2px currentColor;
+}
+
+.demo {
+  padding-top: 48px;
+}
+
+h1 {
+  font-size: 24px;
+  font-weight: 500;
+  margin: 0 0 24px;
+}
+
+.demo-card,
+.demo-stage {
   background: #fffefa;
   border: 1px solid #d8ded2;
   border-radius: 18px;
-  padding: 30px 34px 0;
-  box-shadow: 0 8px 36px #294c3910;
+  padding: 24px;
 }
-.card-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 14px;
+
+.demo-stage {
+  display: grid;
+  place-items: center;
+  min-height: 360px;
 }
-h2 {
-  font-size: 20px;
-  font-weight: 500;
-  letter-spacing: -0.4px;
-  margin: 10px 0;
-}
-.status-dot {
-  font-size: 11px;
-  color: #568765;
-}
-.status-dot::before {
-  content: '';
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  background: #73a17c;
-  border-radius: 50%;
-  margin-right: 7px;
-}
+
 .toggle-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-top: 1px solid #e6e9df;
-  padding: 24px 0;
+  gap: 16px;
+  padding: 20px 0;
 }
+
+.toggle-row + .toggle-row {
+  border-top: 1px solid #e6e9df;
+}
+
 .toggle-row strong {
   font-size: 14px;
   font-weight: 500;
 }
-.toggle-row p {
-  font-size: 12px;
-  color: #819085;
-  margin: 7px 0 0;
-}
+
 .switch {
   width: 58px;
   height: 34px;
@@ -138,6 +123,7 @@ h2 {
   padding: 5px;
   flex-shrink: 0;
 }
+
 .thumb {
   display: block;
   width: 24px;
@@ -146,17 +132,10 @@ h2 {
   background: #fffefa;
   box-shadow: 0 2px 4px #173d3630;
 }
-.card-footer {
-  border-top: 1px solid #e6e9df;
-  margin: 0 -34px;
-  padding: 18px 34px;
-  display: flex;
-  justify-content: space-between;
-  font-size: 10px;
-  color: #809083;
-}
+
 .text-button {
-  font-size: 10px;
+  margin-top: 16px;
+  font-size: 12px;
   border: none;
   padding: 0;
   background: transparent;
@@ -164,50 +143,23 @@ h2 {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.secondary {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin: 30px 0 50px;
-  padding: 0 4px;
-}
-.secondary p:not(.eyebrow) {
-  color: #819085;
-  font-size: 12px;
-}
+
 .beacon {
   background: #dce6d5;
   color: #345c42;
   border: 1px solid #c7d6bd;
   border-radius: 30px;
   padding: 13px 24px;
-  font-size: 12px;
+  font-size: 14px;
 }
-footer {
-  border-top: 1px solid #dce0d5;
-  padding-top: 22px;
-  color: #8a978a;
-  font-size: 10px;
-}
+
 @media (max-width: 600px) {
   main {
     padding: 24px;
   }
-  .tag {
-    display: none;
-  }
-  .intro {
-    padding-top: 48px;
-  }
-  .demo-card {
-    padding: 24px 20px 0;
-  }
-  .card-footer {
-    margin: 0 -20px;
-    padding: 18px 20px;
-    gap: 16px;
-  }
-  footer {
-    gap: 20px;
+
+  .demo-card,
+  .demo-stage {
+    padding: 20px;
   }
 }

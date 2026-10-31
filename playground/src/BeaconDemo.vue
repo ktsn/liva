@@ -5,21 +5,19 @@ const active = ref(false)
 </script>
 
 <template>
-  <section class="secondary">
-    <div>
-      <p class="eyebrow">02 / Another definition</p>
-      <h2>A quieter pulse</h2>
-      <p>A separate motion identity, on the same page.</p>
+  <section class="demo" aria-labelledby="beacon-title">
+    <h1 id="beacon-title">Beacon</h1>
+    <div class="demo-stage">
+      <button
+        v-liva:beacon="{ checked: active }"
+        v-liva-target:light
+        class="beacon"
+        :aria-pressed="active"
+        @click="active = !active"
+      >
+        {{ active ? 'Active' : 'Activate' }}
+      </button>
     </div>
-    <button
-      v-liva:beacon="{ checked: active }"
-      v-liva-target:light
-      class="beacon"
-      :aria-pressed="active"
-      @click="active = !active"
-    >
-      {{ active ? 'Active' : 'Activate' }}
-    </button>
   </section>
 </template>
 

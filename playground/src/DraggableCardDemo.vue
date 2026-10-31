@@ -1,11 +1,11 @@
 <template>
-  <section class="drag-demo">
-    <h2>Move a little. Come back.</h2>
-    <p>Drag the card and release it to feel the spring.</p>
-    <div v-liva:card="{}" v-liva-target:body class="draggable-card" data-testid="draggable-card">
-      <span>↗</span>
-      <strong>Room to move</strong>
-      <p>Grab, move, release.</p>
+  <section class="demo" aria-labelledby="drag-title">
+    <h1 id="drag-title">Drag</h1>
+    <div class="demo-stage">
+      <div v-liva:card="{}" v-liva-target:body class="draggable-card" data-testid="draggable-card">
+        <span aria-hidden="true">↗</span>
+        <strong>Drag me</strong>
+      </div>
     </div>
   </section>
 </template>
@@ -47,11 +47,7 @@ motion card {
 </liva>
 
 <style scoped>
-.drag-demo {
-  padding: 2rem 0 4rem;
-}
 .draggable-card {
-  margin: 2rem auto;
   width: 220px;
   padding: 2rem;
   border-radius: 24px;

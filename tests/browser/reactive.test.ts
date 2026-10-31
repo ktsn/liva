@@ -172,7 +172,7 @@ test('parameter updates select states and repeated values retain running effects
 test('normal Vue playground includes a draggable card selectable in the editor', async ({
   page,
 }) => {
-  await page.goto(base)
+  await page.goto(`${base}/drag`)
   const card = page.getByTestId('draggable-card')
   await expect(card).toBeVisible()
   await card.scrollIntoViewIfNeeded()
