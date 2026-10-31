@@ -10,7 +10,7 @@
   </section>
 </template>
 
-<liva>
+<liva lang="liva">
 motion card {
   let movement = drag(target: body)
 

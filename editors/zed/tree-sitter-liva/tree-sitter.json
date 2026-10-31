@@ -1,0 +1,22 @@
+{
+  "grammars": [
+    {
+      "name": "liva",
+      "camelcase": "Liva",
+      "scope": "source.liva",
+      "path": ".",
+      "file-types": ["liv", "liva"],
+      "highlights": "../languages/liva/highlights.scm"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "Liva animation language",
+    "authors": [
+      {
+        "name": "Katashin"
+      }
+    ]
+  }
+}

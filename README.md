@@ -57,6 +57,12 @@ revision before editing again. Recovery copies live in the ignored
 `playground/.liva-backups/` directory, keyed by the original full-file SHA-256.
 The bridge supports local HTTP sessions; remote/proxied editing is outside the MVP.
 
+## Editor support
+
+The [Zed extension and Language Server](docs/language-server.md) provide syntax
+highlighting, type hover, and compiler diagnostics for standalone Liva files and
+Vue custom blocks. See that guide for local installation and verification.
+
 ## Vue integration
 
 With the Liva Vite plugin configured, install the Vue plugin through its package:

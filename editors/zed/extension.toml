@@ -1,0 +1,23 @@
+id = "liva"
+name = "Liva"
+version = "0.1.0"
+schema_version = 1
+authors = ["Katashin"]
+description = "Liva syntax highlighting, type hover, and compiler diagnostics"
+
+[language_servers.liva]
+name = "Liva Language Server"
+languages = ["Liva", "Vue.js"]
+
+[language_servers.liva.language_ids]
+Liva = "liva"
+"Vue.js" = "vue"
+
+[grammars.liva]
+repository = "https://github.com/ktsn/liva"
+rev = "main"
+path = "editors/zed/tree-sitter-liva"
+
+[lib]
+kind = "Rust"
+version = "0.7.0"

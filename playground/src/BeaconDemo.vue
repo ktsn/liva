@@ -21,7 +21,7 @@ const active = ref(false)
   </section>
 </template>
 
-<liva>
+<liva lang="liva">
 motion beacon(checked: boolean) {
   state off { light { opacity: 0.5; scale: 1 } }
   state on when checked { light { opacity: 1; scale: 1.04 } }

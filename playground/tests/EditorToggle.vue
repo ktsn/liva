@@ -14,7 +14,7 @@ const active = ref(false)
     {{ label }}
   </button>
 </template>
-<liva>
+<liva lang="liva">
 motion motion(checked: boolean) {
   state off { box { background-color: red } }
   state on when checked { box { background-color: blue } }

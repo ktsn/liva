@@ -21,7 +21,7 @@ const checked = ref(false)
   </div>
 </template>
 
-<liva>
+<liva lang="liva">
 motion toggle(checked: boolean) {
   state off {
     track {

@@ -1,0 +1,60 @@
+==================
+Types, expressions, CSS, and comments
+==================
+// comment
+motion card(progress: number) {
+  let movement = drag(target: body)
+  state on when movement.active {
+    body { translate: ${movement.offset.x}px 0; color: #fff }
+  }
+  transition { @tween: 100ms ease-out }
+}
+---
+
+(source_file
+  (comment)
+  (motion
+    (identifier)
+    (parenthesized
+      (property
+        (identifier))
+      (type))
+    (block
+      (keyword)
+      (identifier)
+      (operator)
+      (call
+        (identifier)
+        (parenthesized
+          (property
+            (identifier))
+          (identifier)))
+      (state
+        (identifier)
+        (identifier)
+        (punctuation)
+        (identifier)
+        (block
+          (selector_block
+            (identifier)
+            (block
+              (property
+                (identifier))
+              (interpolation
+                (identifier)
+                (punctuation)
+                (identifier)
+                (punctuation)
+                (identifier))
+              (identifier)
+              (number)
+              (punctuation)
+              (property
+                (identifier))
+              (css_token)))))
+      (transition
+        (block
+          (animation)
+          (punctuation)
+          (number)
+          (identifier))))))

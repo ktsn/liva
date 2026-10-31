@@ -7,7 +7,7 @@ const active = ref(false)
     HMR {{ active }}
   </button>
 </template>
-<liva>
+<liva lang="liva">
 motion hmr {
   state off { box { background-color: red } }
   state on when true { box { background-color: blue } }
