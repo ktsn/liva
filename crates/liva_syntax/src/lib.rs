@@ -435,11 +435,24 @@ impl Parser<'_> {
             let begin = self.index;
             self.start(Kind::Header);
 
-            while !self.at().is_empty() && !matches!(self.at(), "{" | "}" | ":" | ";" | "\n" | "\r")
+            // Keep colons and newlines inside parentheses or brackets in the header
+            // expression so a named argument's colon in a state condition is not mistaken
+            // for a property declaration separator, with the preceding header as its name.
+            let mut nesting_depth = 0usize;
+
+            while !self.at().is_empty()
+                && !matches!(self.at(), "{" | "}" | ";")
+                && !(nesting_depth == 0 && matches!(self.at(), ":" | "\n" | "\r"))
             {
                 if depth == 0 && self.tokens[begin].text == "motion" && self.at() == "(" {
                     self.parameters();
                 } else {
+                    match self.at() {
+                        "(" | "[" => nesting_depth += 1,
+                        ")" | "]" => nesting_depth = nesting_depth.saturating_sub(1),
+                        _ => {}
+                    }
+
                     self.bump();
                 }
             }
