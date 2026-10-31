@@ -14,7 +14,7 @@ pub enum Kind {
     Text,
     Trivia,
     Error,
-    Source,
+    Let,
     Parameters,
     Parameter,
     TypeReference,
@@ -37,7 +37,7 @@ impl Language for Liva {
             6 => Kind::Argument,
             7 => Kind::Text,
             8 => Kind::Trivia,
-            10 => Kind::Source,
+            10 => Kind::Let,
             11 => Kind::Parameters,
             12 => Kind::Parameter,
             13 => Kind::TypeReference,
@@ -408,8 +408,8 @@ impl Parser<'_> {
                 return;
             }
 
-            if self.at() == "source" {
-                self.start(Kind::Source);
+            if self.at() == "let" {
+                self.start(Kind::Let);
                 self.bump();
                 self.gap();
                 self.start(Kind::Header);
@@ -425,7 +425,7 @@ impl Parser<'_> {
                     self.raw(false, true);
                     self.end();
                 } else {
-                    self.error("Expected source initializer after =");
+                    self.error("Expected let initializer after =");
                 }
                 self.end();
                 continue;

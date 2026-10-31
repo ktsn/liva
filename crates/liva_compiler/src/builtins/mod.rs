@@ -1,6 +1,6 @@
 mod drag;
 
-use crate::expression::{Expression, Scope, Type};
+use crate::expression::{Argument, Scope, Type};
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -27,14 +27,7 @@ pub fn lookup(name: &str) -> Result<&'static Function, String> {
         .ok_or_else(|| format!("Unknown function: {name}"))
 }
 
-pub fn check_initializer(expression: &Expression, scope: &Scope) -> Result<(), String> {
-    let Expression::Call {
-        function,
-        arguments,
-    } = expression
-    else {
-        return Err("Source initializer must be a function call".into());
-    };
+pub fn check_call(function: &str, arguments: &[Argument], scope: &Scope) -> Result<Type, String> {
     let signature = lookup(function)?;
     let mut seen = BTreeSet::new();
 
@@ -68,5 +61,5 @@ pub fn check_initializer(expression: &Expression, scope: &Scope) -> Result<(), S
         }
     }
 
-    Ok(())
+    Ok(signature.return_type)
 }

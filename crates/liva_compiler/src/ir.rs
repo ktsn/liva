@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub struct Definition {
     pub name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub sources: Vec<Source>,
+    pub let_bindings: Vec<LetBinding>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<MotionParameter>,
     pub states: Vec<State>,
@@ -118,12 +118,12 @@ impl State {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Source {
+pub struct LetBinding {
     pub name: String,
     pub initializer: Expression,
 }
 
-impl Source {
+impl LetBinding {
     pub fn name(&self) -> &str {
         &self.name
     }

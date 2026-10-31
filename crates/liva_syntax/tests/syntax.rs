@@ -196,6 +196,7 @@ fn reactive_syntax_is_lossless_even_when_truncated() {
     for source in [
         include_str!("../../../fixtures/card.liv"),
         include_str!("../../../fixtures/reactive-toggle.liv"),
+        include_str!("../../../fixtures/derived.liv"),
     ] {
         assert!(
             parse(source).diagnostics.is_empty(),
@@ -288,10 +289,10 @@ fn parameter_types_have_lossless_nodes_and_recover_at_the_body() {
 }
 
 #[test]
-fn source_initializers_have_generic_call_nodes_and_original_ranges() {
+fn let_initializers_have_generic_call_nodes_and_original_ranges() {
     for name in ["drag", "custom"] {
         let source = format!(
-            "motion card {{ source movement={name}(\r\n target: /* 😀 */ body,\r\n)\r\n state idle {{ body {{ opacity: 1 }} }} }}"
+            "motion card {{ let movement={name}(\r\n target: /* 😀 */ body,\r\n)\r\n state idle {{ body {{ opacity: 1 }} }} }}"
         );
         let parsed = parse(&source);
         assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
@@ -301,7 +302,7 @@ fn source_initializers_have_generic_call_nodes_and_original_ranges() {
             .root
             .child(Kind::Block)
             .unwrap()
-            .child(Kind::Source)
+            .child(Kind::Let)
             .unwrap();
         assert_eq!(declaration.header().as_deref(), Some("movement"));
         let call = declaration

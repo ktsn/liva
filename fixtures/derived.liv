@@ -1,0 +1,15 @@
+motion derived(progress: number, divisor: number) {
+  let translated = scaled + movement.offset.x
+  let scaled = progress / divisor
+  let movement = drag(target: selected)
+  let selected = body
+  let active = movement.active
+
+  state idle {
+    body { translate: ${translated}px 0; }
+  }
+
+  state dragging when active {
+    body { translate: ${translated}px 0; }
+  }
+}

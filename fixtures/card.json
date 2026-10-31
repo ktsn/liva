@@ -3,7 +3,7 @@
   "definitions": [
     {
       "name": "card",
-      "sources": [
+      "letBindings": [
         {
           "name": "movement",
           "initializer": {

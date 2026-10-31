@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "definitions": [
+    {
+      "name": "derived",
+      "letBindings": [
+        {
+          "name": "translated",
+          "initializer": {
+            "kind": "binary",
+            "operator": "+",
+            "left": {
+              "kind": "reference",
+              "path": ["scaled"]
+            },
+            "right": {
+              "kind": "reference",
+              "path": ["movement", "offset", "x"]
+            }
+          }
+        },
+        {
+          "name": "scaled",
+          "initializer": {
+            "kind": "binary",
+            "operator": "/",
+            "left": {
+              "kind": "reference",
+              "path": ["progress"]
+            },
+            "right": {
+              "kind": "reference",
+              "path": ["divisor"]
+            }
+          }
+        },
+        {
+          "name": "movement",
+          "initializer": {
+            "kind": "call",
+            "function": "drag",
+            "arguments": [
+              {
+                "name": "target",
+                "value": {
+                  "kind": "reference",
+                  "path": ["selected"]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "selected",
+          "initializer": {
+            "kind": "reference",
+            "path": ["body"]
+          }
+        },
+        {
+          "name": "active",
+          "initializer": {
+            "kind": "reference",
+            "path": ["movement", "active"]
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "progress",
+          "type": "number"
+        },
+        {
+          "name": "divisor",
+          "type": "number"
+        }
+      ],
+      "states": [
+        {
+          "name": "idle",
+          "targets": [
+            {
+              "name": "body",
+              "properties": [
+                {
+                  "name": "translate",
+                  "value": "${translated}px 0",
+                  "template": [
+                    {
+                      "kind": "reference",
+                      "path": ["translated"]
+                    },
+                    "px 0"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "dragging",
+          "when": {
+            "kind": "reference",
+            "path": ["active"]
+          },
+          "targets": [
+            {
+              "name": "body",
+              "properties": [
+                {
+                  "name": "translate",
+                  "value": "${translated}px 0",
+                  "template": [
+                    {
+                      "kind": "reference",
+                      "path": ["translated"]
+                    },
+                    "px 0"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "directionalTransitions": []
+    }
+  ],
+  "diagnostics": []
+}

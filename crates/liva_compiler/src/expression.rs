@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -309,10 +309,10 @@ pub fn check(expression: &Expression, scope: &Scope) -> Result<Type, String> {
 
             Ok(value_type)
         }
-        Expression::Call { function, .. } => {
-            crate::builtins::lookup(function)?;
-            Err("Source-producing function calls belong in source initializers".into())
-        }
+        Expression::Call {
+            function,
+            arguments,
+        } => crate::builtins::check_call(function, arguments, scope),
         Expression::Unary { operator, operand } => {
             let expected = if operator == "!" {
                 Type::Boolean
@@ -393,4 +393,20 @@ pub fn template(text: &str) -> Result<Vec<TemplatePart>, String> {
         parts.push(TemplatePart::Text(text[start..].into()));
     }
     Ok(parts)
+}
+
+pub fn dependencies(expression: &Expression) -> BTreeSet<String> {
+    match expression {
+        Expression::Reference { path } => [path[0].clone()].into_iter().collect(),
+        Expression::Call { arguments, .. } => arguments
+            .iter()
+            .flat_map(|argument| dependencies(&argument.value))
+            .collect(),
+        Expression::Unary { operand, .. } => dependencies(operand),
+        Expression::Binary { left, right, .. } => dependencies(left)
+            .into_iter()
+            .chain(dependencies(right))
+            .collect(),
+        _ => BTreeSet::new(),
+    }
 }

@@ -17,7 +17,7 @@ fn animation(timing: &str) -> String {
 }
 
 #[test]
-fn motion_examples_compile_to_ordered_sources_conditions_and_templates() {
+fn motion_examples_compile_to_ordered_let_bindings_conditions_and_templates() {
     let toggle = valid(include_str!("../../../fixtures/reactive-toggle.liv"));
     assert_eq!(toggle.definitions[0].parameters.len(), 1);
     assert_eq!(toggle.definitions[0].states[1].name, "on");
@@ -132,7 +132,7 @@ fn expression_types_references_and_fallback_are_validated() {
     for source in [
         "motion a { state first {} state second {} }",
         "motion a { state first when true {} }",
-        "motion a { source movement = drag(target: missing); state idle {} }",
+        "motion a { let movement = drag(target: missing); state idle {} }",
     ] {
         assert!(
             compile(source, false)
@@ -198,21 +198,19 @@ fn track_edits_preserve_surrounding_source() {
 }
 
 #[test]
-fn source_arguments_scope_and_whitespace_are_checked() {
+fn let_arguments_scope_and_whitespace_are_checked() {
     valid(
         &animation("@tween: 1ms")
             .replace("checked: boolean", "checked /* input */ :\tboolean")
             .replace("when checked", "when\tchecked"),
     );
 
-    valid(
-        &include_str!("../../../fixtures/card.liv").replace("source movement", "source\tmovement"),
-    );
+    valid(&include_str!("../../../fixtures/card.liv").replace("let movement", "let\tmovement"));
 
     for source in [
-        "motion a { state idle { source movement = drag(target: body); } }",
-        "source movement = drag(target: body); motion a { state idle {} }",
-        "motion a { state idle {} transition { source movement = drag(target: body); } }",
+        "motion a { state idle { let movement = drag(target: body); } }",
+        "let movement = drag(target: body); motion a { state idle {} }",
+        "motion a { state idle {} transition { let movement = drag(target: body); } }",
     ] {
         assert!(
             compile(source, false)
@@ -249,14 +247,14 @@ fn inline_frame_field_edits_preserve_comments_or_reject() {
 }
 
 #[test]
-fn typed_parameters_are_declarations_and_share_expression_scope_with_sources() {
+fn typed_parameters_are_declarations_and_share_expression_scope_with_let_bindings() {
     let result = valid(
         r#"motion progress(
         progress: number,
         enabled: boolean,
         label: string,
     ) {
-        source movement = drag(target: body)
+        let movement = drag(target: body)
         state idle { body { translate: ${progress + movement.offset.x}px 0; content: ${label} } }
         state active when enabled && label != "" { body { translate: ${progress}px 0; content: ${label} } }
         transition { @tween: 100ms }
@@ -272,7 +270,7 @@ fn typed_parameters_are_declarations_and_share_expression_scope_with_sources() {
             {"name": "label", "type": "string"},
         ])
     );
-    assert_eq!(result.definitions[0].sources.len(), 1);
+    assert_eq!(result.definitions[0].let_bindings.len(), 1);
 
     for header in [
         "motion empty",
@@ -315,7 +313,7 @@ fn invalid_parameter_declarations_are_diagnosed() {
     }
 
     for body in [
-        "source value = drag(target: body); state idle { body { opacity: 1 } }",
+        "let value = drag(target: body); state idle { body { opacity: 1 } }",
         "state idle when number {}",
         "state idle { body { opacity: ${missing} } }",
         "state idle { body { opacity: ${value.member} } }",
@@ -355,11 +353,11 @@ fn definition_names_are_unique_independently_of_parameters() {
 }
 
 #[test]
-fn source_initializers_use_function_calls_and_builtin_signatures() {
+fn let_initializers_use_function_calls_and_builtin_signatures() {
     let result = valid(
-        "motion card { source movement=drag(\n target: card_body,\n)\n state idle { card_body { translate: ${movement.offset.x}px 0 } } }",
+        "motion card { let movement=drag(\n target: card_body,\n)\n state idle { card_body { translate: ${movement.offset.x}px 0 } } }",
     );
-    let initializer = serde_json::to_value(&result.definitions[0].sources[0]).unwrap();
+    let initializer = serde_json::to_value(&result.definitions[0].let_bindings[0]).unwrap();
 
     assert_eq!(
         initializer,
@@ -384,14 +382,10 @@ fn source_initializers_use_function_calls_and_builtin_signatures() {
         ("drag(target: absent)", "Unknown variable"),
         ("drag(target: enabled)", "Invalid argument type"),
         ("drag(target: body.active)", "Unknown variable member"),
-        (
-            "drag(target: drag(target: body))",
-            "Source-producing function calls",
-        ),
-        ("42", "must be a function call"),
+        ("drag(target: drag(target: body))", "Invalid argument type"),
     ] {
         let source = format!(
-            "motion card(enabled: boolean) {{ source movement = {call}; state idle {{ body {{ opacity: 1 }} }} }}"
+            "motion card(enabled: boolean) {{ let movement = {call}; state idle {{ body {{ opacity: 1 }} }} }}"
         );
         let result = compile(&source, true);
 
@@ -399,16 +393,14 @@ fn source_initializers_use_function_calls_and_builtin_signatures() {
         let diagnostic = result
             .diagnostics
             .iter()
-            .find(|diagnostic| diagnostic.code == "semantic.call")
+            .find(|diagnostic| diagnostic.code == "semantic.expression")
             .unwrap();
         assert!(
             diagnostic.message.contains(message),
             "{call}: {}",
             diagnostic.message
         );
-        assert!(
-            source[diagnostic.range.start..diagnostic.range.end].starts_with("source movement")
-        );
+        assert!(source[diagnostic.range.start..diagnostic.range.end].starts_with("let movement"));
     }
 }
 
@@ -443,9 +435,10 @@ fn calls_parse_without_resolving_function_names() {
 #[test]
 fn target_variables_share_motion_scope_and_use_reference_expressions() {
     let result = valid(
-        "motion card { source movement = drag(target: (body)); state idle { body { opacity: 1 } } }",
+        "motion card { let movement = drag(target: (body)); state idle { body { opacity: 1 } } }",
     );
-    let initializer = serde_json::to_value(&result.definitions[0].sources[0].initializer).unwrap();
+    let initializer =
+        serde_json::to_value(&result.definitions[0].let_bindings[0].initializer).unwrap();
 
     assert_eq!(
         initializer["arguments"][0]["value"],
@@ -458,12 +451,12 @@ fn target_variables_share_motion_scope_and_use_reference_expressions() {
             "semantic.duplicate",
         ),
         (
-            "motion card { source body = drag(target: other); state idle { body { opacity: 1 } other { opacity: 1 } } }",
+            "motion card { let body = drag(target: other); state idle { body { opacity: 1 } other { opacity: 1 } } }",
             "semantic.duplicate",
         ),
         (
-            "motion card(body: string) { source movement = drag(target: body); state idle { other { opacity: 1 } } }",
-            "semantic.call",
+            "motion card(body: string) { let movement = drag(target: body); state idle { other { opacity: 1 } } }",
+            "semantic.expression",
         ),
         (
             "motion card { state idle { body { opacity: ${body} } } }",
@@ -492,7 +485,7 @@ fn target_variables_share_motion_scope_and_use_reference_expressions() {
     }
 
     let result = compile(
-        "motion first { state idle { body { opacity: 1 } } } motion second { source movement = drag(target: body); state idle { other { opacity: 1 } } }",
+        "motion first { state idle { body { opacity: 1 } } } motion second { let movement = drag(target: body); state idle { other { opacity: 1 } } }",
         false,
     );
 
@@ -504,4 +497,48 @@ fn target_variables_share_motion_scope_and_use_reference_expressions() {
             .iter()
             .any(|diagnostic| diagnostic.message == "Unknown variable: body")
     );
+}
+
+#[test]
+fn let_expressions_infer_types_and_resolve_dependencies() {
+    let result = valid(
+        r#"motion derived(progress: number) {
+        let doubled = base * 2;
+        let base = progress + 1;
+        let selected = body;
+        let movement = drag(target: selected);
+        let offset = movement.offset;
+        let active = movement.active;
+        let label = "ready";
+        let constant = 42;
+        state idle { body { translate: ${doubled}px ${offset.y}px; } }
+        state moving when active { body { translate: ${doubled}px ${offset.y}px; } }
+    }"#,
+    );
+
+    assert_eq!(result.definitions[0].let_bindings.len(), 8);
+    assert_eq!(result.definitions[0].let_bindings[0].name, "doubled");
+
+    for (declarations, message) in [
+        ("let a = a;", "Cyclic let binding dependency"),
+        ("let a = b; let b = a;", "Cyclic let binding dependency"),
+        ("let a = missing * 2;", "Unknown variable"),
+        (
+            "let a = true; let b = a * 2;",
+            "Incompatible expression operands",
+        ),
+    ] {
+        let source = format!("motion example {{ {declarations} state idle {{}} }}");
+        let result = compile(&source, true);
+
+        assert!(result.definitions.is_empty(), "{source}");
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| diagnostic
+                .message
+                .to_lowercase()
+                .contains(&message.to_lowercase())),
+            "{:?}",
+            result.diagnostics
+        );
+    }
 }

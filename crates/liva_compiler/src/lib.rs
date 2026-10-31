@@ -71,26 +71,27 @@ impl Compiler {
         parameters
     }
 
-    fn sources(&mut self, node: &Ast) -> Vec<Source> {
-        let mut sources = vec![];
+    fn let_bindings(&mut self, node: &Ast) -> Vec<LetBinding> {
+        let mut bindings = vec![];
         let mut seen = BTreeMap::new();
-        for source in node.children(Kind::Source) {
-            let name = source.header().unwrap_or_default();
-            self.unique(&mut seen, &name, &source);
+
+        for binding in node.children(Kind::Let) {
+            let name = binding.header().unwrap_or_default();
+            self.unique(&mut seen, &name, &binding);
 
             if !expression::identifier(&name) || matches!(name.as_str(), "true" | "false") {
-                self.error("semantic.source", "Invalid source identifier", &source);
+                self.error("semantic.binding", "Invalid let identifier", &binding);
             }
 
-            let result = expression::parse(&source.value().unwrap_or_default());
+            let result = expression::parse(&binding.value().unwrap_or_default());
 
             match result {
-                Ok(initializer) => sources.push(Source { name, initializer }),
-                Err(message) => self.error("semantic.call", message, &source),
+                Ok(initializer) => bindings.push(LetBinding { name, initializer }),
+                Err(message) => self.error("semantic.expression", message, &binding),
             }
         }
 
-        sources
+        bindings
     }
 
     fn css_template(
@@ -125,11 +126,11 @@ impl Compiler {
         let mut args: BTreeMap<String, String> = BTreeMap::new();
         let mut call_timing = None;
 
-        for source in node.children(Kind::Source) {
+        for binding in node.children(Kind::Let) {
             self.error(
                 "semantic.structure",
-                "Sources belong directly to an animation definition",
-                &source,
+                "Let declarations belong directly to a motion",
+                &binding,
             );
         }
 
@@ -294,11 +295,11 @@ impl Compiler {
         let mut declarations = BTreeMap::new();
 
         if path.is_empty() || path.contains('/') {
-            for source in node.children(Kind::Source) {
+            for binding in node.children(Kind::Let) {
                 self.error(
                     "semantic.structure",
-                    "Sources belong directly to an animation definition",
-                    &source,
+                    "Let declarations belong directly to a motion",
+                    &binding,
                 );
             }
         }
@@ -629,22 +630,6 @@ impl Compiler {
             scope.insert(parameter.name.clone(), value_type);
         }
 
-        for source in &definition.sources {
-            if scope.contains_key(&source.name) {
-                self.error(
-                    "semantic.duplicate",
-                    format!("Duplicate variable: {}", source.name),
-                    node,
-                );
-            }
-
-            if let expression::Expression::Call { function, .. } = &source.initializer
-                && let Ok(signature) = builtins::lookup(function)
-            {
-                scope.insert(source.name.clone(), signature.return_type);
-            }
-        }
-
         let mut targets = BTreeMap::new();
 
         for state in node.children(Kind::Block).filter(|block| {
@@ -677,6 +662,39 @@ impl Compiler {
             }
         }
 
+        for binding in &definition.let_bindings {
+            if scope.contains_key(&binding.name) {
+                self.error(
+                    "semantic.duplicate",
+                    format!("Duplicate variable: {}", binding.name),
+                    node,
+                );
+            }
+        }
+
+        let initial_scope = scope.clone();
+
+        for syntax in node.children(Kind::Let) {
+            if let Some(binding) = definition
+                .let_bindings
+                .iter()
+                .find(|binding| Some(&binding.name) == syntax.header().as_ref())
+            {
+                if initial_scope.contains_key(&binding.name) {
+                    continue;
+                }
+
+                if let Err(message) = infer_let_type(
+                    &binding.name,
+                    &definition.let_bindings,
+                    &mut scope,
+                    &mut BTreeSet::new(),
+                ) {
+                    self.error("semantic.expression", message, &syntax);
+                }
+            }
+        }
+
         scope
     }
 
@@ -686,24 +704,13 @@ impl Compiler {
         self.declarations(node, Some(&[]), &name);
         let mut definition = Definition {
             name: name.clone(),
-            sources: self.sources(node),
+            let_bindings: self.let_bindings(node),
             parameters: self.parameters(node),
             states: vec![],
             general_transition: None,
             directional_transitions: vec![],
         };
         let scope = self.motion_scope(node, &definition);
-
-        for syntax in node.children(Kind::Source) {
-            if let Some(source) = definition
-                .sources
-                .iter()
-                .find(|source| Some(&source.name) == syntax.header().as_ref())
-                && let Err(message) = builtins::check_initializer(&source.initializer, &scope)
-            {
-                self.error("semantic.call", message, &syntax);
-            }
-        }
 
         let mut states = BTreeMap::new();
         let mut transitions = BTreeMap::new();
@@ -962,6 +969,41 @@ impl Compiler {
             }
         }
     }
+}
+
+fn infer_let_type(
+    name: &str,
+    bindings: &[LetBinding],
+    scope: &mut expression::Scope,
+    visiting: &mut BTreeSet<String>,
+) -> Result<expression::Type, String> {
+    if let Some(value_type) = scope.get(name) {
+        return Ok(*value_type);
+    }
+
+    if !visiting.insert(name.into()) {
+        return Err(format!("Cyclic let binding dependency: {name}"));
+    }
+
+    let result = (|| {
+        let binding = bindings
+            .iter()
+            .find(|binding| binding.name == name)
+            .ok_or_else(|| format!("Unknown variable: {name}"))?;
+
+        for dependency in expression::dependencies(&binding.initializer) {
+            if bindings.iter().any(|binding| binding.name == dependency) {
+                infer_let_type(&dependency, bindings, scope, visiting)?;
+            }
+        }
+
+        let value_type = expression::check(&binding.initializer, scope)?;
+        scope.insert(name.into(), value_type);
+        Ok(value_type)
+    })();
+    visiting.remove(name);
+
+    result
 }
 
 pub fn compile(source: &str, development: bool) -> Compilation {
