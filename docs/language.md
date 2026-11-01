@@ -173,60 +173,85 @@ value; quoted or grouped `@` characters remain CSS text. Missing endpoints deriv
 from the states. Tween easing is the default per interval, overridden by each
 frame's easing. WAAPI effect easing stays linear for tweens. Intermediate frames
 or frame easing with springs are errors. Explicit endpoints can differ from states
-but warn because final settlement uses the destination state. Runtime templates are currently supported only in state CSS values. Keyframe
-templates are diagnosed; their evaluation timing remains future design work.
+but warn because final settlement uses the destination state. Runtime templates are supported in state CSS values and lifecycle keyframes.
+Ordinary transition keyframe templates remain unsupported.
 
 ## Enter, leave, and events
 
-A Motion may declare one `enter` and one `leave` block. Both use transition
-target/property blocks, keyframes, tween timing, spring timing, and property
-overrides. They do not inherit a state transition's timing. Targets must already
-be declared in the Motion's states. The root is animated only when explicitly
-bound as a named target.
+A Motion may declare one default `enter` and one default `leave` block, plus one
+`enter stateName` and one `leave stateName` per state. State names must resolve in
+the same Motion. Lifecycle timing is independent of ordinary state transitions.
+Targets must already be declared in the Motion's states. The root is animated
+only when explicitly bound as a named target.
 
 ```css
-motion panel {
-  state idle {
-    content {
-      opacity: 1;
-      translate: 0 0;
-    }
+motion panel(open: boolean, distance: number) {
+  state closed {
+    content { opacity: 1; scale: 0.9; translate: 0px 0 }
   }
+  state opened when open {
+    content { scale: 1 }
+  }
+  transition { @tween: 150ms }
 
   enter {
     @tween: 250ms ease-out
-    content {
-      opacity {
-        0%: 0;
-      }
-      translate {
-        0%: 0 20px;
-      }
-    }
+    content { opacity: 0 }
   }
-
+  enter opened {
+    content { scale: 0.8 }
+  }
   leave {
     @tween: 200ms ease-in
-    content {
-      opacity {
-        100%: 0;
-      }
-      translate {
-        100%: 300px 0;
-      }
-    }
+    content { opacity: 0 }
+  }
+  leave opened {
+    content { scale: 1.2; translate: ${distance}px 0 }
   }
 }
 ```
 
-Enter runs on initial insertion, subsequent insertion, and showing. Missing
-endpoints use the active state's resolved values where available. The initial
+The state selected at insertion/showing chooses `enter stateName`; the state
+selected at removal/hiding chooses `leave stateName`. Properties not mentioned
+by the state-specific block inherit the default. For each property, timing uses
+this precedence: state-specific property, default property, state-specific block,
+default block. Existing `@tween`, `@spring`, and their longhands retain their
+CSS-like declaration-order behavior. A property with authored frames replaces the
+entire inherited frame set; a timing-only property inherits the default frames.
+
+A direct CSS declaration in a lifecycle target is endpoint shorthand:
+
+```css
+enter { content { opacity: 0 } } // opacity { 0%: 0 }
+leave { content { opacity: 0 } } // opacity { 100%: 0 }
+```
+
+These examples show property syntax only; effective timing must also be supplied.
+Shorthand and explicit keyframes can coexist for different properties. Repeating
+a property within one target is an error, including mixing shorthand and explicit
+frames for that property. Across default and state-specific blocks, shorthand
+replaces the complete inherited frame set just like explicit keyframes.
+
+CSS names retain standard CSS spelling. Values remain CSS text; `${expression}`
+embeds a scalar from the Motion's existing expression environment. Units are never
+added automatically. Both shorthand and explicit lifecycle frames support these
+templates, evaluated only when that lifecycle starts, after state-specific
+inheritance. Ordinary state CSS declarations retain their existing meaning.
+
+Enter runs on initial insertion, subsequent insertion, and showing. Missing final
+endpoints use the captured state's resolved CSS values where available. Its initial
 presentation is installed before insertion; disconnected elements do not require
 computed styles when the state supplies the value. Completion settles to the
-active state. Leave samples the displayed presentation before ordinary transition
-effects or target registrations are disposed. An omitted starting frame uses that
-snapshot; explicit frames remain authored overrides. Leave ends at its final
-keyframe and then permits removal or hiding.
+captured state. Leave captures the state, expression values, and displayed
+presentation before disposal or hiding. Its omitted starting frame uses that
+presentation, including an interrupted animation, rather than blindly using state
+CSS. Explicit frames remain authored overrides. Leave ends at its final keyframe
+and then permits removal or hiding.
+
+State and expression changes do not retarget an existing lifecycle session.
+Existing cancellation and replacement behavior still applies, for example when
+showing an element again during leave. During leave, ordinary transitions do not
+take over the properties owned by that session.
 
 A conditional event is independent of state selection and animation completion:
 

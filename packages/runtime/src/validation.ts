@@ -43,6 +43,9 @@ export function isFrame(value: unknown): value is Frame {
     isRecord(value) &&
     typeof value.offset === 'number' &&
     typeof value.value === 'string' &&
+    (value.template === undefined ||
+      (Array.isArray(value.template) &&
+        value.template.every((part: unknown) => typeof part === 'string' || isExpression(part)))) &&
     (value.easing === undefined || typeof value.easing === 'string')
   )
 }
@@ -178,6 +181,15 @@ export function isDefinition(value: unknown): value is Definition {
             parameter.type === 'string'),
       )) &&
     (value.letBindings === undefined || isArrayOf(value.letBindings, isLetBinding)) &&
+    [value.stateEnters, value.stateLeaves].every(
+      (items) =>
+        items === undefined ||
+        (Array.isArray(items) &&
+          items.every(
+            (item: unknown) =>
+              isRecord(item) && typeof item.state === 'string' && isTransition(item.transition),
+          )),
+    ) &&
     (value.enter === undefined || isTransition(value.enter)) &&
     (value.leave === undefined || isTransition(value.leave)) &&
     (value.events === undefined ||

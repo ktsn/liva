@@ -236,8 +236,8 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
               const name = targets.get(element)?.name
               if (name) explicitRoot(target)?.runtime.releaseLifecycle([name], element)
             },
-            retainEnter(session: LifecycleSession) {
-              explicitRoot(target)?.runtime.retainEnter(session)
+            retainLifecycle(phase: 'enter' | 'leave', session: LifecycleSession) {
+              explicitRoot(target)?.runtime.retainLifecycle(phase, session)
             },
             capture(phase: 'enter' | 'leave') {
               reconcileNow()

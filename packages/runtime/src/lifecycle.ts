@@ -1,7 +1,52 @@
-import type { State, Transition } from './definition.ts'
+import type { Definition, State, Transition } from './definition.ts'
+import { renderValue, type VariableValues } from './expression.ts'
 import type { ResolvedTrack } from './resolve.ts'
 import { sampleSpring } from './spring.ts'
 import { waapiProperty } from './animation.ts'
+
+export function lifecycleTransitions(
+  definition: Definition,
+  phase: 'enter' | 'leave',
+): readonly Transition[] {
+  const specific = phase === 'enter' ? definition.stateEnters : definition.stateLeaves
+  return [
+    ...(definition[phase] ? [definition[phase]] : []),
+    ...(specific ?? []).map((item) => item.transition),
+  ]
+}
+
+export function hasLifecycle(definition: Definition): boolean {
+  return (
+    lifecycleTransitions(definition, 'enter').length > 0 ||
+    lifecycleTransitions(definition, 'leave').length > 0
+  )
+}
+
+/** Select and render only the lifecycle that is starting, leaving inactive expressions unevaluated. */
+export function captureLifecycleDefinition(
+  definition: Definition,
+  phase: 'enter' | 'leave',
+  state: string,
+  values: VariableValues,
+): Transition | undefined {
+  const specific = phase === 'enter' ? definition.stateEnters : definition.stateLeaves
+  const transition = specific?.find((item) => item.state === state)?.transition ?? definition[phase]
+  if (!transition) return undefined
+
+  return {
+    ...transition,
+    targets: transition.targets.map((target) => ({
+      ...target,
+      properties: target.properties.map((property) => ({
+        ...property,
+        keyframes: property.keyframes?.map((frame) => ({
+          ...frame,
+          value: renderValue(frame, values),
+        })),
+      })),
+    })),
+  }
+}
 
 export interface LifecycleWork {
   readonly element: HTMLElement
@@ -91,6 +136,10 @@ export class LifecycleSession {
   constructor(work: readonly LifecycleWork[], phase: 'enter' | 'leave') {
     this.phase = phase
     this.work = [...work]
+  }
+
+  owns(element: HTMLElement, property: string): boolean {
+    return this.work.some((item) => item.element === element && item.track.property === property)
   }
 
   initialize() {

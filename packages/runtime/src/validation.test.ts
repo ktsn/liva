@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test'
 import fixture from '../../../fixtures/toggle.json'
+import lifecycleFixture from '../../../fixtures/lifecycle.json'
 import presenceFixture from '../../../fixtures/presence.json'
 import { decodeBundle } from './definition.ts'
 import { isDefinition } from './validation.ts'
@@ -16,6 +17,7 @@ function expectInvalidDefinition(definition: unknown) {
 describe('serialized definition validation', () => {
   it.each([
     ['state transitions', fixture],
+    ['state-specific lifecycle animations', lifecycleFixture],
     ['lifecycle animations and events', presenceFixture],
   ])('accepts and freezes compiler output for %s', (_name, serialized) => {
     expect(isDefinition(serialized.definitions[0])).toBe(true)
@@ -89,4 +91,38 @@ describe('serialized definition validation', () => {
       ].map((events) => ({ ...valid, events })),
     )('rejects malformed event data: %j', expectInvalidDefinition)
   })
+})
+
+it.each(['stateEnters', 'stateLeaves'])('validates %s entries and frame templates', (field) => {
+  for (const value of [
+    null,
+    {},
+    [null],
+    [{ state: 1, transition: { targets: [] } }],
+    [{ state: 'idle' }],
+    [
+      {
+        state: 'idle',
+        transition: {
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                { name: 'opacity', keyframes: [{ offset: 0, value: '0', template: [null] }] },
+              ],
+            },
+          ],
+        },
+      },
+    ],
+  ]) {
+    expectInvalidDefinition({ ...valid, [field]: value })
+  }
+  const definition = decodeBundle(JSON.stringify(lifecycleFixture)).definitions[0]
+  expect(Object.isFrozen(definition.stateEnters?.[0].transition)).toBe(true)
+  expect(
+    Object.isFrozen(
+      definition.stateEnters?.[0].transition.targets[0].properties[1].keyframes?.[0].template,
+    ),
+  ).toBe(true)
 })

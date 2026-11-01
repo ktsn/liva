@@ -10,7 +10,12 @@ import {
 } from './expression.ts'
 import type { Definition } from './definition.ts'
 import { getState, resolve, type ResolvedTrack } from './resolve.ts'
-import { resolveLifecycle, type LifecycleSession } from './lifecycle.ts'
+import {
+  resolveLifecycle,
+  captureLifecycleDefinition,
+  hasLifecycle,
+  type LifecycleSession,
+} from './lifecycle.ts'
 import { sampleSpring } from './spring.ts'
 
 export interface RuntimeDiagnostic {
@@ -56,6 +61,7 @@ export class LivaInstance {
   private targetElements = new Map<string, HTMLElement[]>()
   private active: ActiveTrack[] = []
   private enterSessions = new Set<LifecycleSession>()
+  private leaveSessions = new Set<LifecycleSession>()
   private owned: OwnedElement[] = []
   private generation = 0
   private manuallyPaused = false
@@ -86,9 +92,10 @@ export class LivaInstance {
     this.motion.addEventListener('change', this.motionChanged)
   }
 
-  retainEnter(session: LifecycleSession) {
-    this.enterSessions.add(session)
-    void session.finished.then(() => this.enterSessions.delete(session))
+  retainLifecycle(phase: 'enter' | 'leave', session: LifecycleSession) {
+    const sessions = phase === 'enter' ? this.enterSessions : this.leaveSessions
+    sessions.add(session)
+    void session.finished.then(() => sessions.delete(session))
   }
 
   captureLifecycle(phase: 'enter' | 'leave', names: readonly string[], element?: HTMLElement) {
@@ -100,7 +107,7 @@ export class LivaInstance {
     )
     const work = resolveLifecycle(
       phase,
-      definition[phase],
+      captureLifecycleDefinition(definition, phase, this.state, this.values),
       getState(definition, this.state),
       targets,
     )
@@ -259,14 +266,13 @@ export class LivaInstance {
     if (this.disposed) return
 
     const next = new Map(entries)
-    const duplicate =
-      next.size !== entries.length && !this.definition.enter && !this.definition.leave
+    const duplicate = next.size !== entries.length && !hasLifecycle(this.definition)
     const missing = this.definition.states.some((state) =>
       state.targets.some((target) => !next.has(target.name)),
     )
     const unchanged =
       !duplicate &&
-      (!missing || !!this.definition.enter || !!this.definition.leave) &&
+      (!missing || hasLifecycle(this.definition)) &&
       !this.suspended &&
       entries.length === [...this.targetElements.values()].flat().length &&
       entries.every(([key, value]) => this.targetElements.get(key)?.includes(value))
@@ -284,7 +290,7 @@ export class LivaInstance {
       this.targetElements.set(name, elements)
     }
     this.duplicateBindings = duplicate
-    this.suspended = duplicate || (missing && !this.definition.enter && !this.definition.leave)
+    this.suspended = duplicate || (missing && !hasLifecycle(this.definition))
 
     if (this.definition.letBindings?.length || this.definition.parameters?.length) {
       this.state = selectState(this.definition, this.values)
@@ -335,8 +341,7 @@ export class LivaInstance {
     this.state = state
     this.suspended =
       this.duplicateBindings ||
-      (!definition.enter &&
-        !definition.leave &&
+      (!hasLifecycle(definition) &&
         definition.states.some((s) => s.targets.some((t) => !this.targets.has(t.name))))
     if (!this.suspended) this.bindLetBindings()
     this.settle()
@@ -388,7 +393,12 @@ export class LivaInstance {
     const snapshots = new Map<HTMLElement, Map<string, string>>()
 
     const boundTracks = tracks.flatMap((track) =>
-      (this.targetElements.get(track.target) ?? []).map((element) => ({ track, element })),
+      (this.targetElements.get(track.target) ?? [])
+        .filter(
+          (element) =>
+            ![...this.leaveSessions].some((session) => session.owns(element, track.property)),
+        )
+        .map((element) => ({ track, element })),
     )
 
     // Read every displayed value before canceling any effect or writing styles.
@@ -581,6 +591,7 @@ export class LivaInstance {
 
   dispose() {
     if (this.disposed) return
+    this.leaveSessions.clear()
     for (const session of this.enterSessions) session.cancel('owner-teardown')
     this.enterSessions.clear()
     this.clearLetBindings()

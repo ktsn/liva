@@ -56,6 +56,8 @@ access to the underlying Rowan node, text, and absolute byte ranges. `Document`
 exposes `Motion` views; motions expose parameters, let bindings, states, events,
 and animation blocks. `enters()` and `leaves()` select lifecycle declarations;
 `transitions()` traverses all animation blocks, including enter and leave.
+`lifecycle_state()` exposes an optional state selector; target
+`animation_properties()` visits shorthand declarations and explicit tracks in source order.
 These iterators preserve source order, duplicates, and malformed headers so
 semantic validation can diagnose them. `events()` exposes event declarations,
 with optional name and condition accessors. Targets contain property declarations or property blocks with
@@ -678,3 +680,23 @@ The core runtime contains no Vue structural semantics. It shares transition IR,
 spring sampling, CSS-property conversion, and browser interpolation with normal
 state transitions. Conditional events are evaluated after let updates and before
 visual selection, and the adapter translates event names into DOM CustomEvents.
+
+### Lifecycle normalization and state capture
+
+Lifecycle CSS shorthand is normalized to the existing Frame IR at offset 0 for
+enter and offset 1 for leave. Frames may carry the same scalar template parts as
+state CSS. The compiler resolves lifecycle state references and emits optional
+`stateEnters` and `stateLeaves` arrays of `{ state, transition }`. Each transition
+already includes its default inheritance, with the same property-first timing
+precedence as directional transitions. Explicit or shorthand frames replace the
+inherited property frame set as a whole. Default `enter` and `leave` retain their
+existing representation for states without an override.
+
+Boundary planning considers the union of default and state-specific targets,
+including definitions with only state-specific lifecycle blocks. At lifecycle
+capture, the runtime selects a compiled transition using the current state and
+renders only its templates. The resulting tracks own captured CSS values and do
+not retain the expression environment. Leave sessions protect their active
+properties from ordinary transitions while a persisted target remains mounted;
+Motion disposal does not cancel the captured leave work. No additional Vue
+boundary or directive is needed.

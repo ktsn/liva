@@ -106,7 +106,10 @@ export function selectState(definition: Definition, values: VariableValues): str
   return selected
 }
 
-export function renderValue(property: Property, values: VariableValues): string {
+export function renderValue(
+  property: Pick<Property, 'value' | 'template'>,
+  values: VariableValues,
+): string {
   return property.template
     ? property.template
         .map((part) => (typeof part === 'string' ? part : String(evaluateScalar(part, values))))

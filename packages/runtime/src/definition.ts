@@ -11,6 +11,7 @@ export type Timing =
     }
 
 export interface Frame {
+  readonly template?: readonly (string | Expression)[]
   readonly offset: number
   readonly value: string
   readonly easing?: string
@@ -74,7 +75,15 @@ export interface Transition {
   readonly targets: readonly Target<PropertyTransition>[]
 }
 
+/** State-specific lifecycle transitions include their compiled default inheritance. */
+export interface StateTransition {
+  readonly state: string
+  readonly transition: Transition
+}
+
 export interface Definition {
+  readonly stateEnters?: readonly StateTransition[]
+  readonly stateLeaves?: readonly StateTransition[]
   readonly enter?: Transition
   readonly leave?: Transition
   readonly events?: readonly { readonly name: string; readonly when: Expression }[]

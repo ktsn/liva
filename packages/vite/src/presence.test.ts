@@ -125,3 +125,19 @@ it('preserves modifiers and escapes expressions in generated bindings', () => {
   expect(result.code).toContain('state === &quot;idle&quot;')
   expect(result.code).toContain('v-liva-target:body.custom.compiled="{ value: (readTarget()),')
 })
+
+it('plans targets declared only by state-specific lifecycles', () => {
+  const source = `<template><div v-liva:panel><span v-if="visible" v-liva-target:body /></div></template>
+  <liva>motion panel { state idle { body { opacity: 1 } } enter idle { @tween: 10ms; body { opacity: 0 } } leave idle { @tween: 10ms; body { opacity: 0 } } }</liva>`
+  const result = planPresence(
+    source,
+    'Panel.vue',
+    compileSfc(source, 'Panel.vue', false).result.definitions,
+  )
+
+  expect(result.boundaries).toHaveLength(1)
+  expect(result.boundaries[0].targets).toEqual([
+    { motion: 'panel', target: 'body', enter: true, leave: true },
+  ])
+  expect(result.code).toContain('v-liva-target:body.compiled=')
+})

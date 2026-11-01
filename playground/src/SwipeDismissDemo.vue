@@ -88,25 +88,16 @@ motion swipeItem {
     @tween: 350ms ease-out
 
     body {
-      opacity {
-        0%: 0
-      }
-
-      translate {
-        0%: 0 -20px
-      }
+      opacity: 0
+      translate: 0 -20px
     }
   }
 
   leave {
     @tween: 250ms ease-out
     body {
-      translate {
-        100%: 500px 0
-      }
-      opacity {
-        100%: 0
-      }
+      translate: 500px 0
+      opacity: 0
     }
   }
 }

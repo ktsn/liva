@@ -1,6 +1,8 @@
 import { expect, it } from 'vite-plus/test'
 import type { State, Transition } from './definition.ts'
-import { resolveLifecycleTracks } from './lifecycle.ts'
+import fixture from '../../../fixtures/lifecycle.json'
+import { decodeBundle } from './definition.ts'
+import { captureLifecycleDefinition, hasLifecycle, resolveLifecycleTracks } from './lifecycle.ts'
 
 const state: State = {
   name: 'idle',
@@ -118,4 +120,46 @@ it('resolves only registered targets and keeps their independent property timing
     { kind: 'tween', durationMs: 200, easing: 'linear' },
     { kind: 'tween', durationMs: 500, easing: 'ease-out' },
   ])
+})
+
+const definition = decodeBundle(JSON.stringify(fixture)).definitions[0]
+
+it.each(['enter', 'leave'] as const)(
+  'captures %s state selection and expression values once',
+  (phase) => {
+    const values = { open: true, distance: 40 }
+    const captured = captureLifecycleDefinition(definition, phase, 'opened', values)!
+    values.open = false
+    values.distance = 90
+
+    const capturedProperty = (name: string) =>
+      captured.targets
+        .find((target) => target.name === 'content')!
+        .properties.find((property) => property.name === name)!
+    expect(capturedProperty('translate').keyframes?.[0].value).toBe('40px 0')
+    expect(capturedProperty('scale').keyframes).toHaveLength(1)
+    expect(capturedProperty('scale').keyframes?.[0].value).toBe(phase === 'enter' ? '0.8' : '1.2')
+    expect(capturedProperty('opacity').keyframes?.[0].value).toBe('0')
+    expect(captured.targets.some((target) => target.name === 'badge')).toBe(true)
+
+    const selected = definition.states.find((candidate) => candidate.name === 'opened')!
+    const tracks = resolveLifecycleTracks(phase, captured, selected, () => '0.42')
+    const opacity = tracks.find(
+      (track) => track.target === 'content' && track.property === 'opacity',
+    )!
+    expect(opacity.keyframes.map((frame) => frame.value)).toEqual(
+      phase === 'enter' ? ['0', '1'] : ['0.42', '0'],
+    )
+    expect(captureLifecycleDefinition(definition, phase, 'closed', values)?.targets).toHaveLength(1)
+  },
+)
+
+it('does not evaluate inactive lifecycle expressions and recognizes state-only definitions', () => {
+  const specificOnly = { ...definition, enter: undefined, leave: undefined }
+  expect(hasLifecycle(specificOnly)).toBe(true)
+  expect(captureLifecycleDefinition(specificOnly, 'enter', 'closed', {})).toBeUndefined()
+  expect(() => captureLifecycleDefinition(definition, 'leave', 'closed', {})).not.toThrow()
+  expect(() => captureLifecycleDefinition(definition, 'leave', 'opened', {})).toThrow(
+    'Unknown variable',
+  )
 })
