@@ -1274,7 +1274,10 @@ impl Compiler {
                     };
                     self.error_range(
                         "semantic.completeness",
-                        format!("MVP requires {target}.{property} in state {}", state.name),
+                        format!(
+                            "Missing value for {target}.{property} in state {}",
+                            state.name
+                        ),
                         self.source_header(path),
                     );
                 }
