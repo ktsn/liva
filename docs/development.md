@@ -58,7 +58,8 @@ channels, and spring translation comparisons allow 0.1 px.
 
 ## Tooling constraints
 
-TypeScript 5.9.3 supports the legacy `lib/tsc` API used by the pinned Vue checker.
+TypeScript 6.0.3 supports the legacy `lib/tsc` API used by the pinned Vue checker.
+TypeScript 7 does not export that entry and cannot run `vue-tsc` 3.3.14.
 The Vue checks cover SFCs and application/test sources; `vp check` checks Vite
 configuration separately because including it in the Vue checker triggers a
 compiler assertion in overloaded plugin signatures. Verify both paths when updating

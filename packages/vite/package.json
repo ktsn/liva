@@ -7,11 +7,11 @@
   "dependencies": {
     "@liva/runtime": "workspace:*",
     "@liva/vue": "workspace:*",
-    "@vue/compiler-core": "3.5.44",
-    "@vue/compiler-sfc": "3.5.44"
+    "@vue/compiler-core": "^3.5.44",
+    "@vue/compiler-sfc": "^3.5.44"
   },
   "peerDependencies": {
-    "vite-plus": "1.4.0",
-    "vue": "3.5.44"
+    "vite-plus": "^1.4.0",
+    "vue": "^3.5.44"
   }
 }
