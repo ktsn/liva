@@ -100,3 +100,21 @@ fn hyphenated_names_have_whole_identifier_hover_ranges() {
         assert_eq!(actual, expected, "{name}");
     }
 }
+
+#[test]
+fn lifecycle_templates_expose_typed_hovers_in_both_property_forms() {
+    let source = "// 日本語\r\nmotion panel(distance: number) { state idle { body { translate: 0px 0 } } enter idle { @tween: 1ms; body { translate: ${distance}px 0 } } leave { @tween: 1ms; body { translate { 100%: ${distance}px 0 } } } }";
+    let found = hovers(source);
+    let expected: Vec<_> = source
+        .match_indices("${distance}")
+        .map(|(start, _)| start + 2)
+        .collect();
+
+    for start in expected {
+        assert!(
+            found
+                .iter()
+                .any(|hover| hover.range.start == start && hover.label == "distance: number")
+        );
+    }
+}

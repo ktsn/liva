@@ -216,9 +216,9 @@ motion other { state idle {} }
 #[test]
 fn lifecycle_accessors_retain_duplicate_and_malformed_declarations() {
     let source = "motion panel {
-  enter invalid {}
+  enter invalid extra {}
   enter {}
-  leave invalid {}
+  leave invalid extra {}
   leave {}
   event missing
   event when true

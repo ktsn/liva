@@ -125,7 +125,7 @@ impl Compiler {
 
     fn css_template(
         &mut self,
-        node: &syn::Property,
+        node: &impl HasValue,
         scope: &expression::Scope,
     ) -> Option<Vec<expression::TemplatePart>> {
         let value = node.value_text().unwrap_or_default();
@@ -547,7 +547,21 @@ impl Compiler {
         }
     }
 
-    fn transition(&mut self, node: &syn::Transition, path: &str) -> Transition {
+    fn transition(
+        &mut self,
+        node: &syn::Transition,
+        path: &str,
+        scope: &expression::Scope,
+    ) -> Transition {
+        let endpoint = match node.selector() {
+            Some(syn::TransitionSelector::Enter | syn::TransitionSelector::EnterState(_)) => {
+                Some(0.0)
+            }
+            Some(syn::TransitionSelector::Leave | syn::TransitionSelector::LeaveState(_)) => {
+                Some(1.0)
+            }
+            _ => None,
+        };
         self.mapping(path, node, "block");
         let timing = self.animation_declarations(node, path);
         let mut targets = vec![];
@@ -558,11 +572,58 @@ impl Compiler {
             self.unique(&mut seen, &name, &target);
             let target_path = format!("{path}/target/{name}");
             self.mapping(&target_path, &target, "block");
-            self.declarations(&target, Some(&[]), &target_path);
+            if endpoint.is_none() {
+                self.declarations(&target, Some(&[]), &target_path);
+            } else {
+                for binding in target.bindings() {
+                    self.error(
+                        "semantic.structure",
+                        "Let declarations belong directly to a motion",
+                        &binding,
+                    );
+                }
+            }
             let mut properties = vec![];
             let mut property_names = BTreeMap::new();
 
-            for property in target.property_blocks() {
+            for item in target.animation_properties() {
+                let property = match item {
+                    syn::AnimationProperty::Keyframes(property) => property,
+                    syn::AnimationProperty::Shorthand(property) => {
+                        let Some(offset) = endpoint else { continue };
+                        let name = property.header().unwrap_or_default();
+                        self.unique(&mut property_names, &name, &property);
+                        let property_path = format!("{target_path}/property/{name}");
+                        self.mapping(&property_path, &property, "block");
+                        if !liva_syntax::is_property(&name) || name.starts_with('@') {
+                            self.error(
+                                "semantic.declaration",
+                                "Expected a CSS property",
+                                &property,
+                            );
+                            continue;
+                        }
+                        let value = property.value_text().unwrap_or_default();
+                        let value_node = property.value_node().unwrap();
+                        if value.is_empty() {
+                            self.error("semantic.value", "Value must not be empty", &value_node);
+                        }
+                        let frame_path = format!("{property_path}/frame/{offset}");
+                        self.mapping(&frame_path, &property, "block");
+                        self.mapping(&format!("{frame_path}/value"), &value_node, "value");
+                        properties.push(PropertyTransition {
+                            name,
+                            timing: None,
+                            keyframes: Some(vec![Frame {
+                                offset,
+                                value,
+                                easing: None,
+                                template: self.css_template(&property, scope),
+                            }]),
+                        });
+                        continue;
+                    }
+                };
                 let name = property.header().unwrap_or_default();
                 self.unique(&mut property_names, &name, &property);
                 let property_path = format!("{target_path}/property/{name}");
@@ -615,7 +676,7 @@ impl Compiler {
                         );
                     }
 
-                    if value.contains("${") {
+                    if endpoint.is_none() && value.contains("${") {
                         let interpolations: Vec<_> = value_node
                             .syntax()
                             .descendants()
@@ -671,7 +732,15 @@ impl Compiler {
                             self.mapping(&format!("{frame_path}/easing"), &value_node, "value");
                         }
                     }
+                    let mut template = endpoint.and_then(|_| self.css_template(&frame, scope));
+                    if easing.is_some()
+                        && let Some(expression::TemplatePart::Text(text)) =
+                            template.as_mut().and_then(|parts| parts.last_mut())
+                    {
+                        *text = split_frame(text).0.trim_end().into();
+                    }
                     frames.push(Frame {
+                        template,
                         offset,
                         value: value.into(),
                         easing: easing.map(str::to_string),
@@ -817,6 +886,8 @@ impl Compiler {
             events: vec![],
             enter: None,
             leave: None,
+            state_enters: vec![],
+            state_leaves: vec![],
             states: vec![],
             general_transition: None,
             directional_transitions: vec![],
@@ -920,33 +991,55 @@ impl Compiler {
                 }
                 syn::MotionItem::Transition(transition) => match transition.selector() {
                     Some(
-                        selector
-                        @ (syn::TransitionSelector::Enter | syn::TransitionSelector::Leave),
+                        selector @ (syn::TransitionSelector::Enter
+                        | syn::TransitionSelector::Leave
+                        | syn::TransitionSelector::EnterState(_)
+                        | syn::TransitionSelector::LeaveState(_)),
                     ) => {
-                        let phase = if selector == syn::TransitionSelector::Enter {
+                        let phase = if matches!(
+                            selector,
+                            syn::TransitionSelector::Enter | syn::TransitionSelector::EnterState(_)
+                        ) {
                             "enter"
                         } else {
                             "leave"
                         };
-                        self.unique(&mut transitions, phase, &transition);
-                        let value = self.transition(&transition, &format!("{name}/{phase}"));
-                        if phase == "enter" {
-                            definition.enter = Some(value);
-                        } else {
-                            definition.leave = Some(value);
+                        let state = transition.lifecycle_state();
+                        let suffix = state
+                            .as_ref()
+                            .map_or_else(|| phase.to_string(), |state| format!("{phase}/{state}"));
+                        self.unique(&mut transitions, &suffix, &transition);
+                        let value =
+                            self.transition(&transition, &format!("{name}/{suffix}"), &scope);
+                        match (phase, state) {
+                            ("enter", None) => definition.enter = Some(value),
+                            (_, None) => definition.leave = Some(value),
+                            ("enter", Some(state)) => {
+                                definition.state_enters.push(StateTransition {
+                                    state,
+                                    transition: value,
+                                })
+                            }
+                            (_, Some(state)) => definition.state_leaves.push(StateTransition {
+                                state,
+                                transition: value,
+                            }),
                         }
                     }
                     Some(syn::TransitionSelector::General) => {
                         self.unique(&mut transitions, "general", &transition);
-                        definition.general_transition = Some(
-                            self.transition(&transition, &format!("{name}/transition/general")),
-                        );
+                        definition.general_transition = Some(self.transition(
+                            &transition,
+                            &format!("{name}/transition/general"),
+                            &scope,
+                        ));
                     }
                     Some(syn::TransitionSelector::Directional { from, to }) => {
                         self.unique(&mut transitions, &format!("{from}/{to}"), &transition);
                         let value = self.transition(
                             &transition,
                             &format!("{name}/transition/directional/{from}/{to}"),
+                            &scope,
                         );
                         definition
                             .directional_transitions
@@ -1024,6 +1117,14 @@ impl Compiler {
             }
         }
         self.validate(&definition, node);
+        for (default, overrides) in [
+            (&definition.enter, &mut definition.state_enters),
+            (&definition.leave, &mut definition.state_leaves),
+        ] {
+            for item in overrides {
+                item.transition = merge_lifecycle(default.as_ref(), &item.transition);
+            }
+        }
         definition
     }
 
@@ -1057,44 +1158,85 @@ impl Compiler {
             }
         }
 
-        for (phase, animation) in [("enter", &def.enter), ("leave", &def.leave)] {
-            let Some(animation) = animation else { continue };
-            for target in &animation.targets {
-                let target_path = format!("{}/{phase}/target/{}", def.name, target.name);
-                if !def
-                    .states
+        for (phase, default, overrides) in [
+            ("enter", &def.enter, &def.state_enters),
+            ("leave", &def.leave, &def.state_leaves),
+        ] {
+            for (state, specific) in default.iter().map(|animation| (None, animation)).chain(
+                overrides
                     .iter()
-                    .any(|state| state.targets.iter().any(|item| item.name == target.name))
+                    .map(|item| (Some(item.state.as_str()), &item.transition)),
+            ) {
+                let base_path = format!("{}/{phase}", def.name);
+                let path =
+                    state.map_or_else(|| base_path.clone(), |state| format!("{base_path}/{state}"));
+                if let Some(state) = state
+                    && !def.states.iter().any(|item| item.name == state)
                 {
+                    let header = self.sources[&path].child::<syn::Header>().unwrap();
+                    let source = SourceText::new(&header);
                     self.error_range(
                         "semantic.reference",
-                        format!("Unknown lifecycle target: {}", target.name),
-                        self.source_header(&target_path),
+                        format!("Unknown state: {state}"),
+                        source.range(source.text.split_whitespace().nth(1).unwrap()),
                     );
                 }
-
-                for property in &target.properties {
-                    let path = format!("{target_path}/property/{}", property.name);
-                    let timing = property.timing.as_ref().or(animation.timing.as_ref());
-                    if timing.is_none() {
-                        self.error_range(
-                            "semantic.timing-missing",
-                            "Lifecycle property requires timing",
-                            self.source_header(&path),
-                        );
-                    }
-                    if timing.is_some_and(|timing| !matches!(timing, Timing::Tween { .. }))
-                        && property.keyframes.as_ref().is_some_and(|frames| {
-                            frames.iter().any(|frame| {
-                                (frame.offset > 0.0 && frame.offset < 1.0) || frame.easing.is_some()
-                            })
-                        })
+                let animation = if state.is_some() {
+                    merge_lifecycle(default.as_ref(), specific)
+                } else {
+                    specific.clone()
+                };
+                for target in &animation.targets {
+                    let specific_target_path = format!("{path}/target/{}", target.name);
+                    let target_path = if self.sources.contains_key(&specific_target_path) {
+                        specific_target_path
+                    } else {
+                        format!("{base_path}/target/{}", target.name)
+                    };
+                    if !def
+                        .states
+                        .iter()
+                        .any(|state| state.targets.iter().any(|item| item.name == target.name))
                     {
                         self.error_range(
-                            "semantic.spring-keyframes",
-                            "Spring tracks cannot contain intermediate frames or frame easing",
-                            self.source_header(&path),
+                            "semantic.reference",
+                            format!("Unknown lifecycle target: {}", target.name),
+                            self.source_header(&target_path),
                         );
+                    }
+                    for property in &target.properties {
+                        let specific_property_path =
+                            format!("{path}/target/{}/property/{}", target.name, property.name);
+                        let property_path = if self.sources.contains_key(&specific_property_path) {
+                            specific_property_path
+                        } else {
+                            format!(
+                                "{base_path}/target/{}/property/{}",
+                                target.name, property.name
+                            )
+                        };
+                        let timing = property.timing.as_ref().or(animation.timing.as_ref());
+                        if timing.is_none() {
+                            self.error_range(
+                                "semantic.timing-missing",
+                                "Lifecycle property requires timing",
+                                self.source_header(&property_path),
+                            );
+                        }
+                        if timing.is_some_and(|timing| !matches!(timing, Timing::Tween { .. }))
+                            && property.keyframes.as_ref().is_some_and(|frames| {
+                                frames.iter().any(|frame| {
+                                    (frame.offset > 0.0 && frame.offset < 1.0)
+                                        || frame.easing.is_some()
+                                })
+                            })
+                        {
+                            self.error_range(
+                                "semantic.spring-keyframes",
+                                "Spring tracks cannot contain intermediate frames or frame easing",
+                                self.source_header(&property_path),
+                            );
+                        }
                     }
                 }
             }
@@ -1433,4 +1575,44 @@ fn split_frame(text: &str) -> (&str, Option<&str>) {
     }
 
     (text.trim(), None)
+}
+
+/// Apply the same property-first timing precedence as directional transitions.
+fn merge_lifecycle(default: Option<&Transition>, specific: &Transition) -> Transition {
+    let mut result = specific.clone();
+    result.timing = specific
+        .timing
+        .clone()
+        .or_else(|| default.and_then(|item| item.timing.clone()));
+    if let Some(default) = default {
+        for target in &default.targets {
+            if let Some(existing) = result
+                .targets
+                .iter_mut()
+                .find(|item| item.name == target.name)
+            {
+                for property in &target.properties {
+                    if let Some(overridden) = existing
+                        .properties
+                        .iter_mut()
+                        .find(|item| item.name == property.name)
+                    {
+                        overridden.timing = overridden
+                            .timing
+                            .clone()
+                            .or_else(|| property.timing.clone());
+                        overridden.keyframes = overridden
+                            .keyframes
+                            .clone()
+                            .or_else(|| property.keyframes.clone());
+                    } else {
+                        existing.properties.push(property.clone());
+                    }
+                }
+            } else {
+                result.targets.push(target.clone());
+            }
+        }
+    }
+    result
 }

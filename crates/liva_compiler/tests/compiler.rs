@@ -29,6 +29,10 @@ fn fixture_json_matches_the_public_compilation_schema() {
             include_str!("../../../fixtures/derived.json"),
         ),
         (
+            include_str!("../../../fixtures/lifecycle.liv"),
+            include_str!("../../../fixtures/lifecycle.json"),
+        ),
+        (
             include_str!("../../../fixtures/presence.liv"),
             include_str!("../../../fixtures/presence.json"),
         ),

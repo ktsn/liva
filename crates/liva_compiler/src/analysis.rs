@@ -79,6 +79,27 @@ pub fn hovers(source: &str) -> Vec<Hover> {
             }
         }
 
+        for animation in motion.enters().chain(motion.leaves()) {
+            for target in animation.targets() {
+                for property in target.animation_properties() {
+                    match property {
+                        liva_syntax::ast::AnimationProperty::Shorthand(property) => {
+                            if let Some(value) = property.value_node() {
+                                expression_hovers(&value, &scope, &mut result);
+                            }
+                        }
+                        liva_syntax::ast::AnimationProperty::Keyframes(property) => {
+                            for frame in property.keyframes() {
+                                if let Some(value) = frame.value_node() {
+                                    expression_hovers(&value, &scope, &mut result);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         for state in motion.states() {
             if let Some(condition) = state.condition() {
                 expression_hovers(&condition, &scope, &mut result);
