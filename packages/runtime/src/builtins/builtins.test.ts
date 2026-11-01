@@ -18,6 +18,7 @@ it('dispatches call IR to independently initialized built-in subscriptions', () 
   )
   expect(first.evaluate(firstVariables).movement).toEqual({
     active: false,
+    released: false,
     offset: { x: 0, y: 0 },
   })
   expect(() => callBuiltin('missing', {})).toThrow('Unknown function: missing')
@@ -63,5 +64,5 @@ it('evaluates target variables using the same environment as other argument valu
 
   if (!isReactiveSubscription(subscription)) throw new Error('Expected a reactive subscription')
 
-  expect(subscription.value).toEqual({ active: false, offset: { x: 0, y: 0 } })
+  expect(subscription.value).toEqual({ active: false, released: false, offset: { x: 0, y: 0 } })
 })

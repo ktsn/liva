@@ -56,6 +56,8 @@ export function resolve(definition: Definition, fromName: string, toName: string
 
       const timing = dp?.timing ?? gp?.timing ?? directional?.timing ?? general?.timing
 
+      if (!timing && property.template) continue
+
       if (!timing) {
         throw new Error(`Missing timing: ${target.name}.${property.name}`)
       }

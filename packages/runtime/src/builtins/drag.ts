@@ -1,6 +1,7 @@
 import type { ReactiveSubscription, RuntimeValue } from '../reactive-value.ts'
 
 interface DragValue {
+  readonly released: boolean
   readonly active: boolean
   readonly offset: { readonly x: number; readonly y: number }
 }
@@ -14,25 +15,25 @@ export function drag(args: Readonly<Record<string, RuntimeValue>>): ReactiveSubs
 
   const targetName = target.name
 
-  let value: DragValue = { active: false, offset: { x: 0, y: 0 } }
+  let value: DragValue = { active: false, released: false, offset: { x: 0, y: 0 } }
 
   return {
     get value() {
-      return { active: value.active, offset: value.offset }
+      return { active: value.active, released: value.released, offset: value.offset }
     },
     bind(targets, update) {
       const element = targets.get(targetName)
 
-      if (!element) throw new Error(`Unknown target: ${targetName}`)
+      if (!element) return () => {}
 
       const cleanup = bindDrag(element, (next) => {
         value = next
-        update({ active: value.active, offset: value.offset })
+        update({ active: value.active, released: value.released, offset: value.offset })
       })
 
       return () => {
         cleanup()
-        value = { ...value, active: false }
+        value = { ...value, active: false, released: false }
       }
     },
   }
@@ -48,7 +49,7 @@ function bindDrag(element: HTMLElement, update: (value: DragValue) => void): () 
     const captured = pointer
     pointer = undefined
     if (element.hasPointerCapture(captured)) element.releasePointerCapture(captured)
-    update({ active: false, offset })
+    update({ active: false, released: event?.type === 'pointerup', offset })
   }
 
   const down = (event: PointerEvent) => {
@@ -57,13 +58,13 @@ function bindDrag(element: HTMLElement, update: (value: DragValue) => void): () 
     pointer = event.pointerId
     origin = { x: event.clientX, y: event.clientY }
     offset = { x: 0, y: 0 }
-    update({ active: true, offset })
+    update({ active: true, released: false, offset })
   }
 
   const move = (event: PointerEvent) => {
     if (event.pointerId !== pointer) return
     offset = { x: event.clientX - origin.x, y: event.clientY - origin.y }
-    update({ active: true, offset })
+    update({ active: true, released: false, offset })
   }
 
   const up = (event: PointerEvent) => {

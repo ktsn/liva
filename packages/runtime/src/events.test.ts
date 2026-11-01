@@ -1,0 +1,120 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
+import { LivaInstance } from './instance.ts'
+import type { Definition } from './definition.ts'
+
+const definition: Definition = {
+  name: 'event',
+  parameters: [{ name: 'ready', type: 'boolean' }],
+  states: [{ name: 'idle', targets: [] }],
+  directionalTransitions: [],
+  events: [{ name: 'dismiss', when: { kind: 'reference', path: ['ready'] } }],
+}
+const instances: LivaInstance[] = []
+
+function createInstance(ready: boolean, source = definition) {
+  const instance = new LivaInstance(source, { ready })
+  instances.push(instance)
+  return instance
+}
+
+beforeEach(() => {
+  vi.stubGlobal('matchMedia', () => ({ addEventListener() {}, removeEventListener() {} }))
+})
+
+afterEach(() => {
+  for (const instance of instances) instance.dispose()
+  instances.length = 0
+  vi.unstubAllGlobals()
+})
+
+describe('conditional event edges', () => {
+  it.each([
+    { initial: false, values: [false, true, true, false, true], counts: [0, 1, 1, 1, 2] },
+    { initial: true, values: [true, false, true, true, false, true], counts: [0, 0, 1, 1, 1, 2] },
+  ])(
+    'emits only rising edges when the initial condition is $initial',
+    ({ initial, values, counts }) => {
+      const instance = createInstance(initial)
+      const emitted: string[] = []
+      instance.onEvent = (name) => emitted.push(name)
+
+      const observed = values.map((ready) => {
+        instance.updateParameters({ ready })
+        return emitted.length
+      })
+
+      expect(observed).toEqual(counts)
+      expect(emitted).toEqual(['dismiss', 'dismiss'])
+      expect(instance.state).toBe('idle')
+    },
+  )
+
+  it('tracks sibling Motion instances independently', () => {
+    const first = createInstance(false)
+    const second = createInstance(false)
+    const emitted: string[] = []
+    first.onEvent = (name) => emitted.push('first:' + name)
+    second.onEvent = (name) => emitted.push('second:' + name)
+
+    first.updateParameters({ ready: true })
+    second.updateParameters({ ready: true })
+    first.updateParameters({ ready: true })
+    second.updateParameters({ ready: true })
+
+    expect(emitted).toEqual(['first:dismiss', 'second:dismiss'])
+  })
+
+  it('tracks multiple conditions independently without changing visual state', () => {
+    const instance = createInstance(true, {
+      ...definition,
+      events: [
+        ...definition.events!,
+        {
+          name: 'reset',
+          when: { kind: 'unary', operator: '!', operand: { kind: 'reference', path: ['ready'] } },
+        },
+      ],
+    })
+    const emitted: string[] = []
+    instance.onEvent = (name) => emitted.push(name)
+
+    instance.updateParameters({ ready: false })
+    instance.updateParameters({ ready: false })
+    instance.updateParameters({ ready: true })
+
+    expect(emitted).toEqual(['reset', 'dismiss'])
+    expect(instance.state).toBe('idle')
+  })
+})
+
+describe('event lifecycle', () => {
+  it('does not emit after disposal', () => {
+    const instance = createInstance(false)
+    const emitted: string[] = []
+    instance.onEvent = (name) => emitted.push(name)
+
+    instance.dispose()
+    instance.updateParameters({ ready: true })
+
+    expect(emitted).toEqual([])
+    expect(instance.onEvent).toBeUndefined()
+  })
+
+  it('initializes replacement definitions without emitting an already-true condition', () => {
+    const instance = createInstance(true)
+    const emitted: string[] = []
+    instance.onEvent = (name) => emitted.push(name)
+    const replacement: Definition = {
+      ...definition,
+      events: [{ name: 'replacement', when: { kind: 'reference', path: ['ready'] } }],
+    }
+
+    instance.replaceDefinition(replacement)
+    instance.updateParameters({ ready: true })
+    expect(emitted).toEqual([])
+
+    instance.updateParameters({ ready: false })
+    instance.updateParameters({ ready: true })
+    expect(emitted).toEqual(['replacement'])
+  })
+})

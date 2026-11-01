@@ -75,6 +75,9 @@ export interface Transition {
 }
 
 export interface Definition {
+  readonly enter?: Transition
+  readonly leave?: Transition
+  readonly events?: readonly { readonly name: string; readonly when: Expression }[]
   readonly parameters?: readonly MotionParameter[]
   readonly letBindings?: readonly LetBinding[]
   readonly name: string

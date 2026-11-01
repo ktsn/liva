@@ -1,7 +1,16 @@
+import { waapiProperty } from './animation.ts'
+export { waapiProperty } from './animation.ts'
 import { parameterValues, LetBindingGraph, targetValues } from './let-bindings.ts'
-import { renderDefinition, renderValue, selectState, type VariableValues } from './expression.ts'
+import {
+  evaluate,
+  renderDefinition,
+  renderValue,
+  selectState,
+  type VariableValues,
+} from './expression.ts'
 import type { Definition } from './definition.ts'
 import { getState, resolve, type ResolvedTrack } from './resolve.ts'
+import { resolveLifecycle, type LifecycleSession } from './lifecycle.ts'
 import { sampleSpring } from './spring.ts'
 
 export interface RuntimeDiagnostic {
@@ -34,20 +43,6 @@ function inlineDeclarations(element: HTMLElement): Map<string, InlineValue> {
 
 type ActiveTrack = { track: ResolvedTrack; element: HTMLElement; animation: Animation }
 
-export function waapiProperty(property: string): string {
-  if (property.startsWith('--')) {
-    return property
-  }
-
-  if (property === 'offset') return 'cssOffset'
-  if (property === 'float') return 'cssFloat'
-  // Metadata names have no CSS counterpart/WAAPI alias. Kebab spelling prevents
-  // them from overwriting effect metadata while still reaching the browser.
-  if (property === 'easing' || property === 'composite') return `-${property}`
-
-  return property.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
-}
-
 export class LivaInstance {
   definition: Definition
   state: string
@@ -55,8 +50,12 @@ export class LivaInstance {
   private letBindings: LetBindingGraph
   private letBindingCleanups: (() => void)[] = []
   onReactiveState?: (state: string) => void
+  onEvent?: (name: string) => void
+  private eventValues = new Map<string, boolean>()
   private targets = new Map<string, HTMLElement>()
+  private targetElements = new Map<string, HTMLElement[]>()
   private active: ActiveTrack[] = []
+  private enterSessions = new Set<LifecycleSession>()
   private owned: OwnedElement[] = []
   private generation = 0
   private manuallyPaused = false
@@ -79,11 +78,42 @@ export class LivaInstance {
     this.letBindings = new LetBindingGraph(definition.letBindings ?? [], variables)
     this.values = this.letBindings.evaluate(variables)
     this.definition = definition
+    this.evaluateEvents(false)
     this.state = typeof state === 'string' ? state : selectState(definition, this.values)
     getState(definition, this.state)
     this.report = report
     this.motion = matchMedia('(prefers-reduced-motion: reduce)')
     this.motion.addEventListener('change', this.motionChanged)
+  }
+
+  retainEnter(session: LifecycleSession) {
+    this.enterSessions.add(session)
+    void session.finished.then(() => this.enterSessions.delete(session))
+  }
+
+  captureLifecycle(phase: 'enter' | 'leave', names: readonly string[], element?: HTMLElement) {
+    const definition = renderDefinition(this.definition, this.values, [this.state])
+    const targets = new Map(
+      [...this.targets]
+        .filter(([name]) => names.includes(name))
+        .map(([name, target]) => [name, element ?? target]),
+    )
+    const work = resolveLifecycle(
+      phase,
+      definition[phase],
+      getState(definition, this.state),
+      targets,
+    )
+
+    return work
+  }
+
+  releaseLifecycle(names: readonly string[], element: HTMLElement) {
+    const interrupted = this.active.filter(
+      (entry) => names.includes(entry.track.target) && entry.element === element,
+    )
+    this.active = this.active.filter((entry) => !interrupted.includes(entry))
+    for (const entry of interrupted) entry.animation.cancel()
   }
 
   get reactiveState(): string {
@@ -101,7 +131,11 @@ export class LivaInstance {
     }
   }
 
-  private cancel() {
+  private cancel(cancelEnter = true) {
+    if (cancelEnter) {
+      for (const session of this.enterSessions) session.cancel('superseded')
+      this.enterSessions.clear()
+    }
     this.generation++
     this.manuallyPaused = false
 
@@ -209,13 +243,13 @@ export class LivaInstance {
     if (this.suspended || this.disposed) return
 
     for (const target of getState(this.definition, this.state).targets) {
-      const element = this.targets.get(target.name)!
-
-      for (const property of target.properties) {
-        try {
-          this.write(element, property.name, renderValue(property, this.values))
-        } catch (error) {
-          this.report({ code: 'runtime.expression', message: String(error), error })
+      for (const element of this.targetElements.get(target.name) ?? []) {
+        for (const property of target.properties) {
+          try {
+            this.write(element, property.name, renderValue(property, this.values))
+          } catch (error) {
+            this.report({ code: 'runtime.expression', message: String(error), error })
+          }
         }
       }
     }
@@ -225,25 +259,32 @@ export class LivaInstance {
     if (this.disposed) return
 
     const next = new Map(entries)
-    const duplicate = next.size !== entries.length
+    const duplicate =
+      next.size !== entries.length && !this.definition.enter && !this.definition.leave
     const missing = this.definition.states.some((state) =>
       state.targets.some((target) => !next.has(target.name)),
     )
     const unchanged =
       !duplicate &&
-      !missing &&
+      (!missing || !!this.definition.enter || !!this.definition.leave) &&
       !this.suspended &&
-      next.size === this.targets.size &&
-      [...next].every(([key, value]) => this.targets.get(key) === value)
+      entries.length === [...this.targetElements.values()].flat().length &&
+      entries.every(([key, value]) => this.targetElements.get(key)?.includes(value))
 
     if (unchanged) return
 
     this.clearLetBindings()
-    this.cancel()
+    this.cancel(false)
     this.restore()
     this.targets = next
+    this.targetElements.clear()
+    for (const [name, element] of entries) {
+      const elements = this.targetElements.get(name) ?? []
+      elements.push(element)
+      this.targetElements.set(name, elements)
+    }
     this.duplicateBindings = duplicate
-    this.suspended = duplicate || missing
+    this.suspended = duplicate || (missing && !this.definition.enter && !this.definition.leave)
 
     if (this.definition.letBindings?.length || this.definition.parameters?.length) {
       this.state = selectState(this.definition, this.values)
@@ -289,10 +330,14 @@ export class LivaInstance {
     this.letBindings = letBindings
     this.values = letBindings.evaluate(variables)
     this.definition = definition
+    this.eventValues.clear()
+    this.evaluateEvents(false)
     this.state = state
     this.suspended =
       this.duplicateBindings ||
-      definition.states.some((s) => s.targets.some((t) => !this.targets.has(t.name)))
+      (!definition.enter &&
+        !definition.leave &&
+        definition.states.some((s) => s.targets.some((t) => !this.targets.has(t.name))))
     if (!this.suspended) this.bindLetBindings()
     this.settle()
   }
@@ -334,19 +379,20 @@ export class LivaInstance {
       return true
     }
 
+    tracks = tracks.filter((track) => this.targets.has(track.target))
+
     const interrupted =
+      this.enterSessions.size > 0 ||
       this.active.length > 0 ||
       (this.definition.letBindings?.length ?? 0) + (this.definition.parameters?.length ?? 0) > 0
     const snapshots = new Map<HTMLElement, Map<string, string>>()
 
+    const boundTracks = tracks.flatMap((track) =>
+      (this.targetElements.get(track.target) ?? []).map((element) => ({ track, element })),
+    )
+
     // Read every displayed value before canceling any effect or writing styles.
-    for (const { track, element } of [
-      ...this.active,
-      ...tracks.map((candidate) => ({
-        track: candidate,
-        element: this.targets.get(candidate.target)!,
-      })),
-    ]) {
+    for (const { track, element } of [...this.active, ...boundTracks]) {
       let properties = snapshots.get(element)
 
       if (!properties) {
@@ -361,9 +407,8 @@ export class LivaInstance {
     let preparing: ResolvedTrack | undefined
 
     try {
-      for (const track of tracks) {
+      for (const { track, element } of boundTracks) {
         preparing = track
-        const element = this.targets.get(track.target)!
         const timing =
           track.timing.kind === 'tween'
             ? { durationMs: track.timing.durationMs, easing: 'linear' }
@@ -449,11 +494,27 @@ export class LivaInstance {
     }
   }
 
+  private evaluateEvents(emit = true) {
+    const pending: string[] = []
+
+    for (const event of this.definition.events ?? []) {
+      const next = evaluate(event.when, this.values) === true
+      if (emit && next && this.eventValues.get(event.name) === false) pending.push(event.name)
+      this.eventValues.set(event.name, next)
+    }
+
+    for (const name of pending) this.onEvent?.(name)
+  }
+
   private applyVariableValues(values: VariableValues) {
     const previous = this.values
 
     try {
       values = this.letBindings.evaluate(values)
+      this.values = values
+      this.evaluateEvents()
+      if (this.disposed) return
+
       const state = selectState(this.definition, values)
       const properties = getState(this.definition, state).targets.flatMap((target) =>
         target.properties
@@ -464,8 +525,6 @@ export class LivaInstance {
             value: renderValue(property, values),
           })),
       )
-      this.values = values
-
       if (state !== this.state) {
         if (!this.transitionTo(state, {}, previous)) {
           this.values = previous
@@ -482,12 +541,16 @@ export class LivaInstance {
           }
 
           if (unchanged) continue
+          for (const session of this.enterSessions) session.cancel('superseded')
+          this.enterSessions.clear()
           const replaced = this.active.filter(
             (entry) => entry.track.target === target && entry.track.property === property.name,
           )
           this.active = this.active.filter((entry) => !replaced.includes(entry))
           for (const entry of replaced) entry.animation.cancel()
-          this.write(this.targets.get(target)!, property.name, value)
+          for (const element of this.targetElements.get(target) ?? []) {
+            this.write(element, property.name, value)
+          }
         }
       }
 
@@ -518,11 +581,17 @@ export class LivaInstance {
 
   dispose() {
     if (this.disposed) return
+    for (const session of this.enterSessions) session.cancel('owner-teardown')
+    this.enterSessions.clear()
     this.clearLetBindings()
     this.cancel()
     this.restore()
     this.motion.removeEventListener('change', this.motionChanged)
     this.targets.clear()
+    this.targetElements.clear()
+    this.eventValues.clear()
+    this.onEvent = undefined
+    this.onReactiveState = undefined
     this.disposed = true
   }
 }
