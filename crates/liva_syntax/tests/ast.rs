@@ -143,3 +143,117 @@ fn casts_distinguish_structural_roles_without_discarding_invalid_items() {
         matches!(&items[2], MotionItem::Transition(transition) if transition.selector().is_none())
     );
 }
+
+#[test]
+fn motion_accessors_expose_lifecycle_tracks_and_event_expressions() {
+    let source = r#"// 日本語
+motion panel(enabled: boolean) {
+  event shown when enabled
+  state idle { body { opacity: 1 } }
+  enter { body { opacity { @tween: 100ms; 0%: 0 } } }
+  transition { @tween: 200ms }
+  leave { body { opacity { @tween: 150ms; 100%: 0 } } }
+  event hidden when !enabled
+}
+motion other { state idle {} }
+"#;
+    let parsed = parse(source);
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    assert_eq!(parsed.root.text(), source);
+    let mut motions = parsed.root.motions();
+    let motion = motions.next().unwrap();
+
+    for (animations, selector, offset) in [
+        (
+            motion.enters().collect::<Vec<_>>(),
+            TransitionSelector::Enter,
+            "0%",
+        ),
+        (
+            motion.leaves().collect::<Vec<_>>(),
+            TransitionSelector::Leave,
+            "100%",
+        ),
+    ] {
+        assert_eq!(animations.len(), 1);
+        let animation = &animations[0];
+        assert_eq!(animation.selector(), Some(selector));
+        let target = animation.targets().next().unwrap();
+        let property = target.property_blocks().next().unwrap();
+        let frame = property.keyframes().next().unwrap();
+
+        assert_eq!(target.header().as_deref(), Some("body"));
+        assert_eq!(property.header().as_deref(), Some("opacity"));
+        assert_eq!(frame.header().as_deref(), Some(offset));
+        assert_range(source, animation);
+        assert_range(source, &frame);
+    }
+
+    let events = motion.events().collect::<Vec<_>>();
+    assert_eq!(events.len(), 2);
+
+    for (event, name, expression) in [
+        (&events[0], "shown", "enabled"),
+        (&events[1], "hidden", "!enabled"),
+    ] {
+        let condition = event.condition().unwrap();
+        let expression_node = condition.expression().unwrap();
+
+        assert_eq!(event.name().as_deref(), Some(name));
+        assert_eq!(expression_node.semantic_text(), expression);
+        assert_range(source, event);
+        assert_range(source, &condition);
+        assert_range(source, &expression_node);
+    }
+
+    assert_eq!(motion.transitions().count(), 3);
+    let other = motions.next().unwrap();
+    assert_eq!(other.enters().count(), 0);
+    assert_eq!(other.leaves().count(), 0);
+    assert_eq!(other.events().count(), 0);
+}
+
+#[test]
+fn lifecycle_accessors_retain_duplicate_and_malformed_declarations() {
+    let source = "motion panel {
+  enter invalid {}
+  enter {}
+  leave invalid {}
+  leave {}
+  event missing
+  event when true
+  event valid when true
+  state idle {}
+}";
+    let parsed = parse(source);
+    assert!(!parsed.diagnostics.is_empty());
+    assert_eq!(parsed.root.text(), source);
+    let motion = parsed.root.motions().next().unwrap();
+
+    for animations in [
+        motion.enters().collect::<Vec<_>>(),
+        motion.leaves().collect::<Vec<_>>(),
+    ] {
+        assert_eq!(animations.len(), 2);
+        assert!(animations[0].selector().is_none());
+        assert!(animations[1].selector().is_some());
+
+        for animation in animations {
+            assert_range(source, &animation);
+        }
+    }
+
+    let events = motion.events().collect::<Vec<_>>();
+    assert_eq!(events.len(), 3);
+    assert_eq!(events[0].name().as_deref(), Some("missing"));
+    assert!(events[0].condition().is_none());
+    assert!(events[1].name().is_none());
+    assert!(events[1].condition().unwrap().expression().is_some());
+    assert_eq!(events[2].name().as_deref(), Some("valid"));
+
+    for event in events {
+        assert_range(source, &event);
+    }
+
+    assert_eq!(motion.states().count(), 1);
+}

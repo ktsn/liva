@@ -28,6 +28,10 @@ fn fixture_json_matches_the_public_compilation_schema() {
             include_str!("../../../fixtures/derived.liv"),
             include_str!("../../../fixtures/derived.json"),
         ),
+        (
+            include_str!("../../../fixtures/presence.liv"),
+            include_str!("../../../fixtures/presence.json"),
+        ),
     ] {
         let result = compile(source, false);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);

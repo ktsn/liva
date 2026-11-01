@@ -9,10 +9,22 @@ pub struct Definition {
     pub let_bindings: Vec<LetBinding>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<MotionParameter>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<Event>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enter: Option<Transition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leave: Option<Transition>,
     pub states: Vec<State>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub general_transition: Option<Transition>,
     pub directional_transitions: Vec<DirectionalTransition>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Event {
+    pub name: String,
+    pub when: Expression,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

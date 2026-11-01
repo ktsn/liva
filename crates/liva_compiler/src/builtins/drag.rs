@@ -12,6 +12,10 @@ pub const DRAG: Function = Function {
             value_type: Type::Boolean,
         },
         Field {
+            name: "released",
+            value_type: Type::Boolean,
+        },
+        Field {
             name: "offset",
             value_type: Type::Record(&[
                 Field {

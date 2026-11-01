@@ -379,14 +379,14 @@ fn definition_and_transition_requirements_point_to_headers_or_references() {
             "absent",
         ),
         (
-            "motion a { state idle { t { x: 0 } } «state active when true» {} }",
+            "motion a { «state idle» {} state active when true { t { x: 0 } } }",
             "semantic.completeness",
-            "in state active",
+            "in state idle",
         ),
         (
-            "motion a { state idle { t { x: 0; y: 1 } } state active when true { «t» { x: 0 } } }",
+            "motion a { state idle { «t» { x: 0 } } state active when true { t { x: 0; y: 1 } } }",
             "semantic.completeness",
-            "in state active",
+            "in state idle",
         ),
         (
             "motion a { state idle { t { x: 0 } } «state active when true» { t { x: 1 } } }",

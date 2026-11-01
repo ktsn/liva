@@ -80,6 +80,40 @@ impl Parser<'_> {
                 return;
             }
 
+            if self.at() == "event" {
+                if depth != 1 {
+                    self.error("Events must be declared directly inside a Motion");
+                }
+                self.start(Kind::Event);
+                self.bump();
+
+                while self
+                    .tokens
+                    .get(self.index)
+                    .is_some_and(|token| token.trivia)
+                    && !matches!(self.at(), "\n" | "\r")
+                {
+                    self.bump();
+                }
+                self.start(Kind::Header);
+
+                while !matches!(self.at(), "" | "when" | "{" | "}" | ";" | "\n" | "\r") {
+                    self.bump();
+                }
+                self.end();
+
+                if self.at() == "when" {
+                    self.bump();
+                    self.start(Kind::Condition);
+                    self.expression_region(true);
+                    self.end();
+                } else {
+                    self.error("Expected event condition after when");
+                }
+                self.end();
+                continue;
+            }
+
             if self.at() == "let" {
                 self.start(Kind::Let);
                 self.bump();
@@ -339,6 +373,34 @@ impl Parser<'_> {
 
         while !self.at().is_empty() {
             let text = self.at();
+            if header && matches!(text, "\n" | "\r") && !stack.is_empty() {
+                let mut next = self.tokens[self.index + 1..]
+                    .iter()
+                    .filter(|token| !token.trivia)
+                    .map(|token| token.text);
+                let declaration = match (next.next(), next.next(), next.next()) {
+                    (Some("state"), Some(name), Some("{" | "when")) => is_name(name),
+                    (Some("enter" | "leave" | "transition"), Some("{"), _) => true,
+                    (Some("transition"), Some(name), Some("->")) => is_name(name),
+                    (Some("event"), Some(name), Some("when")) => is_name(name),
+                    (Some("let"), Some(name), Some("=")) => is_name(name),
+                    _ => false,
+                };
+
+                if declaration {
+                    break;
+                }
+            }
+
+            if matches!(text, "\n" | "\r") && stack.is_empty() {
+                let next = self.tokens[self.index + 1..]
+                    .iter()
+                    .find(|token| !token.trivia);
+                if next.is_some_and(|token| matches!(token.text, "&&" | "||")) {
+                    self.index += 1;
+                    continue;
+                }
+            }
             if text == "}"
                 || (header && matches!(text, "{" | ";"))
                 || (stack.is_empty() && matches!(text, ";" | "\n" | "\r"))
@@ -477,7 +539,7 @@ fn validate_headers(node: &impl AstNode, depth: usize, diagnostics: &mut Vec<Dia
             1 => match words.as_slice() {
                 ["state", name] => is_name(name),
                 ["state", name, "when", ..] => is_name(name) && words.len() > 3,
-                ["transition"] => true,
+                ["transition"] | ["enter"] | ["leave"] => true,
                 ["transition", from, "->", to] => is_name(from) && is_name(to),
                 _ => false,
             },

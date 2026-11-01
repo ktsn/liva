@@ -814,10 +814,41 @@ impl Compiler {
                 })
                 .collect(),
             parameters,
+            events: vec![],
+            enter: None,
+            leave: None,
             states: vec![],
             general_transition: None,
             directional_transitions: vec![],
         };
+
+        let mut events = BTreeMap::new();
+
+        for event in node.events() {
+            let event_name = event.header().unwrap_or_default();
+            if !liva_syntax::is_name(&event_name) {
+                self.error("semantic.event", "Expected an event name", &event);
+            }
+            self.unique(&mut events, &event_name, &event);
+
+            if let Some(condition) = event.condition()
+                && let Some(parsed) = self.expression_view(&condition)
+            {
+                match parsed.check(&scope).and_then(|ty| {
+                    if ty == expression::Type::Boolean {
+                        parsed.to_output()
+                    } else {
+                        Err(parsed.error("Event condition must be Boolean"))
+                    }
+                }) {
+                    Ok(when) => definition.events.push(Event {
+                        name: event_name,
+                        when,
+                    }),
+                    Err(error) => self.expression_error(error),
+                }
+            }
+        }
 
         let mut states = BTreeMap::new();
         let mut fallback_count = 0;
@@ -888,6 +919,23 @@ impl Compiler {
                     });
                 }
                 syn::MotionItem::Transition(transition) => match transition.selector() {
+                    Some(
+                        selector
+                        @ (syn::TransitionSelector::Enter | syn::TransitionSelector::Leave),
+                    ) => {
+                        let phase = if selector == syn::TransitionSelector::Enter {
+                            "enter"
+                        } else {
+                            "leave"
+                        };
+                        self.unique(&mut transitions, phase, &transition);
+                        let value = self.transition(&transition, &format!("{name}/{phase}"));
+                        if phase == "enter" {
+                            definition.enter = Some(value);
+                        } else {
+                            definition.leave = Some(value);
+                        }
+                    }
                     Some(syn::TransitionSelector::General) => {
                         self.unique(&mut transitions, "general", &transition);
                         definition.general_transition = Some(
@@ -943,6 +991,38 @@ impl Compiler {
                 .extend(fallbacks.iter().skip(2).map(header_range));
             self.diagnostics.push(diagnostic);
         }
+        if let Some(fallback) = definition
+            .states
+            .iter()
+            .find(|state| state.when.is_none())
+            .cloned()
+        {
+            for state in &mut definition.states {
+                if state.when.is_none() {
+                    continue;
+                }
+
+                for target in &fallback.targets {
+                    if let Some(existing) = state
+                        .targets
+                        .iter_mut()
+                        .find(|item| item.name == target.name)
+                    {
+                        for property in &target.properties {
+                            if !existing
+                                .properties
+                                .iter()
+                                .any(|item| item.name == property.name)
+                            {
+                                existing.properties.push(property.clone());
+                            }
+                        }
+                    } else {
+                        state.targets.push(target.clone());
+                    }
+                }
+            }
+        }
         self.validate(&definition, node);
         definition
     }
@@ -973,6 +1053,49 @@ impl Compiler {
             for target in &transition.targets {
                 for property in &target.properties {
                     pairs.insert((target.name.as_str(), property.name.as_str()));
+                }
+            }
+        }
+
+        for (phase, animation) in [("enter", &def.enter), ("leave", &def.leave)] {
+            let Some(animation) = animation else { continue };
+            for target in &animation.targets {
+                let target_path = format!("{}/{phase}/target/{}", def.name, target.name);
+                if !def
+                    .states
+                    .iter()
+                    .any(|state| state.targets.iter().any(|item| item.name == target.name))
+                {
+                    self.error_range(
+                        "semantic.reference",
+                        format!("Unknown lifecycle target: {}", target.name),
+                        self.source_header(&target_path),
+                    );
+                }
+
+                for property in &target.properties {
+                    let path = format!("{target_path}/property/{}", property.name);
+                    let timing = property.timing.as_ref().or(animation.timing.as_ref());
+                    if timing.is_none() {
+                        self.error_range(
+                            "semantic.timing-missing",
+                            "Lifecycle property requires timing",
+                            self.source_header(&path),
+                        );
+                    }
+                    if timing.is_some_and(|timing| !matches!(timing, Timing::Tween { .. }))
+                        && property.keyframes.as_ref().is_some_and(|frames| {
+                            frames.iter().any(|frame| {
+                                (frame.offset > 0.0 && frame.offset < 1.0) || frame.easing.is_some()
+                            })
+                        })
+                    {
+                        self.error_range(
+                            "semantic.spring-keyframes",
+                            "Spring tracks cannot contain intermediate frames or frame easing",
+                            self.source_header(&path),
+                        );
+                    }
                 }
             }
         }
@@ -1054,6 +1177,17 @@ impl Compiler {
                         continue;
                     }
                     let Some(timing) = timing else {
+                        if to
+                            .targets
+                            .iter()
+                            .find(|item| item.name == *target)
+                            .and_then(|item| {
+                                item.properties.iter().find(|item| item.name == *property)
+                            })
+                            .is_some_and(|item| item.template.is_some())
+                        {
+                            continue;
+                        }
                         let state_path = format!("{}/state/{}", def.name, to.name);
                         let path = [&dp_path, &gp_path, &directional_path, &general_path]
                             .into_iter()

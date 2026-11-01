@@ -73,6 +73,12 @@ pub fn hovers(source: &str) -> Vec<Hover> {
             }
         }
 
+        for event in motion.events() {
+            if let Some(condition) = event.condition() {
+                expression_hovers(&condition, &scope, &mut result);
+            }
+        }
+
         for state in motion.states() {
             if let Some(condition) = state.condition() {
                 expression_hovers(&condition, &scope, &mut result);

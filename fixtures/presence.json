@@ -1,0 +1,272 @@
+{
+  "schemaVersion": 1,
+  "definitions": [
+    {
+      "name": "swipe",
+      "letBindings": [
+        {
+          "name": "movement",
+          "initializer": {
+            "kind": "call",
+            "function": "drag",
+            "arguments": [
+              {
+                "name": "target",
+                "value": {
+                  "kind": "reference",
+                  "path": ["body"]
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "events": [
+        {
+          "name": "dismiss",
+          "when": {
+            "kind": "binary",
+            "operator": "&&",
+            "left": {
+              "kind": "reference",
+              "path": ["movement", "released"]
+            },
+            "right": {
+              "kind": "binary",
+              "operator": ">",
+              "left": {
+                "kind": "reference",
+                "path": ["movement", "offset", "x"]
+              },
+              "right": {
+                "kind": "number",
+                "value": 120.0
+              }
+            }
+          }
+        },
+        {
+          "name": "reset",
+          "when": {
+            "kind": "binary",
+            "operator": "&&",
+            "left": {
+              "kind": "unary",
+              "operator": "!",
+              "operand": {
+                "kind": "reference",
+                "path": ["movement", "active"]
+              }
+            },
+            "right": {
+              "kind": "binary",
+              "operator": "==",
+              "left": {
+                "kind": "reference",
+                "path": ["movement", "offset", "x"]
+              },
+              "right": {
+                "kind": "number",
+                "value": 0.0
+              }
+            }
+          }
+        }
+      ],
+      "enter": {
+        "timing": {
+          "kind": "tween",
+          "durationMs": 250.0,
+          "easing": "ease-out"
+        },
+        "targets": [
+          {
+            "name": "body",
+            "properties": [
+              {
+                "name": "opacity",
+                "keyframes": [
+                  {
+                    "offset": 0.0,
+                    "value": "0"
+                  }
+                ]
+              },
+              {
+                "name": "translate",
+                "keyframes": [
+                  {
+                    "offset": 0.0,
+                    "value": "0 -20px"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "badge",
+            "properties": [
+              {
+                "name": "opacity",
+                "timing": {
+                  "kind": "spring-duration",
+                  "durationMs": 350.0,
+                  "bounce": 0.2
+                },
+                "keyframes": [
+                  {
+                    "offset": 0.0,
+                    "value": "0"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "leave": {
+        "timing": {
+          "kind": "tween",
+          "durationMs": 200.0,
+          "easing": "ease-in"
+        },
+        "targets": [
+          {
+            "name": "body",
+            "properties": [
+              {
+                "name": "opacity",
+                "keyframes": [
+                  {
+                    "offset": 1.0,
+                    "value": "0"
+                  }
+                ]
+              },
+              {
+                "name": "translate",
+                "keyframes": [
+                  {
+                    "offset": 1.0,
+                    "value": "500px 0"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "badge",
+            "properties": [
+              {
+                "name": "opacity",
+                "timing": {
+                  "kind": "tween",
+                  "durationMs": 100.0,
+                  "easing": "linear"
+                },
+                "keyframes": [
+                  {
+                    "offset": 1.0,
+                    "value": "0"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "states": [
+        {
+          "name": "idle",
+          "targets": [
+            {
+              "name": "body",
+              "properties": [
+                {
+                  "name": "translate",
+                  "value": "0 0"
+                },
+                {
+                  "name": "opacity",
+                  "value": "1"
+                }
+              ]
+            },
+            {
+              "name": "badge",
+              "properties": [
+                {
+                  "name": "opacity",
+                  "value": "1"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "dragging",
+          "when": {
+            "kind": "reference",
+            "path": ["movement", "active"]
+          },
+          "targets": [
+            {
+              "name": "body",
+              "properties": [
+                {
+                  "name": "translate",
+                  "value": "${movement.offset.x}px 0",
+                  "template": [
+                    {
+                      "kind": "reference",
+                      "path": ["movement", "offset", "x"]
+                    },
+                    "px 0"
+                  ]
+                },
+                {
+                  "name": "opacity",
+                  "value": "1"
+                }
+              ]
+            },
+            {
+              "name": "badge",
+              "properties": [
+                {
+                  "name": "opacity",
+                  "value": "1"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "directionalTransitions": [
+        {
+          "from": "dragging",
+          "to": "idle",
+          "transition": {
+            "targets": [
+              {
+                "name": "body",
+                "properties": [
+                  {
+                    "name": "translate",
+                    "timing": {
+                      "kind": "spring-physics",
+                      "stiffness": 300.0,
+                      "damping": 20.0,
+                      "mass": 1.0
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "diagnostics": []
+}

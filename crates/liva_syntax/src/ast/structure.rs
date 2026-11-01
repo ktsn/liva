@@ -40,7 +40,9 @@ node!(Motion, |n: &SyntaxNode| n.kind() == Kind::Block
 node!(State, |n: &SyntaxNode| block_depth(n) == 1
     && keyword(n, "state"));
 node!(Transition, |n: &SyntaxNode| block_depth(n) == 1
-    && keyword(n, "transition"));
+    && (keyword(n, "transition")
+        || keyword(n, "enter")
+        || keyword(n, "leave")));
 node!(Target, |n: &SyntaxNode| n.kind() == Kind::Block
     && block_depth(n) == 2);
 node!(PropertyBlock, |n: &SyntaxNode| n.kind() == Kind::Block
@@ -50,6 +52,7 @@ node!(Keyframe, |n: &SyntaxNode| n.kind() == Kind::Declaration
     && n.child::<Header>()
         .is_some_and(|h| h.semantic_text().ends_with('%')));
 node!(Property, |n: &SyntaxNode| n.kind() == Kind::Declaration);
+node!(Event, |n: &SyntaxNode| n.kind() == Kind::Event);
 node!(LetBinding, |n: &SyntaxNode| n.kind() == Kind::Let);
 node!(Parameter, |n: &SyntaxNode| n.kind() == Kind::Parameter);
 node!(Parameters, |n: &SyntaxNode| n.kind() == Kind::Parameters);
@@ -64,7 +67,7 @@ node!(Interpolation, |n: &SyntaxNode| n.kind()
 macro_rules! implement {
     ($trait:ident: $($name:ident),+ $(,)?) => { $(impl $trait for $name {})+ };
 }
-implement!(HasHeader: Block, Motion, State, Transition, Target, PropertyBlock, Keyframe, Property, LetBinding, Parameter);
+implement!(HasHeader: Block, Motion, State, Transition, Target, PropertyBlock, Keyframe, Property, LetBinding, Parameter, Event);
 implement!(HasValue: Property, LetBinding, Keyframe);
 implement!(HasItems: Document, Block, Motion, State, Transition, Target, PropertyBlock);
 
@@ -127,8 +130,33 @@ impl Motion {
         self.children()
     }
 
+    /// All animation blocks, including enter and leave declarations.
     pub fn transitions(&self) -> impl Iterator<Item = Transition> {
         self.children()
+    }
+
+    pub fn enters(&self) -> impl Iterator<Item = Transition> {
+        self.transitions()
+            .filter(|transition| keyword(transition.syntax(), "enter"))
+    }
+
+    pub fn leaves(&self) -> impl Iterator<Item = Transition> {
+        self.transitions()
+            .filter(|transition| keyword(transition.syntax(), "leave"))
+    }
+
+    pub fn events(&self) -> impl Iterator<Item = Event> {
+        self.children()
+    }
+}
+
+impl Event {
+    pub fn name(&self) -> Option<String> {
+        self.header().filter(|name| crate::is_name(name))
+    }
+
+    pub fn condition(&self) -> Option<Condition> {
+        self.child()
     }
 }
 
@@ -208,6 +236,8 @@ pub enum MotionItem {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransitionSelector {
     General,
+    Enter,
+    Leave,
     Directional { from: String, to: String },
 }
 
@@ -232,6 +262,8 @@ impl Transition {
         let header = self.header()?;
         match header.split_whitespace().collect::<Vec<_>>().as_slice() {
             ["transition"] => Some(TransitionSelector::General),
+            ["enter"] => Some(TransitionSelector::Enter),
+            ["leave"] => Some(TransitionSelector::Leave),
             ["transition", from, "->", to] => Some(TransitionSelector::Directional {
                 from: (*from).into(),
                 to: (*to).into(),
