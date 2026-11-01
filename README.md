@@ -13,7 +13,7 @@ Production includes only immutable definitions, the Vue adapter and the runtime.
 
 ```sh
 pnpm install --frozen-lockfile
-cargo install wasm-bindgen-cli --version 0.2.127 --locked
+cargo install wasm-bindgen-cli --version 0.2.130 --locked
 sh scripts/build-wasm.sh
 cd playground
 vp dev --host 127.0.0.1
