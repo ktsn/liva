@@ -189,6 +189,9 @@ importers:
       '@liva/vue':
         specifier: workspace:*
         version: link:../vue
+      '@vue/compiler-core':
+        specifier: 3.5.44
+        version: 3.5.44
       '@vue/compiler-sfc':
         specifier: 3.5.44
         version: 3.5.44

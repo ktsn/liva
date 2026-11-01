@@ -1,0 +1,101 @@
+import { expect, it } from 'vite-plus/test'
+import { compileSfc } from './compiler.ts'
+import { planPresence, PresenceError } from './presence.ts'
+
+const block = `<liva>
+motion panel {
+  state idle { body { opacity: 1 } other { opacity: 1 } }
+  enter { @tween: 100ms; body { opacity { 0%: 0 } } }
+  leave { @tween: 200ms; body { opacity { 100%: 0 } } other { opacity { 100%: 0 } } }
+}
+</liva>`
+
+function plan(template: string) {
+  const source = `<template>${template}</template>${block}`
+  return planPresence(
+    source,
+    'Panel.vue',
+    compileSfc(source, 'Panel.vue', false).result.definitions,
+  )
+}
+
+it('deduplicates shared boundaries and plans each nested structural operation', () => {
+  const result = plan(`<div v-liva:panel>
+    <section v-if="visible"><article v-for="item in items" :key="item.id">
+      <div v-liva-target:body /><span v-liva-target:other />
+    </article></section>
+  </div>`)
+
+  expect(result.boundaries.map((boundary) => boundary.operation)).toEqual(['if', 'for'])
+  expect(result.boundaries.map((boundary) => boundary.targets.length)).toEqual([2, 2])
+  expect(result.code.match(/<LivaPresenceBoundary /g)).toHaveLength(2)
+  expect(result.code).toContain(':key="item.id"')
+  expect(result.code).toContain('livaBoundary1.item(item.id)')
+  expect(result.map.sources).toEqual(['Panel.vue'])
+})
+
+it('wraps the whole conditional chain while retaining listeners and authored keys', () => {
+  const result = plan(`<div v-liva:panel>
+    <div v-if="a" key="a" v-liva-target:body @click="act" />
+    <!-- branch -->
+    <div v-else-if="b" key="b" v-liva-target:body />
+    <div v-else key="c" v-liva-target:body />
+  </div>`)
+
+  expect(result.boundaries).toHaveLength(1)
+  expect(result.code.match(/<LivaPresenceBoundary /g)).toHaveLength(1)
+  expect(result.code).toContain('@click="act"')
+  expect(result.code).toContain('key="a"')
+  expect(result.code.indexOf('</LivaPresenceBoundary>')).toBeGreaterThan(
+    result.code.indexOf('v-else key="c"'),
+  )
+})
+
+it.each(['Transition', 'TransitionGroup', 'transition', 'transition-group'])(
+  'rejects lifecycle ownership by user %s with a source location',
+  (component) => {
+    let caught: unknown
+    try {
+      plan(
+        `<div v-liva:panel>\n<${component}><div v-if="visible" v-liva-target:body /></${component}></div>`,
+      )
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBeInstanceOf(PresenceError)
+    if (!(caught instanceof PresenceError)) throw new Error('Expected conflict')
+    expect(caught.message).toContain('Remove the Vue Transition')
+    expect(caught.loc.line).toBe(2)
+  },
+)
+
+it('leaves unrelated Transitions unchanged', () => {
+  const transition = '<Transition name="fade"><div v-if="unrelated">Other</div></Transition>'
+  const result = plan(
+    `<div v-liva:panel>${transition}<section v-show="shown"><div v-liva-target:body /></section></div>`,
+  )
+
+  expect(result.code).toContain(transition)
+  expect(result.boundaries[0].strategy).toBe('persisted Transition')
+})
+
+it.each([
+  ['<div v-for="item in items" v-liva-target:body />', 'explicit :key'],
+  ['<template v-if="visible"><div v-liva-target:body /></template>', 'native structural element'],
+  ['<div v-if="visible" v-show="shown" v-liva-target:body />', 'Separate combined'],
+  [
+    '<section v-if="visible"><Child><div v-liva-target:body /></Child></section>',
+    'across a child component',
+  ],
+])('diagnoses unsupported structure %s', (template, message) => {
+  expect(() => plan(`<div v-liva:panel>${template}</div>`)).toThrow(message)
+})
+
+it('does not resolve targets across a nested Motion root', () => {
+  const result = plan(
+    '<div v-liva:panel><div v-liva:panel><span v-if="ok" v-liva-target:body /></div></div>',
+  )
+  expect(result.code).toContain('owner: [1]')
+  expect(result.code).not.toContain('owner: [0]')
+})

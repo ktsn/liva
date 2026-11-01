@@ -53,8 +53,12 @@ and return optional fields for incomplete input. Semantic analysis consumes thes
 views and emits validated data without putting semantic state into the tree.
 All views implement `liva_syntax::ast::AstNode`, which provides checked casts,
 access to the underlying Rowan node, text, and absolute byte ranges. `Document`
-exposes `Motion` views; motions expose parameters, let bindings, states, and
-transitions. Targets contain property declarations or property blocks with
+exposes `Motion` views; motions expose parameters, let bindings, states, events,
+and animation blocks. `enters()` and `leaves()` select lifecycle declarations;
+`transitions()` traverses all animation blocks, including enter and leave.
+These iterators preserve source order, duplicates, and malformed headers so
+semantic validation can diagnose them. `events()` exposes event declarations,
+with optional name and condition accessors. Targets contain property declarations or property blocks with
 keyframes. Expression views (`ast::expression::Expr`, `Name`, and `Argument`)
 use the same interface.
 
@@ -155,6 +159,9 @@ Definition {
   name: string
   parameters?: MotionParameter[]
   letBindings?: LetBinding[]
+  events?: { name: string, when: Expression }[]
+  enter?: Transition
+  leave?: Transition
   states: State[]
   generalTransition?: Transition
   directionalTransitions: { from: string, to: string, transition: Transition }[]
@@ -241,7 +248,8 @@ Resolution order:
 
 ## Future resolution of omitted state properties
 
-The MVP compiler requires complete state property declarations. This validation
+The compiler normalizes omitted conditional-state properties from the unconditional
+fallback. The fallback still requires the complete state property set. This validation
 constraint must not become a permanent assumption of the language or IR schema.
 After the MVP, omitted values will be resolved from each instance's actual DOM
 at transition resolution time, with the precise sampling point still to be designed.
@@ -368,7 +376,9 @@ Integration design:
 
 1. `@vitejs/plugin-vue` handles SFC compilation. The Liva transform handles its
    custom-block request, compiles it through Node-loaded WASM, and exports a
-   component-augmentation function holding immutable definitions.
+   component-augmentation function holding immutable definitions. Before Vue
+   compiles the template, it also plans and inserts lifecycle boundaries when
+   enter/leave declarations require them.
 2. An explicitly installed Vue plugin registers `v-liva` and `v-liva-target`.
    A root directive obtains its declaring component's attached definitions via
    supported directive instance/component options access. Prove that lookup works
@@ -377,8 +387,10 @@ Integration design:
    directive registers an instance. Reconcile after mount/update in a queued pass
    so child/parent hook order and both directives on one element do not matter.
 4. Assign targets to the nearest registered root, including the root itself; never
-   cross a nested root. One name binds one element within an instance. The same
-   definition name on another root creates a separate instance.
+   cross a nested root. Ordinary target names bind one element. Definitions with
+   lifecycle animation may bind a name to multiple keyed elements; state styles
+   apply to all of them and lifecycle hooks resolve each concrete element.
+   The same definition name on another root creates a separate instance.
 5. Directive updates submit named parameter objects. The runtime selects states from conditions. Unmount removes bindings, effects,
    registry entries, and editor selections.
 
@@ -625,3 +637,39 @@ the same checks. WASM consumers run uncached after an explicit rebuild.
 Primary references were consulted on 2026-10-25; Vite+ references on 2026-10-26. Recheck tool APIs and pin
 tested versions when implementing; documentation is not a substitute for the
 experiments in the [MVP plan](mvp.md).
+
+## Compiler-owned Vue presence
+
+`packages/vite/src/presence.ts` traverses the SFC template AST and returns a
+boundary plan with structural operation, source range, Motion/target references,
+required phases, and integration strategy. It groups conditional chains, deduplicates
+shared operations, plans every nested operation, and diagnoses conflicting user
+Transitions. The transform preserves source maps and inserts internal boundary,
+entry, owner, and target registration bindings.
+
+Each owner identity consists of its static SFC root ID and enclosing keyed-loop
+values, scoped to the Vue component instance. Each boundary has keyed entry
+objects; generated target bindings explicitly register with those entries.
+The adapter never discovers structural ownership by traversing the DOM.
+Ordinary target registration retains nearest-root behavior for existing directives.
+
+`packages/vue/src/presence.ts` uses public JavaScript hooks on Vue Transition and
+TransitionGroup; persisted Transition handles v-show. Before target or Motion
+disposal, the adapter captures resolved work into all applicable boundary entries.
+Snapshots unused by that render patch are released in a microtask. Vue component
+unmount hooks and reactive-effect disposal retain their normal ordering; retained
+DOM does not keep the original Motion alive.
+
+`packages/runtime/src/lifecycle.ts` resolves lifecycle tracks from active-state
+values and a presentation snapshot. A session owns only resolved tracks, element
+references, temporary inline presentations, and WAAPI handles. Completion joins
+all tracks. Supersession, owner teardown, cancellation/failure, and normal
+completion have distinct results with idempotent cleanup. Only a current session
+may release Vue's removal/hide callback. Enter sessions are registered with live
+Motion instances so reactive state changes can interrupt them; leave sessions
+remain independent of the disposed instance.
+
+The core runtime contains no Vue structural semantics. It shares transition IR,
+spring sampling, CSS-property conversion, and browser interpolation with normal
+state transitions. Conditional events are evaluated after let updates and before
+visual selection, and the adapter translates event names into DOM CustomEvents.

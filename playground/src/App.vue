@@ -10,6 +10,7 @@ import { RouterLink, RouterView } from 'vue-router'
         <RouterLink to="/toggle">Toggle</RouterLink>
         <RouterLink to="/beacon">Beacon</RouterLink>
         <RouterLink to="/drag">Drag</RouterLink>
+        <RouterLink to="/swipe">Swipe</RouterLink>
       </nav>
     </header>
     <RouterView />

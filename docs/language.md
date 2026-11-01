@@ -80,7 +80,7 @@ motion's scope. Its value refers to the `body` target declared in that motion's
 states. Argument expressions use the same name resolution and type checking as
 other expressions. A string-valued variable does not satisfy a target parameter.
 The return value has
-`active: boolean` and `offset: { x: number, y: number }`. These fields belong to
+`active: boolean`, `released: boolean`, and `offset: { x: number, y: number }`. These fields belong to
 the built-in return type; object-valued motion parameters are outside scope.
 Function implementations return either an ordinary value or a reactive subscription.
 The runtime classifies each result by its value, not by the function's name.
@@ -95,7 +95,9 @@ contains variable references.
 Drag values expose `active`, `offset.x`, and `offset.y`. Offsets are pixel
 displacements from the current pointer-down, reset on each new gesture and retained
 on release until the next gesture. Only the primary left-button pointer is tracked.
-Cancellation and lost capture release the gesture just like pointer-up. Target
+Pointer-up sets `released` to true after publishing the final offset. The flag
+remains true until the next pointer-down; cancellation and lost capture end the
+gesture with `released: false` and never trigger release events. Target
 replacement and disposal remove listeners and release capture. Set `touch-action:
 none` on draggable targets; the adapter does not change application CSS.
 
@@ -126,8 +128,10 @@ translate: ${movement.offset.x}px ${movement.offset.y}px
 
 Units are explicit text. The compiler validates expression references and member
 paths. Non-finite runtime arithmetic reports a diagnostic and retains valid styles.
-CSS validity and easing validity are delegated to the browser. States must declare
-the same target/property set; implicit DOM fallback remains future work.
+CSS validity and easing validity are delegated to the browser. Conditional states inherit omitted targets and properties from the unconditional
+fallback state. The fallback must provide the complete state property set; implicit
+DOM fallback for missing state properties remains outside scope. Dynamic destination
+properties without transition timing update immediately.
 
 ## Animation declarations
 
@@ -171,6 +175,106 @@ frame's easing. WAAPI effect easing stays linear for tweens. Intermediate frames
 or frame easing with springs are errors. Explicit endpoints can differ from states
 but warn because final settlement uses the destination state. Runtime templates are currently supported only in state CSS values. Keyframe
 templates are diagnosed; their evaluation timing remains future design work.
+
+## Enter, leave, and events
+
+A Motion may declare one `enter` and one `leave` block. Both use transition
+target/property blocks, keyframes, tween timing, spring timing, and property
+overrides. They do not inherit a state transition's timing. Targets must already
+be declared in the Motion's states. The root is animated only when explicitly
+bound as a named target.
+
+```css
+motion panel {
+  state idle {
+    content {
+      opacity: 1;
+      translate: 0 0;
+    }
+  }
+
+  enter {
+    @tween: 250ms ease-out
+    content {
+      opacity {
+        0%: 0;
+      }
+      translate {
+        0%: 0 20px;
+      }
+    }
+  }
+
+  leave {
+    @tween: 200ms ease-in
+    content {
+      opacity {
+        100%: 0;
+      }
+      translate {
+        100%: 300px 0;
+      }
+    }
+  }
+}
+```
+
+Enter runs on initial insertion, subsequent insertion, and showing. Missing
+endpoints use the active state's resolved values where available. The initial
+presentation is installed before insertion; disconnected elements do not require
+computed styles when the state supplies the value. Completion settles to the
+active state. Leave samples the displayed presentation before ordinary transition
+effects or target registrations are disposed. An omitted starting frame uses that
+snapshot; explicit frames remain authored overrides. Leave ends at its final
+keyframe and then permits removal or hiding.
+
+A conditional event is independent of state selection and animation completion:
+
+```css
+event dismiss when movement.released
+  && movement.offset.x > 120
+```
+
+Conditions must be Boolean expressions. Each Motion instance remembers its own
+condition values and emits once on each false-to-true edge. An initially true
+condition does not emit. The Vue adapter dispatches a bubbling `CustomEvent`
+named `liva-dismiss` from the Motion root; no payload expression is supported.
+Use ordinary DOM listeners such as `@liva-dismiss="removeItem(item.id)"`.
+Application state changes immediately; it never waits for the leave animation.
+
+The [swipe playground](../playground/src/SwipeDismissDemo.vue) combines drag,
+events, a return spring, and leave animation. Each draggable list item has its
+own Motion instance. No velocity or inertia is calculated.
+
+## Vue presence support
+
+The SFC compiler plans lifecycle boundaries and generates internal Vue
+`Transition` or `TransitionGroup` integration. Users only author `v-liva`,
+`v-liva-target`, ordinary Vue structural directives, and Liva declarations.
+Generated components add no DOM wrapper. Existing element keys, props, listeners,
+and scoped CSS remain intact.
+
+Supported operations on native elements are direct or ancestor `v-if`, complete
+`v-if`/`v-else-if`/`v-else` chains, keyed `v-for`, and direct or ancestor
+`v-show`. Nested operations each receive a boundary; targets sharing an operation
+share a completion barrier. Motion-root removal and nested Motion instances work
+within these native structures. Repeated lifecycle targets can share a Motion;
+use an independent Motion root per item when the item has a drag subscription.
+
+Persisted transitions leave `v-show` elements visible during leave and let Vue
+apply `display: none` after completion. Showing uses Vue's display restoration.
+A reversal cancels the obsolete session so its completion cannot hide new content.
+Newly captured nested leaves participate in a parent's barrier. Already-running
+child exits are cancelled when their owning boundary is destroyed.
+
+Targets and Motion roots are SFC-local. Parent-controlled child component removal,
+cross-component target resolution, dynamic Motion/target directive arguments,
+structural `template` fragments, unkeyed repetition, and combined structural
+directives on one element are unsupported.
+Move structural directives onto separate nested native elements as diagnostics
+recommend. A user-authored `Transition` or `TransitionGroup` owning the same
+operation is a compile error, even without props. Remove that Vue transition and
+define the animation in Liva. Unrelated transitions remain unchanged.
 
 ## Syntax and recovery
 

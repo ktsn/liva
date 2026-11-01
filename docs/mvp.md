@@ -73,7 +73,7 @@ real offsets. Editing the gesture itself is outside this iteration.
 
 No velocity propagation, inertia, retained states, persistence events, simultaneous
 state layers, scroll/orientation sources, arbitrary functions, custom CSS
-interpolation, or isolated preview environment. Missing state properties still
-fail completeness checks. DOM fallback and runtime keyframe interpolation require
+interpolation, or isolated preview environment. Conditional states inherit omitted properties from the fallback; missing fallback
+properties still fail completeness checks. DOM fallback and runtime keyframe interpolation require
 separate semantic design. The local longhand/default policy and built-in subscription lifecycle
 choices are specified in [language.md](language.md), not inferred by the editor.

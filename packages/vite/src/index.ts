@@ -1,3 +1,4 @@
+import { planPresence, PresenceError } from './presence.ts'
 import { fileURLToPath } from 'node:url'
 import { EditorService } from './editor/communication/server.ts'
 import { readFile } from 'node:fs/promises'
@@ -65,6 +66,18 @@ export default function liva(): Plugin {
               id: file,
               loc: diagnosticLocation(snapshot, diagnostic),
             })
+          }
+        }
+        if (hasLivaBlock(_code, file)) {
+          const snapshot = valid.get(file)
+          if (snapshot) {
+            try {
+              return planPresence(_code, file, snapshot.result.definitions)
+            } catch (error) {
+              if (error instanceof PresenceError)
+                this.error({ message: error.message, id: file, loc: error.loc })
+              throw error
+            }
           }
         }
         return undefined
