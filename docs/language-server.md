@@ -2,8 +2,7 @@
 
 Liva provides a stdio Language Server and a Zed dev extension. The server supports
 `.liv` / `.liva` files and inline top-level `<liva>` blocks in Vue SFCs. Standalone
-files are supported for editing; importing them into the application is not yet
-part of the Vite integration.
+files are supported for editing; the Vite integration does not support importing them into applications.
 
 ## Install in Zed
 
@@ -67,7 +66,7 @@ shows the information at the cursor.
 For Vue, install Zed's Vue extension and use `<liva lang="liva">` for syntax
 highlighting through its custom-block language injection. Hover and diagnostics
 also work in plain `<liva>` blocks. Configure Vue's server priority so Liva hover
-is available alongside the Vue server (this repository includes `.zed/settings.json`):
+is available alongside the Vue server:
 
 ```json
 {

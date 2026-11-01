@@ -154,7 +154,7 @@ configuration. A tween/spring family switch clears the previous family. Mixing
 physics and duration spring longhands is an error unless a shorthand resets the
 configuration. Longhands may complete earlier longhands in the same block; a
 complete normalized timing is required locally. They do not partially merge with
-an inherited transition. These are the minimal local normalization rules.
+an inherited transition. Normalization is local to each block.
 
 General and directional transitions merge per property: directional property,
 general property, directional global, then general global timing. Timing is an
@@ -325,12 +325,18 @@ The Rowan CST preserves every byte, trivia and UTF-8 ranges, including malformed
 input. Diagnostics prevent execution of invalid definitions while development
 retains the last valid definition. Production fails on any compilation error.
 
-## Scope
+## Limitations and unresolved semantics
+
+Standalone file imports, framework adapters other than Vue, SSR animation,
+component-root directive forwarding, Teleport targets and Shadow DOM target
+traversal are unsupported.
 
 No velocity input, inertia, retained states, state-change persistence events,
 simultaneous state layers, scroll/orientation sources, user functions, custom CSS
 interpolation, or standalone preview environment. Omitted-state CSS sampling and
-additional source types remain unresolved future design work. The editor edits
+additional source types are unsupported. DOM-derived state values require decisions
+about when to sample computed or animated styles, when to refresh them, and how to
+restore the CSS cascade after removing Liva-owned inline values. The editor edits
 existing transition parameters and frames; let/condition authoring is textual.
 
 ## Toggle example
