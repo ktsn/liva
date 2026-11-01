@@ -26,6 +26,21 @@ export interface LivaOptions {
   observe?: (event: 'mount' | 'update' | 'unmount', instance: InstanceBinding) => void
 }
 
+type MotionValue = string | Record<string, unknown> | undefined
+
+interface PresenceBinding {
+  value: MotionValue
+  owner: readonly unknown[]
+  entries?: PresenceEntry[]
+}
+
+// Only compiler-generated bindings use this modifier; authored parameter objects
+// remain opaque, even when they contain value, owner, or entries properties.
+function motionValue(binding: DirectiveBinding, previous = false): MotionValue {
+  const value = previous ? binding.oldValue : binding.value
+  return binding.modifiers.compiled ? value?.value : value
+}
+
 function sameKey(a: readonly unknown[], b: readonly unknown[]) {
   return a.length === b.length && a.every((value, index) => value === b[index])
 }
@@ -101,10 +116,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
         }
       }
 
-      const mount = (
-        element: HTMLElement,
-        binding: DirectiveBinding<string | Record<string, unknown>>,
-      ) => {
+      const mount = (element: HTMLElement, binding: DirectiveBinding) => {
         const component: ComponentCustomOptions | undefined = binding.instance?.$options
         const definition = component?.livaDefinitions?.find((d) => d.name === binding.arg)
 
@@ -117,7 +129,8 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
         }
 
         try {
-          const runtime = new LivaInstance(definition, binding.value, report)
+          const value = motionValue(binding)
+          const runtime = new LivaInstance(definition, value, report)
           runtime.onEvent = (name) =>
             element.dispatchEvent(new CustomEvent(`liva-${name}`, { bubbles: true }))
           let requestedState = runtime.state
@@ -127,7 +140,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
             runtime,
             definition,
             get requestedState() {
-              return typeof binding.value === 'string' ? requestedState : runtime.reactiveState
+              return typeof value === 'string' ? requestedState : runtime.reactiveState
             },
             set requestedState(state: string) {
               requestedState = state
@@ -139,6 +152,11 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
           }
           roots.set(element, record)
           owners.set(element, binding.instance!)
+
+          if (binding.modifiers.compiled) {
+            explicitOwners.set(element, { owner: binding.instance!, key: binding.value.owner })
+          }
+
           options.observe?.('mount', record)
           reconcile()
         } catch (error) {
@@ -155,12 +173,13 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
           }
           record.runtime.dispose()
           roots.delete(element)
+          explicitOwners.delete(element)
           options.observe?.('unmount', record)
           reconcile()
         }
       }
 
-      const rootDirective: ObjectDirective<HTMLElement, string | Record<string, unknown>> = {
+      const rootDirective: ObjectDirective<HTMLElement, MotionValue | PresenceBinding> = {
         created: mount,
         updated(element, binding) {
           const record = roots.get(element)
@@ -171,17 +190,20 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
             return
           }
 
-          if (typeof binding.value !== 'string') {
-            record.runtime.updateParameters(binding.value ?? {})
-          } else if (binding.value !== binding.oldValue) {
-            if (!record.definition.states.some((state) => state.name === binding.value)) {
-              record.runtime.setState(binding.value)
+          const value = motionValue(binding)
+          const oldValue = motionValue(binding, true)
+
+          if (typeof value !== 'string') {
+            record.runtime.updateParameters(value ?? {})
+          } else if (value !== oldValue) {
+            if (!record.definition.states.some((state) => state.name === value)) {
+              record.runtime.setState(value)
               return
             }
 
-            record.requestedState = binding.value
+            record.requestedState = value
             options.observe?.('update', record)
-            record.runtime.setState(binding.value)
+            record.runtime.setState(value)
           }
 
           reconcile()
@@ -199,15 +221,38 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
         reconcile()
       }
 
+      const registerLifecycleTarget = (
+        element: HTMLElement,
+        binding: DirectiveBinding<PresenceBinding & { entries: PresenceEntry[] }>,
+      ) => {
+        if (!binding.modifiers.compiled) return
+
+        const target = {
+          owner: binding.instance!,
+          key: binding.value.owner,
+          entries: binding.value.entries,
+          registration: {
+            release() {
+              const name = targets.get(element)?.name
+              if (name) explicitRoot(target)?.runtime.releaseLifecycle([name], element)
+            },
+            retainEnter(session: LifecycleSession) {
+              explicitRoot(target)?.runtime.retainEnter(session)
+            },
+            capture(phase: 'enter' | 'leave') {
+              reconcileNow()
+              const name = targets.get(element)?.name
+              return name
+                ? (explicitRoot(target)?.runtime.captureLifecycle(phase, [name], element) ?? [])
+                : []
+            },
+          },
+        }
+        lifecycleTargets.set(element, target)
+        for (const entry of target.entries) entry.targets.add(target.registration)
+      }
+
       app.component('LivaPresenceBoundary', LivaPresenceBoundary)
-      app.directive('liva-owner', {
-        created(element: HTMLElement, binding: DirectiveBinding<readonly unknown[]>) {
-          explicitOwners.set(element, { owner: binding.instance!, key: binding.value })
-        },
-        unmounted(element: HTMLElement) {
-          explicitOwners.delete(element)
-        },
-      })
       app.directive('liva-entry', {
         created(element: HTMLElement, binding: DirectiveBinding<PresenceEntry>) {
           binding.value.element = element
@@ -216,47 +261,17 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
           binding.value.element = element
         },
       })
-      app.directive('liva-lifecycle', {
-        created(
-          element: HTMLElement,
-          binding: DirectiveBinding<{ owner: readonly unknown[]; entries: PresenceEntry[] }>,
-        ) {
-          const target = {
-            owner: binding.instance!,
-            key: binding.value.owner,
-            entries: binding.value.entries,
-            registration: {
-              release() {
-                const name = targets.get(element)?.name
-                if (name) explicitRoot(target)?.runtime.releaseLifecycle([name], element)
-              },
-              retainEnter(session: LifecycleSession) {
-                explicitRoot(target)?.runtime.retainEnter(session)
-              },
-              capture(phase: 'enter' | 'leave') {
-                reconcileNow()
-                const name = targets.get(element)?.name
-                return name
-                  ? (explicitRoot(target)?.runtime.captureLifecycle(phase, [name], element) ?? [])
-                  : []
-              },
-            },
-          }
-          lifecycleTargets.set(element, target)
-          for (const entry of target.entries) entry.targets.add(target.registration)
-        },
-        beforeUnmount(element: HTMLElement) {
-          snapshotTarget(element)
-          lifecycleTargets.delete(element)
-        },
-      })
 
       app.directive('liva', rootDirective)
       app.directive('liva-target', {
-        created: bindTarget,
+        created(element, binding) {
+          bindTarget(element, binding)
+          registerLifecycleTarget(element, binding)
+        },
         updated: bindTarget,
         beforeUnmount(element: HTMLElement) {
           snapshotTarget(element)
+          lifecycleTargets.delete(element)
           targets.delete(element)
           reconcile()
         },

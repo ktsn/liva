@@ -229,16 +229,32 @@ export function planPresence(source: string, filename: string, definitions: read
   const add = (node: Element, text: string) =>
     output.appendLeft(node.loc.start.offset + 1 + node.tag.length, text)
 
+  const withPresence = (node: Element, name: string, metadata: string) => {
+    const prop = directive(node, name)!
+    const value =
+      prop.exp?.type === NodeTypes.SIMPLE_EXPRESSION
+        ? prop.exp.content.trim() || 'undefined'
+        : 'undefined'
+    const modifiers = prop.modifiers.map((modifier) => `.${modifier.content}`).join('')
+
+    output.overwrite(
+      prop.loc.start.offset,
+      prop.loc.end.offset,
+      `v-${name}:${argument(prop)}${modifiers}.compiled="${attr(`{ value: (${value}), ${metadata} }`)}"`,
+    )
+  }
+
   for (const [root] of roots) {
     if ([...associations.values()].some((association) => association.root === root)) {
-      add(root, ` v-liva-owner="${attr(ownerExpression(root))}"`)
+      withPresence(root, 'liva', `owner: ${ownerExpression(root)}`)
     }
   }
   for (const [target, association] of associations) {
     const entries = association.boundaries.map((owner) => entryExpression(owner, target))
-    add(
+    withPresence(
       target,
-      ` v-liva-lifecycle="{ owner: ${attr(ownerExpression(association.root))}, entries: [${attr(entries.join(', '))}] }"`,
+      'liva-target',
+      `owner: ${ownerExpression(association.root)}, entries: [${entries.join(', ')}]`,
     )
   }
   for (const [owner, boundary] of boundaries) {

@@ -6,15 +6,25 @@ const UnmountProbe = defineComponent({
     return () => h('span', { id: 'probe' }, 'Probe')
   },
 })
+const manualState = ref('idle')
+const parameters = ref({ value: false, owner: false, entries: false })
 const visible = ref(true)
 const shown = ref(true)
 const branch = ref(0)
 const items = ref([1, 2])
 const rootVisible = ref(true)
 const innerVisible = ref(true)
+
+function updateBindings() {
+  manualState.value = 'dim'
+  parameters.value = { value: true, owner: true, entries: true }
+}
 </script>
 
 <template>
+  <button id="binding-update" @click="updateBindings">Update bindings</button>
+  <div v-liva:nested="manualState" v-liva-target:body id="manual-binding">Manual</div>
+  <div v-liva:parameters="parameters" v-liva-target:body id="parameter-binding">Parameters</div>
   <button id="toggle" @click="visible = !visible">Toggle</button>
   <button id="show" @click="shown = !shown">Show</button>
   <button id="branch" @click="branch = (branch + 1) % 3">Branch</button>
@@ -98,9 +108,17 @@ motion panel {
 }
 motion nested {
   state idle { body { opacity: 1 } }
+  state dim when false { body { opacity: 0.4 } }
+  transition { @tween: 1ms }
   leave {
     @tween: 400ms
     body { opacity { 100%: 0 } }
   }
+}
+motion parameters(value: boolean, owner: boolean, entries: boolean) {
+  state idle { body { opacity: 1 } }
+  state dim when value && owner && entries { body { opacity: 0.3 } }
+  transition { @tween: 1ms }
+  enter { @tween: 100ms; body { opacity { 0%: 0 } } }
 }
 </liva>

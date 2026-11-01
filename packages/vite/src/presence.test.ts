@@ -99,3 +99,29 @@ it('does not resolve targets across a nested Motion root', () => {
   expect(result.code).toContain('owner: [1]')
   expect(result.code).not.toContain('owner: [0]')
 })
+
+it.each([
+  ['', 'undefined'],
+  ['=""', 'undefined'],
+  ['="state"', 'state'],
+  ["='{ value: 1, owner: 2, entries: 3 }'", '{ value: 1, owner: 2, entries: 3 }'],
+  ['="readParameters()"', 'readParameters()'],
+])('wraps authored Motion values without changing their expressions: %s', (binding, value) => {
+  const result = plan(`<div v-liva:panel${binding} v-liva-target:body />`)
+
+  expect(result.code).toContain(`v-liva:panel.compiled="{ value: (${value}), owner: [0] }"`)
+  expect(result.code).toContain('v-liva-target:body.compiled=')
+  expect(result.code).toContain('v-liva-entry=')
+  expect(result.code).not.toMatch(/v-liva-(owner|lifecycle)/)
+  expect(result.code.split(`value: (${value})`).length - 1).toBe(value === 'undefined' ? 2 : 1)
+})
+
+it('preserves modifiers and escapes expressions in generated bindings', () => {
+  const result = plan(`<div v-liva:panel.custom="state === &quot;idle&quot; ? state : 'idle'">
+    <span v-liva-target:body.custom="readTarget()" />
+  </div>`)
+
+  expect(result.code).toContain('v-liva:panel.custom.compiled=')
+  expect(result.code).toContain('state === &quot;idle&quot;')
+  expect(result.code).toContain('v-liva-target:body.custom.compiled="{ value: (readTarget()),')
+})

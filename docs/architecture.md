@@ -644,8 +644,13 @@ experiments in the [MVP plan](mvp.md).
 boundary plan with structural operation, source range, Motion/target references,
 required phases, and integration strategy. It groups conditional chains, deduplicates
 shared operations, plans every nested operation, and diagnoses conflicting user
-Transitions. The transform preserves source maps and inserts internal boundary,
-entry, owner, and target registration bindings.
+Transitions. The transform preserves source maps and inserts a boundary component
+and the internal `v-liva-entry` directive on structural elements. Owner metadata is
+carried by `v-liva`, and target registration metadata by `v-liva-target`.
+Compiler-generated bindings use the reserved `compiled` modifier and a wrapper
+containing the original `value` and internal metadata. The adapter unwraps current
+and previous values before handling state or parameter updates; ordinary parameter
+objects are never interpreted as metadata based on their property names.
 
 Each owner identity consists of its static SFC root ID and enclosing keyed-loop
 values, scoped to the Vue component instance. Each boundary has keyed entry

@@ -315,3 +315,19 @@ test('reset restores only removed cards and preserves remaining elements', async
   await expect(page.locator('.swipe-card')).toHaveCount(3)
   expect(await page.evaluate(() => document.getAnimations().length)).toBe(0)
 })
+
+test('presence metadata preserves manual state and colliding parameter names on updates', async ({
+  page,
+}) => {
+  await page.goto(base + '/tests/presence.html')
+  const manual = page.locator('#manual-binding')
+  const parameters = page.locator('#parameter-binding')
+
+  await expect(manual).toHaveCSS('opacity', '1')
+  await expect(parameters).toHaveCSS('opacity', '1')
+  await page.locator('#binding-update').click()
+
+  await expect(manual).toHaveCSS('opacity', '0.4')
+  await expect(parameters).toHaveCSS('opacity', '0.3')
+  expect(await page.evaluate(() => window.diagnostics)).toEqual([])
+})
