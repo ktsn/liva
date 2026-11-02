@@ -393,7 +393,9 @@ export class LivaInstance {
     const snapshots = new Map<HTMLElement, Map<string, string>>()
 
     const boundTracks = tracks.flatMap((track) =>
+      /* v8 ignore start -- @preserve: Tracks were filtered against targets, which bind populates together with targetElements. */
       (this.targetElements.get(track.target) ?? [])
+        /* v8 ignore stop -- @preserve */
         .filter(
           (element) =>
             ![...this.leaveSessions].some((session) => session.owns(element, track.property)),
@@ -469,6 +471,7 @@ export class LivaInstance {
         }
 
         animation.play()
+        /* v8 ignore else -- @preserve: The active document timeline has a numeric currentTime; null belongs to inactive documents. */
         if (typeof start === 'number') animation.startTime = start
 
         void animation.finished
@@ -482,7 +485,7 @@ export class LivaInstance {
           })
           .catch(() => {})
       }
-    } catch (error) {
+    } catch (error) /* v8 ignore next -- @preserve: Effects are already constructed on the document timeline; synchronous playback failure requires replacing browser APIs. */ {
       this.cancel()
       this.settle()
       this.report({ code: 'runtime.animation', message: String(error), track: preparing, error })

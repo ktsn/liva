@@ -1,9 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { mkdtemp, readFile, writeFile, rm, symlink, unlink, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EditorService } from './server.ts'
 import type { EditorRequest } from './protocol.ts'
+
+vi.mock('node:fs/promises', { spy: true })
 
 let root: string
 let outside: string
@@ -118,4 +120,146 @@ describe('guarded source transactions', () => {
     expect(results[0]).toEqual(results[2])
     expect(await readFile(join(root, 'Other.vue'), 'utf8')).toBe(source)
   })
+})
+
+it('validates preview identity, commit IDs, edit limits and definition scope', async () => {
+  const preview = await request('preview')
+
+  for (const patch of [
+    { instanceId: undefined },
+    { instanceId: 'x'.repeat(101) },
+    { sequence: -1 },
+    { sequence: 0.5 },
+  ]) {
+    await expect(service.request({ ...preview, ...patch })).rejects.toMatchObject({ status: 400 })
+  }
+
+  for (const requestId of [undefined, 'short', 'x'.repeat(101)]) {
+    await expect(
+      service.request({ ...preview, action: 'commit', requestId }),
+    ).rejects.toMatchObject({ status: 400 })
+  }
+
+  await expect(service.request({ ...preview, edits: undefined })).rejects.toMatchObject({
+    status: 400,
+  })
+  await expect(
+    service.request({ ...preview, edits: Array.from({ length: 101 }, () => preview.edits![0]) }),
+  ).rejects.toMatchObject({ status: 400 })
+  await expect(
+    service.request({ ...preview, edits: [{ op: 'set', path: 'other/value', value: '1' }] }),
+  ).rejects.toMatchObject({ status: 403 })
+  await expect(
+    service.request({
+      ...preview,
+      edits: [
+        {
+          op: 'override',
+          definition: 'other',
+          from: 'off',
+          to: 'on',
+          target: 'thumb',
+          property: 'scale',
+          timing: '@tween: 1s',
+        },
+      ],
+    }),
+  ).rejects.toMatchObject({ status: 403 })
+  await expect(
+    service.request({ action: 'inspect', sourceId, definition: 'missing' }),
+  ).rejects.toMatchObject({ status: 404 })
+})
+
+it('deduplicates in-flight transactions and rejects conflicting request identities', async () => {
+  const commit = await request('commit')
+  const first = service.request(commit)
+  const duplicate = service.request(commit)
+
+  await expect(service.request({ ...commit, edits: [] })).rejects.toMatchObject({ status: 409 })
+  expect(await duplicate).toEqual(await first)
+})
+
+it('rejects non-Vue paths, project roots and invalid registered sources', async () => {
+  await expect(service.register(root)).rejects.toMatchObject({ status: 403 })
+
+  const text = join(root, 'notes.txt')
+
+  await writeFile(text, source)
+
+  await expect(service.register(text)).rejects.toMatchObject({ status: 403 })
+
+  await writeFile(join(root, 'Toggle.vue'), '<template><div /></template><liva>motion {</liva>')
+
+  await expect(
+    service.request({ action: 'inspect', sourceId, definition: 'toggle' }),
+  ).rejects.toMatchObject({ status: 422 })
+})
+
+it('refuses symlinked backup directories and preserves the source', async () => {
+  const commit = await request('commit')
+
+  await symlink(outside, join(root, '.liva-backups'))
+
+  await expect(service.request(commit)).rejects.toMatchObject({ status: 403 })
+  expect(await readFile(join(root, 'Toggle.vue'), 'utf8')).toBe(source)
+  expect(await readdir(outside)).toEqual([])
+})
+
+it('rejects a registered source replaced with an in-project symlink', async () => {
+  await writeFile(join(root, 'Other.vue'), source)
+  await unlink(join(root, 'Toggle.vue'))
+  await symlink(join(root, 'Other.vue'), join(root, 'Toggle.vue'))
+
+  await expect(
+    service.request({ action: 'inspect', sourceId, definition: 'toggle' }),
+  ).rejects.toMatchObject({ status: 409 })
+})
+
+it('reuses an existing backup when saving the same source revision again', async () => {
+  const first = await request('commit')
+
+  await service.request(first)
+  await writeFile(join(root, 'Toggle.vue'), source)
+  await service.request({ ...first, requestId: crypto.randomUUID() })
+
+  expect(await readdir(join(root, '.liva-backups'))).toEqual([`${first.baseHash}.vue`])
+  expect(await readFile(join(root, '.liva-backups', `${first.baseHash}.vue`), 'utf8')).toBe(source)
+})
+
+it('evicts the oldest commit identity after the bounded retry history fills', async () => {
+  const first = { ...(await request('commit')), edits: [] }
+
+  await service.request(first)
+
+  for (let index = 0; index < 512; index++) {
+    await service.request({ ...first, requestId: crypto.randomUUID() })
+  }
+
+  const changed = await service.request({
+    ...first,
+    edits: [{ op: 'set', path: 'toggle/transition/general/timing/duration', value: '600ms' }],
+  })
+
+  expect(changed.definition.generalTransition?.timing).toMatchObject({ durationMs: 600 })
+})
+
+it('does not overwrite an external edit made while the temporary save is being written', async () => {
+  const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+  const commit = await request('commit')
+  const external = source.replace('const label', 'const externalLabel')
+
+  vi.mocked(writeFile).mockImplementation(async (...args: Parameters<typeof writeFile>) => {
+    await actual.writeFile(...args)
+
+    if (typeof args[0] === 'string' && args[0].endsWith('.liva.tmp'))
+      await actual.writeFile(join(root, 'Toggle.vue'), external)
+  })
+
+  try {
+    await expect(service.request(commit)).rejects.toMatchObject({ status: 409 })
+    expect(await readFile(join(root, 'Toggle.vue'), 'utf8')).toBe(external)
+    expect((await readdir(root)).filter((name) => name.endsWith('.liva.tmp'))).toEqual([])
+  } finally {
+    vi.mocked(writeFile).mockImplementation(actual.writeFile)
+  }
 })

@@ -1,10 +1,10 @@
 import { expect, it } from 'vite-plus/test'
-import cardFixture from '../../../../fixtures/card.json'
-import { decodeBundle } from '../definition.ts'
-import { evaluate, evaluateScalar } from '../expression.ts'
-import { LetBindingGraph, targetValues } from '../let-bindings.ts'
-import { isReactiveSubscription } from '../reactive-value.ts'
-import { callBuiltin } from './index.ts'
+import cardFixture from '../../../../../fixtures/card.json'
+import { decodeBundle } from '../../definition.ts'
+import { evaluate, evaluateScalar } from '../../expression.ts'
+import { LetBindingGraph, targetValues } from '../../let-bindings.ts'
+import { isReactiveSubscription } from '../../reactive-value.ts'
+import { callBuiltin } from '../index.ts'
 
 it('dispatches call IR to independently initialized built-in subscriptions', () => {
   const definition = decodeBundle(JSON.stringify(cardFixture)).definitions[0]
@@ -63,6 +63,23 @@ it('evaluates target variables using the same environment as other argument valu
   })
 
   if (!isReactiveSubscription(subscription)) throw new Error('Expected a reactive subscription')
+
+  expect(subscription.value).toEqual({ active: false, released: false, offset: { x: 0, y: 0 } })
+})
+
+it('rejects drag arguments without a named target and tolerates an absent DOM binding', () => {
+  expect(() => callBuiltin('drag', { target: 1 })).toThrow('requires a target')
+  expect(() => callBuiltin('drag', { target: {} })).toThrow('requires a target')
+
+  const subscription = callBuiltin('drag', { target: { name: 'body' } })
+
+  if (!isReactiveSubscription(subscription)) throw new Error('Expected a subscription')
+
+  const cleanup = subscription.bind(new Map(), () => {
+    throw new Error('An absent target cannot emit updates')
+  })
+
+  cleanup()
 
   expect(subscription.value).toEqual({ active: false, released: false, offset: { x: 0, y: 0 } })
 })

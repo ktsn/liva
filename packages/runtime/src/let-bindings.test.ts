@@ -310,3 +310,49 @@ it('does not commit ordinary call caches when a later initializer fails', () => 
   expect(graph.evaluate({ input: 3, divisor: 1 }).ratio).toBe(3)
   expect(invoke).toHaveBeenCalledTimes(3)
 })
+
+it('rolls back newly bound subscriptions when a later subscription cannot bind', () => {
+  const active = new Set<string>()
+
+  vi.spyOn(functions, 'callBuiltin').mockImplementation((name) => ({
+    value: true,
+    bind() {
+      if (name === 'failing') throw new Error('Binding failed')
+
+      active.add(name)
+      return () => active.delete(name)
+    },
+  }))
+
+  const definitions: LetBinding[] = ['first', 'failing'].map((name) => ({
+    name,
+    initializer: {
+      kind: 'binary',
+      operator: '&&',
+      left: { kind: 'reference', path: ['enabled'] },
+      right: { kind: 'call', function: name, arguments: [] },
+    },
+  }))
+  const graph = new LetBindingGraph(definitions, { enabled: false })
+  const cleanups = graph.bind(new Map(), () => {})
+
+  expect(() => graph.evaluate({ enabled: true })).toThrow('Binding failed')
+  expect(active.size).toBe(0)
+  expect(graph.evaluate({ enabled: false })).toMatchObject({ first: false, failing: false })
+
+  for (const cleanup of cleanups) cleanup()
+})
+
+it('keeps the current binding active when an older binding is disposed twice', () => {
+  const graph = new LetBindingGraph([], {})
+  const [oldCleanup] = graph.bind(new Map(), () => {})
+  const [currentCleanup] = graph.bind(new Map(), () => {})
+
+  oldCleanup()
+  oldCleanup()
+
+  expect(graph.evaluate({ value: 1 })).toEqual({ value: 1 })
+
+  currentCleanup()
+  currentCleanup()
+})

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vite-plus/test'
-import fixture from '../../../fixtures/toggle.json'
-import { decodeBundle, type Definition, type Timing } from './definition.ts'
-import { resolve } from './resolve.ts'
-import { sampleSpring, springResponse, SPRING_ERROR } from './spring.ts'
-import { waapiProperty } from './instance.ts'
+import fixture from '../../../../fixtures/toggle.json'
+import { decodeBundle, type Definition, type Timing } from '../definition.ts'
+import { resolve } from '../resolve.ts'
+import { sampleSpring, springResponse, SPRING_ERROR } from '../spring.ts'
+import { waapiProperty } from '../instance.ts'
 
 const definition = decodeBundle(JSON.stringify(fixture)).definitions[0]
 const tween = (durationMs: number): Timing => ({ kind: 'tween', durationMs, easing: 'linear' })
@@ -128,4 +128,83 @@ describe('scalar spring solver', () => {
       sampleSpring({ kind: 'spring-physics', stiffness: 1e100, damping: 1, mass: 1 }),
     ).toThrow('cap')
   })
+})
+
+it('rejects incomplete transitions and invalid frame offsets', () => {
+  const incomplete = changed((d) => {
+    d.states[0].targets = []
+  })
+
+  expect(() => resolve(incomplete, 'off', 'on')).toThrow('Incomplete state')
+
+  const missing = changed((d) => {
+    d.generalTransition = undefined
+    d.directionalTransitions = []
+  })
+
+  expect(() => resolve(missing, 'off', 'on')).toThrow('Missing timing')
+
+  for (const offsets of [[-0.1], [1.1], [NaN], [0.5, 0.5]]) {
+    const invalid = changed((d) => {
+      d.generalTransition.targets[1].properties[1].keyframes = offsets.map((offset) => ({
+        offset,
+        value: '2',
+      }))
+    })
+
+    expect(() => resolve(invalid, 'off', 'on')).toThrow('Invalid or duplicate')
+  }
+})
+
+it('settles reactive template properties without transition timing', () => {
+  const def = changed((d) => {
+    d.generalTransition = undefined
+    d.directionalTransitions = []
+
+    for (const state of d.states) {
+      for (const target of state.targets) {
+        for (const property of target.properties) property.template = [property.value]
+      }
+    }
+  })
+
+  expect(resolve(def, 'off', 'on')).toEqual([])
+})
+
+it('rejects invalid duration springs and resolves critical damping', () => {
+  for (const durationMs of [0, -1, Infinity, NaN]) {
+    expect(() => sampleSpring({ kind: 'spring-duration', durationMs, bounce: 0 })).toThrow(
+      'Invalid spring parameters',
+    )
+  }
+
+  const critical = springResponse(100, 20, 1, 0.5)
+
+  expect(critical.value).toBeCloseTo(1 - 6 * Math.exp(-5), 12)
+  expect(critical.velocity).toBeCloseTo(50 * Math.exp(-5), 12)
+  expect(() =>
+    sampleSpring({ kind: 'spring-physics', stiffness: -1, damping: 1, mass: 1 }),
+  ).toThrow('solver sample cap')
+})
+
+it('bounds the number of easing samples for a stiff, slowly damped spring', () => {
+  expect(() =>
+    sampleSpring({ kind: 'spring-physics', stiffness: 100000, damping: 5, mass: 1 }),
+  ).toThrow('easing sample cap')
+})
+
+it('enforces the sample cap after adaptive refinement', () => {
+  expect(() =>
+    sampleSpring({ kind: 'spring-physics', stiffness: 100000, damping: 10.02, mass: 1 }),
+  ).toThrow('easing sample cap')
+})
+
+it('rejects easing attached to spring endpoints', () => {
+  const invalid = changed((d) => {
+    const property = d.generalTransition.targets[1].properties[0]
+
+    property.keyframes = [{ offset: 0, value: '0 0', easing: 'linear' }]
+  })
+
+  expect(() => resolve(invalid, 'off', 'on')).toThrow('Spring tracks cannot')
 })

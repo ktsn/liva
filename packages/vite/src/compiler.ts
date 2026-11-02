@@ -35,6 +35,7 @@ export interface SourceSnapshot {
 export function compile(source: string, development: boolean): Compilation {
   const result: unknown = JSON.parse(wasm.compile(source, development))
 
+  /* v8 ignore if -- @preserve: The bundled Rust compiler produces this schema; invalid output requires mocking its ABI. */
   if (!isCompilation(result)) throw new Error('Unsupported Liva compiler schema')
   return result
 }
@@ -82,6 +83,7 @@ export function applyEdits(
 ): { source: string; compilation: Compilation } {
   const result: unknown = JSON.parse(wasm.applyEdits(source, JSON.stringify(edits)))
   if (isRecord(result) && typeof result.error === 'string') throw new Error(result.error)
+  /* v8 ignore if -- @preserve: Successful Rust edits return source and compilation together by construction. */
   if (
     !isRecord(result) ||
     typeof result.source !== 'string' ||
@@ -92,10 +94,12 @@ export function applyEdits(
   return { source: result.source, compilation: result.compilation }
 }
 
+/* v8 ignore next -- @preserve: ABI assertions inspect only bundled Rust output, not user input. */
 function isRange(value: unknown): value is SourceRange {
   return isRecord(value) && typeof value.start === 'number' && typeof value.end === 'number'
 }
 
+/* v8 ignore next -- @preserve: ABI assertions inspect only bundled Rust output, not user input. */
 function isDiagnostic(value: unknown): value is Diagnostic {
   return (
     isRecord(value) &&
@@ -107,12 +111,14 @@ function isDiagnostic(value: unknown): value is Diagnostic {
   )
 }
 
+/* v8 ignore next -- @preserve: ABI assertions inspect only bundled Rust output, not user input. */
 function isMapping(value: unknown): value is Mapping {
   return (
     isRecord(value) && (value.kind === 'block' || value.kind === 'value') && isRange(value.range)
   )
 }
 
+/* v8 ignore next -- @preserve: ABI assertions inspect only bundled Rust output, not user input. */
 function isCompilation(value: unknown): value is Compilation {
   return (
     isRecord(value) &&

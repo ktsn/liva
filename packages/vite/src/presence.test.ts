@@ -141,3 +141,51 @@ it('plans targets declared only by state-specific lifecycles', () => {
   ])
   expect(result.code).toContain('v-liva-target:body.compiled=')
 })
+
+it.each([
+  ['<div v-liva="value"><span v-liva-target:body /></div>', 'static Motion'],
+  ['<div v-liva:panel><span v-liva-target="value" /></div>', 'static target'],
+  ['<Panel v-liva:panel><span v-liva-target:body /></Panel>', 'native elements'],
+  ['<div v-liva:panel><Panel v-liva-target:body /></div>', 'native elements'],
+  ['<div v-for="item in items" v-liva:panel><span v-liva-target:body /></div>', 'explicit :key'],
+])('rejects unsupported lifecycle ownership: %s', (template, message) => {
+  expect(() => plan(template)).toThrow(message)
+})
+
+it('keeps unowned targets and non-lifecycle targets unchanged', () => {
+  const result = plan(
+    '<div v-liva-target:body /><div v-liva:unknown><span v-liva-target:body /></div><div v-liva:panel><span v-liva-target:unrelated /></div>',
+  )
+
+  expect(result.boundaries).toEqual([])
+})
+
+it('keys repeated motion owners independently from their nested presence boundaries', () => {
+  const result = plan(
+    '<div v-for="item in items" :key="item.id" v-liva:panel><span v-if="item.visible" v-liva-target:body /></div>',
+  )
+
+  expect(result.code).toContain('owner: [0, item.id]')
+  expect(result.boundaries.length).toBeGreaterThan(0)
+})
+
+it('accepts dynamic target arguments when no lifecycle requires ownership', () => {
+  const source = '<template><div v-liva:plain><span v-liva-target="target" /></div></template>'
+
+  expect(
+    planPresence(source, 'Plain.vue', [{ name: 'plain', states: [], directionalTransitions: [] }])
+      .code,
+  ).toBe(source)
+  expect(planPresence('<script>export default {}</script>', 'Script.vue', []).boundaries).toEqual(
+    [],
+  )
+})
+
+it('finds native lifecycle owners through non-transition component slots', () => {
+  const result = plan(
+    '<div v-liva:panel><Wrapper><section v-if="visible" v-liva-target:body /></Wrapper></div>',
+  )
+
+  expect(result.boundaries).toHaveLength(1)
+  expect(result.code).toContain('<LivaPresenceBoundary')
+})

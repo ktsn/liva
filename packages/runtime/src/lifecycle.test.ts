@@ -163,3 +163,20 @@ it('does not evaluate inactive lifecycle expressions and recognizes state-only d
     'Unknown variable',
   )
 })
+
+it('uses an empty presentation fallback and validates missing lifecycle timing', () => {
+  const transition: Transition = { targets: [{ name: 'body', properties: [{ name: 'opacity' }] }] }
+
+  expect(() => resolveLifecycleTracks('leave', transition, state, () => '')).toThrow(
+    'Missing lifecycle timing',
+  )
+
+  const timed = {
+    ...transition,
+    timing: { kind: 'tween', durationMs: 10, easing: 'linear' } as const,
+  }
+  const resolved = resolveLifecycleTracks('leave', timed, state, () => '')
+
+  expect(resolved[0].keyframes[0].value).toBe(state.targets[0].properties[0].value)
+  expect(resolveLifecycleTracks('enter', undefined, state, () => '')).toEqual([])
+})

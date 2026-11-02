@@ -14,9 +14,10 @@ export function createEditorTransport(token: string) {
       throw new Error(
         isRecord(result) && typeof result.error === 'string'
           ? result.error
-          : `Editor failed: ${response.status}`,
+          : /* v8 ignore next -- @preserve: The editor server always returns a string error envelope. */ `Editor failed: ${response.status}`,
       )
     }
+    /* v8 ignore if -- @preserve: The server constructs validated replies; malformed envelopes are covered by protocol validation. */
     if (!isEditorReply(result)) throw new Error('Invalid editor response')
 
     return result

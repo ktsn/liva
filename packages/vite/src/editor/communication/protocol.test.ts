@@ -48,3 +48,42 @@ describe('editor message validation', () => {
     expect(isEditorReply({ error: 'Conflict' })).toBe(false)
   })
 })
+
+describe('editor optional fields', () => {
+  it.each([
+    null,
+    { op: 'set', value: '1' },
+    { op: 'unknown', path: 'field' },
+    { op: 'track', path: 'field', timing: 1 },
+  ])('rejects invalid edits %j', (edit) => {
+    expect(isEditorRequest({ ...request, edits: [edit] })).toBe(false)
+  })
+
+  it.each(['inspect', 'commit'])('accepts %s with optional identities', (action) => {
+    expect(
+      isEditorRequest({
+        ...request,
+        action,
+        instanceId: 'instance',
+        baseHash: 'hash',
+        requestId: 'request',
+        edits: [{ op: 'track', path: 'field', timing: '@tween: 1s' }],
+      }),
+    ).toBe(true)
+    expect(isEditorRequest({ ...request, action, instanceId: 42 })).toBe(false)
+  })
+
+  it('accepts both field kinds and an omitted sequence', () => {
+    expect(
+      isEditorReply({
+        ...reply,
+        sequence: undefined,
+        fields: [
+          { path: 'value', kind: 'value', value: '1' },
+          { path: 'block', kind: 'block', value: '' },
+        ],
+      }),
+    ).toBe(true)
+    expect(isEditorReply({ ...reply, sequence: '1' })).toBe(false)
+  })
+})

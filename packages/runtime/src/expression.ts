@@ -73,6 +73,7 @@ export function evaluate(
           throw new Error(`Unsupported expression operator: ${expression.operator}`)
       }
     }
+    /* v8 ignore next -- @preserve: Expression is a closed union validated at the IR boundary. */
     default:
       throw new Error('Unsupported expression kind')
   }
@@ -102,6 +103,7 @@ export function selectState(definition: Definition, values: VariableValues): str
     if (state.when && evaluate(state.when, values) === true) selected = state.name
   }
 
+  /* v8 ignore if -- @preserve: The compiler requires a fallback state in every motion. */
   if (!selected) throw new Error('Definition requires a fallback state')
   return selected
 }

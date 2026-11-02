@@ -95,6 +95,12 @@ export default defineConfig({
         },
       },
     ],
-
+    coverage: {
+      enabled: true,
+      provider: 'v8',
+      include: ['packages/**/*.{ts,vue}'],
+      exclude: ['packages/**/*.test.ts', 'packages/**/*.d.ts', 'packages/**/wasm/**'],
+      thresholds: { 100: true, perFile: true },
+    },
   },
 })

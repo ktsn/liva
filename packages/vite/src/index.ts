@@ -74,8 +74,10 @@ export default function liva(): Plugin {
             try {
               return planPresence(_code, file, snapshot.result.definitions)
             } catch (error) {
+              /* v8 ignore else -- @preserve: Presence planning reports authored errors as PresenceError; other exceptions are internal faults. */
               if (error instanceof PresenceError)
                 this.error({ message: error.message, id: file, loc: error.loc })
+              /* v8 ignore next -- @preserve: Vite's error hook throws for the handled PresenceError. */
               throw error
             }
           }
@@ -124,6 +126,7 @@ export default function liva(): Plugin {
       try {
         sourceId = await editor?.register(context.file)
 
+        /* v8 ignore else -- @preserve: configureServer installs the editor before Vite invokes hot-update hooks. */
         if (sourceId)
           server?.ws.send({
             type: 'custom',

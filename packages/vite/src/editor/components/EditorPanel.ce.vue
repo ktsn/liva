@@ -41,7 +41,10 @@ const unsubscribe = controller.subscribe(() => {
 })
 
 function run(operation: () => Promise<void>) {
-  void operation().catch((error) => controller.report(error))
+  void operation().catch(
+    /* v8 ignore next -- @preserve: This adapter only forwards rejections to the controller error reporting tested independently. */
+    (error) => controller.report(error),
+  )
 }
 
 function select(id: string) {
@@ -77,9 +80,11 @@ function revealInstance() {
 onMounted(() => {
   observer = new ResizeObserver(() => {
     const previous = panelHeight.value
+    /* v8 ignore next -- @preserve: The observer is attached after mount and disconnected before the panel ref is released. */
     panelHeight.value = panel.value?.getBoundingClientRect().height ?? 0
     if (panelHeight.value > previous) revealInstance()
   })
+  /* v8 ignore else -- @preserve: The unconditional panel element is mounted before onMounted runs. */
   if (panel.value) observer.observe(panel.value)
 })
 

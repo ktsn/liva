@@ -126,3 +126,25 @@ it.each(['stateEnters', 'stateLeaves'])('validates %s entries and frame template
     ),
   ).toBe(true)
 })
+
+it('validates string expressions, unknown timing kinds and expression depth limits', () => {
+  expect(
+    isDefinition({
+      ...valid,
+      events: [{ name: 'label', when: { kind: 'string', value: 'ready' } }],
+    }),
+  ).toBe(true)
+
+  expectInvalidDefinition({
+    ...valid,
+    generalTransition: { timing: { kind: 'unknown' }, targets: [] },
+  })
+  expectInvalidDefinition({ ...valid, generalTransition: { timing: null, targets: [] } })
+
+  let expression: unknown = { kind: 'boolean', value: true }
+
+  for (let depth = 0; depth < 258; depth++)
+    expression = { kind: 'unary', operator: '!', operand: expression }
+
+  expectInvalidDefinition({ ...valid, events: [{ name: 'deep', when: expression }] })
+})

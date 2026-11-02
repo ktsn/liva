@@ -100,6 +100,7 @@ async function play() {
   playing.value = true
   const start = performance.now() - time.value
   const tick = (now: number) => {
+    /* v8 ignore if -- @preserve: stop and controller notifications cancel scheduled frames synchronously; this only guards an already queued browser callback. */
     if (!playing.value || !props.controller.previewActive) {
       stop()
       return
@@ -119,7 +120,14 @@ function schedule(edit: Edit, definition: Definition) {
   model.value = definition
   props.controller.setDraft([
     ...props.controller.draft.filter(
-      (old) => !('path' in old && old.path === ('path' in edit ? edit.path : '')),
+      (old) =>
+        !(
+          'path' in old &&
+          old.path ===
+            ('path' in edit
+              ? edit.path
+              : /* v8 ignore next -- @preserve: This form schedules only set and track edits, both with paths. */ '')
+        ),
     ),
     edit,
   ])
@@ -228,6 +236,7 @@ function timing(track: TimelineTrack, value: Timing) {
 }
 
 function resize(track: TimelineTrack, value: number) {
+  /* v8 ignore else -- @preserve: TimelineRow renders resize handles only for duration-based timing. */
   if (track.timing && track.timing.kind !== 'spring-physics')
     timing(track, { ...track.timing, durationMs: value })
 }

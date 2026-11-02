@@ -39,3 +39,12 @@ describe('SFC compiler boundary', () => {
     expect(compileSfc(source, 'Valid.vue', true).result.mappings).toBeDefined()
   })
 })
+
+describe('SFC validation', () => {
+  it('rejects malformed Vue markup and missing motion blocks', () => {
+    expect(() => compileSfc('<template><div></template>', 'Invalid.vue', false)).toThrow(
+      'Invalid Vue SFC',
+    )
+    expect(() => compileSfc('<template><div /></template>', 'Missing.vue', false)).toThrow('inline')
+  })
+})

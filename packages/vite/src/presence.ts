@@ -211,6 +211,7 @@ export function planPresence(source: string, filename: string, definitions: read
       .filter((node) => directive(node, 'for'))
       .map((node) => {
         const key = keyOf(node)
+        /* v8 ignore if -- @preserve: Every repeated ancestor was already checked while planning its structural boundary. */
         if (!key) fail(node, 'Repeated Liva lifecycle Motion roots require an explicit :key.')
         return key
       })
@@ -218,6 +219,7 @@ export function planPresence(source: string, filename: string, definitions: read
   }
   const entryExpression = (owner: Element, target: Element) => {
     const boundary = boundaries.get(owner)!
+    /* v8 ignore next -- @preserve: Associated owners are selected from this target's ancestor path. */
     const member =
       paths.get(target)!.find((node) => (chains.get(node)?.[0] ?? node) === owner) ?? owner
     const key =

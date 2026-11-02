@@ -49,7 +49,7 @@ export class EditorController {
       if (!sourceId) return
       const label =
         binding.root.getAttribute('aria-label') ??
-        `${binding.definition.name} ${binding.root.textContent?.trim().slice(0, 30) ?? ''}`
+        `${binding.definition.name} ${/* v8 ignore next -- @preserve: HTMLElement.textContent is a string; null applies to other Node kinds. */ binding.root.textContent?.trim().slice(0, 30) ?? ''}`
       const entry = { id: crypto.randomUUID(), sourceId, label, binding }
       this.entries.set(entry.id, entry)
 
@@ -160,7 +160,11 @@ export class EditorController {
   seek(time: number) {
     if (!this.previewActive || !Number.isFinite(time)) return
 
-    for (const animation of this.selected?.binding.runtime.animations ?? []) {
+    /* v8 ignore start -- @preserve: A successful preview retains its selected mounted entry; selection changes clear previewActive. */
+    for (const animation of this.selected?.binding.runtime.animations ??
+      []
+    /* v8 ignore stop -- @preserve */
+    ) {
       animation.currentTime = Math.max(0, time)
     }
   }

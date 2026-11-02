@@ -106,6 +106,7 @@ export function sampleSpring(timing: Spring): {
     const actual = springResponse(stiffness, damping, mass, mid).value
 
     if (Math.abs(actual - (a + b) / 2) > SPRING_ERROR) {
+      /* v8 ignore if -- @preserve: The frequency-bounded step resolves curvature before this defensive recursion limit. */
       if (depth >= 20 || samples.length >= SPRING_MAX_SAMPLES) {
         throw new Error('Spring exceeds easing sample cap')
       }

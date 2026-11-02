@@ -51,3 +51,27 @@ it('contains spring solver failures within the affected track', () => {
   expect(tracks.find((track) => track.property === 'translate')?.diagnostic).toBeTruthy()
   expect(tracks.find((track) => track.property === 'scale')?.duration).toBe(350)
 })
+
+it('formats all timing variants and handles missing states and timing', async () => {
+  const { timingText } = await import('./timeline.ts')
+
+  expect(timingText({ kind: 'tween', durationMs: 100, easing: 'linear' })).toBe(
+    '@tween: 100ms linear',
+  )
+  expect(timingText({ kind: 'spring-duration', durationMs: 200, bounce: 0.3 })).toBe(
+    '@spring: 200ms 0.3',
+  )
+  expect(timingText({ kind: 'spring-physics', stiffness: 100, damping: 10, mass: 1 })).toBe(
+    '@spring: 100 10 1',
+  )
+  expect(timelineTracks(definition, 'off', 'missing', false)).toEqual([])
+  expect(normalizedOffset(100, 0)).toBe(0)
+  expect(normalizedOffset(-100, 10)).toBe(0)
+  expect(normalizedOffset(100, 10)).toBe(1)
+
+  const bare = { ...definition, generalTransition: undefined, directionalTransitions: [] }
+  const tracks = timelineTracks(bare, 'missing', 'off', true)
+
+  expect(tracks.every((track) => track.duration === 0)).toBe(true)
+  expect(tracks[0].frames[0].value).toBe(tracks[0].frames[1].value)
+})

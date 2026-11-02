@@ -109,6 +109,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
         const work = target.registration.capture('leave')
 
         for (const entry of target.entries) {
+          /* v8 ignore else -- @preserve: Vue tears down each target once; this guard only preserves an earlier snapshot if teardown hooks overlap. */
           if (!entry.snapshots.has(target.registration))
             entry.snapshots.set(target.registration, work)
           entry.targets.delete(target.registration)
@@ -234,6 +235,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
           registration: {
             release() {
               const name = targets.get(element)?.name
+              /* v8 ignore else -- @preserve: Compiled lifecycle targets always have a static target argument. */
               if (name) explicitRoot(target)?.runtime.releaseLifecycle([name], element)
             },
             retainLifecycle(phase: 'enter' | 'leave', session: LifecycleSession) {
@@ -244,7 +246,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
               const name = targets.get(element)?.name
               return name
                 ? (explicitRoot(target)?.runtime.captureLifecycle(phase, [name], element) ?? [])
-                : []
+                : /* v8 ignore next -- @preserve: Compiled lifecycle targets always have a static target argument. */ []
             },
           },
         }

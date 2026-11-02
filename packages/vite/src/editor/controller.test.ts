@@ -153,3 +153,220 @@ describe('editor revision lifecycle', () => {
     expect(controller.inspection).toBe(reply)
   })
 })
+
+describe('editor selection and saves', () => {
+  it('handles empty selection, missing source identities and detached notifications', async () => {
+    const controller = new EditorController(async () => reply)
+    const orphan = binding('Orphan')
+
+    orphan.component.livaSource = ''
+    controller.observe('mount', orphan)
+    controller.observe('update', orphan)
+    controller.observe('unmount', orphan)
+
+    expect(controller.entries.size).toBe(0)
+
+    await controller.select('missing')
+
+    await expect(controller.preview('on')).rejects.toThrow('mounted')
+    await expect(controller.commit()).rejects.toThrow('first')
+
+    controller.sourceChanged('other')
+    await controller.cancel()
+
+    expect(controller.inspection).toBeUndefined()
+  })
+
+  it('saves a synchronized source and clears the draft', async () => {
+    const { controller } = await setup(async () => reply)
+
+    controller.setDraft(edits)
+    await controller.commit()
+
+    expect(controller.draft).toEqual([])
+    expect(controller.inspection).toEqual(reply)
+    expect(controller.message).toContain('synchronized')
+    expect(controller.stale).toBe(false)
+  })
+
+  it('prevents overlapping saves and keeps retry identity after a transport failure', async () => {
+    const saved = deferred<EditorReply>()
+    const requests: EditorRequest[] = []
+    let fail = true
+    const { controller } = await setup(async (request) => {
+      if (request.action !== 'commit') return reply
+
+      requests.push(request)
+
+      if (fail) throw new Error('Connection lost')
+
+      return saved.promise
+    })
+
+    controller.setDraft(edits)
+
+    await expect(controller.commit()).rejects.toThrow('Connection lost')
+
+    fail = false
+
+    const pending = controller.commit()
+
+    await expect(controller.commit()).rejects.toThrow('already')
+
+    controller.sourceChanged('source')
+    saved.resolve(reply)
+    await pending
+
+    expect(requests[1].requestId).toBe(requests[0].requestId)
+    expect(controller.draft).toEqual([])
+  })
+
+  it('reconnects selection after remount and unsubscribes observers', async () => {
+    const { controller, first } = await setup(async () => reply)
+    const listener = vi.fn<() => void>()
+    const unsubscribe = controller.subscribe(listener)
+
+    controller.observe('unmount', first)
+
+    const replacement = binding('First')
+
+    controller.observe('mount', replacement)
+
+    expect(controller.selected?.binding).toBe(replacement)
+    expect(listener).toHaveBeenCalledTimes(2)
+
+    unsubscribe()
+    controller.report('A diagnostic')
+
+    expect(listener).toHaveBeenCalledTimes(2)
+  })
+
+  it('previews general timing, seeks, and restores after application updates', async () => {
+    const { controller, first } = await setup(async (request) => ({
+      ...reply,
+      sequence: request.sequence,
+    }))
+
+    await controller.preview('on', 'off', true)
+
+    expect(controller.previewActive).toBe(true)
+
+    controller.seek(NaN)
+    controller.seek(-10)
+    controller.observe('update', first)
+
+    expect(controller.previewActive).toBe(false)
+    expect(first.runtime.definition).toBe(definition)
+    expect(controller.message).toContain('superseded')
+
+    controller.endPreview()
+    controller.seek(10)
+  })
+
+  it('reports runtime preview rejection and ignores stale inspection replies', async () => {
+    const { controller, first } = await setup(async (request) => ({
+      ...reply,
+      sequence: request.sequence,
+    }))
+
+    stateSpies.get(first)!.mockReturnValue(false)
+
+    await expect(controller.preview('on')).rejects.toThrow('could not prepare')
+    expect(controller.previewActive).toBe(false)
+
+    const inspection = deferred<EditorReply>()
+    const another = new EditorController(() => inspection.promise)
+
+    another.observe('mount', first)
+
+    const selecting = another.select([...another.entries.keys()][0])
+
+    await another.select('missing')
+    inspection.resolve(reply)
+    await selecting
+
+    expect(another.inspection).toBeUndefined()
+  })
+})
+
+it('retains the draft when live instances fail to synchronize before the deadline', async () => {
+  vi.useFakeTimers()
+
+  try {
+    const changed = { ...definition, name: 'changed' }
+    const { controller } = await setup(async (request) =>
+      request.action === 'commit' ? { ...reply, definition: changed } : reply,
+    )
+
+    controller.setDraft(edits)
+
+    await Promise.all([
+      expect(controller.commit()).rejects.toThrow('synchronization is pending'),
+      vi.advanceTimersByTimeAsync(5040),
+    ])
+
+    expect(controller.draft).toEqual(edits)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it('allocates a new retry identity when a public draft changes after failure', async () => {
+  const requests: EditorRequest[] = []
+  const { controller } = await setup(async (request) => {
+    if (request.action === 'commit') {
+      requests.push(request)
+      throw new Error('Connection lost')
+    }
+
+    return reply
+  })
+
+  controller.setDraft(edits)
+
+  await expect(controller.commit()).rejects.toThrow('Connection lost')
+
+  controller.draft = [{ ...edits[0], value: '400ms' }]
+
+  await expect(controller.commit()).rejects.toThrow('Connection lost')
+
+  expect(requests[1].requestId).not.toBe(requests[0].requestId)
+})
+
+it('ignores unrelated instance updates and only reattaches matching remounts', async () => {
+  const { controller, first, second } = await setup(async (request) => ({
+    ...reply,
+    sequence: request.sequence,
+  }))
+
+  controller.observe('update', second)
+  controller.observe('unmount', second)
+
+  expect(controller.selected?.binding).toBe(first)
+
+  controller.observe('update', first)
+
+  expect(first.runtime.replaceDefinition).not.toHaveBeenCalled()
+
+  controller.observe('unmount', first)
+  controller.observe('mount', binding('Different'))
+
+  expect(controller.selected?.binding).toBe(first)
+
+  const otherSource = binding('First')
+
+  otherSource.component.livaSource = 'other-source'
+  controller.observe('mount', otherSource)
+
+  expect(controller.selected?.binding).toBe(first)
+})
+
+it('does not apply previews started against an already stale inspection', async () => {
+  const { controller } = await setup(async (request) => ({ ...reply, sequence: request.sequence }))
+
+  controller.sourceChanged('source')
+  await controller.preview('on')
+
+  expect(controller.previewActive).toBe(false)
+  expect(controller.stale).toBe(true)
+})
