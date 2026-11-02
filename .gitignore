@@ -3,6 +3,8 @@ node_modules/
 dist/
 playwright-report/
 test-results/
+coverage/
+.vitest/
 packages/vite/wasm/
 **/.liva-backups/
 **/*.liva.tmp
