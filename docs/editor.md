@@ -86,7 +86,8 @@ and active playback. Out-of-order server replies cannot restore obsolete effects
 instances of the definition. Source conflicts and failed saves retain the draft.
 External source changes require discarding/reloading before further preview or save.
 
-The editor does not add targets or CSS properties absent from the state declarations.
+The editor does not add targets or new CSS property names. Lifecycle scopes also
+include properties already authored in lifecycle declarations.
 Clips, delays, looping, curve graphs, automatic key recording, multiselection,
 undo/redo history, and a separate preview canvas are outside this implementation.
 
@@ -100,3 +101,29 @@ source, not through timeline controls. A preview uses the instance's current dra
 offset; zero offset means no translation until the card has been dragged. State
 endpoint fields show CSS templates as source text; replacing them is an explicit
 CSS-value edit, not a visual expression editor.
+
+## Enter and leave editing
+
+Choose **Enter · default**, **Leave · default**, or their **state override** scopes
+in **Editing**. **State** selects the state captured by the preview and, in an
+override scope, the lifecycle block being edited. Default scopes ignore state
+specific overrides. The timeline includes state properties and additional properties
+already authored in the selected lifecycle. Apply timing to an unused property,
+then create an endpoint override to author a new lifecycle track; missing lifecycle
+blocks are created on save.
+
+Timing, keyframe values (including `${expression}` templates), offsets, and easing
+use the same inspector as ordinary transitions. Timing edits create property-level
+overrides. **Use default timing** and **Use default keyframes** independently remove
+state-specific overrides. Editing inherited frames copies their effective collection.
+Endpoint shorthand is converted to explicit frames only for the edited property.
+Implicit lifecycle endpoints describe the captured state or DOM presentation; enter
+and leave scopes do not edit state values.
+
+Play and scrub operate on the mounted preview instance without inserting, hiding,
+or removing application elements. Templates use that instance's current parameters
+and bindings. Leave starts from the selected state's settled presentation; it does
+not simulate removal during an interrupted application animation. The final leave
+pose remains visible until preview ends. End preview, closing the dock, application
+updates, and source invalidation restore the committed definition and application
+state. Missing targets are not mounted by the editor.

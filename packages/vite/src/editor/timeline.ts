@@ -7,7 +7,10 @@ import {
   type Transition,
 } from '@liva/runtime'
 
+export type LifecyclePhase = 'enter' | 'leave'
+
 export interface TimelineTrack {
+  lifecycle?: LifecyclePhase
   target: string
   property: string
   path: string
@@ -37,14 +40,31 @@ export function transitionAt(
   from: string,
   to: string,
   general: boolean,
+  phase?: LifecyclePhase,
 ): Transition | undefined {
+  if (phase) {
+    return general
+      ? definition[phase]
+      : (phase === 'enter' ? definition.stateEnters : definition.stateLeaves)?.find(
+          (item) => item.state === to,
+        )?.transition
+  }
+
   return general
     ? definition.generalTransition
     : definition.directionalTransitions.find((item) => item.from === from && item.to === to)
         ?.transition
 }
 
-export function transitionPath(definition: Definition, from: string, to: string, general: boolean) {
+export function transitionPath(
+  definition: Definition,
+  from: string,
+  to: string,
+  general: boolean,
+  phase?: LifecyclePhase,
+) {
+  if (phase) return `${definition.name}/${phase}${general ? '' : `/${to}`}`
+
   return `${definition.name}/transition/${general ? 'general' : `directional/${from}/${to}`}`
 }
 
@@ -53,13 +73,38 @@ export function timelineTracks(
   from: string,
   to: string,
   general: boolean,
+  phase?: LifecyclePhase,
 ): TimelineTrack[] {
-  const source = definition.states.find((state) => state.name === from)
+  const source = definition.states.find((state) => state.name === (phase ? to : from))
   const destination = definition.states.find((state) => state.name === to)
-  const common = definition.generalTransition
-  const selected = transitionAt(definition, from, to, general)
+  const common = phase ? definition[phase] : definition.generalTransition
+  const selected = transitionAt(definition, from, to, general, phase)
 
-  return (destination?.targets ?? []).flatMap((target) =>
+  const targets = (destination?.targets ?? []).map((target) => ({
+    ...target,
+    properties: [...target.properties],
+  }))
+
+  if (phase) {
+    for (const transition of [common, selected]) {
+      for (const target of transition?.targets ?? []) {
+        let row = targets.find((item) => item.name === target.name)
+
+        if (!row) {
+          row = { name: target.name, properties: [] }
+          targets.push(row)
+        }
+
+        for (const property of target.properties) {
+          if (!row.properties.some((item) => item.name === property.name)) {
+            row.properties.push({ name: property.name, value: '' })
+          }
+        }
+      }
+    }
+  }
+
+  return targets.flatMap((target) =>
     target.properties.map((property) => {
       const local = propertyAt(selected, target.name, property.name)
       const inherited = general ? undefined : propertyAt(common, target.name, property.name)
@@ -88,9 +133,10 @@ export function timelineTracks(
       }
 
       return {
+        lifecycle: phase,
         target: target.name,
         property: property.name,
-        path: `${transitionPath(definition, from, to, general)}/target/${target.name}/property/${property.name}`,
+        path: `${transitionPath(definition, from, to, general, phase)}/target/${target.name}/property/${property.name}`,
         local,
         timing,
         duration,
@@ -101,10 +147,14 @@ export function timelineTracks(
         timingOrigin: local?.timing
           ? 'Local property'
           : inherited?.timing
-            ? 'Inherited common property'
+            ? phase
+              ? 'Inherited default property'
+              : 'Inherited common property'
             : selected?.timing
               ? 'Transition default'
-              : 'Inherited common default',
+              : phase
+                ? 'Lifecycle default'
+                : 'Inherited common default',
       }
     }),
   )
@@ -131,4 +181,53 @@ export function snapTime(
     time + extent,
   )
   return Math.abs(closest - time) <= (extent * 7) / Math.max(1, pixels) ? closest : time
+}
+
+/** Remove compiled lifecycle inheritance using authored source paths before editing. */
+export function editableDefinition(
+  definition: Definition,
+  fields: readonly { path: string }[],
+): Definition {
+  const paths = new Set(fields.map((field) => field.path))
+  const local = (transition: Transition, path: string): Transition => ({
+    timing: paths.has(`${path}/timing`) ? transition.timing : undefined,
+    targets: transition.targets.flatMap((target) => {
+      const targetPath = `${path}/target/${target.name}`
+      if (!paths.has(targetPath)) return []
+
+      return [
+        {
+          name: target.name,
+          properties: target.properties.flatMap((property) => {
+            const propertyPath = `${targetPath}/property/${property.name}`
+            if (!paths.has(propertyPath)) return []
+
+            const keyframes = property.keyframes?.filter((frame) =>
+              paths.has(`${propertyPath}/frame/${frame.offset}`),
+            )
+
+            return [
+              {
+                name: property.name,
+                timing: paths.has(`${propertyPath}/timing`) ? property.timing : undefined,
+                keyframes: keyframes?.length ? keyframes : undefined,
+              },
+            ]
+          }),
+        },
+      ]
+    }),
+  })
+
+  return {
+    ...structuredClone(definition),
+    stateEnters: definition.stateEnters?.map((item) => ({
+      ...item,
+      transition: local(item.transition, `${definition.name}/enter/${item.state}`),
+    })),
+    stateLeaves: definition.stateLeaves?.map((item) => ({
+      ...item,
+      transition: local(item.transition, `${definition.name}/leave/${item.state}`),
+    })),
+  }
 }

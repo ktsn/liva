@@ -5,7 +5,7 @@ export type EditorBinding = Pick<InstanceBinding, 'component' | 'definition' | '
   readonly root: Pick<HTMLElement, 'getAttribute' | 'textContent' | 'getBoundingClientRect'>
   readonly runtime: Pick<
     InstanceBinding['runtime'],
-    'definition' | 'state' | 'animations' | 'replaceDefinition' | 'setState'
+    'definition' | 'state' | 'animations' | 'replaceDefinition' | 'setState' | 'previewLifecycle'
   >
 }
 
@@ -118,7 +118,7 @@ export class EditorController {
     this.notify()
   }
 
-  async preview(state: string, from?: string, general = false) {
+  async preview(state: string, from?: string, general = false, phase?: 'enter' | 'leave') {
     const selected = this.selected
     const inspection = this.inspection
     if (!selected || !inspection || !this.active(selected))
@@ -142,11 +142,17 @@ export class EditorController {
     )
       return
     const definition = general
-      ? { ...reply.definition, directionalTransitions: [] }
+      ? phase
+        ? { ...reply.definition, [phase === 'enter' ? 'stateEnters' : 'stateLeaves']: [] }
+        : { ...reply.definition, directionalTransitions: [] }
       : reply.definition
-    selected.binding.runtime.replaceDefinition(definition, from ?? selected.binding.requestedState)
-    const succeeded =
-      from === undefined
+    selected.binding.runtime.replaceDefinition(
+      definition,
+      phase ? state : (from ?? selected.binding.requestedState),
+    )
+    const succeeded = phase
+      ? selected.binding.runtime.previewLifecycle(phase)
+      : from === undefined
         ? selected.binding.runtime.setState(state)
         : selected.binding.runtime.setState(state, { paused: true })
     this.previewActive = succeeded

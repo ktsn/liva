@@ -336,8 +336,8 @@ simultaneous state layers, scroll/orientation sources, user functions, custom CS
 interpolation, or standalone preview environment. Omitted-state CSS sampling and
 additional source types are unsupported. DOM-derived state values require decisions
 about when to sample computed or animated styles, when to refresh them, and how to
-restore the CSS cascade after removing Liva-owned inline values. The editor edits
-existing transition parameters and frames; let/condition authoring is textual.
+restore the CSS cascade after removing Liva-owned inline values. The editor edits transition and lifecycle parameters and frames, including
+state-specific lifecycle overrides; let/condition authoring is textual.
 
 ## Toggle example
 

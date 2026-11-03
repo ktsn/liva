@@ -632,3 +632,79 @@ it('stops timeline playback when application state supersedes the preview', asyn
     'Application state superseded the preview',
   )
 })
+
+it.each(['enter', 'leave'] as const)(
+  'authors default and state-specific %s tracks for a single-state motion',
+  async (phase) => {
+    const definition = {
+      name: 'single',
+      states: [
+        { name: 'off', targets: [{ name: 'box', properties: [{ name: 'opacity', value: '1' }] }] },
+      ],
+      directionalTransitions: [],
+    }
+    const { controller } = await setupEditor(undefined, definition)
+
+    await click('Motion editor')
+    await input('Editing scope', `${phase}-default`)
+    await click('▸ box')
+
+    expect(button('Play').disabled).toBe(false)
+    expect(host!.querySelector('[aria-label="From state"]')).toBeNull()
+
+    const selectTrack = async () => {
+      host!.querySelector<HTMLButtonElement>('[aria-label="Select box.opacity"]')!.click()
+      await tick()
+    }
+    await selectTrack()
+    await input('Track duration', '200')
+    await click('Apply timing')
+    host!.querySelector<HTMLButtonElement>('[aria-label="box.opacity 0%"]')!.click()
+    await tick()
+
+    expect(host!.textContent).toContain('Captured state / presentation endpoint')
+    expect(
+      [...host!.querySelectorAll('button')].some(
+        (element) => element.textContent === 'Update state value',
+      ),
+    ).toBe(false)
+
+    await input('Keyframe value', '0.2')
+    await click('Create endpoint override')
+    await input('Editing scope', `${phase}-state`)
+    host!.querySelector<HTMLButtonElement>('[aria-label="box.opacity 0%"]')!.click()
+    await tick()
+
+    expect(host!.textContent).toContain('Inherited default keyframe')
+
+    await input('Keyframe value', '0.4')
+    await click('Apply keyframe')
+    await selectTrack()
+    await input('Track duration', '400')
+    await click('Apply timing')
+
+    expect(controller.draft).toContainEqual(
+      expect.objectContaining({
+        path: `single/${phase}/off/target/box/property/opacity`,
+        timing: '@tween: 400ms linear',
+        frames: [{ offset: 0, value: '0.4' }],
+      }),
+    )
+
+    await click('Use default keyframes')
+    await click('Use default timing')
+
+    expect(controller.draft).toContainEqual({
+      op: 'track',
+      path: `single/${phase}/off/target/box/property/opacity`,
+      timing: undefined,
+      frames: undefined,
+    })
+
+    await click('Play')
+    await expect.poll(() => controller.previewActive).toBe(true)
+    await click('End preview')
+
+    expect(controller.previewActive).toBe(false)
+  },
+)

@@ -32,6 +32,7 @@ function binding(label: string) {
       this.definition = next
     }),
     setState: vi.fn<InstanceBinding['runtime']['setState']>().mockReturnValue(true),
+    previewLifecycle: vi.fn<InstanceBinding['runtime']['previewLifecycle']>().mockReturnValue(true),
   }
   const result = {
     root: {
@@ -370,3 +371,31 @@ it('does not apply previews started against an already stale inspection', async 
   expect(controller.previewActive).toBe(false)
   expect(controller.stale).toBe(true)
 })
+
+it.each(['enter', 'leave'] as const)(
+  'selects default or state-specific %s playback and restores on cancellation',
+  async (phase) => {
+    const key = phase === 'enter' ? 'stateEnters' : 'stateLeaves'
+    const lifecycle = { ...definition, [key]: [{ state: 'on', transition: { targets: [] } }] }
+    const { controller, first } = await setup(async (request) => ({
+      ...reply,
+      definition: lifecycle,
+      sequence: request.sequence,
+    }))
+
+    await controller.preview('on', undefined, true, phase)
+
+    expect(first.runtime.replaceDefinition).toHaveBeenLastCalledWith(
+      { ...lifecycle, [key]: [] },
+      'on',
+    )
+    expect(first.runtime.previewLifecycle).toHaveBeenLastCalledWith(phase)
+    expect(first.runtime.setState).not.toHaveBeenCalled()
+
+    await controller.preview('on', undefined, false, phase)
+
+    expect(first.runtime.replaceDefinition).toHaveBeenLastCalledWith(lifecycle, 'on')
+    controller.endPreview()
+    expect(first.runtime.replaceDefinition).toHaveBeenLastCalledWith(definition, 'off')
+  },
+)

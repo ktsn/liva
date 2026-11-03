@@ -72,3 +72,24 @@ Vue-requested state. Failed saves retain the draft. Save acknowledgment requires
 both the current source hash and every mounted shared instance to match; delayed
 HMR reports pending synchronization and preserves an idempotent retry. New edits or
 selection changes during a save are preserved by a separate user-edit revision.
+
+## Lifecycle editing and playback
+
+Lifecycle track paths are `<motion>/enter[/<state>]/target/<target>/property/<property>`
+and the corresponding `leave` paths. The atomic track planner creates missing
+lifecycle containers and replaces shorthand declarations through their block mapping.
+It retains the same comment-preservation and compiler-validation rules as ordinary
+transition edits.
+
+State-specific lifecycle IR already includes default inheritance. Development
+mappings expose a `<block>/timing` marker for authored timing declarations. Together
+with property and frame paths, these markers let the editor reconstruct local
+lifecycle settings without serializing source metadata in production IR. The editor
+resolves inheritance for its draft; the server recompiles the source for playback.
+
+`LivaInstance.previewLifecycle` captures the selected lifecycle with current
+expression values and resolves every mounted target, including repeated targets.
+Paused effects participate in the instance's existing animation ownership and
+cleanup. Enter settles to state CSS at its end; leave holds its last frame. The
+controller restores the committed definition on cancellation and never invokes Vue
+presence completion callbacks or removes DOM elements.

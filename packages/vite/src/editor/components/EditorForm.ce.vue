@@ -4,7 +4,14 @@ import type { Definition, Frame, PropertyTransition, Timing } from '@liva/runtim
 import { sampleSpring } from '@liva/runtime'
 import type { EditorController } from '../controller.ts'
 import type { Edit, Inspection } from '../communication/protocol.ts'
-import { normalizedOffset, timelineTracks, timingText, type TimelineTrack } from '../timeline.ts'
+import {
+  editableDefinition,
+  normalizedOffset,
+  timelineTracks,
+  timingText,
+  type TimelineTrack,
+  type LifecyclePhase,
+} from '../timeline.ts'
 import TimelineRow from './TimelineRow.ce.vue'
 import TimelineInspector from './TimelineInspector.ce.vue'
 
@@ -17,7 +24,9 @@ const props = defineProps<{
   active: boolean
   stale: boolean
 }>()
-const model = shallowRef<Definition>(structuredClone(props.inspection.definition))
+const model = shallowRef<Definition>(
+  editableDefinition(props.inspection.definition, props.inspection.fields),
+)
 const states = model.value.states.map((state) => state.name)
 const from = ref(states[0])
 const to = ref(states[1] ?? states[0])
@@ -30,8 +39,13 @@ const busy = ref(false)
 let frameId = 0
 let timer: ReturnType<typeof setTimeout> | undefined
 let generation = 0
-const general = computed(() => scope.value === 'general')
-const tracks = computed(() => timelineTracks(model.value, from.value, to.value, general.value))
+const phase = computed<LifecyclePhase | undefined>(() =>
+  scope.value.startsWith('enter') ? 'enter' : scope.value.startsWith('leave') ? 'leave' : undefined,
+)
+const general = computed(() => scope.value === 'general' || scope.value.endsWith('-default'))
+const tracks = computed(() =>
+  timelineTracks(model.value, from.value, to.value, general.value, phase.value),
+)
 const duration = computed(() => Math.max(0, ...tracks.value.map((track) => track.duration)))
 const extent = computed(() => Math.max(100, Math.ceil(duration.value / 100) * 100))
 const targets = computed(() => [...new Set(tracks.value.map((track) => track.target))])
@@ -66,7 +80,12 @@ async function prepare() {
   const current = ++generation
   busy.value = true
   try {
-    await props.controller.preview(to.value, from.value, general.value)
+    await props.controller.preview(
+      to.value,
+      phase.value ? undefined : from.value,
+      general.value,
+      phase.value,
+    )
     if (current !== generation || !props.controller.previewActive) return false
     props.controller.seek(time.value)
     return true
@@ -136,20 +155,33 @@ function schedule(edit: Edit, definition: Definition) {
 
 function updateTrack(track: TimelineTrack, patch: Partial<PropertyTransition>) {
   const next = structuredClone(model.value) as MutableDefinition
-  let transition = general.value
-    ? next.generalTransition
-    : next.directionalTransitions.find((item) => item.from === from.value && item.to === to.value)
-        ?.transition
+  const lifecycleStates = phase.value === 'enter' ? 'stateEnters' : 'stateLeaves'
+  let transition = phase.value
+    ? general.value
+      ? next[phase.value]
+      : next[lifecycleStates]?.find((item) => item.state === to.value)?.transition
+    : general.value
+      ? next.generalTransition
+      : next.directionalTransitions.find((item) => item.from === from.value && item.to === to.value)
+          ?.transition
+
   if (!transition) {
     transition = { targets: [] }
-    if (general.value) next.generalTransition = transition
+
+    if (phase.value) {
+      if (general.value) next[phase.value] = transition
+      else (next[lifecycleStates] ??= []).push({ state: to.value, transition })
+    } else if (general.value) next.generalTransition = transition
     else next.directionalTransitions.push({ from: from.value, to: to.value, transition })
   }
+
   let target = transition.targets.find((item) => item.name === track.target)
+
   if (!target) {
     target = { name: track.target, properties: [] }
     transition.targets.push(target)
   }
+
   const property = structuredClone({
     ...track.local,
     name: track.property,
@@ -263,7 +295,8 @@ function stateValue(track: TimelineTrack, value: string) {
 }
 
 function changeDirection() {
-  if (from.value === to.value) to.value = states.find((state) => state !== from.value) ?? from.value
+  if (!phase.value && from.value === to.value)
+    to.value = states.find((state) => state !== from.value) ?? from.value
   endPreview()
   selected.value = undefined
   time.value = 0
@@ -309,21 +342,30 @@ onScopeDispose(() => {
       >Editing<select v-model="scope" aria-label="Editing scope" @change="changeDirection">
         <option value="directional">Directional transition</option>
         <option value="general">Common settings</option>
+        <option value="enter-default">Enter · default</option>
+        <option value="enter-state">Enter · state override</option>
+        <option value="leave-default">Leave · default</option>
+        <option value="leave-state">Leave · state override</option>
       </select></label
     >
-    <label
+    <label v-if="!phase"
       >From<select v-model="from" aria-label="From state" @change="changeDirection">
         <option v-for="state in states" :key="state">{{ state }}</option>
       </select></label
     >
-    <span>→</span>
+    <span v-if="!phase">→</span>
     <label
-      >To<select v-model="to" aria-label="To state" @change="changeDirection">
-        <option v-for="state in states" :key="state" :disabled="state === from">{{ state }}</option>
+      >{{ phase ? 'State' : 'To'
+      }}<select v-model="to" aria-label="To state" @change="changeDirection">
+        <option v-for="state in states" :key="state" :disabled="!phase && state === from">
+          {{ state }}
+        </option>
       </select></label
     >
     <button
-      :disabled="busy || stale || from === to || tracks.some((track) => track.diagnostic)"
+      :disabled="
+        busy || stale || (!phase && from === to) || tracks.some((track) => track.diagnostic)
+      "
       @click="play"
     >
       {{ playing ? 'Pause' : 'Play' }}
@@ -353,7 +395,7 @@ onScopeDispose(() => {
             :max="extent"
             step="1"
             :value="time"
-            :disabled="stale || from === to"
+            :disabled="stale || (!phase && from === to)"
             @input="seek(Number(($event.target as HTMLInputElement).value))"
           />
         </div>

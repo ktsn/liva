@@ -99,13 +99,21 @@ function applyTiming() {
     <h3>{{ track.target }} / {{ track.property }}</h3>
     <p v-if="track.diagnostic" role="alert">{{ track.diagnostic }}</p>
     <template v-if="offset !== undefined">
-      <p v-if="implicit">State {{ offset === 0 ? from : to }} · shared by other transitions</p>
+      <p v-if="implicit">
+        {{
+          track.lifecycle
+            ? 'Captured state / presentation endpoint'
+            : `State ${offset === 0 ? from : to} · shared by other transitions`
+        }}
+      </p>
       <p v-else>
         {{
           pending
             ? 'New keyframe'
             : track.inheritedFrames
-              ? 'Inherited common keyframe'
+              ? track.lifecycle
+                ? 'Inherited default keyframe'
+                : 'Inherited common keyframe'
               : 'Local keyframe'
         }}
       </p>
@@ -143,7 +151,7 @@ function applyTiming() {
         <button v-if="!pending" @click="emit('remove')">Delete keyframe</button>
       </template>
       <template v-else>
-        <button @click="emit('state', value)">Update state value</button>
+        <button v-if="!track.lifecycle" @click="emit('state', value)">Update state value</button>
         <button @click="applyFrame">Create endpoint override</button>
       </template>
     </template>
@@ -187,10 +195,10 @@ function applyTiming() {
     </template>
     <div v-if="!general" class="inheritance">
       <button :disabled="!track.local?.timing" @click="emit('resetTiming')">
-        Use common timing
+        {{ track.lifecycle ? 'Use default timing' : 'Use common timing' }}
       </button>
       <button :disabled="!track.local?.keyframes" @click="emit('resetFrames')">
-        Use common keyframes
+        {{ track.lifecycle ? 'Use default keyframes' : 'Use common keyframes' }}
       </button>
     </div>
   </aside>
