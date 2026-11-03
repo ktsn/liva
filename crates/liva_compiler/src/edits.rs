@@ -217,6 +217,14 @@ fn replace_track(
             "property",
             p,
         ] if is_name(from) && is_name(to) => (*d, format!("transition {from} -> {to}"), *t, *p),
+        [d, phase, "target", t, "property", p] if matches!(*phase, "enter" | "leave") => {
+            (*d, phase.to_string(), *t, *p)
+        }
+        [d, phase, state, "target", t, "property", p]
+            if matches!(*phase, "enter" | "leave") && is_name(state) =>
+        {
+            (*d, format!("{phase} {state}"), *t, *p)
+        }
         _ => return Err("Invalid property track path".into()),
     };
 

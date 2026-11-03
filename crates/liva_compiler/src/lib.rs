@@ -249,6 +249,7 @@ impl Compiler {
                 ranges.clear();
                 names.clear();
             }
+            self.mapping(&format!("{path}/timing"), &declaration, "block");
             family = next_family.into();
             origin = name_range(&declaration);
 

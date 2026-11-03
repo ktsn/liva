@@ -466,3 +466,69 @@ fn missing_frame_easing_is_inserted_inline() {
 
     assert_eq!(result.source, source.replace("40%: 2", "40%: 2 @ ease-in"));
 }
+
+#[test]
+fn lifecycle_tracks_support_creation_shorthand_templates_and_inheritance_reset() {
+    use liva_compiler::edits::FrameEdit;
+
+    let source = "motion panel(distance: number, open: boolean) {\n  state idle { body { opacity: 1 } }\n  state active when open { body { opacity: 0.8 } }\n  transition { @tween: 100ms }\n  enter { @tween: 200ms; body { opacity: 0 } }\n}\n";
+    let track = |path: &str, value: &str| Edit::Track {
+        path: path.into(),
+        timing: Some("@tween: 400ms ease-out".into()),
+        frames: Some(vec![FrameEdit {
+            offset: 0.0,
+            value: value.into(),
+            easing: None,
+        }]),
+    };
+
+    let edited = apply_edits(
+        source,
+        &[
+            track("panel/enter/target/body/property/opacity", "0.2"),
+            track(
+                "panel/enter/active/target/body/property/translate",
+                "${distance}px 0",
+            ),
+            track("panel/leave/target/body/property/opacity", "0.4"),
+            track("panel/leave/active/target/body/property/opacity", "0.6"),
+        ],
+    )
+    .unwrap();
+
+    assert!(edited.source.contains("enter active"));
+    assert!(edited.source.contains("leave active"));
+    assert!(edited.source.contains("${distance}px 0"));
+    assert_eq!(edited.source.matches("opacity {").count(), 3);
+
+    let reset = apply_edits(
+        &edited.source,
+        &[Edit::Track {
+            path: "panel/leave/active/target/body/property/opacity".into(),
+            timing: None,
+            frames: None,
+        }],
+    )
+    .unwrap();
+
+    assert!(!reset.source.contains("0%: 0.6"));
+    assert!(reset.source.contains("0%: 0.4"));
+    assert!(
+        apply_edits(
+            source,
+            &[track(
+                "panel/enter/missing/target/body/property/opacity",
+                "0"
+            )]
+        )
+        .is_err()
+    );
+    assert!(
+        apply_edits(
+            &source.replace("opacity: 0", "opacity: /* keep */ 0"),
+            &[track("panel/enter/target/body/property/opacity", "0.2")]
+        )
+        .unwrap_err()
+        .contains("comments")
+    );
+}
