@@ -56,7 +56,7 @@ function removeItem(id: number) {
 }
 </style>
 
-<liva>
+<liva lang="liva">
 motion swipeItem {
   let movement = drag(target: body)
 
