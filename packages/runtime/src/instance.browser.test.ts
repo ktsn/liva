@@ -663,3 +663,121 @@ it('cancels effects prepared before a later track fails browser validation', () 
   expect(instance.animations).toEqual([])
   expect(errors.at(-1)?.code).toBe('runtime.animation')
 })
+
+it.each(['enter', 'leave'] as const)(
+  'scrubs %s templates on repeated targets and restores the requested state',
+  (phase) => {
+    const def = {
+      name: 'panel',
+      parameters: [{ name: 'opacity', type: 'number' as const }],
+      states: [
+        {
+          name: 'idle',
+          targets: [{ name: 'body', properties: [{ name: 'opacity', value: '1' }] }],
+        },
+      ],
+      directionalTransitions: [],
+      [phase]: {
+        timing: { kind: 'tween' as const, durationMs: 200, easing: 'linear' },
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'opacity',
+                keyframes: [
+                  {
+                    offset: phase === 'enter' ? 0 : 1,
+                    value: '${opacity}',
+                    template: [{ kind: 'reference' as const, path: ['opacity'] }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const { instance, targets, errors } = setup(def, { opacity: 0.2 })
+    const second = document.createElement('div')
+    document.body.append(second)
+    elements.push(second)
+    instance.bind([
+      ['body', targets.get('body')!],
+      ['body', second],
+    ])
+
+    expect(instance.previewLifecycle(phase)).toBe(true)
+    expect(instance.animations).toHaveLength(2)
+
+    for (const animation of instance.animations) animation.currentTime = 100
+
+    for (const element of [targets.get('body')!, second]) {
+      expect(Number(getComputedStyle(element).opacity)).toBeCloseTo(0.6)
+      expect(element.isConnected).toBe(true)
+    }
+
+    instance.replaceDefinition(def, 'idle')
+
+    expect(instance.animations).toHaveLength(0)
+    expect(getComputedStyle(second).opacity).toBe('1')
+    expect(errors).toEqual([])
+
+    instance.dispose()
+    expect(instance.previewLifecycle(phase)).toBe(false)
+  },
+)
+
+it('keeps lifecycle preview preparation atomic on invalid easing and supports spring scrubbing', () => {
+  const def = {
+    name: 'panel',
+    states: [
+      {
+        name: 'off',
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              { name: 'opacity', value: '1' },
+              { name: 'scale', value: '1' },
+            ],
+          },
+        ],
+      },
+    ],
+    directionalTransitions: [],
+    leave: {
+      timing: { kind: 'spring-duration' as const, durationMs: 200, bounce: 0.2 },
+      targets: [
+        {
+          name: 'body',
+          properties: [
+            { name: 'opacity', keyframes: [{ offset: 1, value: '0' }] },
+            {
+              name: 'scale',
+              timing: { kind: 'tween' as const, durationMs: 200, easing: 'invalid' },
+              keyframes: [{ offset: 1, value: '0.5', easing: 'invalid' }],
+            },
+          ],
+        },
+      ],
+    },
+  }
+  const { instance, targets, errors } = setup(def)
+
+  expect(instance.previewLifecycle('leave')).toBe(false)
+  expect(targets.get('body')!.getAnimations()).toHaveLength(0)
+  expect(errors.at(-1)?.code).toBe('runtime.animation')
+
+  const valid = {
+    ...def,
+    leave: {
+      ...def.leave,
+      targets: [{ name: 'body', properties: [def.leave.targets[0].properties[0]] }],
+    },
+  }
+  instance.replaceDefinition(valid)
+
+  expect(instance.previewLifecycle('leave')).toBe(true)
+  expect(instance.animations).toHaveLength(1)
+})

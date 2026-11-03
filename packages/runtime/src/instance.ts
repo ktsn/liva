@@ -351,6 +351,58 @@ export class LivaInstance {
     return this.transitionTo(state, options, this.values)
   }
 
+  /** Prepare scrub-ready lifecycle effects without invoking presence removal callbacks. */
+  previewLifecycle(phase: 'enter' | 'leave'): boolean {
+    if (this.disposed || this.suspended) return false
+
+    const prepared: ActiveTrack[] = []
+
+    try {
+      const work = [...this.targetElements].flatMap(([name, elements]) =>
+        elements.flatMap((element) => this.captureLifecycle(phase, [name], element)),
+      )
+
+      for (const { track, element } of work) {
+        const timing =
+          track.timing.kind === 'tween'
+            ? { durationMs: track.timing.durationMs, easing: 'linear' }
+            : sampleSpring(track.timing)
+        const effect = new KeyframeEffect(
+          element,
+          track.keyframes.map((frame) => ({
+            [waapiProperty(track.property)]: frame.value,
+            offset: frame.offset,
+            easing: frame.easing,
+          })),
+          {
+            duration: timing.durationMs,
+            easing: timing.easing,
+            fill: phase === 'enter' ? 'backwards' : 'both',
+          },
+        )
+        const animation = new Animation(effect, document.timeline)
+
+        prepared.push({ track, element, animation })
+      }
+
+      this.cancel()
+      this.active = prepared
+      this.manuallyPaused = true
+
+      for (const { animation } of prepared) {
+        animation.pause()
+        animation.currentTime = 0
+      }
+
+      return true
+    } catch (error) {
+      for (const { animation } of prepared) animation.cancel()
+
+      this.report({ code: 'runtime.animation', message: String(error), error })
+      return false
+    }
+  }
+
   private transitionTo(
     state: string,
     options: { paused?: boolean },
