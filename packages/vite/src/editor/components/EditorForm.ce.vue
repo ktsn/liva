@@ -547,29 +547,29 @@ onScopeDispose(() => {
           </div>
         </div>
         <template v-for="target in targets" :key="target">
-          <div class="target-row">
-            <button
-              :aria-expanded="expanded.includes(target)"
-              :aria-label="`Toggle ${target} tracks`"
-              @click="
-                expanded = expanded.includes(target)
-                  ? expanded.filter((item) => item !== target)
-                  : [...expanded, target]
-              "
+          <button
+            class="target-row"
+            :aria-expanded="expanded.includes(target)"
+            :aria-label="`Toggle ${target} tracks`"
+            @click="
+              expanded = expanded.includes(target)
+                ? expanded.filter((item) => item !== target)
+                : [...expanded, target]
+            "
+          >
+            <span class="target-name"
+              >{{ expanded.includes(target) ? '▾' : '▸' }} {{ target }}</span
             >
-              {{ expanded.includes(target) ? '▾' : '▸' }} {{ target }}
-            </button>
-            <div class="summary">
+            <span class="summary" aria-hidden="true">
               <span
                 v-for="(mark, index) in tracks
                   .filter((track) => track.target === target)
                   .flatMap((track) => track.frames.map((frame) => frame.offset * track.duration))"
                 :key="index"
                 :style="{ left: `${(mark / extent) * 100}%` }"
-                >◆</span
-              >
-            </div>
-          </div>
+              />
+            </span>
+          </button>
           <template v-if="expanded.includes(target)"
             ><TimelineRow
               v-for="track in tracks.filter((track) => track.target === target)"
@@ -660,7 +660,7 @@ onScopeDispose(() => {
   position: sticky;
   top: 0;
   z-index: 12;
-  height: 50px;
+  height: 36px;
   background: var(--liva-surface-ruler);
   align-items: center;
 }
@@ -696,13 +696,13 @@ onScopeDispose(() => {
   position: relative;
   z-index: 11;
   clip-path: inset(0 0 0 calc(var(--scroll-left) - 24px));
-  height: 50px;
+  height: 36px;
 }
 .ruler-lane::after {
   content: '';
   position: absolute;
   left: var(--playhead);
-  top: 36px;
+  top: 32px;
   bottom: 0;
   width: 1px;
   transform: translateX(-50%);
@@ -711,7 +711,7 @@ onScopeDispose(() => {
 }
 .playhead-overlay {
   position: absolute;
-  top: 50px;
+  top: 36px;
   bottom: 0;
   left: var(--timeline-label-width);
   right: 0;
@@ -731,13 +731,13 @@ onScopeDispose(() => {
 .ruler input {
   appearance: none;
   position: absolute;
-  top: 20px;
+  top: 0;
   left: 0;
   width: 100%;
   opacity: 0;
   z-index: 2;
   padding: 0;
-  height: 16px;
+  height: 100%;
   margin: 0;
   border: 0;
   border-radius: 0;
@@ -762,7 +762,7 @@ onScopeDispose(() => {
 .playhead-marker {
   position: absolute;
   left: var(--playhead);
-  top: 20px;
+  top: 16px;
   width: 14px;
   height: 16px;
   transform: translateX(-50%);
@@ -775,7 +775,7 @@ onScopeDispose(() => {
 }
 .ticks {
   position: relative;
-  height: 20px;
+  height: 16px;
   font-size: 10px;
 }
 .ticks span {
@@ -789,11 +789,19 @@ onScopeDispose(() => {
   background-size: var(--grid-step) 100%;
 }
 .target-row {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  text-align: left;
   height: 36px;
   background: var(--liva-surface-target);
   border-bottom: 1px solid var(--liva-border-row);
 }
-.target-row button {
+.target-name {
+  display: flex;
+  align-items: center;
+  padding: 7px 10px;
   position: sticky;
   left: 0;
   z-index: 7;
@@ -808,6 +816,9 @@ onScopeDispose(() => {
   z-index: 8;
   clip-path: inset(0 0 0 calc(var(--scroll-left) - 10px));
   pointer-events: none;
+}
+.summary span::before {
+  content: '◆';
 }
 .summary span {
   position: absolute;
