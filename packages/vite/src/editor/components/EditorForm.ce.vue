@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onScopeDispose, ref, shallowRef } from 'vue'
+import { computed, nextTick, onMounted, onScopeDispose, ref, shallowRef, useTemplateRef } from 'vue'
 import type { Definition, Frame, PropertyTransition, Timing } from '@liva/runtime'
 import { sampleSpring } from '@liva/runtime'
 import type { EditorController } from '../controller.ts'
@@ -47,7 +47,63 @@ const tracks = computed(() =>
   timelineTracks(model.value, from.value, to.value, general.value, phase.value),
 )
 const duration = computed(() => Math.max(0, ...tracks.value.map((track) => track.duration)))
-const extent = computed(() => Math.max(100, Math.ceil(duration.value / 100) * 100))
+const timelineLabelWidth = 190
+
+const zoom = ref(1)
+const zoomTail = ref(0)
+const baseExtent = computed(() =>
+  Math.max(100, Math.ceil(duration.value / Math.min(1, zoom.value) / 100) * 100),
+)
+const extent = computed(() => baseExtent.value + zoomTail.value)
+
+const horizontalScroll = ref(0)
+
+const pan = ref<{ x: number; scrollLeft: number }>()
+
+const timeline = useTemplateRef<HTMLElement>('timeline')
+const rulerLane = useTemplateRef<HTMLElement>('rulerLane')
+
+const viewportWidth = ref(1000)
+
+const tickInterval = computed(() => {
+  const laneWidth =
+    (Math.max(1, viewportWidth.value - timelineLabelWidth) *
+      Math.max(1, zoom.value) *
+      extent.value) /
+    baseExtent.value
+  const ideal = (extent.value * 80) / laneWidth
+
+  const magnitude = 10 ** Math.floor(Math.log10(ideal))
+  const normalized = ideal / magnitude
+
+  const step =
+    normalized < Math.sqrt(2)
+      ? 1
+      : normalized < Math.sqrt(10)
+        ? 2
+        : normalized < Math.sqrt(50)
+          ? 5
+          : 10
+
+  return step * magnitude
+})
+
+const ticks = computed(() =>
+  Array.from({ length: Math.floor(extent.value / tickInterval.value) + 1 }, (_, index) =>
+    Number((index * tickInterval.value).toPrecision(12)),
+  ),
+)
+
+let timelineObserver: ResizeObserver | undefined
+
+onMounted(() => {
+  timelineObserver = new ResizeObserver(([entry]) => {
+    viewportWidth.value = entry.contentRect.width
+  })
+
+  timelineObserver.observe(timeline.value!)
+})
+
 const targets = computed(() => [...new Set(tracks.value.map((track) => track.target))])
 const marks = computed(() =>
   tracks.value.flatMap((track) => track.frames.map((frame) => frame.offset * track.duration)),
@@ -58,6 +114,48 @@ const selection = computed(() =>
       track.target === selected.value?.target && track.property === selected.value?.property,
   ),
 )
+
+async function changeZoom(value: number) {
+  const scroller = timeline.value!
+  const lane = rulerLane.value!
+  const leftTime = (scroller.scrollLeft / lane.getBoundingClientRect().width) * extent.value
+
+  zoom.value = value
+
+  const laneWidth = Math.max(250, scroller.clientWidth - timelineLabelWidth) * Math.max(1, value)
+  const scrollLeft = (leftTime / baseExtent.value) * laneWidth
+
+  zoomTail.value = Math.max(
+    0,
+    Math.ceil(
+      (leftTime +
+        ((scroller.clientWidth - timelineLabelWidth) / laneWidth) * baseExtent.value -
+        baseExtent.value) /
+        100,
+    ) * 100,
+  )
+
+  await nextTick()
+
+  scroller.scrollLeft = scrollLeft
+}
+
+function beginPan(event: PointerEvent) {
+  if (event.button !== 0 || (event.target as HTMLElement).closest('button, input, select')) return
+
+  pan.value = { x: event.clientX, scrollLeft: timeline.value!.scrollLeft }
+}
+
+function movePan(event: PointerEvent) {
+  if (!pan.value || Math.abs(event.clientX - pan.value.x) < 3) return
+
+  timeline.value!.setPointerCapture(event.pointerId)
+  timeline.value!.scrollLeft = pan.value.scrollLeft + pan.value.x - event.clientX
+}
+
+function endPan() {
+  pan.value = undefined
+}
 
 function report(error: unknown) {
   props.controller.report(error)
@@ -329,6 +427,7 @@ const unsubscribe = props.controller.subscribe(() => {
 })
 
 onScopeDispose(() => {
+  timelineObserver?.disconnect()
   unsubscribe()
   stop()
   clearTimeout(timer)
@@ -372,77 +471,121 @@ onScopeDispose(() => {
     </button>
     <button :disabled="stale" @click="seek(0)">To start</button>
     <button @click="endPreview">End preview</button>
-    <span class="readout">{{ Math.round(time) }} / {{ Math.round(duration) }} ms</span>
+    <span class="readout" role="timer" aria-label="Playback time"
+      >{{ Math.round(time) }} / {{ Math.round(duration) }} ms</span
+    >
+    <div class="zoom-controls" role="group" aria-label="Timeline zoom">
+      <button aria-label="Zoom out timeline" @click="changeZoom(zoom / 1.25)">−</button>
+      <input
+        class="zoom-slider"
+        type="range"
+        aria-label="Timeline zoom level"
+        :min="Math.min(-4, Math.log2(zoom))"
+        :max="Math.max(4, Math.log2(zoom))"
+        step="0.01"
+        :value="Math.log2(zoom)"
+        @input="changeZoom(2 ** Number(($event.target as HTMLInputElement).value))"
+      />
+      <button aria-label="Zoom in timeline" @click="changeZoom(zoom * 1.25)">+</button>
+    </div>
     <div class="actions">
       <button @click="discard">Discard changes</button
       ><button :disabled="stale || !controller.draft.length" @click="save">Save to source</button>
     </div>
   </div>
   <div class="workspace">
-    <div class="timeline">
-      <div class="ruler">
-        <span>Targets / properties</span>
-        <div>
-          <div class="ticks">
-            <span v-for="index in 11" :key="index">{{
-              Math.round(((index - 1) * extent) / 10)
-            }}</span>
+    <div
+      ref="timeline"
+      role="region"
+      aria-label="Animation timeline"
+      :class="{ panning: pan }"
+      @pointerdown="beginPan"
+      @pointermove="movePan"
+      @pointerup="endPan"
+      @pointercancel="endPan"
+      @pointerleave="endPan"
+      @lostpointercapture="endPan"
+      @scroll="horizontalScroll = ($event.target as HTMLElement).scrollLeft"
+      class="timeline"
+      :style="{
+        '--timeline-label-width': `${timelineLabelWidth}px`,
+        '--scroll-left': `${horizontalScroll}px`,
+        '--playhead': `${(time / extent) * 100}%`,
+        '--grid-step': `${(tickInterval / extent) * 100}%`,
+      }"
+    >
+      <div
+        class="timeline-content"
+        data-testid="timeline-content"
+        :style="{
+          width: `calc(var(--timeline-label-width) + (100% - var(--timeline-label-width)) * ${(Math.max(1, zoom) * extent) / baseExtent})`,
+        }"
+      >
+        <div class="ruler">
+          <span>Targets / properties</span>
+          <div ref="rulerLane" class="ruler-lane" data-testid="timeline-ruler-lane">
+            <div class="ticks">
+              <span
+                data-testid="timeline-tick"
+                v-for="tick in ticks"
+                :key="tick"
+                :style="{ left: `${(tick / extent) * 100}%` }"
+                >{{ tick }}</span
+              >
+            </div>
+            <span class="playhead-marker" aria-hidden="true" />
+            <input
+              aria-label="Playhead"
+              type="range"
+              min="0"
+              :max="extent"
+              step="1"
+              :value="time"
+              :disabled="stale || (!phase && from === to)"
+              @input="seek(Number(($event.target as HTMLInputElement).value))"
+            />
           </div>
-          <input
-            aria-label="Playhead"
-            type="range"
-            min="0"
-            :max="extent"
-            step="1"
-            :value="time"
-            :disabled="stale || (!phase && from === to)"
-            @input="seek(Number(($event.target as HTMLInputElement).value))"
-          />
         </div>
-      </div>
-      <template v-for="target in targets" :key="target">
-        <div class="target-row">
-          <button
-            :aria-expanded="expanded.includes(target)"
-            :aria-label="`Toggle ${target} tracks`"
-            @click="
-              expanded = expanded.includes(target)
-                ? expanded.filter((item) => item !== target)
-                : [...expanded, target]
-            "
-          >
-            {{ expanded.includes(target) ? '▾' : '▸' }} {{ target }}
-          </button>
-          <div class="summary">
-            <span
-              v-for="(mark, index) in tracks
-                .filter((track) => track.target === target)
-                .flatMap((track) => track.frames.map((frame) => frame.offset * track.duration))"
-              :key="index"
-              :style="{ left: `${(mark / extent) * 100}%` }"
-              >◆</span
+        <template v-for="target in targets" :key="target">
+          <div class="target-row">
+            <button
+              :aria-expanded="expanded.includes(target)"
+              :aria-label="`Toggle ${target} tracks`"
+              @click="
+                expanded = expanded.includes(target)
+                  ? expanded.filter((item) => item !== target)
+                  : [...expanded, target]
+              "
             >
+              {{ expanded.includes(target) ? '▾' : '▸' }} {{ target }}
+            </button>
+            <div class="summary">
+              <span
+                v-for="(mark, index) in tracks
+                  .filter((track) => track.target === target)
+                  .flatMap((track) => track.frames.map((frame) => frame.offset * track.duration))"
+                :key="index"
+                :style="{ left: `${(mark / extent) * 100}%` }"
+                >◆</span
+              >
+            </div>
           </div>
-        </div>
-        <template v-if="expanded.includes(target)"
-          ><TimelineRow
-            v-for="track in tracks.filter((track) => track.target === target)"
-            :key="track.path"
-            :track="track"
-            :extent="extent"
-            :time="time"
-            :marks="marks"
-            :selected="selection === track ? selected?.offset : undefined"
-            @select="choose(track, $event)"
-            @add="add(track, $event)"
-            @move="(old, offset) => move(track, old, offset)"
-            @duration="resize(track, $event)"
-        /></template>
-      </template>
-      <p class="hint">
-        Double-click a property lane to add a keyframe. Drag keys or duration handles. Hold Alt to
-        disable snapping.
-      </p>
+          <template v-if="expanded.includes(target)"
+            ><TimelineRow
+              v-for="track in tracks.filter((track) => track.target === target)"
+              :key="track.path"
+              :track="track"
+              :extent="extent"
+              :marks="marks"
+              :selected="selection === track ? selected?.offset : undefined"
+              @select="choose(track, $event)"
+              @add="add(track, $event)"
+              @move="(old, offset) => move(track, old, offset)"
+              @duration="resize(track, $event)"
+          /></template>
+        </template>
+        <div class="playhead-overlay" aria-hidden="true"><span /></div>
+      </div>
     </div>
     <TimelineInspector
       v-if="selection"
@@ -472,7 +615,7 @@ onScopeDispose(() => {
   gap: 8px;
   align-items: center;
   padding: 8px 14px;
-  border-bottom: 1px solid #ccd9d1;
+  border-bottom: 1px solid var(--liva-border-panel);
 }
 .toolbar label {
   display: flex;
@@ -500,50 +643,170 @@ onScopeDispose(() => {
 }
 .timeline {
   overflow: auto;
-  padding: 0 12px 20px;
+  padding: 0 0 20px;
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
+}
+.timeline.panning {
+  cursor: grabbing;
 }
 .ruler,
 .target-row {
   display: grid;
-  grid-template-columns: 190px minmax(250px, 1fr);
+  grid-template-columns: var(--timeline-label-width) minmax(250px, 1fr);
 }
 .ruler {
   position: sticky;
   top: 0;
-  z-index: 8;
+  z-index: 12;
   height: 50px;
-  background: #f1f5f0;
+  background: var(--liva-surface-ruler);
   align-items: center;
 }
-.ruler > div {
-  margin-right: 18px;
+.timeline-content {
+  position: relative;
+  overflow: clip;
+  min-width: 440px;
+}
+.ruler > span {
+  padding-left: 10px;
+  position: sticky;
+  left: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  background: var(--liva-surface-ruler);
+  z-index: 10;
+}
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.zoom-slider {
+  width: 120px;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--liva-accent);
+  cursor: pointer;
+}
+.ruler-lane {
+  position: relative;
+  z-index: 11;
+  clip-path: inset(0 0 0 calc(var(--scroll-left) - 24px));
+  height: 50px;
+}
+.ruler-lane::after {
+  content: '';
+  position: absolute;
+  left: var(--playhead);
+  top: 36px;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--liva-playhead);
+  pointer-events: none;
+}
+.playhead-overlay {
+  position: absolute;
+  top: 50px;
+  bottom: 0;
+  left: var(--timeline-label-width);
+  right: 0;
+  pointer-events: none;
+  z-index: 9;
+  clip-path: inset(0 0 0 calc(var(--scroll-left) - 1px));
+}
+.playhead-overlay span {
+  position: absolute;
+  left: var(--playhead);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--liva-playhead);
 }
 .ruler input {
+  appearance: none;
+  position: absolute;
+  top: 20px;
+  left: 0;
+  width: 100%;
+  opacity: 0;
+  z-index: 2;
   padding: 0;
   height: 16px;
   margin: 0;
-  accent-color: #bd6540;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: ew-resize;
+}
+.ruler input::-webkit-slider-thumb {
+  appearance: none;
+  width: 0;
+  height: 16px;
+  background: var(--liva-playhead);
+  clip-path: polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%);
+}
+.ruler input::-moz-range-thumb {
+  width: 0;
+  height: 16px;
+  border: 0;
+  border-radius: 0;
+  background: var(--liva-playhead);
+  clip-path: polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%);
+}
+.playhead-marker {
+  position: absolute;
+  left: var(--playhead);
+  top: 20px;
+  width: 14px;
+  height: 16px;
+  transform: translateX(-50%);
+  background: var(--liva-playhead);
+  clip-path: polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%);
+  pointer-events: none;
+}
+.ruler-lane:focus-within .playhead-marker {
+  background: var(--liva-playhead-focus);
 }
 .ticks {
-  display: flex;
-  justify-content: space-between;
+  position: relative;
+  height: 20px;
   font-size: 10px;
+}
+.ticks span {
+  position: absolute;
+  transform: translateX(-50%);
+  background: var(--liva-surface-ruler);
+}
+.ruler-lane,
+.summary {
+  background-image: linear-gradient(to right, var(--liva-grid) 1px, transparent 1px);
+  background-size: var(--grid-step) 100%;
 }
 .target-row {
   height: 36px;
-  background: #e9f0e9;
-  border-bottom: 1px solid #d4e0d7;
+  background: var(--liva-surface-target);
+  border-bottom: 1px solid var(--liva-border-row);
 }
 .target-row button {
+  position: sticky;
+  left: 0;
+  z-index: 7;
   text-align: left;
   font-weight: 600;
   border: 0;
   border-radius: 0;
-  background: transparent;
+  background: var(--liva-surface-target);
 }
 .summary {
   position: relative;
-  margin-right: 18px;
+  z-index: 8;
+  clip-path: inset(0 0 0 calc(var(--scroll-left) - 10px));
   pointer-events: none;
 }
 .summary span {
@@ -551,16 +814,15 @@ onScopeDispose(() => {
   top: 10px;
   transform: translateX(-50%);
   font-size: 10px;
-  color: #839a8b;
+  color: var(--liva-keyframe-summary);
 }
-.hint,
 .empty {
-  color: #77897d;
+  color: var(--liva-text-muted);
   font-size: 11px;
   padding: 14px;
 }
 .empty {
-  border-left: 1px solid #ccd9d1;
+  border-left: 1px solid var(--liva-border-panel);
 }
 @media (max-width: 760px) {
   .workspace {

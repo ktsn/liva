@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onScopeDispose, ref, shallowRef } from 'vue'
+import { nextTick, onMounted, onScopeDispose, ref, shallowRef, useTemplateRef } from 'vue'
 import type { EditorController } from '../controller.ts'
 import EditorForm from './EditorForm.ce.vue'
 
@@ -8,7 +8,7 @@ defineOptions({ inheritAttrs: false })
 const { controller } = defineProps<{ controller: EditorController }>()
 const open = ref(false)
 const inspectionVersion = ref(0)
-const panel = ref<HTMLElement>()
+const panel = useTemplateRef<HTMLElement>('panel')
 const panelHeight = ref(0)
 let observer: ResizeObserver | undefined
 
@@ -100,21 +100,19 @@ onScopeDispose(() => {
   <div class="editor">
     <section ref="panel" v-show="open" class="panel" aria-label="Liva motion editor">
       <div class="top">
-        <h2>Motion editor</h2>
+        <select
+          class="instance"
+          :value="state.selectedId"
+          aria-label="Preview instance"
+          @change="select(($event.target as HTMLSelectElement).value)"
+        >
+          <option value="">Choose an instance…</option>
+          <option v-for="entry in state.entries" :key="entry.id" :value="entry.id">
+            {{ entry.label }}
+          </option>
+        </select>
         <button @click="toggle">Close</button>
       </div>
-
-      <select
-        class="instance"
-        :value="state.selectedId"
-        aria-label="Preview instance"
-        @change="select(($event.target as HTMLSelectElement).value)"
-      >
-        <option value="">Choose an instance…</option>
-        <option v-for="entry in state.entries" :key="entry.id" :value="entry.id">
-          {{ entry.label }}
-        </option>
-      </select>
       <EditorForm
         v-if="state.inspection"
         :key="inspectionVersion"
@@ -123,7 +121,6 @@ onScopeDispose(() => {
         :active="state.active"
         :stale="state.stale"
       />
-      <div class="status" role="status">{{ state.message }}</div>
     </section>
     <button v-if="!open" class="launcher" @click="toggle">Motion editor</button>
   </div>
@@ -144,26 +141,25 @@ onScopeDispose(() => {
 }
 
 .instance {
-  width: min(450px, 90vw);
-  margin: 0 14px 8px;
+  width: min(450px, 70vw);
 }
 .launcher {
   margin: 16px;
   float: right;
-  background: #244e3a;
-  color: white;
+  background: var(--liva-accent);
+  color: var(--liva-text-invert);
   border: 0;
   border-radius: 30px;
   padding: 12px 20px;
-  box-shadow: 0 4px 24px #0002;
+  box-shadow: 0 4px 24px var(--liva-shadow-launcher);
 }
 .panel {
   width: 100%;
   max-height: 82vh;
-  background: #fffefa;
-  border: 1px solid #cbd6c7;
+  background: var(--liva-surface-panel);
+  border: 1px solid var(--liva-border-control);
   border-radius: 10px 10px 0 0;
-  box-shadow: 0 12px 60px #152c3030;
+  box-shadow: 0 12px 60px var(--liva-shadow-panel);
   overflow: auto;
   padding: 0;
 }
@@ -173,21 +169,5 @@ onScopeDispose(() => {
   gap: 8px;
   align-items: center;
   justify-content: space-between;
-}
-.status {
-  white-space: pre-wrap;
-  background: #edf3e8;
-  padding: 10px;
-  border-radius: 6px;
-  margin-top: 0;
-  font-size: 11px;
-}
-h2 {
-  font-size: 16px;
-  margin: 0;
-}
-p {
-  margin: 8px 0;
-  color: #627568;
 }
 </style>

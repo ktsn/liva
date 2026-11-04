@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, useTemplateRef } from 'vue'
 import type { TimelineTrack } from '../timeline.ts'
 import { normalizedOffset, snapTime } from '../timeline.ts'
 
 const props = defineProps<{
   track: TimelineTrack
   extent: number
-  time: number
   selected?: number
   marks: number[]
 }>()
@@ -16,7 +15,7 @@ const emit = defineEmits<{
   move: [from: number, to: number]
   duration: [duration: number]
 }>()
-const lane = ref<HTMLElement>()
+const lane = useTemplateRef<HTMLElement>('lane')
 const drag = ref<{ kind: 'frame' | 'duration'; offset: number; start: number; time: number }>()
 const width = computed(
   () =>
@@ -119,7 +118,6 @@ function add(event: MouseEvent) {
         @pointerup="finish"
         @pointercancel="drag = undefined"
       />
-      <span class="playhead" :style="{ left: `${(time / extent) * 100}%` }" />
     </div>
   </div>
 </template>
@@ -127,40 +125,39 @@ function add(event: MouseEvent) {
 <style scoped>
 .row {
   display: grid;
-  grid-template-columns: 190px minmax(250px, 1fr);
+  grid-template-columns: var(--timeline-label-width) minmax(250px, 1fr);
   height: 38px;
-  border-bottom: 1px solid #e2e8e4;
+  border-bottom: 1px solid var(--liva-border-row);
 }
 .name {
+  position: sticky;
+  left: 0;
+  z-index: 7;
   text-align: left;
   padding-left: 30px;
   border: 0;
   border-radius: 0;
-  background: #f5f7f4;
+  background: var(--liva-surface-property);
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .lane {
   position: relative;
-  margin-right: 18px;
-  background: repeating-linear-gradient(
-    90deg,
-    transparent 0,
-    transparent calc(10% - 1px),
-    #e2e8e4 calc(10% - 1px),
-    #e2e8e4 10%
-  );
+  z-index: 8;
+  clip-path: inset(-10px 0 -1px calc(var(--scroll-left) - 10px));
+  background-image: linear-gradient(to right, var(--liva-grid) 1px, transparent 1px);
+  background-size: var(--grid-step) 100%;
   touch-action: none;
 }
 .band {
   position: absolute;
   top: 10px;
   height: 18px;
-  background: #bed7cb;
+  background: var(--liva-track-tween);
   min-width: 1px;
 }
 .band.spring {
-  background: #d7cfeb;
+  background: var(--liva-track-spring);
 }
 .resize {
   position: absolute;
@@ -171,7 +168,7 @@ function add(event: MouseEvent) {
   padding: 0;
   border: 0;
   border-radius: 0;
-  background: #729887;
+  background: var(--liva-duration-handle);
   cursor: ew-resize;
   z-index: 3;
 }
@@ -181,32 +178,23 @@ function add(event: MouseEvent) {
   width: 12px;
   height: 12px;
   padding: 0;
-  border: 2px solid #326653;
+  border: 2px solid var(--liva-accent);
   border-radius: 1px;
-  background: #326653;
+  background: var(--liva-accent);
   transform: translateX(-50%) rotate(45deg);
   z-index: 4;
   cursor: ew-resize;
   touch-action: none;
 }
 .key.implicit {
-  background: #fff;
+  background: var(--liva-surface-input);
 }
 .key.inherited {
-  border-color: #81729d;
+  border-color: var(--liva-keyframe-inherited);
 }
 .key.selected {
-  outline: 2px solid #d98d3a;
+  outline: 2px solid var(--liva-keyframe-selected);
   outline-offset: 3px;
   z-index: 5;
-}
-.playhead {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: #bd6540;
-  pointer-events: none;
-  z-index: 6;
 }
 </style>

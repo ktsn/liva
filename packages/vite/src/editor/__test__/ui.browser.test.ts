@@ -372,7 +372,9 @@ it('plays to completion, restarts at the end and saves synchronized edits', asyn
   await click('Motion editor')
   await click('Play')
 
-  await expect.poll(() => host!.querySelector('.readout')!.textContent).not.toMatch(/^0 /)
+  await expect
+    .poll(() => host!.querySelector('[role="timer"][aria-label="Playback time"]')!.textContent)
+    .not.toMatch(/^0 /)
   await expect.poll(() => button('Play').disabled, { timeout: 5000 }).toBe(false)
 
   await click('Play')
@@ -628,9 +630,7 @@ it('stops timeline playback when application state supersedes the preview', asyn
   expect(button('Play')).toBeDefined()
   expect(controller.previewActive).toBe(false)
   expect(runtime!.state).toBe('on')
-  expect(host!.querySelector('[role="status"]')!.textContent).toContain(
-    'Application state superseded the preview',
-  )
+  expect(controller.message).toContain('Application state superseded the preview')
 })
 
 it.each(['enter', 'leave'] as const)(
@@ -708,3 +708,110 @@ it.each(['enter', 'leave'] as const)(
     expect(controller.previewActive).toBe(false)
   },
 )
+
+it('adapts timeline ticks to zoom while preserving the playhead', async () => {
+  await setupEditor()
+  await click('Motion editor')
+  await input('Playhead', '150')
+
+  const content = host!.querySelector<HTMLElement>('[data-testid="timeline-content"]')!
+  const initialWidth = content.style.width
+  const labels = () =>
+    [...host!.querySelectorAll('[data-testid="timeline-tick"]')].map((element) =>
+      Number(element.textContent),
+    )
+  const playhead = host!.querySelector<HTMLInputElement>('[aria-label="Playhead"]')!
+  const initialExtent = Number(playhead.max)
+
+  expect(labels().every((value, index) => value === index * labels()[1])).toBe(true)
+
+  await click('+')
+
+  expect(content.style.width).not.toBe(initialWidth)
+  expect(playhead.value).toBe('150')
+  expect(Number(playhead.max)).toBe(initialExtent)
+
+  await click('−')
+  await click('−')
+
+  expect(Number(playhead.max)).toBeGreaterThan(initialExtent)
+  expect(labels().every((value, index) => value === index * labels()[1])).toBe(true)
+  expect(playhead.value).toBe('150')
+
+  await click('+')
+
+  expect(content.style.width).toBe(initialWidth)
+  expect(Number(playhead.max)).toBe(initialExtent)
+
+  const initialStep = labels()[1]
+
+  for (let index = 0; index < 6; index++) {
+    await click('−')
+  }
+
+  expect(labels()[1]).toBeGreaterThan(initialStep)
+  expect([1, 2, 5]).toContain(labels()[1] / 10 ** Math.floor(Math.log10(labels()[1])))
+  expect(playhead.value).toBe('150')
+  expect(host!.querySelector('[aria-label="Reset timeline zoom"]')).toBeNull()
+})
+
+it('scrubs zoom with the slider and keeps it synchronized with the zoom buttons', async () => {
+  await setupEditor()
+  await click('Motion editor')
+  await input('Playhead', '150')
+
+  const slider = host!.querySelector<HTMLInputElement>('[aria-label="Timeline zoom level"]')!
+  const playhead = host!.querySelector<HTMLInputElement>('[aria-label="Playhead"]')!
+  const content = host!.querySelector<HTMLElement>('[data-testid="timeline-content"]')!
+  const initialWidth = content.style.width
+  const initialExtent = Number(playhead.max)
+
+  await input('Timeline zoom level', '2')
+
+  expect(content.style.width).not.toBe(initialWidth)
+  expect(Number(playhead.max)).toBe(initialExtent)
+  expect(playhead.value).toBe('150')
+
+  await click('−')
+
+  expect(Number(slider.value)).toBeLessThan(2)
+
+  await click('+')
+
+  expect(Number(slider.value)).toBeCloseTo(2)
+
+  await input('Timeline zoom level', '-2')
+
+  expect(Number(playhead.max)).toBeGreaterThan(initialExtent)
+  expect(playhead.value).toBe('150')
+})
+
+it('keeps the leftmost visible time anchored when zooming in and out', async () => {
+  await setupEditor()
+  await click('Motion editor')
+  await input('Timeline zoom level', '2')
+
+  const scroller = host!.querySelector<HTMLElement>(
+    '[role="region"][aria-label="Animation timeline"]',
+  )!
+  const lane = host!.querySelector<HTMLElement>('[data-testid="timeline-ruler-lane"]')!
+  const playhead = host!.querySelector<HTMLInputElement>('[aria-label="Playhead"]')!
+  const leftTime = () =>
+    (scroller.scrollLeft / lane.getBoundingClientRect().width) * Number(playhead.max)
+
+  scroller.style.width = '800px'
+  scroller.style.overflow = 'auto'
+  lane.parentElement!.style.cssText =
+    'display: grid; grid-template-columns: var(--timeline-label-width) 1fr'
+  scroller.scrollLeft = 200
+
+  const anchor = leftTime()
+
+  expect(anchor).toBeGreaterThan(0)
+
+  for (const level of ['3', '1', '-1']) {
+    await input('Timeline zoom level', level)
+
+    expect(Math.abs(leftTime() - anchor)).toBeLessThan(2)
+  }
+})
