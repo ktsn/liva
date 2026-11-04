@@ -208,8 +208,8 @@ function applyTiming() {
 .inspector {
   padding: 14px;
   overflow: auto;
-  border-left: 1px solid #ccd9d1;
-  background: #fafbf8;
+  border-left: 1px solid var(--liva-border-panel);
+  background: var(--liva-surface-inspector);
 }
 h3 {
   font-size: 12px;
@@ -217,14 +217,14 @@ h3 {
   overflow-wrap: anywhere;
 }
 p {
-  color: #697c70;
+  color: var(--liva-text-muted);
   font-size: 11px;
 }
 button {
   margin: 8px 5px 0 0;
 }
 .inheritance {
-  border-top: 1px solid #dce4de;
+  border-top: 1px solid var(--liva-border-panel);
   margin-top: 14px;
   padding-top: 6px;
 }

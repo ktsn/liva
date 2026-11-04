@@ -1,7 +1,40 @@
 :host {
+  --liva-text: #244238;
+  --liva-text-muted: #627568;
+  --liva-text-invert: #fff;
+
+  --liva-surface-panel: #fffefa;
+  --liva-surface-input: #fff;
+  --liva-surface-button: #f5f8f0;
+  --liva-surface-button-hover: #e5eddf;
+  --liva-surface-inspector: #fafbf8;
+  --liva-surface-ruler: #f1f5f0;
+  --liva-surface-target: #e9f0e9;
+  --liva-surface-property: #f5f7f4;
+
+  --liva-border-control: #cbd6c7;
+  --liva-border-button: #bacbbb;
+  --liva-border-panel: #ccd9d1;
+  --liva-border-row: #e2e8e4;
+  --liva-grid: #d4e0d7;
+
+  --liva-accent: #326653;
+  --liva-focus: #b87043;
+  --liva-playhead: #bd6540;
+  --liva-playhead-focus: #934626;
+  --liva-keyframe-summary: #839a8b;
+  --liva-keyframe-inherited: #81729d;
+  --liva-keyframe-selected: #d98d3a;
+  --liva-track-tween: #bed7cb;
+  --liva-track-spring: #d7cfeb;
+  --liva-duration-handle: #729887;
+
+  --liva-shadow-launcher: #0002;
+  --liva-shadow-panel: #152c3030;
+
   display: block;
   font: 12px/1.5 system-ui;
-  color: #244238;
+  color: var(--liva-text);
 }
 * {
   box-sizing: border-box;
@@ -14,28 +47,28 @@ textarea {
 }
 button {
   cursor: pointer;
-  border: 1px solid #bacbbb;
+  border: 1px solid var(--liva-border-button);
   border-radius: 6px;
   padding: 7px 10px;
-  background: #f5f8f0;
-  color: #244238;
+  background: var(--liva-surface-button);
+  color: var(--liva-text);
 }
 button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 button:hover {
-  background: #e5eddf;
+  background: var(--liva-surface-button-hover);
 }
 input,
 select,
 textarea {
   width: 100%;
-  border: 1px solid #cbd6c7;
+  border: 1px solid var(--liva-border-control);
   border-radius: 5px;
-  background: #fff;
+  background: var(--liva-surface-input);
   padding: 7px;
-  color: #244238;
+  color: var(--liva-text);
 }
 textarea {
   min-height: 65px;
@@ -45,21 +78,12 @@ label {
   display: block;
   margin: 10px 0 4px;
   font-size: 11px;
-  color: #627568;
-}
-details {
-  border-top: 1px solid #e2e8dc;
-  margin-top: 12px;
-  padding-top: 10px;
-}
-summary {
-  cursor: pointer;
-  font-weight: 600;
+  color: var(--liva-text-muted);
 }
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
-  outline: 2px solid #b87043;
+  outline: 2px solid var(--liva-focus);
   outline-offset: 2px;
 }
