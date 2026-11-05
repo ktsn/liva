@@ -1,27 +1,28 @@
 motion panel(open: boolean, distance: number) {
-  state closed {
-    content { opacity: 1; scale: 0.9; translate: 0px 0 }
+  layer base {
+    content { opacity: 1; scale: 0.9; translate: 0px 0; border-radius: 0px }
     badge { opacity: 1 }
   }
-  state opened when open {
-    content { scale: 1 }
+
+  layer opened when open {
+    content { scale: 1; border-radius: 20px }
   }
-  transition { @tween: 100ms }
+
   enter {
-    @tween: 250ms ease-out
-    content { opacity: 0; scale { 0%: 0.5; 50%: 1.1 } }
+    content @tween(duration: 2000, easing: linear) {
+      opacity: 0
+      scale: 0.8
+      translate: ${distance}px 0
+    }
+    badge @tween(duration: 2000, easing: linear) { opacity: 0 }
   }
-  enter opened {
-    @tween: 300ms ease-out
-    content { scale: 0.8; translate: ${distance}px 0 }
-    badge { opacity: 0 }
-  }
+
   leave {
-    @tween: 200ms ease-in
-    content { opacity: 0 }
-  }
-  leave opened {
-    content { scale: 1.2; translate: ${distance}px 0 }
-    badge { opacity { @tween: 100ms; 100%: 0 } }
+    content @tween(duration: 1000, easing: linear) {
+      opacity: 0
+      scale: 1.2
+      translate: ${distance}px 0
+    }
+    badge @tween(duration: 1000, easing: linear) { opacity: 0 }
   }
 }

@@ -1403,10 +1403,15 @@ impl Compiler {
                 }
                 syn::MotionItem::Transition(transition) => match transition.selector() {
                     Some(
-                        selector @ (syn::TransitionSelector::Enter
-                        | syn::TransitionSelector::Leave
-                        | syn::TransitionSelector::EnterState(_)
-                        | syn::TransitionSelector::LeaveState(_)),
+                        syn::TransitionSelector::EnterState(_)
+                        | syn::TransitionSelector::LeaveState(_),
+                    ) => {
+                        self.error("semantic.lifecycle-state", "State-specific enter/leave is no longer supported; use motion-level enter/leave or a layer transition", &transition);
+                    }
+
+                    Some(
+                        selector
+                        @ (syn::TransitionSelector::Enter | syn::TransitionSelector::Leave),
                     ) => {
                         let phase = if matches!(
                             selector,
@@ -1620,7 +1625,14 @@ impl Compiler {
                     if !def
                         .states
                         .iter()
-                        .any(|state| state.targets.iter().any(|item| item.name == target.name))
+                        .flat_map(|state| &state.targets)
+                        .chain(def.layers.iter().flat_map(|layer| {
+                            layer
+                                .targets
+                                .iter()
+                                .chain(layer.states.iter().flat_map(|state| &state.targets))
+                        }))
+                        .any(|item| item.name == target.name)
                     {
                         self.error_range(
                             "semantic.reference",

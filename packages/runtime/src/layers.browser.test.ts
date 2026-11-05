@@ -1,3 +1,4 @@
+import { LifecycleSession } from './lifecycle.ts'
 import { afterEach, describe, expect, it } from 'vite-plus/test'
 import { cdp, userEvent } from 'vite-plus/test/browser'
 import { LivaInstance, type RuntimeDiagnostic } from './instance.ts'
@@ -701,5 +702,119 @@ describe('reactive layer instances', () => {
 
     expect(element.style.opacity).toBe('1')
     expect(errors).toEqual([])
+  })
+})
+
+function start(phase: 'enter' | 'leave', instance: LivaInstance, element: HTMLElement) {
+  const work = instance.captureLifecycle(phase, ['body'])
+  instance.releaseLifecycle(
+    ['body'],
+    element,
+    work.map(({ track }) => track.property),
+  )
+  const session = new LifecycleSession(work, phase)
+  session.initialize()
+  instance.retainLifecycle(phase, session)
+  session.play()
+
+  for (const animation of element.getAnimations()) {
+    animation.pause()
+    animation.currentTime = 0
+  }
+
+  cleanup.push(() => session.cancel('owner-teardown'))
+  return session
+}
+
+describe('layer lifecycle snapshots', () => {
+  const lifecycle = {
+    timing: { kind: 'tween', durationMs: 1000, easing: 'linear' } as const,
+    targets: [
+      { name: 'body', properties: [{ name: 'scale', keyframes: [{ offset: 0, value: '.5' }] }] },
+    ],
+  }
+
+  it('holds an enter snapshot while another property changes and settles the latest values', async () => {
+    const { instance, element } = setup({ ...timedDefinition(), enter: lifecycle })
+    const session = start('enter', instance, element)
+    const effect = element.getAnimations()[0]
+
+    instance.updateParameters({ hover: true, press: true, size: 1.4 })
+
+    expect(element.getAnimations()).toContain(effect)
+    expect(getComputedStyle(element).scale).toBe('0.5')
+    expect(element.style.opacity).toBe('0.5')
+    if (!(effect.effect instanceof KeyframeEffect)) throw new Error('Expected keyframe effect')
+
+    expect(effect.effect.getKeyframes().at(-1)?.scale).toBe('1')
+
+    effect.finish()
+    await session.finished
+
+    expect(element.style.scale).toBe('0.9')
+    expect(element.style.opacity).toBe('0.5')
+  })
+
+  it('restores original CSS when an enter-owned property disappears from the cascade', async () => {
+    const source = {
+      ...definition,
+      layers: definition.layers?.filter((layer) => layer.name === 'press'),
+      enter: lifecycle,
+    }
+    const { instance, element } = setup(source, { hover: false, press: true, size: 1 })
+    const session = start('enter', instance, element)
+
+    instance.updateParameters({ hover: false, press: false, size: 1 })
+
+    expect(getComputedStyle(element).scale).toBe('0.5')
+    for (const animation of element.getAnimations()) animation.finish()
+    await session.finished
+
+    expect(element.style.scale).toBe('')
+    expect(element.style.opacity).toBe('')
+    expect(element.style.color).toBe('red')
+  })
+
+  it('preserves enter presentation across target rebinding and releases only its own tracks', async () => {
+    const { instance, element } = setup({ ...timedDefinition(), enter: lifecycle })
+    instance.updateParameters({ hover: true, press: false, size: 1.4 })
+    const session = start('enter', instance, element)
+    const other = document.createElement('div')
+    document.body.append(other)
+    cleanup.push(() => other.remove())
+
+    instance.bind([
+      ['body', element],
+      ['extra', other],
+    ])
+
+    expect(getComputedStyle(element).scale).toBe('0.5')
+    for (const animation of element.getAnimations()) animation.finish()
+    await session.finished
+
+    expect(element.style.scale).toBe('1.4')
+  })
+
+  it('keeps a leave snapshot while layers change and permits unrelated updates', async () => {
+    const leave = {
+      ...lifecycle,
+      targets: [
+        { name: 'body', properties: [{ name: 'scale', keyframes: [{ offset: 1, value: '.5' }] }] },
+      ],
+    }
+    const { instance, element } = setup({ ...timedDefinition(), leave })
+    const session = start('leave', instance, element)
+    const effect = element.getAnimations()[0]
+
+    instance.updateParameters({ hover: true, press: true, size: 1.4 })
+
+    expect(element.getAnimations()).toContain(effect)
+    if (!(effect.effect instanceof KeyframeEffect)) throw new Error('Expected keyframe effect')
+
+    expect(effect.effect.getKeyframes().map((frame) => frame.scale)).toEqual(['1', '0.5'])
+    expect(element.style.opacity).toBe('0.5')
+
+    effect.finish()
+    expect(await session.finished).toBe('completed')
   })
 })

@@ -31,9 +31,7 @@ test.beforeEach(async ({ page }) => {
     .toBe(3)
 })
 
-test('state-specific enter starts with shorthand CSS and settles to the captured state', async ({
-  page,
-}) => {
+test('motion-level enter snapshots the cascaded destination', async ({ page }) => {
   expect(await presentation(page)).toEqual({ opacity: '0', scale: '0.8', translate: '40px' })
   await expect(page.locator('#badge')).toHaveCSS('opacity', '0')
 
@@ -50,7 +48,7 @@ for (const [button, id, removal] of [
   ['remove', 'card', true],
   ['hide', 'shown-card', false],
 ] as const) {
-  test(`captures state-specific leave before ${removal ? 'disposal' : 'hiding'}`, async ({
+  test(`captures motion-level leave before ${removal ? 'disposal' : 'hiding'}`, async ({
     page,
   }) => {
     await finishAnimations(page)
@@ -95,25 +93,39 @@ for (const [button, id, removal] of [
   })
 }
 
-test('default lifecycle is selected after the active state changes and reinsertion reselects enter', async ({
+test('enter keeps its snapshot while unrelated properties update and completion applies latest layers', async ({
   page,
 }) => {
-  await finishAnimations(page)
   await page.locator('#toggle-state').click()
-  await finishAnimations(page)
-  await page.locator('#remove').click()
 
-  await expect
-    .poll(() => page.locator('#card').evaluate((element) => element.getAnimations().length))
-    .toBe(1)
+  expect(await presentation(page)).toEqual({ opacity: '0', scale: '0.8', translate: '40px' })
+  await expect(page.locator('#card')).toHaveCSS('border-radius', '0px')
+
+  const endpoints = await page
+    .locator('#card')
+    .evaluate((element) =>
+      element
+        .getAnimations()
+        .map((animation) =>
+          animation.effect instanceof KeyframeEffect
+            ? animation.effect.getKeyframes().at(-1)
+            : undefined,
+        ),
+    )
+
+  expect(endpoints.some((frame) => frame?.scale === '1')).toBe(true)
+  await finishAnimations(page)
+
+  expect(await presentation(page)).toEqual({ opacity: '1', scale: '0.9', translate: '0px' })
+  await page.locator('#remove').click()
   await finishAnimations(page)
   await expect(page.locator('#card')).toHaveCount(0)
   await page.locator('#remove').click()
 
   await expect
     .poll(() => page.locator('#card').evaluate((element) => element.getAnimations().length))
-    .toBe(1)
-  expect(await presentation(page)).toEqual({ opacity: '0', scale: '0.9', translate: '0px' })
+    .toBe(3)
   await finishAnimations(page)
+
   expect(await presentation(page)).toEqual({ opacity: '1', scale: '0.9', translate: '0px' })
 })

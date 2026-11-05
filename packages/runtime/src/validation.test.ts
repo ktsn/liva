@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test'
 import fixture from '../../../fixtures/toggle.json'
-import lifecycleFixture from '../../../fixtures/lifecycle.json'
+import lifecycleFixture from '../../../fixtures/legacy-lifecycle.json'
 import presenceFixture from '../../../fixtures/presence.json'
 import { decodeBundle } from './definition.ts'
 import { isDefinition } from './validation.ts'

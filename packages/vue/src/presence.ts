@@ -11,7 +11,7 @@ import { LifecycleSession, type LifecycleWork } from '@liva/runtime'
 export interface PresenceTarget {
   capture(phase: 'enter' | 'leave'): LifecycleWork[]
   retainLifecycle(phase: 'enter' | 'leave', session: LifecycleSession): void
-  release(): void
+  release(work: readonly LifecycleWork[]): void
 }
 
 export class PresenceEntry {
@@ -75,7 +75,7 @@ export const LivaPresenceBoundary = defineComponent({
           },
         }))
       }
-      for (const target of entry.targets) target.release()
+      for (const target of entry.targets) target.release(work)
       entry.leaving = phase === 'leave'
       entry.cancel('superseded')
       entry.session = new LifecycleSession(work, phase)

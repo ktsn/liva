@@ -1,6 +1,6 @@
 import { expect, it } from 'vite-plus/test'
 import type { State, Transition } from './definition.ts'
-import fixture from '../../../fixtures/lifecycle.json'
+import fixture from '../../../fixtures/legacy-lifecycle.json'
 import { decodeBundle } from './definition.ts'
 import { captureLifecycleDefinition, hasLifecycle, resolveLifecycleTracks } from './lifecycle.ts'
 

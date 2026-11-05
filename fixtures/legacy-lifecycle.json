@@ -1,0 +1,294 @@
+{
+  "schemaVersion": 1,
+  "definitions": [
+    {
+      "name": "panel",
+      "parameters": [
+        {
+          "name": "open",
+          "type": "boolean"
+        },
+        {
+          "name": "distance",
+          "type": "number"
+        }
+      ],
+      "enter": {
+        "timing": {
+          "kind": "tween",
+          "durationMs": 250.0,
+          "easing": "ease-out"
+        },
+        "targets": [
+          {
+            "name": "content",
+            "properties": [
+              {
+                "name": "opacity",
+                "keyframes": [
+                  {
+                    "offset": 0.0,
+                    "value": "0"
+                  }
+                ]
+              },
+              {
+                "name": "scale",
+                "keyframes": [
+                  {
+                    "offset": 0.0,
+                    "value": "0.5"
+                  },
+                  {
+                    "offset": 0.5,
+                    "value": "1.1"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "leave": {
+        "timing": {
+          "kind": "tween",
+          "durationMs": 200.0,
+          "easing": "ease-in"
+        },
+        "targets": [
+          {
+            "name": "content",
+            "properties": [
+              {
+                "name": "opacity",
+                "keyframes": [
+                  {
+                    "offset": 1.0,
+                    "value": "0"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "stateEnters": [
+        {
+          "state": "opened",
+          "transition": {
+            "timing": {
+              "kind": "tween",
+              "durationMs": 300.0,
+              "easing": "ease-out"
+            },
+            "targets": [
+              {
+                "name": "content",
+                "properties": [
+                  {
+                    "name": "scale",
+                    "keyframes": [
+                      {
+                        "offset": 0.0,
+                        "value": "0.8"
+                      }
+                    ]
+                  },
+                  {
+                    "name": "translate",
+                    "keyframes": [
+                      {
+                        "template": [
+                          {
+                            "kind": "reference",
+                            "path": ["distance"]
+                          },
+                          "px 0"
+                        ],
+                        "offset": 0.0,
+                        "value": "${distance}px 0"
+                      }
+                    ]
+                  },
+                  {
+                    "name": "opacity",
+                    "keyframes": [
+                      {
+                        "offset": 0.0,
+                        "value": "0"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "name": "badge",
+                "properties": [
+                  {
+                    "name": "opacity",
+                    "keyframes": [
+                      {
+                        "offset": 0.0,
+                        "value": "0"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "stateLeaves": [
+        {
+          "state": "opened",
+          "transition": {
+            "timing": {
+              "kind": "tween",
+              "durationMs": 200.0,
+              "easing": "ease-in"
+            },
+            "targets": [
+              {
+                "name": "content",
+                "properties": [
+                  {
+                    "name": "scale",
+                    "keyframes": [
+                      {
+                        "offset": 1.0,
+                        "value": "1.2"
+                      }
+                    ]
+                  },
+                  {
+                    "name": "translate",
+                    "keyframes": [
+                      {
+                        "template": [
+                          {
+                            "kind": "reference",
+                            "path": ["distance"]
+                          },
+                          "px 0"
+                        ],
+                        "offset": 1.0,
+                        "value": "${distance}px 0"
+                      }
+                    ]
+                  },
+                  {
+                    "name": "opacity",
+                    "keyframes": [
+                      {
+                        "offset": 1.0,
+                        "value": "0"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "name": "badge",
+                "properties": [
+                  {
+                    "name": "opacity",
+                    "timing": {
+                      "kind": "tween",
+                      "durationMs": 100.0,
+                      "easing": "linear"
+                    },
+                    "keyframes": [
+                      {
+                        "offset": 1.0,
+                        "value": "0"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "states": [
+        {
+          "name": "closed",
+          "targets": [
+            {
+              "name": "content",
+              "properties": [
+                {
+                  "name": "opacity",
+                  "value": "1"
+                },
+                {
+                  "name": "scale",
+                  "value": "0.9"
+                },
+                {
+                  "name": "translate",
+                  "value": "0px 0"
+                }
+              ]
+            },
+            {
+              "name": "badge",
+              "properties": [
+                {
+                  "name": "opacity",
+                  "value": "1"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "opened",
+          "when": {
+            "kind": "reference",
+            "path": ["open"]
+          },
+          "targets": [
+            {
+              "name": "content",
+              "properties": [
+                {
+                  "name": "scale",
+                  "value": "1"
+                },
+                {
+                  "name": "opacity",
+                  "value": "1"
+                },
+                {
+                  "name": "translate",
+                  "value": "0px 0"
+                }
+              ]
+            },
+            {
+              "name": "badge",
+              "properties": [
+                {
+                  "name": "opacity",
+                  "value": "1"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "generalTransition": {
+        "timing": {
+          "kind": "tween",
+          "durationMs": 100.0,
+          "easing": "linear"
+        },
+        "targets": []
+      },
+      "directionalTransitions": []
+    }
+  ],
+  "diagnostics": []
+}

@@ -120,9 +120,15 @@ export class LifecycleSession {
   })
 
   private readonly phase: 'enter' | 'leave'
+  private readonly report: (error: unknown) => void
 
-  constructor(work: readonly LifecycleWork[], phase: 'enter' | 'leave') {
+  constructor(
+    work: readonly LifecycleWork[],
+    phase: 'enter' | 'leave',
+    report: (error: unknown) => void = console.error,
+  ) {
     this.phase = phase
+    this.report = report
     this.work = [...work]
   }
 
@@ -176,11 +182,18 @@ export class LifecycleSession {
 
       void Promise.all(this.effects.map((effect) => effect.finished)).then(
         () => this.end('completed'),
-        () => this.end('failed'),
+        (error) => this.fail(error),
       )
-    } catch {
-      this.end('failed')
+    } catch (error) {
+      this.fail(error)
     }
+  }
+
+  private fail(error: unknown) {
+    if (this.ended) return
+
+    this.end('failed')
+    this.report(error)
   }
 
   cancel(reason: 'superseded' | 'owner-teardown') {
