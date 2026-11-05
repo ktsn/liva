@@ -61,7 +61,10 @@ export function compileSfc(source: string, filename: string, development: boolea
   }
 }
 
-export function diagnosticLocation(snapshot: SourceSnapshot, diagnostic: Diagnostic) {
+export function diagnosticLocation(
+  snapshot: Pick<SourceSnapshot, 'source' | 'blockStart'>,
+  diagnostic: Diagnostic,
+) {
   const before = Buffer.from(snapshot.source)
     .subarray(0, snapshot.blockStart + diagnostic.range.start)
     .toString()

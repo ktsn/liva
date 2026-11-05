@@ -1,28 +1,93 @@
 import { planPresence, PresenceError } from './presence.ts'
 import { fileURLToPath } from 'node:url'
 import { EditorService } from './editor/communication/server.ts'
-import { readFile } from 'node:fs/promises'
-import type { Plugin, ViteDevServer } from 'vite-plus'
+import type { Plugin, Rollup, ViteDevServer } from 'vite-plus'
 import {
+  compile,
   compileSfc,
+  type Compilation,
   diagnosticLocation,
   hasErrors,
   hasLivaBlock,
   type SourceSnapshot,
 } from './compiler.ts'
 
+type TransformContext = Pick<Rollup.TransformPluginContext, 'error' | 'warn'>
+
 export default function liva(): Plugin {
   let server: ViteDevServer | undefined
   let editor: EditorService | undefined
   const valid = new Map<string, SourceSnapshot>()
 
-  const compileFile = async (file: string) => {
-    const source = await readFile(file, 'utf8')
+  const blocks = new Map<string, { source: string; result: Compilation }>()
+
+  const preprocess = (context: TransformContext, source: string, file: string) => {
+    if (!hasLivaBlock(source, file)) return undefined
+
     const previous = valid.get(file)
-    if (previous?.source === source) return previous
-    const snapshot = compileSfc(source, file, !!server)
-    if (!hasErrors(snapshot)) valid.set(file, snapshot)
-    return snapshot
+    const snapshot = previous?.source === source ? previous : compileSfc(source, file, !!server)
+
+    if (!hasErrors(snapshot)) {
+      valid.set(file, snapshot)
+      blocks.set(file, { source: snapshot.block, result: snapshot.result })
+    }
+
+    if (hasErrors(snapshot) && !server) {
+      const diagnostic = snapshot.result.diagnostics.find((d) => d.severity === 'error')!
+      context.error({
+        message: diagnostic.message,
+        id: file,
+        loc: diagnosticLocation(snapshot, diagnostic),
+      })
+    }
+
+    const current = valid.get(file)
+    if (!current) return undefined
+
+    try {
+      return planPresence(source, file, current.result.definitions)
+    } catch (error) {
+      /* v8 ignore else -- @preserve: Presence planning reports authored errors as PresenceError; other exceptions are internal faults. */
+      if (error instanceof PresenceError)
+        context.error({ message: error.message, id: file, loc: error.loc })
+      /* v8 ignore next -- @preserve: Vite's error hook throws for the handled PresenceError. */
+      throw error
+    }
+  }
+
+  const transformBlock = async (
+    context: TransformContext,
+    code: string,
+    file: string,
+    id: string,
+  ) => {
+    const previous = blocks.get(file)
+    let result = previous?.source === code ? previous.result : compile(code, !!server)
+    const diagnostic = result.diagnostics.find((d) => d.severity === 'error')
+
+    if (diagnostic) {
+      const error = {
+        message: diagnostic.message,
+        id,
+        loc: diagnosticLocation({ source: code, blockStart: 0 }, diagnostic),
+      }
+      if (!server || !previous) context.error(error)
+      context.warn(error)
+      result = previous.result
+    } else {
+      blocks.set(file, { source: code, result })
+    }
+
+    const bundle = JSON.stringify({ schemaVersion: 1, definitions: result.definitions })
+      .replace(/\u2028/g, '\\u2028')
+      .replace(/\u2029/g, '\\u2029')
+    const association = editor
+      ? `component.livaSource = ${JSON.stringify(await editor.register(file))};`
+      : ''
+    return {
+      code: `import { decodeBundle } from '@liva/runtime'; const bundle = decodeBundle(${JSON.stringify(bundle)}); export default (component) => { component.livaDefinitions = bundle.definitions; ${association} };`,
+      map: null,
+    }
   }
 
   return {
@@ -49,72 +114,18 @@ export default function liva(): Plugin {
         return `export * from "@liva/vue/runtime"; import { createLivaPlugin } from '@liva/vue/runtime'; export default createLivaPlugin();`
       return null
     },
-    async transform(_code, id) {
+    async transform(code, id) {
       const [file, query = ''] = id.split('?', 2)
       const parameters = new URLSearchParams(query)
       if (!file.endsWith('.vue')) return undefined
-
-      if (!query) {
-        // Validate the descriptor even when a second custom block would otherwise
-        // be compiled independently by Vue.
-        if (hasLivaBlock(_code, file)) {
-          const snapshot = await compileFile(file)
-          if (hasErrors(snapshot) && !server) {
-            const diagnostic = snapshot.result.diagnostics.find((d) => d.severity === 'error')!
-            this.error({
-              message: diagnostic.message,
-              id: file,
-              loc: diagnosticLocation(snapshot, diagnostic),
-            })
-          }
-        }
-        if (hasLivaBlock(_code, file)) {
-          const snapshot = valid.get(file)
-          if (snapshot) {
-            try {
-              return planPresence(_code, file, snapshot.result.definitions)
-            } catch (error) {
-              /* v8 ignore else -- @preserve: Presence planning reports authored errors as PresenceError; other exceptions are internal faults. */
-              if (error instanceof PresenceError)
-                this.error({ message: error.message, id: file, loc: error.loc })
-              /* v8 ignore next -- @preserve: Vite's error hook throws for the handled PresenceError. */
-              throw error
-            }
-          }
-        }
+      if (['raw', 'url', 'worker', 'sharedworker'].some((name) => parameters.has(name)))
         return undefined
-      }
+
+      if (!parameters.has('type')) return preprocess(this, code, file)
 
       if (!parameters.has('vue') || parameters.get('type') !== 'liva') return undefined
-      let snapshot = await compileFile(file)
 
-      if (hasErrors(snapshot)) {
-        const diagnostic = snapshot.result.diagnostics.find((d) => d.severity === 'error')!
-        const previous = valid.get(file)
-        if (!server || !previous)
-          this.error({
-            message: diagnostic.message,
-            id: file,
-            loc: diagnosticLocation(snapshot, diagnostic),
-          })
-        this.warn({
-          message: diagnostic.message,
-          id: file,
-          loc: diagnosticLocation(snapshot, diagnostic),
-        })
-        snapshot = previous
-      }
-
-      const bundle = JSON.stringify({ schemaVersion: 1, definitions: snapshot.result.definitions })
-        .replace(/\u2028/g, '\\u2028')
-        .replace(/\u2029/g, '\\u2029')
-      const association = editor
-        ? `component.livaSource = ${JSON.stringify(await editor.register(file))};`
-        : ''
-      return {
-        code: `import { decodeBundle } from '@liva/runtime'; const bundle = decodeBundle(${JSON.stringify(bundle)}); export default (component) => { component.livaDefinitions = bundle.definitions; ${association} };`,
-        map: null,
-      }
+      return transformBlock(this, code, file, id)
     },
     async handleHotUpdate(context) {
       if (!context.file.endsWith('.vue')) return undefined

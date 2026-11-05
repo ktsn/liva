@@ -8,11 +8,13 @@ import type { Plugin } from 'vite-plus'
 let root: string
 let file: string
 let source: string
+let block: string
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'liva-plugin-'))
   file = join(root, 'Toggle.vue')
-  source = `<template><div /></template><liva>${await readFile(new URL('../../../fixtures/toggle.liv', import.meta.url), 'utf8')}</liva>`
+  block = await readFile(new URL('../../../fixtures/toggle.liv', import.meta.url), 'utf8')
+  source = `<template><div /></template><liva>${block}</liva>`
   await writeFile(file, source)
 })
 
@@ -70,19 +72,65 @@ describe('Vite compilation hooks', () => {
   it('compiles custom blocks, reuses unchanged sources and skips other queries', async () => {
     const { call } = hooks()
 
-    for (const id of ['file.ts', `${file}?vue&type=template`, `${file}?type=liva`]) {
-      expect(await call('transform', '', id)).toBeUndefined()
+    for (const id of [
+      'file.ts',
+      `${file}?vue&type=template`,
+      `${file}?type=liva`,
+      `${file}?vue&vize&type=template`,
+      ...['raw', 'url', 'worker', 'sharedworker'].map((query) => `${file}?${query}`),
+      `${file}?vue&type=liva&raw`,
+    ]) {
+      expect(await call('transform', source, id)).toBeUndefined()
     }
 
     expect(await call('transform', '<template><div /></template>', file)).toBeUndefined()
     expect(await call('transform', source, file)).toMatchObject({ code: source })
+    for (const query of ['vue', 'vue&vize', 'component=true']) {
+      expect(await call('transform', source, `${file}?${query}`)).toMatchObject({ code: source })
+    }
 
-    const first = await call('transform', '', `${file}?vue&type=liva`)
+    const first = await call('transform', block, `${file}?vue&type=liva`)
 
     expect(first.code).toContain('decodeBundle')
     expect(first.code).toContain('toggle')
     expect(first.code).not.toContain('livaSource')
-    expect(await call('transform', '', `${file}?vue&type=liva`)).toEqual(first)
+    expect(await call('transform', block, `${file}?vue&type=liva`)).toEqual(first)
+  })
+
+  it('preprocesses supplied SFC source and compiles supplied blocks without rereading the file', async () => {
+    const { call } = hooks()
+    await writeFile(file, '<template><div /></template><liva>motion {</liva>')
+
+    expect(await call('transform', source, `${file}?component=true`)).toMatchObject({
+      code: source,
+    })
+
+    const replacement = 'motion replacement { state idle { box { opacity: 1 } } }'
+    const transformed = await call('transform', replacement, `${file}?vue&type=liva&index=0`)
+    expect(transformed.code).toContain('replacement')
+    expect(transformed.code).not.toContain('toggle')
+
+    await rm(file)
+
+    expect(await call('transform', replacement, `${file}?vue&type=liva&index=0`)).toEqual(
+      transformed,
+    )
+    expect((await call('transform', block, `${file}?vue&type=liva&index=0`)).code).toContain(
+      'toggle',
+    )
+  })
+
+  it('rejects duplicate and external blocks while preprocessing the whole SFC', async () => {
+    const { call } = hooks()
+
+    for (const blocks of [
+      '<liva>motion a {}</liva><liva>motion b {}</liva>',
+      '<liva src="a.liv" />',
+    ]) {
+      await expect(
+        call('transform', `<template><div /></template>${blocks}`, file),
+      ).rejects.toThrow('Expected exactly one inline <liva> block')
+    }
   })
 
   it('rejects compilation errors in production', async () => {
@@ -90,9 +138,10 @@ describe('Vite compilation hooks', () => {
     const invalid = '<template><div /></template><liva>motion {</liva>'
 
     await writeFile(file, invalid)
+    block = 'motion {'
 
     await expect(call('transform', invalid, file)).rejects.toThrow(/expected|Expected/)
-    await expect(call('transform', '', `${file}?vue&type=liva`)).rejects.toThrow(
+    await expect(call('transform', block, `${file}?vue&type=liva`)).rejects.toThrow(
       /expected|Expected/,
     )
   })
@@ -103,16 +152,18 @@ describe('Vite compilation hooks', () => {
 
     expect(call('load', '\0liva:vue-plugin')).toContain('createDevPlugin')
 
-    const first = await call('transform', '', `${file}?vue&type=liva`)
+    await call('transform', source, file)
+    const first = await call('transform', block, `${file}?vue&type=liva`)
 
     expect(first.code).toContain('livaSource')
 
     const invalid = '<template><div /></template><liva>motion {</liva>'
 
     await writeFile(file, invalid)
+    block = 'motion {'
 
     expect(await call('transform', invalid, file)).toMatchObject({ code: invalid })
-    expect((await call('transform', '', `${file}?vue&type=liva`)).code).toBe(first.code)
+    expect((await call('transform', block, `${file}?vue&type=liva`)).code).toBe(first.code)
     expect(warnings).toHaveLength(1)
     expect(await call('handleHotUpdate', { file, read: async () => invalid })).toEqual([])
     expect(events).toEqual(
@@ -160,7 +211,10 @@ it('does not invent a fallback compilation for an initially invalid development 
   const invalid = '<template><div /></template><liva>motion {</liva>'
 
   await writeFile(file, invalid)
+  block = 'motion {'
 
   expect(await call('transform', invalid, file)).toBeUndefined()
-  await expect(call('transform', '', `${file}?vue&type=liva`)).rejects.toThrow(/expected|Expected/)
+  await expect(call('transform', block, `${file}?vue&type=liva`)).rejects.toThrow(
+    /expected|Expected/,
+  )
 })
