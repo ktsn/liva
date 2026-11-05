@@ -37,6 +37,8 @@ node!(Block, |n: &SyntaxNode| n.kind() == Kind::Block);
 // Top-level blocks retain the Motion view even when their header is incomplete.
 node!(Motion, |n: &SyntaxNode| n.kind() == Kind::Block
     && n.parent().is_some_and(|p| p.kind() == Kind::Document));
+node!(Layer, |n: &SyntaxNode| block_depth(n) == 1
+    && keyword(n, "layer"));
 node!(State, |n: &SyntaxNode| block_depth(n) == 1
     && keyword(n, "state"));
 node!(Transition, |n: &SyntaxNode| block_depth(n) == 1
@@ -67,9 +69,9 @@ node!(Interpolation, |n: &SyntaxNode| n.kind()
 macro_rules! implement {
     ($trait:ident: $($name:ident),+ $(,)?) => { $(impl $trait for $name {})+ };
 }
-implement!(HasHeader: Block, Motion, State, Transition, Target, PropertyBlock, Keyframe, Property, LetBinding, Parameter, Event);
+implement!(HasHeader: Block, Motion, Layer, State, Transition, Target, PropertyBlock, Keyframe, Property, LetBinding, Parameter, Event);
 implement!(HasValue: Property, LetBinding, Keyframe);
-implement!(HasItems: Document, Block, Motion, State, Transition, Target, PropertyBlock);
+implement!(HasItems: Document, Block, Motion, Layer, State, Transition, Target, PropertyBlock);
 
 impl Document {
     pub fn motions(&self) -> impl Iterator<Item = Motion> {
@@ -126,6 +128,10 @@ impl Motion {
             .flat_map(|list| list.children::<Parameter>().collect::<Vec<_>>())
     }
 
+    pub fn layers(&self) -> impl Iterator<Item = Layer> {
+        self.children()
+    }
+
     pub fn states(&self) -> impl Iterator<Item = State> {
         self.children()
     }
@@ -157,6 +163,20 @@ impl Event {
 
     pub fn condition(&self) -> Option<Condition> {
         self.child()
+    }
+}
+
+impl Layer {
+    pub fn name(&self) -> Option<String> {
+        self.header()?.split_whitespace().nth(1).map(str::to_owned)
+    }
+
+    pub fn condition(&self) -> Option<Condition> {
+        self.header_node()?.child()
+    }
+
+    pub fn targets(&self) -> impl Iterator<Item = Target> {
+        self.children()
     }
 }
 
@@ -243,6 +263,7 @@ impl Interpolation {
 
 #[derive(Debug, Clone)]
 pub enum MotionItem {
+    Layer(Layer),
     State(State),
     Transition(Transition),
     Invalid(Block),
@@ -261,7 +282,11 @@ pub enum TransitionSelector {
 impl Motion {
     pub fn items(&self) -> impl Iterator<Item = MotionItem> {
         self.blocks().map(|block| {
-            if let Some(state) =
+            if let Some(layer) =
+                Layer::cast(block.syntax().clone()).filter(|layer| layer.name().is_some())
+            {
+                MotionItem::Layer(layer)
+            } else if let Some(state) =
                 State::cast(block.syntax().clone()).filter(|state| state.name().is_some())
             {
                 MotionItem::State(state)
