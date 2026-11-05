@@ -421,6 +421,7 @@ export class LivaInstance {
         ),
         this.state,
         state,
+        this.values,
       )
     } catch (error) {
       this.report({ code: 'runtime.state', message: String(error), error })

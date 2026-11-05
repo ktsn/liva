@@ -1,5 +1,18 @@
-import { easingConstant, isTimingFunction, callTiming } from './timing-values.ts'
-import type { CallExpression, Definition, Expression, Property } from './definition.ts'
+import {
+  easingConstant,
+  isTimingFunction,
+  callTiming,
+  timingValue,
+  easingCss,
+} from './timing-values.ts'
+import type {
+  CallExpression,
+  Definition,
+  Expression,
+  Property,
+  Frame,
+  Transition,
+} from './definition.ts'
 
 import type { RuntimeValue, Scalar } from './reactive-value.ts'
 
@@ -133,6 +146,32 @@ export function renderValue(
     : property.value
 }
 
+export function renderFrame(frame: Frame, values: VariableValues): Frame {
+  return {
+    ...frame,
+    value: renderValue(frame, values),
+    easing: frame.easingExpression
+      ? easingCss(evaluate(frame.easingExpression, values))
+      : frame.easing,
+  }
+}
+
+export function renderTransition(transition: Transition, values: VariableValues): Transition {
+  return {
+    ...transition,
+    targets: transition.targets.map((target) => ({
+      ...target,
+      properties: target.properties.map((property) => ({
+        ...property,
+        timing: property.timingExpression
+          ? timingValue(evaluate(property.timingExpression, values))
+          : property.timing,
+        keyframes: property.keyframes?.map((frame) => renderFrame(frame, values)),
+      })),
+    })),
+  }
+}
+
 export function renderDefinition(
   definition: Definition,
   values: VariableValues,
@@ -149,6 +188,10 @@ export function renderDefinition(
               properties: target.properties.map((property) => ({
                 ...property,
                 value: renderValue(property, values),
+                timing: property.timingExpression
+                  ? timingValue(evaluate(property.timingExpression, values))
+                  : property.timing,
+                keyframes: property.keyframes?.map((frame) => renderFrame(frame, values)),
               })),
             })),
           }

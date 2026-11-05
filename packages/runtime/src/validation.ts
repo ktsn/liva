@@ -46,6 +46,7 @@ export function isFrame(value: unknown): value is Frame {
     (value.template === undefined ||
       (Array.isArray(value.template) &&
         value.template.every((part: unknown) => typeof part === 'string' || isExpression(part)))) &&
+    (value.easingExpression === undefined || isExpression(value.easingExpression)) &&
     (value.easing === undefined || typeof value.easing === 'string')
   )
 }
@@ -54,6 +55,7 @@ function isPropertyTransition(value: unknown): value is PropertyTransition {
   return (
     isRecord(value) &&
     typeof value.name === 'string' &&
+    (value.timingExpression === undefined || isExpression(value.timingExpression)) &&
     (value.timing === undefined || isTiming(value.timing)) &&
     (value.keyframes === undefined || isArrayOf(value.keyframes, isFrame))
   )
@@ -156,6 +158,8 @@ function isState(value: unknown): value is State {
             isRecord(property) &&
             typeof property.name === 'string' &&
             typeof property.value === 'string' &&
+            (property.timingExpression === undefined || isExpression(property.timingExpression)) &&
+            (property.keyframes === undefined || isArrayOf(property.keyframes, isFrame)) &&
             (property.template === undefined ||
               (Array.isArray(property.template) &&
                 property.template.every(

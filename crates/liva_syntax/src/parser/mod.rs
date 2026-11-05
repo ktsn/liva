@@ -151,6 +151,11 @@ impl Parser<'_> {
                 && !matches!(self.at(), "{" | "}" | ";")
                 && !(nesting_depth == 0 && matches!(self.at(), ":" | "\n" | "\r"))
             {
+                if depth >= 2 && header_words > 0 && nesting_depth == 0 && self.at() == "@" {
+                    self.decorator();
+                    break;
+                }
+
                 if depth == 1
                     && self.tokens[begin].text == "state"
                     && header_words == 2
@@ -193,11 +198,11 @@ impl Parser<'_> {
                         }
                     })
                     .collect::<String>();
-                if !(if in_state {
+                if !(if in_state && depth < 4 {
                     is_property(name.trim())
                 } else {
                     is_property(name.trim().trim_start_matches('@'))
-                }) && (in_state
+                }) && ((in_state && depth < 4)
                     || !name
                         .trim()
                         .strip_suffix('%')
@@ -286,10 +291,39 @@ impl Parser<'_> {
         self.end();
     }
 
+    fn decorator(&mut self) {
+        self.start(Kind::Decorator);
+        self.bump();
+        let mut depth = 0usize;
+
+        while !self.at().is_empty() {
+            if matches!(self.at(), "{" | "}")
+                || (depth == 0 && matches!(self.at(), ";" | "\n" | "\r"))
+            {
+                break;
+            }
+
+            match self.at() {
+                "(" | "[" => depth += 1,
+                ")" | "]" => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+
+            self.bump();
+        }
+
+        self.end();
+    }
+
     fn raw(&mut self) {
         let mut stack = vec![];
 
         while !self.at().is_empty() {
+            if stack.is_empty() && self.at() == "@" {
+                self.decorator();
+                break;
+            }
+
             if self.at() == "${" {
                 self.interpolation();
                 continue;

@@ -89,7 +89,8 @@ fn structural_views_expose_parameters_bindings_states_and_transition_tracks() {
     let frame = track.keyframes().next().unwrap();
     assert_eq!(track.header().as_deref(), Some("opacity"));
     assert_eq!(frame.header().as_deref(), Some("0%"));
-    assert_eq!(frame.value_text().as_deref(), Some("0 @ linear"));
+    assert_eq!(frame.value_text().as_deref(), Some("0"));
+    assert!(frame.text().contains("@ linear"));
     assert_eq!(
         track
             .properties()

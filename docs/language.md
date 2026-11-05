@@ -427,3 +427,37 @@ Types are checked by the compiler; numeric domain errors from evaluated expressi
 are reported by the runtime. Use typed easing values, rather than CSS strings, as
 `tween` arguments. Legacy CSS-like animation declarations remain supported while
 expression decorators provide the migration path for these values.
+
+### Typed animation decorators
+
+Use `@expression` to apply a timing value to a target, a single declaration, or an
+entire property track. A keyframe segment accepts an easing value:
+
+```css
+motion button {
+  let quick = tween(duration: 150, easing: easeOut)
+  state idle {
+    body @quick {
+      opacity: 1
+      scale: 1 @spring(stiffness: 300, damping: 20)
+      translate @tween(duration: 400) {
+        0%: 0 20px
+        50%: 0 5px @easeOut
+        100%: 0 0
+      }
+    }
+  }
+}
+```
+
+The target timing is a default; a property's decorator replaces that whole value.
+Track timing goes before the opening brace. CSS values remain CSS, with `${...}`
+for scalar interpolation. Style tracks require an explicit 100% destination;
+transition tracks can omit endpoints for completion from their source/destination.
+Only the selected transition or lifecycle evaluates its timing and frame expressions.
+
+To migrate legacy `@tween: 150ms ease-out`, use `@tween(duration: 150, easing: easeOut)`
+on the target or property track. Replace legacy frame suffix `@ ease-out` with
+`@easeOut`, or reference a bound easing value. Legacy animation declarations and
+CSS easing suffixes continue to parse. The lossless CST retains decorators separately
+from header names and CSS value text; source-preserving tooling must retain those nodes.

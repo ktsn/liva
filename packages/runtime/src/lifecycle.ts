@@ -1,5 +1,5 @@
 import type { Definition, State, Transition } from './definition.ts'
-import { renderValue, type VariableValues } from './expression.ts'
+import { renderTransition, type VariableValues } from './expression.ts'
 import type { ResolvedTrack } from './resolve.ts'
 import { sampleSpring } from './spring.ts'
 import { waapiProperty } from './animation.ts'
@@ -33,19 +33,7 @@ export function captureLifecycleDefinition(
   const transition = specific?.find((item) => item.state === state)?.transition ?? definition[phase]
   if (!transition) return undefined
 
-  return {
-    ...transition,
-    targets: transition.targets.map((target) => ({
-      ...target,
-      properties: target.properties.map((property) => ({
-        ...property,
-        keyframes: property.keyframes?.map((frame) => ({
-          ...frame,
-          value: renderValue(frame, values),
-        })),
-      })),
-    })),
-  }
+  return renderTransition(transition, values)
 }
 
 export interface LifecycleWork {
