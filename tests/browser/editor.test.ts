@@ -212,6 +212,7 @@ test('pointer editing adds and moves keys and resizes duration in real time', as
   await track(page, 'box', 'background-color')
   const lane = page.locator('[data-track="box.background-color"]')
   const bounds = (await lane.boundingBox())!
+  const duration = Number(await page.getByLabel('Track duration', { exact: true }).inputValue())
 
   await lane.dblclick({ position: { x: bounds.width * 0.2, y: 18 }, modifiers: ['Alt'] })
   await page.getByLabel('Keyframe percentage', { exact: true }).fill('40')
@@ -223,9 +224,15 @@ test('pointer editing adds and moves keys and resizes duration in real time', as
   const keyBounds = (await key.boundingBox())!
   await page.mouse.move(keyBounds.x + keyBounds.width / 2, keyBounds.y + keyBounds.height / 2)
   await page.mouse.down()
-  await page.mouse.move(bounds.x + bounds.width * 0.3, keyBounds.y + keyBounds.height / 2, {
-    steps: 5,
-  })
+  const extent = Number(await page.getByLabel('Playhead').getAttribute('max'))
+
+  await page.mouse.move(
+    bounds.x + bounds.width * ((duration * 0.6) / extent),
+    keyBounds.y + keyBounds.height / 2,
+    {
+      steps: 5,
+    },
+  )
   await page.mouse.up()
   await expect(
     page.getByRole('button', { name: 'box.background-color 60%', exact: true }),
@@ -238,9 +245,15 @@ test('pointer editing adds and moves keys and resizes duration in real time', as
     handleBounds.y + handleBounds.height / 2,
   )
   await page.mouse.down()
-  await page.mouse.move(bounds.x + bounds.width * 0.8, handleBounds.y + handleBounds.height / 2, {
-    steps: 5,
-  })
+  const resizeExtent = Number(await page.getByLabel('Playhead').getAttribute('max'))
+
+  await page.mouse.move(
+    bounds.x + bounds.width * (80 / resizeExtent),
+    handleBounds.y + handleBounds.height / 2,
+    {
+      steps: 5,
+    },
+  )
   await page.mouse.up()
   await expect(page.getByLabel('Track duration', { exact: true })).toHaveValue('80')
   await page.getByRole('button', { name: 'box.background-color 60%', exact: true }).click()

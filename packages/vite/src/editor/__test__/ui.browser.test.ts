@@ -815,3 +815,48 @@ it('keeps the leftmost visible time anchored when zooming in and out', async () 
     expect(Math.abs(leftTime() - anchor)).toBeLessThan(2)
   }
 })
+
+function pointer(target: Element, type: string, x: number, mouseButton = 0) {
+  target.dispatchEvent(
+    new PointerEvent(type, { bubbles: true, clientX: x, button: mouseButton, pointerId: 1 }),
+  )
+}
+
+it('pans the timeline only after a primary pointer drag on its background', async () => {
+  await setupEditor()
+  await click('Motion editor')
+  await input('Timeline zoom level', '2')
+
+  const scroller = host!.querySelector<HTMLElement>('[aria-label="Animation timeline"]')!
+  const lane = host!.querySelector<HTMLElement>('[data-testid="timeline-ruler-lane"]')!
+
+  scroller.style.width = '800px'
+  scroller.style.overflow = 'auto'
+  lane.parentElement!.style.cssText =
+    'display: grid; grid-template-columns: var(--timeline-label-width) 1fr'
+  scroller.scrollLeft = 200
+
+  pointer(scroller, 'pointermove', 100)
+  pointer(scroller, 'pointerdown', 100, 2)
+  pointer(scroller.querySelector('button')!, 'pointerdown', 100)
+  await tick()
+
+  expect(scroller.classList.contains('panning')).toBe(false)
+
+  pointer(scroller, 'pointerdown', 100)
+  pointer(scroller, 'pointermove', 101)
+  await tick()
+
+  expect(scroller.scrollLeft).toBe(200)
+  expect(scroller.classList.contains('panning')).toBe(true)
+
+  pointer(scroller, 'pointermove', 80)
+  await tick()
+
+  expect(scroller.scrollLeft).toBe(220)
+
+  pointer(scroller, 'pointerup', 80)
+  await tick()
+
+  expect(scroller.classList.contains('panning')).toBe(false)
+})

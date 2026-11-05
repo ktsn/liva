@@ -44,7 +44,8 @@ Zed extension and grammar checks are separate; see [language-server.md](language
   transactions. DOM mocks cannot establish CSS interpolation or interruption behavior.
 - Playwright runs Chromium, Firefox and WebKit for real WAAPI behavior, lifecycle
   cleanup, Vue integration and previews. Shared-file-writing scenarios run only in
-  Chromium to avoid concurrent writes; other engines skip those duplicate scenarios.
+  Chromium; other engines skip those duplicate scenarios. The suite uses one worker
+  because source writes also trigger HMR in concurrently running read-only pages.
 - Production checks build both normal and `development` modes, scan for editor,
   compiler, source-map and WASM artifacts, and exercise playback and POST rejection.
   `FORCE_COLOR=1 CI=1 node scripts/test-production.ts` also checks colored server output.
