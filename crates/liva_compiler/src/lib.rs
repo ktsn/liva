@@ -1265,7 +1265,67 @@ impl Compiler {
                         }
                     }
 
+                    let mut guarded = vec![];
+
+                    for transition in layer.transitions() {
+                        let Some(syn::TransitionSelector::Directional { from, to }) =
+                            transition.selector()
+                        else {
+                            self.error(
+                                "semantic.layer-transition",
+                                "Layer transitions require source and destination states",
+                                &transition,
+                            );
+                            continue;
+                        };
+
+                        for state_name in [&from, &to] {
+                            if !state_names.contains_key(state_name) {
+                                self.error(
+                                    "semantic.reference",
+                                    format!("Unknown layer state: {state_name}"),
+                                    &transition,
+                                );
+                            }
+                        }
+
+                        let Some(condition) = transition.condition() else {
+                            self.error(
+                                "semantic.layer-transition",
+                                "Layer transitions require a Boolean when guard",
+                                &transition,
+                            );
+                            continue;
+                        };
+                        let Some(parsed) = self.expression_view(&condition) else {
+                            continue;
+                        };
+                        let when = match parsed.check(&scope).and_then(|ty| {
+                            if ty == expression::Type::Boolean {
+                                parsed.to_output()
+                            } else {
+                                Err(parsed.error("Transition guard must be Boolean"))
+                            }
+                        }) {
+                            Ok(when) => when,
+                            Err(error) => {
+                                self.expression_error(error);
+                                continue;
+                            }
+                        };
+                        let path = format!("{layer_path}/transition/{}", guarded.len());
+                        let animation = self.transition(&transition, &path, &scope);
+
+                        guarded.push(GuardedTransition {
+                            from,
+                            to,
+                            when,
+                            transition: animation,
+                        });
+                    }
+
                     definition.layers.push(Layer {
+                        transitions: guarded,
                         states: layer_states,
                         initial_state: initial_states.into_iter().next(),
                         when,
@@ -1435,6 +1495,10 @@ impl Compiler {
                 }
             }
         }
+        if !definition.layers.is_empty() && !definition.states.is_empty() {
+            self.error("semantic.layer-migration", "Use layers or legacy motion-level states in one motion; move exclusive states into a layer", node);
+        }
+
         self.validate(&definition, node);
         for (default, overrides) in [
             (&definition.enter, &mut definition.state_enters),

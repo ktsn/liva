@@ -199,3 +199,40 @@ fn animation_target_names_do_not_enter_style_context() {
         ));
     }
 }
+
+#[test]
+fn guarded_transitions_keep_declaration_order_and_layer_local_references() {
+    let result = valid(
+        "motion submit(loading: boolean, completed: boolean) { layer submission { state idle initial {} state loading {} state success {} transition idle -> loading when loading\n transition loading -> success when completed\n } }",
+    );
+    let transitions = &result.definitions[0].layers[0].transitions;
+
+    assert_eq!(transitions.len(), 2);
+    assert_eq!(transitions[0].from, "idle");
+    assert_eq!(transitions[1].to, "success");
+}
+
+#[test]
+fn guarded_transitions_validate_guards_and_state_references() {
+    for (transition, code) in [
+        ("transition idle -> missing when true", "semantic.reference"),
+        ("transition idle -> idle when 1", "semantic.expression"),
+        ("transition idle -> idle {}", "semantic.layer-transition"),
+    ] {
+        let result = compile(
+            &format!(
+                "motion submit {{ layer submission {{ state idle initial {{}} {transition}\n }} }}"
+            ),
+            true,
+        );
+
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == code),
+            "{transition}: {:?}",
+            result.diagnostics
+        );
+    }
+}

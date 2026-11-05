@@ -148,6 +148,7 @@ impl Parser<'_> {
             // for a property declaration separator, with the preceding header as its name.
             let mut nesting_depth = 0usize;
             let mut header_words = 0;
+            let mut guarded_transition = false;
 
             while !self.at().is_empty()
                 && !matches!(self.at(), "{" | "}" | ";")
@@ -155,6 +156,19 @@ impl Parser<'_> {
             {
                 if depth >= 2 && header_words > 0 && nesting_depth == 0 && self.at() == "@" {
                     self.decorator();
+                    break;
+                }
+
+                if depth == 2
+                    && self.tokens[begin].text == "transition"
+                    && header_words == 4
+                    && self.at() == "when"
+                {
+                    self.bump();
+                    self.start(Kind::Condition);
+                    self.expression_region(true);
+                    self.end();
+                    guarded_transition = true;
                     break;
                 }
 
@@ -186,6 +200,13 @@ impl Parser<'_> {
                 }
             }
             self.end();
+
+            if guarded_transition && self.at() != "{" {
+                self.builder
+                    .start_node_at(checkpoint, Liva::kind_to_raw(Kind::Block));
+                self.end();
+                continue;
+            }
 
             if self.at() == ":" {
                 self.builder
@@ -233,7 +254,8 @@ impl Parser<'_> {
                     .collect::<String>();
                 self.items(
                     depth + 1,
-                    in_state
+                    (in_state
+                        && !(depth == 2 && header.split_whitespace().next() == Some("transition")))
                         || (depth == 1
                             && matches!(header.split_whitespace().next(), Some("state" | "layer"))),
                 );
@@ -592,6 +614,9 @@ fn validate_headers(node: &impl AstNode, depth: usize, diagnostics: &mut Vec<Dia
                 ["transition"] | ["enter"] | ["leave"] => true,
                 ["enter" | "leave", state] => is_name(state),
                 ["transition", from, "->", to] => is_name(from) && is_name(to),
+                ["transition", from, "->", to, "when", ..] => {
+                    depth == 2 && is_name(from) && is_name(to) && words.len() > 5
+                }
                 _ => false,
             }
         } else if Target::cast(block.syntax().clone()).is_some() {

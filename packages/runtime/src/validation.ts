@@ -1,5 +1,6 @@
 import type {
   Definition,
+  Layer,
   MotionParameter,
   Expression,
   LetBinding,
@@ -170,10 +171,30 @@ function isState(value: unknown): value is State {
   )
 }
 
+function isLayer(value: unknown): value is Layer {
+  return (
+    isState(value) &&
+    isRecord(value) &&
+    (value.states === undefined || isArrayOf(value.states, isState)) &&
+    (value.initialState === undefined || typeof value.initialState === 'string') &&
+    (value.transitions === undefined ||
+      (Array.isArray(value.transitions) &&
+        value.transitions.every(
+          (item: unknown) =>
+            isRecord(item) &&
+            typeof item.from === 'string' &&
+            typeof item.to === 'string' &&
+            isExpression(item.when) &&
+            isTransition(item.transition),
+        )))
+  )
+}
+
 export function isDefinition(value: unknown): value is Definition {
   return (
     isRecord(value) &&
     typeof value.name === 'string' &&
+    (value.layers === undefined || isArrayOf(value.layers, isLayer)) &&
     (value.parameters === undefined ||
       isArrayOf(
         value.parameters,
