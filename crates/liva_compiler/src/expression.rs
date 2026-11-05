@@ -18,6 +18,8 @@ pub enum Type {
     Number,
     Boolean,
     String,
+    Timing,
+    Easing,
     Target,
     Record(&'static [crate::builtins::Field]),
 }
@@ -143,9 +145,13 @@ impl ExprExt for Expr {
                 let first = path
                     .first()
                     .ok_or_else(|| self.error("Expected variable name"))?;
-                let mut value_type = *scope.get(&first.text()).ok_or_else(|| {
-                    name_error(first, format!("Unknown variable: {}", first.text()))
-                })?;
+                let mut value_type = scope
+                    .get(&first.text())
+                    .copied()
+                    .or_else(|| crate::builtins::constant_type(&first.text()))
+                    .ok_or_else(|| {
+                        name_error(first, format!("Unknown variable: {}", first.text()))
+                    })?;
 
                 for member in path.iter().skip(1) {
                     let error = || {
@@ -215,7 +221,7 @@ impl ExprExt for Expr {
                     }
                 }
                 for parameter in signature.parameters {
-                    if !seen.contains(parameter.name) {
+                    if !parameter.optional && !seen.contains(parameter.name) {
                         return Err(self.error(format!(
                             "Missing argument for {}: {}",
                             function.text(),

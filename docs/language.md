@@ -397,3 +397,33 @@ motion toggle(checked: boolean) {
   }
 }
 ```
+
+## Timing and easing values
+
+Animation settings are immutable expression values: `tween` and `spring` return
+`timing`; easing constants and `cubicBezier` return `easing`. They describe an
+animation without starting one. Bind and reuse them through `let`:
+
+```css
+let curve = cubicBezier(x1: 0.2, y1: 0, x2: 0, y2: 1)
+let quick = tween(duration: 150, easing: curve)
+let bounce = spring(stiffness: 400, damping: 20)
+```
+
+Calls use the same named-argument syntax as other Liva functions. Numeric values
+carry no implicit CSS units. The available signatures are:
+
+- `tween(duration: number = 300, easing: easing = ease)`: duration is nonnegative
+  milliseconds. Zero duration settles immediately.
+- `spring(stiffness: number = 100, damping: number = 10, mass: number = 1)`:
+  positive, finite physical parameters consumed by the runtime spring sampler.
+- `cubicBezier(x1: number, y1: number, x2: number, y2: number)`: all arguments are
+  required and finite; x coordinates must be in `[0, 1]`. Y coordinates may overshoot.
+- Easing constants: `linear`, `ease`, `easeIn`, `easeOut`, `easeInOut`.
+
+A timing value is replaced as a whole. Different calls never merge their parameters.
+Timing and easing values cannot be interpolated into CSS or used as Boolean guards.
+Types are checked by the compiler; numeric domain errors from evaluated expressions
+are reported by the runtime. Use typed easing values, rather than CSS strings, as
+`tween` arguments. Legacy CSS-like animation declarations remain supported while
+expression decorators provide the migration path for these values.
