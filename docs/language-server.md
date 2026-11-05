@@ -77,7 +77,7 @@ is available alongside the Vue server:
 ```
 
 The `...` entry keeps the other Vue language servers enabled. Open
-`playground/src/DraggableCardDemo.vue` to verify the embedded case.
+`playground/src/pages/drag.vue` to verify the embedded case.
 The server checks each inline Liva block independently; `src` blocks and host
 JavaScript/TypeScript bindings are not analyzed. Embedded syntax highlighting is
 subject to the Vue grammar's custom-block parsing.

@@ -12,7 +12,8 @@
 
 <style scoped>
 .draggable-card {
-  width: 220px;
+  inline-size: 220px;
+  max-inline-size: 100%;
   padding: 2rem;
   border-radius: 24px;
   background: #e0eddf;
@@ -28,7 +29,7 @@
 .draggable-card span {
   display: block;
   font-size: 2rem;
-  margin-bottom: 1rem;
+  margin-block-end: 1rem;
 }
 </style>
 

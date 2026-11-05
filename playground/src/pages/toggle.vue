@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import Toggle from './Toggle.vue'
+import Toggle from '../Toggle.vue'
 
 const visible = ref(true)
 </script>

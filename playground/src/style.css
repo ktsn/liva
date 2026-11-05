@@ -29,25 +29,20 @@ a:focus-visible {
   outline-offset: 5px;
 }
 
-main {
-  max-width: 800px;
-  margin: auto;
-  padding: 32px;
+.playground {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  min-block-size: 100dvh;
 }
 
-header,
-nav {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-header {
-  justify-content: space-between;
-  flex-wrap: wrap;
+.sidebar {
+  padding: 32px 24px;
+  background: #eeeee5;
+  border-inline-end: 1px solid #d8ded2;
 }
 
 .wordmark {
+  display: block;
   color: inherit;
   font-size: 28px;
   font-weight: 700;
@@ -55,27 +50,45 @@ header {
   letter-spacing: -1px;
 }
 
-.wordmark span {
+.wordmark-caption {
+  display: block;
   font-size: 13px;
   font-weight: 400;
   letter-spacing: 0;
   color: #64766f;
 }
 
-nav a {
+.demo-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-block-start: 40px;
+}
+
+.demo-link {
   color: #64766f;
   font-size: 14px;
   text-decoration: none;
-  padding: 8px 0;
+  padding: 12px 16px;
+  border-radius: 8px;
+
+  &:hover {
+    background: #e3e7da;
+  }
+
+  &.router-link-active {
+    color: #173d36;
+    background: #dce6d5;
+    font-weight: 600;
+  }
 }
 
-nav a.router-link-active {
-  color: #173d36;
-  box-shadow: 0 2px currentColor;
-}
-
-.demo {
-  padding-top: 48px;
+.demo-content {
+  inline-size: 100%;
+  max-inline-size: 864px;
+  min-inline-size: 0;
+  padding: 40px 48px;
+  margin-inline: auto;
 }
 
 h1 {
@@ -95,7 +108,7 @@ h1 {
 .demo-stage {
   display: grid;
   place-items: center;
-  min-height: 360px;
+  min-block-size: 360px;
 }
 
 .toggle-row {
@@ -107,7 +120,7 @@ h1 {
 }
 
 .toggle-row + .toggle-row {
-  border-top: 1px solid #e6e9df;
+  border-block-start: 1px solid #e6e9df;
 }
 
 .toggle-row strong {
@@ -116,8 +129,8 @@ h1 {
 }
 
 .switch {
-  width: 58px;
-  height: 34px;
+  inline-size: 58px;
+  block-size: 34px;
   border-radius: 22px;
   border: 0;
   padding: 5px;
@@ -126,15 +139,15 @@ h1 {
 
 .thumb {
   display: block;
-  width: 24px;
-  height: 24px;
+  inline-size: 24px;
+  block-size: 24px;
   border-radius: 50%;
   background: #fffefa;
   box-shadow: 0 2px 4px #173d3630;
 }
 
 .text-button {
-  margin-top: 16px;
+  margin-block-start: 16px;
   font-size: 12px;
   border: none;
   padding: 0;
@@ -154,8 +167,20 @@ h1 {
 }
 
 @media (max-width: 600px) {
-  main {
-    padding: 24px;
+  .playground {
+    grid-template-columns: 112px minmax(0, 1fr);
+  }
+
+  .sidebar {
+    padding: 24px 12px;
+  }
+
+  .demo-link {
+    padding: 12px 8px;
+  }
+
+  .demo-content {
+    padding: 24px 16px;
   }
 
   .demo-card,

@@ -267,7 +267,7 @@ named `liva-dismiss` from the Motion root; no payload expression is supported.
 Use ordinary DOM listeners such as `@liva-dismiss="removeItem(item.id)"`.
 Application state changes immediately; it never waits for the leave animation.
 
-The [swipe playground](../playground/src/SwipeDismissDemo.vue) combines drag,
+The [swipe playground](../playground/src/pages/swipe.vue) combines drag,
 events, a return spring, and leave animation. Each draggable list item has its
 own Motion instance. No velocity or inertia is calculated.
 

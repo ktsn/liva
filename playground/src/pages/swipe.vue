@@ -18,7 +18,7 @@ function removeItem(id: number) {
 </script>
 
 <template>
-  <section class="swipe-demo">
+  <section class="demo">
     <h1>Swipe to dismiss</h1>
     <p>Drag a card more than 120 pixels to the right, then release.</p>
     <button type="button" @click="resetItems">Reset cards</button>
@@ -39,10 +39,6 @@ function removeItem(id: number) {
 </template>
 
 <style scoped>
-.swipe-demo {
-  max-width: 38rem;
-  margin: 3rem auto;
-}
 .swipe-card {
   display: flex;
   justify-content: space-between;
