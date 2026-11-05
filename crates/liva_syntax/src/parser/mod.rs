@@ -1,7 +1,9 @@
 pub(crate) mod expression;
 mod template;
 
-use crate::ast::{AstNode, Block, Document, HasHeader, Motion};
+use crate::ast::{
+    AstNode, Block, Document, HasHeader, Layer, Motion, PropertyBlock, State, Target, Transition,
+};
 use crate::lexer::{Token, TokenKind, lex};
 use crate::{Diagnostic, Kind, Liva, Parse, Range, SyntaxNode, is_name, is_property};
 use rowan::{GreenNodeBuilder, Language};
@@ -156,7 +158,7 @@ impl Parser<'_> {
                     break;
                 }
 
-                if depth == 1
+                if (depth == 1 || depth == 2)
                     && matches!(self.tokens[begin].text, "state" | "layer")
                     && header_words == 2
                     && self.at() == "when"
@@ -231,7 +233,9 @@ impl Parser<'_> {
                     .collect::<String>();
                 self.items(
                     depth + 1,
-                    in_state || (depth == 1 && header.split_whitespace().next() == Some("state")),
+                    in_state
+                        || (depth == 1
+                            && matches!(header.split_whitespace().next(), Some("state" | "layer"))),
                 );
 
                 if self.at() == "}" {
@@ -566,26 +570,41 @@ fn validate_headers(node: &impl AstNode, depth: usize, diagnostics: &mut Vec<Dia
     for block in node.children::<Block>() {
         let header = block.header().unwrap_or_default();
         let words: Vec<_> = header.split_whitespace().collect();
-        let valid = match depth {
-            0 => Motion::cast(block.syntax().clone())
+        let valid = if depth == 0 {
+            Motion::cast(block.syntax().clone())
                 .and_then(|motion| motion.name())
-                .is_some(),
-            2 => is_name(&header),
-            1 => match words.as_slice() {
-                ["state" | "layer", name] => is_name(name),
-                ["state" | "layer", name, "when", ..] => is_name(name) && words.len() > 3,
+                .is_some()
+        } else if Layer::cast(block.syntax().clone()).is_some() {
+            match words.as_slice() {
+                ["layer", name] => is_name(name),
+                ["layer", name, "when", ..] => is_name(name) && words.len() > 3,
+                _ => false,
+            }
+        } else if State::cast(block.syntax().clone()).is_some() {
+            match words.as_slice() {
+                ["state", name] => is_name(name),
+                ["state", name, "initial"] => depth == 2 && is_name(name),
+                ["state", name, "when", ..] => is_name(name) && words.len() > 3,
+                _ => false,
+            }
+        } else if Transition::cast(block.syntax().clone()).is_some() {
+            match words.as_slice() {
                 ["transition"] | ["enter"] | ["leave"] => true,
                 ["enter" | "leave", state] => is_name(state),
                 ["transition", from, "->", to] => is_name(from) && is_name(to),
                 _ => false,
-            },
-            3 => is_property(&header),
-            4 => header.strip_suffix('%').is_some_and(|n| {
-                !n.is_empty()
-                    && n.bytes()
-                        .all(|c| c.is_ascii_digit() || c == b'.' || c == b'-')
-            }),
-            _ => false,
+            }
+        } else if Target::cast(block.syntax().clone()).is_some() {
+            is_name(&header)
+        } else if PropertyBlock::cast(block.syntax().clone()).is_some() {
+            is_property(&header)
+        } else {
+            depth == 4
+                && header.strip_suffix('%').is_some_and(|n| {
+                    !n.is_empty()
+                        && n.bytes()
+                            .all(|c| c.is_ascii_digit() || c == b'.' || c == b'-')
+                })
         };
 
         if !valid {
