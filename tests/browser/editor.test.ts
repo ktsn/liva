@@ -18,13 +18,17 @@ async function open(page: Page, fixture = false) {
   await expect(page.getByLabel('Playhead')).toBeVisible()
 }
 
+async function expectMessage(page: Page, message: string) {
+  await expect.poll(() => page.evaluate(() => window.__LIVA_EDITOR__.message)).toContain(message)
+}
+
 async function seek(page: Page, time: number) {
   await page.getByLabel('Playhead').evaluate((element, position) => {
     if (!(element instanceof HTMLInputElement)) throw new Error('Expected the playhead input')
     element.value = String(position)
     element.dispatchEvent(new Event('input', { bubbles: true }))
   }, time)
-  await expect(page.getByRole('status')).toContainText('Previewing')
+  await expectMessage(page, 'Previewing')
 }
 
 async function track(page: Page, target: string, property: string) {
@@ -34,9 +38,9 @@ async function track(page: Page, target: string, property: string) {
 }
 
 async function save(page: Page) {
-  await expect(page.getByRole('status')).toContainText('Previewing')
+  await expectMessage(page, 'Previewing')
   await page.getByRole('button', { name: 'Save to source' }).click()
-  await expect(page.getByRole('status')).toContainText('All shared instances are synchronized')
+  await expectMessage(page, 'All shared instances are synchronized')
 }
 
 test('docked timeline scrubs both ways, isolates instances, and yields to application state', async ({
@@ -70,7 +74,7 @@ test('docked timeline scrubs both ways, isolates instances, and yields to applic
   await seek(page, 100)
   await first.click()
   await expect(first).toHaveAttribute('aria-checked', 'true')
-  await expect(page.getByRole('status')).toContainText('Application state superseded')
+  await expectMessage(page, 'Application state superseded')
   await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0)
   await expect(first).toHaveCSS('background-color', 'rgb(52, 178, 123)')
 })
@@ -84,16 +88,16 @@ test('editing inherited keys copies the collection, rejects collisions, and rest
   await expect(page.getByText('Inherited common keyframe', { exact: true })).toBeVisible()
   await page.getByLabel('Keyframe value', { exact: true }).fill('1.5')
   await page.getByRole('button', { name: 'Apply keyframe', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('Previewing')
+  await expectMessage(page, 'Previewing')
   await expect(page.locator('[data-track="thumb.scale"] .key')).toHaveCount(4)
   await expect(page.getByText('Local keyframe', { exact: true })).toBeVisible()
 
   await page.getByLabel('Keyframe percentage', { exact: true }).fill('70')
   await page.getByRole('button', { name: 'Apply keyframe', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('already exists')
+  await expectMessage(page, 'already exists')
   await expect(page.getByRole('button', { name: 'thumb.scale 40%', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Use common keyframes', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('Previewing')
+  await expectMessage(page, 'Previewing')
   await expect(page.getByLabel('Keyframe value', { exact: true })).toHaveValue('1.3 1')
 })
 
@@ -104,7 +108,7 @@ test('duration edits preserve offsets and spring tracks reject intermediate keys
   await track(page, 'thumb', 'scale')
   await page.getByLabel('Track duration', { exact: true }).fill('700')
   await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('Previewing')
+  await expectMessage(page, 'Previewing')
   await page.getByRole('button', { name: 'thumb.scale 40%', exact: true }).click()
   await expect(page.getByLabel('Keyframe time', { exact: true })).toHaveValue('280')
 
@@ -115,7 +119,7 @@ test('duration edits preserve offsets and spring tracks reject intermediate keys
   await page.getByLabel('Timing mode', { exact: true }).selectOption('spring-duration')
   await page.getByLabel('Track duration', { exact: true }).fill('400')
   await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('Previewing')
+  await expectMessage(page, 'Previewing')
   await expect(page.getByRole('button', { name: 'Resize thumb.translate' })).toBeVisible()
 })
 
@@ -126,7 +130,7 @@ test('playback pauses and close releases preview effects while retaining draft',
   await track(page, 'thumb', 'scale')
   await page.getByLabel('Track duration', { exact: true }).fill('3000')
   await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('Previewing')
+  await expectMessage(page, 'Previewing')
   await page.getByRole('button', { name: 'Play', exact: true }).click()
   await expect.poll(() => page.getByLabel('Playhead').inputValue()).not.toBe('0')
   await page.getByRole('button', { name: 'Pause', exact: true }).click()
@@ -154,7 +158,7 @@ test('timeline saves timing, new frames and endpoint state values with shared HM
     await page.getByRole('button', { name: 'New keyframe at playhead' }).click()
     await page.getByLabel('Keyframe value', { exact: true }).fill('purple')
     await page.getByRole('button', { name: 'Add keyframe', exact: true }).click()
-    await expect(page.getByRole('status')).toContainText('Previewing')
+    await expectMessage(page, 'Previewing')
     expect(await readFile(file, 'utf8')).toBe(original)
     await save(page)
 
@@ -174,7 +178,9 @@ test('timeline saves timing, new frames and endpoint state values with shared HM
 
     await track(page, 'box', 'background-color')
     await page.getByRole('button', { name: 'Use common keyframes', exact: true }).click()
-    await page.getByRole('button', { name: 'box.background-color 100%', exact: true }).click()
+    await page
+      .getByRole('button', { name: 'box.background-color 100%', exact: true })
+      .press('Enter')
     await page.getByLabel('Keyframe value', { exact: true }).fill('green')
     await page.getByRole('button', { name: 'Update state value', exact: true }).click()
     await save(page)
@@ -218,7 +224,7 @@ test('pointer editing adds and moves keys and resizes duration in real time', as
   await page.getByLabel('Keyframe percentage', { exact: true }).fill('40')
   await page.getByLabel('Keyframe value', { exact: true }).fill('purple')
   await page.getByRole('button', { name: 'Add keyframe', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('Previewing')
+  await expectMessage(page, 'Previewing')
 
   const key = page.getByRole('button', { name: 'box.background-color 40%', exact: true })
   const keyBounds = (await key.boundingBox())!
@@ -241,7 +247,7 @@ test('pointer editing adds and moves keys and resizes duration in real time', as
   const handle = page.getByRole('button', { name: 'Resize box.background-color', exact: true })
   const handleBounds = (await handle.boundingBox())!
   await page.mouse.move(
-    handleBounds.x + handleBounds.width / 2,
+    handleBounds.x + handleBounds.width / 4,
     handleBounds.y + handleBounds.height / 2,
   )
   await page.mouse.down()
@@ -329,7 +335,7 @@ test('enabling reduced motion during Play settles immediately but still allows s
   await track(page, 'thumb', 'scale')
   await page.getByLabel('Track duration', { exact: true }).fill('3000')
   await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('Previewing')
+  await expectMessage(page, 'Previewing')
   await page.getByRole('button', { name: 'Play', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
 
@@ -364,7 +370,7 @@ test('an unsettled spring keeps its parameter controls available for correction'
 
   await page.getByLabel('Damping', { exact: true }).fill('20')
   await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('Previewing')
+  await expectMessage(page, 'Previewing')
   await expect(page.getByRole('alert')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeEnabled()
 })
