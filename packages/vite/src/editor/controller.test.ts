@@ -399,3 +399,18 @@ it.each(['enter', 'leave'] as const)(
     expect(first.runtime.replaceDefinition).toHaveBeenLastCalledWith(definition, 'off')
   },
 )
+
+it('rejects timeline preview and save for layers without replacing the live definition', async () => {
+  const layered = { ...definition, layers: [{ name: 'base', targets: [] }] }
+  const send = vi
+    .fn<(request: EditorRequest) => Promise<EditorReply>>()
+    .mockResolvedValue({ ...reply, definition: layered })
+  const { controller, first } = await setup(send)
+
+  expect(controller.message).toContain('read-only')
+  await expect(controller.preview('on')).rejects.toThrow('read-only')
+  await expect(controller.commit()).rejects.toThrow('read-only')
+
+  expect(send).toHaveBeenCalledTimes(1)
+  expect(first.runtime.replaceDefinition).not.toHaveBeenCalled()
+})

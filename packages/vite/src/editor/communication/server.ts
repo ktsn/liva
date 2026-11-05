@@ -1,3 +1,4 @@
+import { timelineReadOnly, readOnlyMessage } from '../capabilities.ts'
 import { isEditorRequest } from './protocol.ts'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { readFile, realpath, stat, writeFile, rename, unlink, mkdir } from 'node:fs/promises'
@@ -178,6 +179,7 @@ export class EditorService {
     const { file, snapshot } = await this.snapshot(request.sourceId)
     const original = this.inspection(snapshot, request.definition)
     if (request.action === 'inspect') return original
+    if (timelineReadOnly(original.definition)) throw new EditorError(422, readOnlyMessage)
     if (request.baseHash !== snapshot.hash)
       throw new EditorError(409, 'Source changed; inspect the latest revision before saving')
     const candidate = this.candidate(snapshot, request)

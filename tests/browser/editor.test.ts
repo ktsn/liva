@@ -13,7 +13,7 @@ test.describe.configure({ mode: 'serial' })
 const file = new URL('../../playground/tests/EditorToggle.vue', import.meta.url)
 
 async function open(page: Page, fixture = false) {
-  await page.goto(fixture ? `${base}/tests/editor.html` : base)
+  await page.goto(fixture ? `${base}/tests/editor.html` : `${base}/tests/legacy-toggle.html`)
   await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
   await expect(page.getByLabel('Playhead')).toBeVisible()
 }
@@ -401,15 +401,6 @@ test('lifecycle previews capture templates, isolate instances, scrub and restore
   await expect(second).toHaveCSS('opacity', '1')
   await expect(first).toHaveAttribute('aria-pressed', 'false')
 
-  await page.getByLabel('Editing scope').selectOption('enter-state')
-  await page.getByLabel('To state').selectOption('active')
-  await track(page, 'body', 'opacity')
-  await expect(page.getByLabel('Track duration', { exact: true })).toHaveValue('400')
-  await page.getByRole('button', { name: 'body.opacity 0%', exact: true }).click()
-  await expect(page.getByText('Inherited default keyframe', { exact: true })).toBeVisible()
-  await seek(page, 200)
-  await expect(first).toHaveCSS('opacity', '0.5')
-
   await page.getByLabel('Editing scope').selectOption('leave-default')
   await page.getByLabel('To state').selectOption('idle')
   await seek(page, 200)
@@ -423,17 +414,14 @@ test('lifecycle previews capture templates, isolate instances, scrub and restore
   await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0)
 })
 
-test('lifecycle edits save shorthand and state overrides with shared HMR and independent inheritance', async ({
-  page,
-  browserName,
-}) => {
+test('motion-level lifecycle edits save with shared HMR', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium', 'Shared source writes run once')
   const lifecycleFile = new URL('../../playground/tests/EditorLifecycle.vue', import.meta.url)
   const original = await readFile(lifecycleFile, 'utf8')
 
   try {
     await openLifecycle(page)
-    await page.getByLabel('Editing scope').selectOption('enter-state')
+    await page.getByLabel('Editing scope').selectOption('enter-default')
     await page.getByLabel('To state').selectOption('active')
     await track(page, 'body', 'opacity')
     await page.getByRole('button', { name: 'body.opacity 0%', exact: true }).click()
@@ -443,17 +431,7 @@ test('lifecycle edits save shorthand and state overrides with shared HMR and ind
 
     expect(await readFile(lifecycleFile, 'utf8')).toContain('0%: ${start * 2}')
 
-    await page.getByLabel('Editing scope').selectOption('enter-state')
-    await page.getByLabel('To state').selectOption('active')
-    await track(page, 'body', 'opacity')
-    await expect(page.getByLabel('Track duration', { exact: true })).toHaveValue('400')
-    await page.getByRole('button', { name: 'Use default keyframes', exact: true }).click()
-    await save(page)
-
-    expect(await readFile(lifecycleFile, 'utf8')).not.toContain('start * 2')
-    expect(await readFile(lifecycleFile, 'utf8')).toContain('@tween: 400ms')
-
-    await page.getByLabel('Editing scope').selectOption('leave-state')
+    await page.getByLabel('Editing scope').selectOption('leave-default')
     await page.getByLabel('To state').selectOption('idle')
     await track(page, 'body', 'opacity')
     await page.getByLabel('Track duration', { exact: true }).fill('500')
@@ -461,7 +439,7 @@ test('lifecycle edits save shorthand and state overrides with shared HMR and ind
     await save(page)
 
     const saved = await readFile(lifecycleFile, 'utf8')
-    expect(saved).toContain('leave idle')
+    expect(saved).toContain('leave {')
     expect(saved).toContain('@tween: 500ms')
     expect(saved.slice(0, saved.indexOf('<liva'))).toBe(
       original.slice(0, original.indexOf('<liva')),

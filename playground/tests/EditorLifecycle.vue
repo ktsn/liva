@@ -22,7 +22,6 @@ motion panel(active: boolean, start: number) {
   state active when active { body { opacity: 0.8 } }
   transition { @tween: 100ms }
   enter { @tween: 200ms; body { opacity: ${start} } }
-  enter active { body { opacity { @tween: 400ms } } }
   leave { @tween: 200ms; body { opacity: 0 } }
 }
 </liva>

@@ -76,88 +76,40 @@ it('formats all timing variants and handles missing states and timing', async ()
   expect(tracks[0].frames[0].value).toBe(tracks[0].frames[1].value)
 })
 
-it('separates authored lifecycle settings from compiled inheritance', async () => {
-  const { editableDefinition } = await import('./timeline.ts')
+it('previews motion-level lifecycle endpoints in the selected legacy state', async () => {
+  const { editableDefinition, transitionAt, transitionPath } = await import('./timeline.ts')
   const compiled = compile(
-    `motion panel(open: boolean) {
-    state idle { body { opacity: 1 } }
-    state active when open { body { opacity: 0.8 } }
-    transition { @tween: 100ms }
+    `motion panel {
+    state idle { body { opacity: 1 } extra { opacity: 1 } }
     enter { @tween: 200ms; body { opacity: 0 } }
-    enter active { @tween: 300ms; body { opacity { @tween: 400ms } } }
-    leave { @tween: 500ms; body { translate: 10px 0 } }
+    leave { @tween: 300ms; body { translate: 10px 0 } extra { opacity: 0 } }
   }`,
     true,
   )
-  const fields = Object.keys(compiled.mappings!).map((path) => ({ path }))
-  const model = editableDefinition(compiled.definitions[0], fields)
+  const model = editableDefinition(compiled.definitions[0])
 
-  const inherited = timelineTracks(model, 'idle', 'active', false, 'enter')[0]
-  expect(inherited.duration).toBe(400)
-  expect(inherited.inheritedFrames).toBe(true)
-  expect(inherited.local?.keyframes).toBeUndefined()
-  expect(inherited.path).toBe('panel/enter/active/target/body/property/opacity')
-  expect(inherited.frames.map((frame) => frame.value)).toEqual(['0', '0.8'])
+  expect(model).not.toBe(compiled.definitions[0])
+  expect(transitionAt(model, 'idle', 'idle', false, 'enter')).toBe(model.enter)
+  expect(transitionPath(model, 'idle', 'idle', false, 'enter')).toBe('panel/enter')
 
-  const common = timelineTracks(model, 'idle', 'active', true, 'enter')[0]
-  expect(common.duration).toBe(200)
-  expect(common.path).toBe('panel/enter/target/body/property/opacity')
+  const enter = timelineTracks(model, 'idle', 'idle', true, 'enter')[0]
+  expect(enter.frames.map((frame) => frame.value)).toEqual(['0', '1'])
+  expect(enter.duration).toBe(200)
 
-  const leave = timelineTracks(model, 'idle', 'active', false, 'leave').find(
+  const leave = timelineTracks(model, 'idle', 'idle', true, 'leave').find(
     (track) => track.property === 'translate',
   )!
-  expect(leave.explicit).toEqual([{ offset: 1, value: '10px 0' }])
-  expect(leave.frames[0].value).toBe('')
-  expect(leave.duration).toBe(500)
+  expect(leave.frames.map((frame) => frame.value)).toEqual(['', '10px 0'])
+  expect(leave.duration).toBe(300)
 })
 
-it('keeps lifecycle inheritance live across default edits and missing overrides', async () => {
-  const { editableDefinition } = await import('./timeline.ts')
+it('displays lifecycle-only targets without inventing an endpoint state', () => {
   const compiled = compile(
-    `motion panel(open: boolean) {
-    state idle { body { opacity: 1; scale: 1 } other { opacity: 1 } }
-    state active when open { body { opacity: 0.8 } }
-    transition { @tween: 100ms }
-    enter { @tween: 200ms; body { opacity { @tween: 250ms; 0%: 0 } scale: 0.5 } other { opacity: 0 } }
-    enter active { body { scale { @tween: 300ms } } }
-    leave { @tween: 200ms; body { opacity: 0 } }
-    leave active { body { opacity: 0.2; scale { @tween: 300ms } } }
-  }`,
-    true,
-  )
-  const model = editableDefinition(
-    compiled.definitions[0],
-    Object.keys(compiled.mappings!).map((path) => ({ path })),
-  )
+    'motion panel { state idle { extra { opacity: 1 } } leave { @tween: 200ms; extra { opacity: 0 } } }',
+    false,
+  ).definitions[0]
+  const tracks = timelineTracks(compiled, 'missing', 'missing', false, 'leave')
 
-  expect(model.stateEnters?.[0].transition.targets).toEqual([
-    {
-      name: 'body',
-      properties: [
-        {
-          name: 'scale',
-          timing: { kind: 'tween', durationMs: 300, easing: 'linear' },
-          keyframes: undefined,
-        },
-      ],
-    },
-  ])
-  expect(model.stateLeaves?.[0].transition.targets[0].properties[1].keyframes).toBeUndefined()
-  expect(timelineTracks(model, 'idle', 'active', false, 'enter')[0].timingOrigin).toBe(
-    'Inherited default property',
-  )
-  expect(timelineTracks(model, 'idle', 'idle', false, 'leave')[0].inheritedFrames).toBe(true)
-  expect(
-    timelineTracks(
-      { ...model, leave: undefined, stateLeaves: undefined },
-      'idle',
-      'idle',
-      false,
-      'leave',
-    )[0].timing,
-  ).toBeUndefined()
-
-  const additional = timelineTracks({ ...model, states: [] }, 'idle', 'missing', true, 'leave')
-  expect(additional.map((track) => track.target)).toEqual(['body'])
-  expect(additional[0].frames[0].value).toBe('')
+  expect(tracks[0].target).toBe('extra')
+  expect(tracks[0].frames.map((frame) => frame.value)).toEqual(['', '0'])
 })

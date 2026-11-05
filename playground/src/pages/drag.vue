@@ -37,33 +37,14 @@
 motion card {
   let movement = drag(target: body)
 
-  state idle {
-    body {
-      translate: 0 0
-      scale: 1
-    }
+  layer base {
+    body @spring(stiffness: 300, damping: 20) { translate: 0 0; scale: 1 }
   }
 
-  state dragging when movement.active {
+  layer dragging when movement.active {
     body {
-      translate: ${movement.offset.x}px ${movement.offset.y}px
+      translate: ${movement.offset.x}px ${movement.offset.y}px @tween(duration: 0)
       scale: 1.05
-    }
-  }
-
-  transition {
-    @tween: 200ms ease-out
-  }
-
-  transition dragging -> idle {
-    body {
-      translate {
-        @spring: 300 20 1
-      }
-
-      scale {
-        @tween: 180ms ease-out
-      }
     }
   }
 }

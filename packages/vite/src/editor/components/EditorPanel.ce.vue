@@ -2,6 +2,7 @@
 import { nextTick, onMounted, onScopeDispose, ref, shallowRef, useTemplateRef } from 'vue'
 import type { EditorController } from '../controller.ts'
 import EditorForm from './EditorForm.ce.vue'
+import { timelineReadOnly, readOnlyMessage } from '../capabilities.ts'
 
 defineOptions({ inheritAttrs: false })
 
@@ -113,8 +114,11 @@ onScopeDispose(() => {
         </select>
         <button @click="toggle">Close</button>
       </div>
+      <p v-if="state.inspection && timelineReadOnly(state.inspection.definition)" role="status">{{
+        readOnlyMessage
+      }}</p>
       <EditorForm
-        v-if="state.inspection"
+        v-else-if="state.inspection"
         :key="inspectionVersion"
         :inspection="state.inspection"
         :controller="controller"

@@ -7,7 +7,7 @@ module.exports = grammar({
   rules: {
     source_file: ($) => repeat($._item),
     _item: ($) =>
-      choice($.motion, $.state, $.transition, $.selector_block, $.block, $._header_item),
+      choice($.motion, $.layer, $.state, $.transition, $.selector_block, $.block, $._header_item),
     _header_item: ($) =>
       choice(
         $.call,
@@ -31,18 +31,39 @@ module.exports = grammar({
       seq(
         'state',
         field('name', $.identifier),
+        optional('initial'),
         optional(seq('when', repeat1($._header_item))),
         $.block,
       ),
-    transition: ($) => seq('transition', optional(seq($.identifier, '->', $.identifier)), $.block),
-    selector_block: ($) => prec(1, seq(field('name', choice($.identifier, $.css_token)), $.block)),
+    layer: ($) =>
+      seq(
+        'layer',
+        field('name', $.identifier),
+        optional(seq('when', repeat1($._header_item))),
+        $.block,
+      ),
+    transition: ($) =>
+      prec.right(
+        seq(
+          'transition',
+          optional(seq($.identifier, '->', $.identifier)),
+          optional(seq('when', repeat1($._header_item))),
+          optional($.block),
+        ),
+      ),
+    selector_block: ($) =>
+      prec(
+        1,
+        seq(field('name', choice($.identifier, $.css_token)), optional($.decorator), $.block),
+      ),
     call: ($) => prec(1, seq(field('function', $.identifier), $.parenthesized)),
     block: ($) => seq('{', repeat($._item), '}'),
     parenthesized: ($) => seq('(', repeat($._item), ')'),
     bracketed: ($) => seq('[', repeat($._item), ']'),
     interpolation: ($) => seq('${', repeat($._item), '}'),
-    keyword: () => 'let',
-    type: () => choice('number', 'boolean', 'string'),
+    decorator: ($) => seq($.animation, optional($.parenthesized)),
+    keyword: () => choice('let', 'event', 'when', 'enter', 'leave'),
+    type: () => choice('number', 'boolean', 'string', 'timing', 'easing'),
     boolean: () => choice('true', 'false'),
     property: ($) => prec(1, seq(field('name', $.identifier), ':')),
     identifier: () => /[A-Za-z_][A-Za-z0-9_-]*/,

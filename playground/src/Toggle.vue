@@ -23,55 +23,25 @@ const checked = ref(false)
 
 <liva lang="liva">
 motion toggle(checked: boolean) {
-  state off {
-    track {
-      background-color: #888
-    }
-
-    thumb {
-      translate: 0 0
-      scale: 1
-    }
+  layer base {
+    track @tween(duration: 200, easing: easeInOut) { background-color: #888 }
+    thumb @spring(stiffness: 300, damping: 20) { translate: 0 0; scale: 1 }
   }
 
-  state on when checked {
-    track {
-      background-color: #34b27b
+  layer selection {
+    state off initial { thumb { scale: 1 } }
+    state on {
+      track { background-color: #34b27b }
+      thumb { translate: 24px 0; scale: 1 }
     }
 
-    thumb {
-      translate: 24px 0
-      scale: 1
-    }
-  }
-
-  transition {
-    @tween: 350ms ease-out
-
-    track {
-      background-color {
-        @tween-duration: 200ms
-        @tween-easing: ease-in-out
+    transition off -> on when checked {
+      thumb {
+        scale @tween(duration: 350) { 40%: 1.3 1 @easeIn; 70%: 0.95 1 @easeOut }
       }
     }
-
-    thumb {
-      translate {
-        @spring: 300 20 1
-      }
-
-      scale {
-        40%: 1.3 1 @ ease-in
-        70%: 0.95 1 @ ease-out
-      }
-    }
-  }
-
-  transition on -> off {
-    thumb {
-      translate {
-        @spring: 350ms 0.2
-      }
+    transition on -> off when !checked {
+      thumb { translate @spring(stiffness: 350, damping: 22) {} }
     }
   }
 }

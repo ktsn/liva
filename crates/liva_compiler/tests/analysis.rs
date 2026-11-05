@@ -103,7 +103,7 @@ fn hyphenated_names_have_whole_identifier_hover_ranges() {
 
 #[test]
 fn lifecycle_templates_expose_typed_hovers_in_both_property_forms() {
-    let source = "// 日本語\r\nmotion panel(distance: number) { state idle { body { translate: 0px 0 } } enter idle { @tween: 1ms; body { translate: ${distance}px 0 } } leave { @tween: 1ms; body { translate { 100%: ${distance}px 0 } } } }";
+    let source = "// 日本語\r\nmotion panel(distance: number) { state idle { body { translate: 0px 0 } } enter { @tween: 1ms; body { translate: ${distance}px 0 } } leave { @tween: 1ms; body { translate { 100%: ${distance}px 0 } } } }";
     let found = hovers(source);
     let expected: Vec<_> = source
         .match_indices("${distance}")
@@ -117,4 +117,36 @@ fn lifecycle_templates_expose_typed_hovers_in_both_property_forms() {
                 .any(|hover| hover.range.start == start && hover.label == "distance: number")
         );
     }
+}
+
+#[test]
+fn layer_guards_and_decorators_expose_expression_types_at_source_offsets() {
+    let source = r#"motion card(active: boolean, duration: number) {
+      let curve = easeOut
+      layer base { body @tween(duration: duration, easing: curve) { opacity: 1 } }
+      layer hover when active { body { opacity: .5 } }
+      layer workflow {
+        state idle initial {}
+        state busy {}
+        transition idle -> busy when active
+      }
+    }"#;
+    let found = hovers(source);
+
+    for (text, label) in [
+        ("duration,", "duration: number"),
+        ("curve)", "curve: easing"),
+        ("active {", "active: boolean"),
+        ("active\n", "active: boolean"),
+    ] {
+        let offset = source.find(text).unwrap();
+        assert!(
+            found
+                .iter()
+                .any(|hover| hover.range.start == offset && hover.label == label),
+            "{text}: {found:?}"
+        );
+    }
+    assert!(found.iter().any(|hover| hover.label.starts_with("tween(")
+        && hover.range.start == source.find("tween(").unwrap()));
 }

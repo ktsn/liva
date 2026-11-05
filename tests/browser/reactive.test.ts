@@ -192,12 +192,12 @@ test('normal Vue playground includes a draggable card selectable in the editor',
       (item) => item.binding.definition.name === 'card',
     )!
     await editor.select(entry.id)
-    await editor.preview('dragging', 'idle')
     editor.endPreview()
   })
   expect(await page.evaluate(() => window.__LIVA_EDITOR__.selected?.binding.definition.name)).toBe(
     'card',
   )
+  expect(await page.evaluate(() => window.__LIVA_EDITOR__.message)).toContain('read-only')
   await expect(card).toHaveCSS('scale', '1')
 })
 
