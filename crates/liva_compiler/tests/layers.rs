@@ -236,3 +236,30 @@ fn guarded_transitions_validate_guards_and_state_references() {
         );
     }
 }
+
+#[test]
+fn directional_tracks_support_decorators_interpolation_and_implicit_destinations() {
+    let result = valid(
+        "motion panel(opened: boolean, size: number) { layer visibility { state closed initial { body { opacity: 0; scale: .9 } } state open { body { opacity: 1; scale: 1 } } transition closed -> open when opened { body @spring(stiffness: 400, damping: 25) { scale { 0%: ${size}; 70%: 1.08 } } } transition open -> closed when !opened { body { opacity: 0 @tween(duration: 150, easing: easeIn) } } } }",
+    );
+    let transitions = &result.definitions[0].layers[0].transitions;
+
+    assert!(
+        transitions[0].transition.targets[0].properties[0]
+            .timing_expression
+            .is_some()
+    );
+    assert_eq!(
+        transitions[0].transition.targets[0].properties[0]
+            .keyframes
+            .as_ref()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert!(
+        transitions[1].transition.targets[0].properties[0]
+            .timing_expression
+            .is_some()
+    );
+}

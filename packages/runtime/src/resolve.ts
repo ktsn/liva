@@ -2,6 +2,9 @@ import { renderTransition, type VariableValues } from './expression.ts'
 import type { Definition, Frame, State, Timing, Transition } from './definition.ts'
 
 export interface ResolvedTrack {
+  readonly directionalOwner?: string
+  readonly ownerState?: string
+  readonly implicitStart?: boolean
   readonly target: string
   readonly property: string
   readonly timing: Timing
@@ -73,49 +76,62 @@ export function resolve(
         throw new Error(`Missing timing: ${target.name}.${property.name}`)
       }
 
-      const frames = (explicitFrames ?? [])
-        .map((frame) => ({ ...frame }))
-        .toSorted((a, b) => a.offset - b.offset)
-
-      if (
-        frames.some(
-          (frame, i) =>
-            !Number.isFinite(frame.offset) ||
-            frame.offset < 0 ||
-            frame.offset > 1 ||
-            (i > 0 && frame.offset === frames[i - 1].offset),
-        )
-      ) {
-        throw new Error('Invalid or duplicate frame offset')
-      }
-
-      if (
-        timing.kind !== 'tween' &&
-        frames.some((f) => (f.offset > 0 && f.offset < 1) || f.easing !== undefined)
-      ) {
-        throw new Error('Spring tracks cannot contain intermediate frames or frame easing')
-      }
-
-      if (frames[0]?.offset !== 0) {
-        frames.unshift({ offset: 0, value: source })
-      }
-
-      if (frames.at(-1)?.offset !== 1) {
-        frames.push({ offset: 1, value: property.value })
-      }
+      const frames = normalizeFrames(source, property.value, explicitFrames, timing)
 
       tracks.push({
         target: target.name,
         property: property.name,
         timing,
-        keyframes: frames.map((frame) => ({
-          ...frame,
-          easing: frame.easing ?? (timing.kind === 'tween' ? timing.easing : 'linear'),
-        })),
+        keyframes: frames,
         destinationValue: property.value,
       })
     }
   }
 
   return tracks
+}
+
+export function normalizeFrames(
+  source: string,
+  destination: string,
+  explicitFrames: readonly Frame[] | undefined,
+  timing: Timing,
+  allowSpringKeyframes = false,
+): Frame[] {
+  const frames = (explicitFrames ?? [])
+    .map((frame) => ({ ...frame }))
+    .toSorted((a, b) => a.offset - b.offset)
+
+  if (
+    frames.some(
+      (frame, i) =>
+        !Number.isFinite(frame.offset) ||
+        frame.offset < 0 ||
+        frame.offset > 1 ||
+        (i > 0 && frame.offset === frames[i - 1].offset),
+    )
+  ) {
+    throw new Error('Invalid or duplicate frame offset')
+  }
+
+  if (
+    !allowSpringKeyframes &&
+    timing.kind !== 'tween' &&
+    frames.some((f) => (f.offset > 0 && f.offset < 1) || f.easing !== undefined)
+  ) {
+    throw new Error('Spring tracks cannot contain intermediate frames or frame easing')
+  }
+
+  if (frames[0]?.offset !== 0) {
+    frames.unshift({ offset: 0, value: source })
+  }
+
+  if (frames.at(-1)?.offset !== 1) {
+    frames.push({ offset: 1, value: destination })
+  }
+
+  return frames.map((frame) => ({
+    ...frame,
+    easing: frame.easing ?? (timing.kind === 'tween' ? timing.easing : 'linear'),
+  }))
 }

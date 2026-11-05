@@ -615,6 +615,13 @@ impl Compiler {
             Some(syn::TransitionSelector::Leave | syn::TransitionSelector::LeaveState(_)) => {
                 Some(1.0)
             }
+            _ if node
+                .syntax()
+                .parent()
+                .is_some_and(|parent| syn::Layer::cast(parent).is_some()) =>
+            {
+                Some(1.0)
+            }
             _ => None,
         };
         self.mapping(path, node, "block");
@@ -1315,6 +1322,32 @@ impl Compiler {
                         };
                         let path = format!("{layer_path}/transition/{}", guarded.len());
                         let animation = self.transition(&transition, &path, &scope);
+
+                        for target in &animation.targets {
+                            for property in &target.properties {
+                                let declared = targets
+                                    .iter()
+                                    .chain(layer_states.iter().flat_map(|state| &state.targets))
+                                    .any(|styles| {
+                                        styles.name == target.name
+                                            && styles
+                                                .properties
+                                                .iter()
+                                                .any(|style| style.name == property.name)
+                                    });
+
+                                if !declared {
+                                    self.error(
+                                        "semantic.reference",
+                                        format!(
+                                            "Unknown layer animation property: {}.{}",
+                                            target.name, property.name
+                                        ),
+                                        &transition,
+                                    );
+                                }
+                            }
+                        }
 
                         guarded.push(GuardedTransition {
                             from,

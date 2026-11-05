@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vite-plus/test'
-import { userEvent } from 'vite-plus/test/browser'
+import { cdp, userEvent } from 'vite-plus/test/browser'
 import { LivaInstance, type RuntimeDiagnostic } from './instance.ts'
 import { decodeBundle, type Definition, type Expression } from './definition.ts'
 
@@ -37,6 +37,34 @@ const definition: Definition = {
     },
   ],
 }
+const timing = (duration: number): Expression => ({
+  kind: 'call',
+  function: 'tween',
+  arguments: [{ name: 'duration', value: { kind: 'number', value: duration } }],
+})
+
+function timedDefinition(duration = 300): Definition {
+  const timingExpression: Expression = {
+    kind: 'call',
+    function: 'tween',
+    arguments: [{ name: 'duration', value: { kind: 'number', value: duration } }],
+  }
+
+  return {
+    ...definition,
+    layers: definition.layers?.map((layer) =>
+      layer.name === 'base'
+        ? {
+            ...layer,
+            targets: [
+              { name: 'body', properties: [{ name: 'scale', value: '1', timingExpression }] },
+            ],
+          }
+        : layer,
+    ),
+  }
+}
+
 const cleanup: (() => void)[] = []
 
 function setup(source = definition, inputs = { hover: false, press: false, size: 1.1 }) {
@@ -119,7 +147,7 @@ describe('reactive layer instances', () => {
   })
 
   it('keeps reactive updates ready while a lifecycle target is absent', () => {
-    const { instance, element, errors } = setup({ ...definition, enter: { targets: [] } })
+    const { instance, element, errors } = setup({ ...timedDefinition(), enter: { targets: [] } })
     instance.bind([])
 
     instance.updateParameters({ hover: true, press: false, size: 1.6 })
@@ -173,6 +201,462 @@ describe('reactive layer instances', () => {
 
     expect(rebound).toBe(true)
     expect(replacement.style.opacity).toBe('1')
+  })
+
+  it('retargets an interrupted property from its displayed presentation', async () => {
+    const timingExpression: Expression = {
+      kind: 'call',
+      function: 'tween',
+      arguments: [
+        { name: 'duration', value: { kind: 'number', value: 300 } },
+        { name: 'easing', value: { kind: 'reference', path: ['linear'] } },
+      ],
+    }
+    const source: Definition = {
+      ...definition,
+      layers: definition.layers?.map((layer) =>
+        layer.name === 'base'
+          ? {
+              ...layer,
+              targets: [
+                { name: 'body', properties: [{ name: 'scale', value: '1', timingExpression }] },
+              ],
+            }
+          : layer,
+      ),
+    }
+    const { instance, element, errors } = setup(source)
+    instance.updateParameters({ hover: true, press: false, size: 1.4 })
+    const first = instance.animations[0]
+    first.pause()
+    first.currentTime = 150
+    const displayed = Number(getComputedStyle(element).scale)
+
+    instance.updateParameters({ hover: false, press: false, size: 1.4 })
+    const next = instance.animations[0]
+    next.pause()
+    next.currentTime = 0
+
+    expect(Number(getComputedStyle(element).scale)).toBeCloseTo(displayed)
+    expect(first.playState).toBe('idle')
+
+    next.finish()
+    await next.finished
+    await Promise.resolve()
+
+    expect(element.style.scale).toBe('1')
+    expect(errors).toEqual([])
+  })
+
+  it('starts an explicitly keyed track when a new owner has the same final value', async () => {
+    const source = timedDefinition()
+    const { instance, element } = setup({
+      ...source,
+      layers: [
+        ...(source.layers?.slice(0, 1) ?? []),
+        {
+          name: 'press',
+          when: ref('press'),
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'scale',
+                  value: '1',
+                  keyframes: [
+                    { offset: 0, value: '.8' },
+                    { offset: 1, value: '1' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+
+    instance.updateParameters({ hover: false, press: true, size: 1 })
+    const animation = instance.animations[0]
+    animation.pause()
+    animation.currentTime = 0
+
+    expect(getComputedStyle(element).scale).toBe('0.8')
+
+    animation.finish()
+    await animation.finished
+  })
+
+  it('executes spring timing through the sampled animation curve', async () => {
+    const source = timedDefinition()
+    const { instance } = setup({
+      ...source,
+      layers: source.layers?.map((layer) =>
+        layer.name === 'base'
+          ? {
+              ...layer,
+              targets: [
+                {
+                  name: 'body',
+                  properties: [
+                    {
+                      name: 'scale',
+                      value: '1',
+                      timingExpression: { kind: 'call', function: 'spring', arguments: [] },
+                    },
+                  ],
+                },
+              ],
+            }
+          : layer,
+      ),
+    })
+
+    instance.updateParameters({ hover: true, press: false, size: 1.4 })
+    const animation = instance.animations[0]
+
+    expect(animation.effect?.getTiming().easing).toContain('linear(')
+
+    animation.finish()
+    await animation.finished
+  })
+
+  it('settles zero-duration updates without creating effects', () => {
+    const { instance, element } = setup(timedDefinition(0))
+
+    instance.updateParameters({ hover: true, press: false, size: 1.4 })
+
+    expect(element.style.scale).toBe('1.4')
+    expect(instance.animations).toEqual([])
+  })
+
+  it('skips animation while reduced motion is enabled', async () => {
+    const session = cdp()
+    await session.send('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
+    })
+
+    try {
+      const { instance, element } = setup(timedDefinition())
+      instance.updateParameters({ hover: true, press: false, size: 1.4 })
+
+      expect(element.style.scale).toBe('1.4')
+      expect(instance.animations).toEqual([])
+    } finally {
+      await session.send('Emulation.setEmulatedMedia', {
+        features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+      })
+    }
+  })
+
+  it('keeps the resolved destination after external animation cancellation', async () => {
+    const { instance, element, errors } = setup(timedDefinition())
+    instance.updateParameters({ hover: true, press: false, size: 1.4 })
+    const animation = instance.animations[0]
+
+    animation.cancel()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(element.style.scale).toBe('1.4')
+    expect(instance.animations).toEqual([])
+    expect(errors[0].code).toBe('runtime.animation')
+  })
+
+  it('does not apply a stale completion after a newer reactive update', async () => {
+    const { instance, element } = setup(timedDefinition())
+    instance.updateParameters({ hover: true, press: false, size: 1.4 })
+    instance.animations[0].finish()
+
+    instance.updateParameters({ hover: false, press: false, size: 1.4 })
+    await Promise.resolve()
+
+    expect(element.style.scale).toBe('1')
+    expect(instance.animations).toHaveLength(1)
+  })
+
+  it('rolls back prepared effects when a later track has invalid easing', () => {
+    const source: Definition = {
+      ...definition,
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'scale',
+                  value: '1',
+                  timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
+                },
+                {
+                  name: 'opacity',
+                  value: '1',
+                  timing: { kind: 'tween', durationMs: 200, easing: 'not-an-easing' },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'hover',
+          when: ref('hover'),
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                { name: 'scale', value: '1.4' },
+                { name: 'opacity', value: '.5' },
+              ],
+            },
+          ],
+        },
+      ],
+    }
+    const { instance, element, errors } = setup(source)
+
+    instance.updateParameters({ hover: true, press: false, size: 1 })
+
+    expect(instance.animations).toEqual([])
+    expect(element.style.scale).toBe('1')
+    expect(element.style.opacity).toBe('1')
+    expect(errors[0].error).toBeInstanceOf(TypeError)
+  })
+
+  it('preserves an unrelated animation across a machine transition', () => {
+    const timingExpression: Expression = {
+      kind: 'call',
+      function: 'tween',
+      arguments: [{ name: 'duration', value: { kind: 'number', value: 300 } }],
+    }
+    const source: Definition = {
+      ...definition,
+      layers: [
+        {
+          name: 'machine',
+          initialState: 'idle',
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                { name: 'opacity', value: '', template: [ref('size')], timingExpression },
+                { name: 'scale', value: '1', timingExpression },
+              ],
+            },
+          ],
+          states: [
+            { name: 'idle', targets: [] },
+            {
+              name: 'open',
+              targets: [{ name: 'body', properties: [{ name: 'scale', value: '1.2' }] }],
+            },
+          ],
+          transitions: [
+            { from: 'idle', to: 'open', when: ref('hover'), transition: { targets: [] } },
+          ],
+        },
+      ],
+    }
+    const { instance } = setup(source, { hover: false, press: false, size: 1 })
+    instance.updateParameters({ hover: false, press: false, size: 0.5 })
+    const opacity = instance.animations[0]
+    opacity.pause()
+    opacity.currentTime = 100
+
+    instance.updateParameters({ hover: true, press: false, size: 0.5 })
+
+    expect(instance.animations).toContain(opacity)
+    expect(opacity.currentTime).toBe(100)
+    expect(opacity.playState).toBe('paused')
+  })
+
+  it('retires an obsolete directional track when the next state has the same value', () => {
+    const timingExpression: Expression = { kind: 'call', function: 'tween', arguments: [] }
+    const source: Definition = {
+      ...definition,
+      layers: [
+        {
+          name: 'machine',
+          initialState: 'closed',
+          targets: [
+            { name: 'body', properties: [{ name: 'scale', value: '1.1', timingExpression }] },
+          ],
+          states: [
+            { name: 'closed', targets: [] },
+            { name: 'open', targets: [] },
+          ],
+          transitions: [
+            {
+              from: 'closed',
+              to: 'open',
+              when: ref('hover'),
+              transition: {
+                targets: [
+                  {
+                    name: 'body',
+                    properties: [{ name: 'scale', keyframes: [{ offset: 0, value: '.8' }] }],
+                  },
+                ],
+              },
+            },
+            {
+              from: 'open',
+              to: 'closed',
+              when: { kind: 'unary', operator: '!', operand: ref('hover') },
+              transition: { targets: [] },
+            },
+          ],
+        },
+      ],
+    }
+    const { instance, element } = setup(source)
+    instance.updateParameters({ hover: true, press: false, size: 1 })
+    const opening = instance.animations[0]
+    opening.pause()
+    opening.currentTime = 0
+
+    instance.updateParameters({ hover: false, press: false, size: 1 })
+    const closing = instance.animations[0]
+    closing.pause()
+    closing.currentTime = 0
+
+    expect(opening.playState).toBe('idle')
+    expect(getComputedStyle(element).scale).toBe('0.8')
+  })
+
+  it('warns about a disagreeing endpoint but settles to the resolved CSS', async () => {
+    const timingExpression: Expression = { kind: 'call', function: 'tween', arguments: [] }
+    const source: Definition = {
+      ...definition,
+      layers: [
+        {
+          name: 'machine',
+          initialState: 'closed',
+          targets: [
+            { name: 'body', properties: [{ name: 'scale', value: '1', timingExpression }] },
+          ],
+          states: [
+            { name: 'closed', targets: [] },
+            {
+              name: 'open',
+              targets: [{ name: 'body', properties: [{ name: 'scale', value: '1.1' }] }],
+            },
+          ],
+          transitions: [
+            {
+              from: 'closed',
+              to: 'open',
+              when: ref('hover'),
+              transition: {
+                targets: [
+                  {
+                    name: 'body',
+                    properties: [{ name: 'scale', keyframes: [{ offset: 1, value: '2' }] }],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    }
+    const { instance, element, errors } = setup(source)
+    instance.updateParameters({ hover: true, press: false, size: 1 })
+    const animation = instance.animations[0]
+
+    animation.finish()
+    await animation.finished
+    await Promise.resolve()
+
+    expect(element.style.scale).toBe('1.1')
+    expect(errors[0].code).toBe('runtime.endpoint')
+  })
+
+  it('uses different directional tracks and restores resolved styles after completion', async () => {
+    const source: Definition = {
+      ...definition,
+      layers: [
+        {
+          name: 'visibility',
+          initialState: 'closed',
+          targets: [
+            {
+              name: 'body',
+              properties: [{ name: 'scale', value: '.9', timingExpression: timing(200) }],
+            },
+          ],
+          states: [
+            { name: 'closed', targets: [] },
+            {
+              name: 'open',
+              targets: [{ name: 'body', properties: [{ name: 'scale', value: '1.1' }] }],
+            },
+          ],
+          transitions: [
+            {
+              from: 'closed',
+              to: 'open',
+              when: ref('hover'),
+              transition: {
+                targets: [
+                  {
+                    name: 'body',
+                    properties: [
+                      {
+                        name: 'scale',
+                        timingExpression: timing(225),
+                        keyframes: [{ offset: 0.7, value: '1.2' }],
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+            {
+              from: 'open',
+              to: 'closed',
+              when: { kind: 'unary', operator: '!', operand: ref('hover') },
+              transition: {
+                targets: [
+                  { name: 'body', properties: [{ name: 'scale', timingExpression: timing(75) }] },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    }
+    const { instance, element, errors } = setup(source)
+    instance.updateParameters({ hover: true, press: false, size: 1 })
+    const opening = instance.animations[0]
+    opening.pause()
+    opening.currentTime = 100
+
+    expect(opening.effect?.getTiming().duration).toBe(225)
+    const effect = opening.effect
+
+    if (!(effect instanceof KeyframeEffect)) throw new Error('Expected keyframe effect')
+
+    expect(effect.getKeyframes().some((frame) => frame.scale === '1.2')).toBe(true)
+
+    instance.updateParameters({ hover: false, press: false, size: 1 })
+    const closing = instance.animations[0]
+
+    expect(closing.effect?.getTiming().duration).toBe(75)
+
+    closing.pause()
+    closing.currentTime = 37.5
+
+    expect(Number(getComputedStyle(element).scale)).toBeGreaterThan(0.9)
+    expect(Number(getComputedStyle(element).scale)).toBeLessThan(1.2)
+
+    closing.finish()
+    await closing.finished
+    await Promise.resolve()
+
+    expect(element.style.scale).toBe('0.9')
+    expect(errors).toEqual([])
   })
 
   it('restores original styles on disposal', () => {

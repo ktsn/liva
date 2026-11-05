@@ -1,4 +1,10 @@
-import { layerTargets, resolveLayers, type LayerResolution } from './layers.ts'
+import {
+  layerPropertyChanged,
+  layerTargets,
+  resolveLayers,
+  resolveLayerTracks,
+  type LayerResolution,
+} from './layers.ts'
 import { waapiProperty } from './animation.ts'
 export { waapiProperty } from './animation.ts'
 import { parameterValues, LetBindingGraph, targetValues } from './let-bindings.ts'
@@ -48,6 +54,8 @@ function inlineDeclarations(element: HTMLElement): Map<string, InlineValue> {
 }
 
 type ActiveTrack = { track: ResolvedTrack; element: HTMLElement; animation: Animation }
+
+const layerPropertyKey = (target: string, property: string) => `${target}\0${property}`
 
 export class LivaInstance {
   definition: Definition
@@ -621,38 +629,8 @@ export class LivaInstance {
       if (this.disposed) return
 
       if (this.layerResolution) {
-        const previousPresentation = this.layerResolution.presentation
         const resolution = resolveLayers(this.definition, values, this.layerResolution.states)
-        const removed = previousPresentation.targets.some((target) =>
-          target.properties.some(
-            (property) =>
-              !resolution.presentation.targets
-                .find((next) => next.name === target.name)
-                ?.properties.some((next) => next.name === property.name),
-          ),
-        )
-        this.layerResolution = resolution
-
-        if (!this.suspended) {
-          if (removed) {
-            this.restore()
-            this.settle()
-          } else {
-            for (const target of resolution.presentation.targets) {
-              for (const property of target.properties) {
-                const previousValue = previousPresentation.targets
-                  .find((item) => item.name === target.name)
-                  ?.properties.find((item) => item.name === property.name)?.value
-
-                if (previousValue === property.value) continue
-
-                for (const element of this.targetElements.get(target.name) ?? []) {
-                  this.write(element, property.name, property.value)
-                }
-              }
-            }
-          }
-        }
+        this.applyLayerResolution(this.layerResolution, resolution)
 
         this.onReactiveState?.(this.state)
         return
@@ -701,6 +679,137 @@ export class LivaInstance {
     } catch (error) {
       this.values = previous
       this.report({ code: 'runtime.expression', message: String(error), error })
+    }
+  }
+
+  private applyLayerResolution(previous: LayerResolution, next: LayerResolution) {
+    const prepared: ActiveTrack[] = []
+    const changed = new Set<string>()
+    for (const entry of this.active) {
+      if (
+        entry.track.directionalOwner !== undefined &&
+        next.states.get(entry.track.directionalOwner) !== entry.track.ownerState
+      ) {
+        changed.add(layerPropertyKey(entry.track.target, entry.track.property))
+      }
+    }
+
+    const removedProperties = new Set(
+      previous.presentation.targets.flatMap((target) =>
+        target.properties
+          .filter(
+            (property) =>
+              !next.presentation.targets
+                .find((item) => item.name === target.name)
+                ?.properties.some((item) => item.name === property.name),
+          )
+          .map((property) => layerPropertyKey(target.name, property.name)),
+      ),
+    )
+    const removed = removedProperties.size > 0
+
+    const tracks = resolveLayerTracks(
+      previous,
+      next,
+      this.values,
+      (target, property) => {
+        const element = this.targets.get(target)
+        return element ? getComputedStyle(element).getPropertyValue(property) : ''
+      },
+      (message) => this.report({ code: 'runtime.endpoint', message }),
+      (target, property) => changed.has(layerPropertyKey(target, property)),
+    )
+
+    for (const target of next.presentation.targets) {
+      for (const property of target.properties) {
+        if (layerPropertyChanged(previous, target.name, property))
+          changed.add(layerPropertyKey(target.name, property.name))
+      }
+    }
+
+    try {
+      if (!this.suspended && !this.motion.matches) {
+        for (const track of tracks) {
+          changed.add(layerPropertyKey(track.target, track.property))
+          const timing =
+            track.timing.kind === 'tween'
+              ? { durationMs: track.timing.durationMs, easing: 'linear' }
+              : sampleSpring(track.timing)
+
+          if (timing.durationMs === 0) continue
+
+          for (const element of this.targetElements.get(track.target) ?? []) {
+            const interrupted = this.active.some(
+              (entry) => entry.element === element && entry.track.property === track.property,
+            )
+            const frames = track.keyframes.map((frame, index) => ({
+              [waapiProperty(track.property)]:
+                index === 0 && (track.implicitStart || interrupted)
+                  ? getComputedStyle(element).getPropertyValue(track.property)
+                  : frame.value,
+              offset: frame.offset,
+              easing: frame.easing,
+            }))
+            const animation = new Animation(
+              new KeyframeEffect(element, frames, {
+                duration: timing.durationMs,
+                easing: timing.easing,
+                fill: 'both',
+              }),
+              document.timeline,
+            )
+            prepared.push({ track, element, animation })
+          }
+        }
+      }
+    } catch (error) {
+      for (const entry of prepared) entry.animation.cancel()
+      throw error
+    }
+
+    const replaced = this.active.filter(
+      (entry) =>
+        removedProperties.has(layerPropertyKey(entry.track.target, entry.track.property)) ||
+        changed.has(layerPropertyKey(entry.track.target, entry.track.property)),
+    )
+    this.active = this.active.filter((entry) => !replaced.includes(entry))
+
+    for (const entry of replaced) entry.animation.cancel()
+
+    this.layerResolution = next
+
+    if (this.suspended) return
+
+    if (removed) this.restore()
+
+    for (const target of next.presentation.targets) {
+      for (const property of target.properties) {
+        if (!removed && !changed.has(layerPropertyKey(target.name, property.name))) continue
+
+        for (const element of this.targetElements.get(target.name) ?? [])
+          this.write(element, property.name, property.value)
+      }
+    }
+
+    this.active.push(...prepared)
+
+    for (const entry of prepared) {
+      entry.animation.play()
+      void entry.animation.finished
+        .then(() => {
+          if (!this.active.includes(entry)) return undefined
+
+          this.write(entry.element, entry.track.property, entry.track.destinationValue)
+          entry.animation.cancel()
+          this.active = this.active.filter((item) => item !== entry)
+          return undefined
+        })
+        .catch((error) => {
+          if (this.active.includes(entry)) {
+            this.active = this.active.filter((item) => item !== entry)
+            this.report({ code: 'runtime.animation', message: String(error), error })
+          }
+        })
     }
   }
 
