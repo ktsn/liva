@@ -77,12 +77,15 @@ function add(event: MouseEvent) {
     >
       {{ track.property }}
     </button>
+    <!-- Pointer shortcuts supplement the keyboard-accessible playhead and New keyframe controls. -->
+    <!-- oxlint-disable-next-line a11y/no-static-element-interactions -->
     <div
       ref="lane"
       class="lane"
       :data-track="`${track.target}.${track.property}`"
       @dblclick.self="add"
     >
+      <!-- oxlint-disable-next-line a11y/no-static-element-interactions -->
       <div
         class="band"
         :class="{ spring: track.timing?.kind !== 'tween' }"

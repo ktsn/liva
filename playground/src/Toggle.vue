@@ -13,8 +13,8 @@ const checked = ref(false)
       role="switch"
       :aria-label="label"
       :aria-checked="checked"
-      @click="checked = !checked"
       class="switch"
+      @click="checked = !checked"
     >
       <span v-liva-target:thumb class="thumb" />
     </button>

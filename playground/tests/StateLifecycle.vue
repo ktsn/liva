@@ -12,10 +12,10 @@ const distance = ref(40)
   <button id="remove" @click="visible = !visible">Toggle insertion</button>
   <button id="hide" @click="shown = !shown">Toggle visibility</button>
   <button id="distance" @click="distance = 90">Change distance</button>
-  <div v-if="visible" v-liva:panel="{ open, distance }" v-liva-target:content id="card">
-    Card <span v-liva-target:badge id="badge">Badge</span>
+  <div v-if="visible" id="card" v-liva:panel="{ open, distance }" v-liva-target:content>
+    Card <span id="badge" v-liva-target:badge>Badge</span>
   </div>
-  <div v-show="shown" v-liva:panel="{ open, distance }" v-liva-target:content id="shown-card">
+  <div v-show="shown" id="shown-card" v-liva:panel="{ open, distance }" v-liva-target:content>
     Shown card <span v-liva-target:badge>Badge</span>
   </div>
 </template>

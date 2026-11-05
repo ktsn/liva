@@ -499,13 +499,6 @@ onScopeDispose(() => {
       aria-label="Animation timeline"
       role="region"
       :class="{ panning: pan }"
-      @pointerdown="beginPan"
-      @pointermove="movePan"
-      @pointerup="endPan"
-      @pointercancel="endPan"
-      @pointerleave="endPan"
-      @lostpointercapture="endPan"
-      @scroll="horizontalScroll = ($event.target as HTMLElement).scrollLeft"
       class="timeline"
       :style="{
         '--timeline-label-width': `${timelineLabelWidth}px`,
@@ -513,6 +506,13 @@ onScopeDispose(() => {
         '--playhead': `${(time / extent) * 100}%`,
         '--grid-step': `${(tickInterval / extent) * 100}%`,
       }"
+      @pointerdown="beginPan"
+      @pointermove="movePan"
+      @pointerup="endPan"
+      @pointercancel="endPan"
+      @pointerleave="endPan"
+      @lostpointercapture="endPan"
+      @scroll="horizontalScroll = ($event.target as HTMLElement).scrollLeft"
     >
       <div
         class="timeline-content"
@@ -526,9 +526,9 @@ onScopeDispose(() => {
           <div ref="rulerLane" class="ruler-lane" data-testid="timeline-ruler-lane">
             <div class="ticks">
               <span
-                data-testid="timeline-tick"
                 v-for="tick in ticks"
                 :key="tick"
+                data-testid="timeline-tick"
                 :style="{ left: `${(tick / extent) * 100}%` }"
               >{{ tick }}</span>
             </div>

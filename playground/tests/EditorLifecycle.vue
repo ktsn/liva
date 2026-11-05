@@ -6,10 +6,10 @@ const active = ref(false)
 
 <template>
   <button
-    :aria-label="label"
-    :aria-pressed="active"
     v-liva:panel="{ active, start: 0.2 }"
     v-liva-target:body
+    :aria-label="label"
+    :aria-pressed="active"
     @click="active = !active"
   >
     {{ label }}

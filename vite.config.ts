@@ -31,6 +31,7 @@ const config = defineViteConfig({
     },
 
     options: {
+      denyWarnings: true,
       typeAware: true,
       typeCheck: true,
     },
@@ -104,4 +105,29 @@ const config = defineViteConfig({
   },
 })
 
-export default defineConfig(config)
+export default defineConfig({
+  ...config,
+  vue: {
+    linter: {
+      maxWarnings: 0,
+      reportUnusedDisableDirectives: true,
+      categories: {
+        correctness: 'error',
+        suspicious: 'error',
+        style: 'error',
+        perf: 'error',
+        a11y: 'error',
+        security: 'error',
+      },
+    },
+    entries: [
+      {
+        files: ['**/*.ce.vue'],
+        linter: {
+          // The .ce suffix enables Vue custom-element style injection.
+          rules: { 'vue/component-definition-name-casing': 'off' },
+        },
+      },
+    ],
+  },
+})

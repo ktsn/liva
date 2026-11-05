@@ -98,7 +98,7 @@ onScopeDispose(() => {
 <template>
   <div class="page-space" :style="{ height: `${panelHeight}px` }" aria-hidden="true" />
   <div class="editor">
-    <section ref="panel" v-show="open" aria-label="Liva motion editor" class="panel">
+    <section v-show="open" ref="panel" aria-label="Liva motion editor" class="panel">
       <div class="top">
         <select
           class="instance"
@@ -126,6 +126,8 @@ onScopeDispose(() => {
   </div>
 </template>
 
+<!-- Shared editor styles are isolated by the custom element's shadow root. -->
+<!-- oxlint-disable-next-line vue/require-scoped-style -->
 <style src="../editor.css"></style>
 
 <style scoped>

@@ -19,7 +19,7 @@ const child = ref(true)
   </div>
 </template>
 
-<style>
+<style scoped>
 span {
   display: inline-block;
 }

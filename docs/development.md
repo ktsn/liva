@@ -62,7 +62,9 @@ Vite+ `defineConfig` wrapper so browser tests retain Vite+ test initialization. 
 TypeScript 7.1 beta with Vize's Content Mapper and checks both the root project
 (including editor SFCs) and the playground. Run `pnpm typecheck`, `vp run lint`,
 `vp run fmt:check`, and `pnpm build` individually, or `pnpm check` for all
-static checks. Use `vp run fmt` to apply formatting.
+static checks. Use `vp run fmt` to apply formatting. Lint warnings fail verification
+for both Vize and Oxlint. Custom-element naming has an extension-based exception in the root configuration.
+The shared shadow-root stylesheet has a local lint annotation.
 
 The root configuration owns the workspace lint and format tasks. Playground task
 generation is disabled to avoid duplicate task names during workspace discovery.

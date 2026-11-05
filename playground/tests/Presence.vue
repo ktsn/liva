@@ -23,8 +23,8 @@ function updateBindings() {
 
 <template>
   <button id="binding-update" @click="updateBindings">Update bindings</button>
-  <div v-liva:nested="manualState" v-liva-target:body id="manual-binding">Manual</div>
-  <div v-liva:parameters="parameters" v-liva-target:body id="parameter-binding">Parameters</div>
+  <div id="manual-binding" v-liva:nested="manualState" v-liva-target:body>Manual</div>
+  <div id="parameter-binding" v-liva:parameters="parameters" v-liva-target:body>Parameters</div>
   <button id="toggle" @click="visible = !visible">Toggle</button>
   <button id="show" @click="shown = !shown">Show</button>
   <button id="branch" @click="branch = (branch + 1) % 3">Branch</button>
@@ -34,21 +34,21 @@ function updateBindings() {
   <div v-liva:panel>
     <section v-if="visible" id="ancestor">
       <UnmountProbe />
-      <div v-liva-target:content id="content">Content</div>
-      <div v-liva-target:secondary id="secondary">Secondary</div>
-      <div v-if="innerVisible" v-liva:nested v-liva-target:body id="nested">Nested</div>
+      <div id="content" v-liva-target:content>Content</div>
+      <div id="secondary" v-liva-target:secondary>Secondary</div>
+      <div v-if="innerVisible" id="nested" v-liva:nested v-liva-target:body>Nested</div>
     </section>
-    <div v-if="visible" v-liva-target:direct id="direct">Direct</div>
-    <div v-show="shown" v-liva-target:directVisibility id="direct-visibility">
+    <div v-if="visible" id="direct" v-liva-target:direct>Direct</div>
+    <div v-show="shown" id="direct-visibility" v-liva-target:directVisibility>
       Direct visibility
     </div>
-    <div v-for="item in items" :key="item" v-liva-target:repeated :id="'repeated-' + item">
+    <div v-for="item in items" :id="'repeated-' + item" :key="item" v-liva-target:repeated>
       Repeated target
     </div>
     <section v-show="shown" id="show-ancestor">
-      <div v-liva-target:visibility id="visibility">Visibility</div>
+      <div id="visibility" v-liva-target:visibility>Visibility</div>
     </section>
-    <div v-if="branch === 0" v-liva-target:first id="first">First</div>
+    <div v-if="branch === 0" id="first" v-liva-target:first>First</div>
     <section v-else-if="branch === 1" id="second">
       <div v-liva-target:second>Second</div>
     </section>
@@ -56,9 +56,9 @@ function updateBindings() {
       <div v-liva-target:third>Third</div>
     </section>
   </div>
-  <div v-if="rootVisible" v-liva:nested v-liva-target:body id="motion-root">Root</div>
-  <section v-for="item in items" :key="item" :id="'row-' + item">
-    <div v-liva:nested v-liva-target:body :id="'row-body-' + item">Row</div>
+  <div v-if="rootVisible" id="motion-root" v-liva:nested v-liva-target:body>Root</div>
+  <section v-for="item in items" :id="'row-' + item" :key="item">
+    <div :id="'row-body-' + item" v-liva:nested v-liva-target:body>Row</div>
   </section>
 </template>
 
