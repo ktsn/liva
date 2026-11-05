@@ -95,7 +95,7 @@ function applyTiming() {
 </script>
 
 <template>
-  <aside class="inspector" aria-label="Selection inspector">
+  <aside aria-label="Selection inspector" class="inspector">
     <h3>{{ track.target }} / {{ track.property }}</h3>
     <p v-if="track.diagnostic" role="alert">{{ track.diagnostic }}</p>
     <template v-if="offset !== undefined">
@@ -119,20 +119,18 @@ function applyTiming() {
       </p>
       <label>Value<input v-model="value" aria-label="Keyframe value" /></label>
       <template v-if="!implicit">
-        <label
-          >Position (%)<input
+        <label>Position (%)<input
             v-model.number="percent"
-            type="number"
-            min="0"
-            max="100"
-            step="0.1"
             aria-label="Keyframe percentage"
-        /></label>
-        <label
-          >Time (ms)<input
-            :value="Math.round((percent / 100) * track.duration * 1000) / 1000"
-            type="number"
+            max="100"
             min="0"
+            step="0.1"
+            type="number"
+          /></label>
+        <label>Time (ms)<input
+            :value="Math.round((percent / 100) * track.duration * 1000) / 1000"
+            min="0"
+            type="number"
             :max="track.duration"
             step="1"
             :disabled="track.duration === 0"
@@ -140,13 +138,12 @@ function applyTiming() {
             @input="
               percent = (Number(($event.target as HTMLInputElement).value) / track.duration) * 100
             "
-        /></label>
-        <label v-if="track.timing?.kind === 'tween' && percent < 100"
-          >Easing to next keyframe<input
+          /></label>
+        <label v-if="track.timing?.kind === 'tween' && percent < 100">Easing to next keyframe<input
             v-model="easing"
-            placeholder="Use track easing"
             aria-label="Keyframe easing"
-        /></label>
+            placeholder="Use track easing"
+          /></label>
         <button @click="applyFrame">{{ pending ? 'Add keyframe' : 'Apply keyframe' }}</button>
         <button v-if="!pending" @click="emit('remove')">Delete keyframe</button>
       </template>
@@ -157,32 +154,32 @@ function applyTiming() {
     </template>
     <template v-else>
       <p>{{ track.timingOrigin }} · {{ Math.round(track.duration) }} ms</p>
-      <label
-        >Timing<select v-model="kind" aria-label="Timing mode">
+      <label>Timing<select v-model="kind" aria-label="Timing mode">
           <option value="tween">Tween</option>
           <option value="spring-duration">Duration spring</option>
           <option value="spring-physics">Physics spring</option>
-        </select></label
-      >
-      <label v-if="kind !== 'spring-physics'"
-        >Duration (ms)<input
+        </select></label>
+      <label v-if="kind !== 'spring-physics'">Duration (ms)<input
           v-model.number="duration"
-          type="number"
-          min="0"
           aria-label="Track duration"
-      /></label>
-      <label v-if="kind === 'tween'"
-        >Default easing<input v-model="defaultEasing" aria-label="Track easing"
-      /></label>
-      <label v-if="kind === 'spring-duration'"
-        >Bounce<input v-model.number="bounce" type="number" min="0" max="0.99" step="0.01"
-      /></label>
-      <template v-if="kind === 'spring-physics'">
-        <label
-          >Stiffness<input v-model.number="stiffness" type="number" min="0.01" step="1"
+          min="0"
+          type="number"
         /></label>
-        <label>Damping<input v-model.number="damping" type="number" min="0.01" step="1" /></label>
-        <label>Mass<input v-model.number="mass" type="number" min="0.01" step="0.1" /></label>
+      <label v-if="kind === 'tween'">Default easing<input
+          v-model="defaultEasing"
+          aria-label="Track easing"
+        /></label>
+      <label v-if="kind === 'spring-duration'">Bounce<input
+          v-model.number="bounce"
+          max="0.99"
+          min="0"
+          step="0.01"
+          type="number"
+        /></label>
+      <template v-if="kind === 'spring-physics'">
+        <label>Stiffness<input v-model.number="stiffness" min="0.01" step="1" type="number" /></label>
+        <label>Damping<input v-model.number="damping" min="0.01" step="1" type="number" /></label>
+        <label>Mass<input v-model.number="mass" min="0.01" step="0.1" type="number" /></label>
         <p>Duration is calculated from the spring parameters.</p>
       </template>
       <button @click="applyTiming">Apply timing</button>

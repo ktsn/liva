@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vp dev",
     "build": "vp build",
-    "check:vue": "vue-tsc --noEmit"
+    "check:vue": "tsc --runExternalCode --noEmit"
   },
   "dependencies": {
     "@liva/runtime": "workspace:*",
@@ -16,8 +16,7 @@
   },
   "devDependencies": {
     "@liva/vite": "workspace:*",
-    "@vitejs/plugin-vue": "6.0.10",
-    "vite-plus": "1.4.0",
-    "vue-tsc": "3.3.14"
+    "@vizejs/vite-plugin": "0.684.0",
+    "vite-plus": "1.4.0"
   }
 }

@@ -5,7 +5,7 @@ const active = ref(false)
 </script>
 
 <template>
-  <section class="demo" aria-labelledby="beacon-title">
+  <section aria-labelledby="beacon-title" class="demo">
     <h1 id="beacon-title">Beacon</h1>
     <div class="demo-stage">
       <button

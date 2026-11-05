@@ -437,30 +437,29 @@ onScopeDispose(() => {
 
 <template>
   <div class="toolbar">
-    <label
-      >Editing<select v-model="scope" aria-label="Editing scope" @change="changeDirection">
+    <label>Editing<select v-model="scope" aria-label="Editing scope" @change="changeDirection">
         <option value="directional">Directional transition</option>
         <option value="general">Common settings</option>
         <option value="enter-default">Enter · default</option>
         <option value="enter-state">Enter · state override</option>
         <option value="leave-default">Leave · default</option>
         <option value="leave-state">Leave · state override</option>
-      </select></label
-    >
-    <label v-if="!phase"
-      >From<select v-model="from" aria-label="From state" @change="changeDirection">
+      </select></label>
+    <label v-if="!phase">From<select
+        v-model="from"
+        aria-label="From state"
+        @change="changeDirection"
+      >
         <option v-for="state in states" :key="state">{{ state }}</option>
-      </select></label
-    >
+      </select></label>
     <span v-if="!phase">→</span>
-    <label
-      >{{ phase ? 'State' : 'To'
+    <label>{{
+        phase ? 'State' : 'To'
       }}<select v-model="to" aria-label="To state" @change="changeDirection">
         <option v-for="state in states" :key="state" :disabled="!phase && state === from">
           {{ state }}
         </option>
-      </select></label
-    >
+      </select></label>
     <button
       :disabled="
         busy || stale || (!phase && from === to) || tracks.some((track) => track.diagnostic)
@@ -471,15 +470,14 @@ onScopeDispose(() => {
     </button>
     <button :disabled="stale" @click="seek(0)">To start</button>
     <button @click="endPreview">End preview</button>
-    <span class="readout" role="timer" aria-label="Playback time"
-      >{{ Math.round(time) }} / {{ Math.round(duration) }} ms</span
-    >
-    <div class="zoom-controls" role="group" aria-label="Timeline zoom">
+    <span aria-label="Playback time" class="readout" role="timer"
+    >{{ Math.round(time) }} / {{ Math.round(duration) }} ms</span>
+    <div aria-label="Timeline zoom" class="zoom-controls" role="group">
       <button aria-label="Zoom out timeline" @click="changeZoom(zoom / 1.25)">−</button>
       <input
+        aria-label="Timeline zoom level"
         class="zoom-slider"
         type="range"
-        aria-label="Timeline zoom level"
         :min="Math.min(-4, Math.log2(zoom))"
         :max="Math.max(4, Math.log2(zoom))"
         step="0.01"
@@ -489,15 +487,17 @@ onScopeDispose(() => {
       <button aria-label="Zoom in timeline" @click="changeZoom(zoom * 1.25)">+</button>
     </div>
     <div class="actions">
-      <button @click="discard">Discard changes</button
-      ><button :disabled="stale || !controller.draft.length" @click="save">Save to source</button>
+      <button @click="discard">Discard changes</button><button
+        :disabled="stale || !controller.draft.length"
+        @click="save"
+      >Save to source</button>
     </div>
   </div>
   <div class="workspace">
     <div
       ref="timeline"
-      role="region"
       aria-label="Animation timeline"
+      role="region"
       :class="{ panning: pan }"
       @pointerdown="beginPan"
       @pointermove="movePan"
@@ -530,14 +530,13 @@ onScopeDispose(() => {
                 v-for="tick in ticks"
                 :key="tick"
                 :style="{ left: `${(tick / extent) * 100}%` }"
-                >{{ tick }}</span
-              >
+              >{{ tick }}</span>
             </div>
-            <span class="playhead-marker" aria-hidden="true" />
+            <span aria-hidden="true" class="playhead-marker" />
             <input
               aria-label="Playhead"
-              type="range"
               min="0"
+              type="range"
               :max="extent"
               step="1"
               :value="time"
@@ -551,16 +550,13 @@ onScopeDispose(() => {
             class="target-row"
             :aria-expanded="expanded.includes(target)"
             :aria-label="`Toggle ${target} tracks`"
-            @click="
-              expanded = expanded.includes(target)
-                ? expanded.filter((item) => item !== target)
-                : [...expanded, target]
-            "
+            @click="expanded = expanded.includes(target)
+              ? expanded.filter((item) => item !== target)
+              : [...expanded, target]"
           >
             <span class="target-name"
-              >{{ expanded.includes(target) ? '▾' : '▸' }} {{ target }}</span
-            >
-            <span class="summary" aria-hidden="true">
+            >{{ expanded.includes(target) ? '▾' : '▸' }} {{ target }}</span>
+            <span aria-hidden="true" class="summary">
               <span
                 v-for="(mark, index) in tracks
                   .filter((track) => track.target === target)
@@ -570,8 +566,7 @@ onScopeDispose(() => {
               />
             </span>
           </button>
-          <template v-if="expanded.includes(target)"
-            ><TimelineRow
+          <template v-if="expanded.includes(target)"><TimelineRow
               v-for="track in tracks.filter((track) => track.target === target)"
               :key="track.path"
               :track="track"
@@ -582,9 +577,9 @@ onScopeDispose(() => {
               @add="add(track, $event)"
               @move="(old, offset) => move(track, old, offset)"
               @duration="resize(track, $event)"
-          /></template>
+            /></template>
         </template>
-        <div class="playhead-overlay" aria-hidden="true"><span /></div>
+        <div aria-hidden="true" class="playhead-overlay"><span /></div>
       </div>
     </div>
     <TimelineInspector

@@ -6,7 +6,7 @@ const visible = ref(true)
 </script>
 
 <template>
-  <section class="demo" aria-labelledby="toggle-title">
+  <section aria-labelledby="toggle-title" class="demo">
     <h1 id="toggle-title">Toggle</h1>
     <div class="demo-card">
       <template v-if="visible">

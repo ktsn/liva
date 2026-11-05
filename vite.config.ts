@@ -1,9 +1,8 @@
-import { defineConfig } from 'vite-plus'
-import vue from '@vitejs/plugin-vue'
+import { defineConfig } from '@vizejs/vite-plugin/vite-plus'
+import { defineConfig as defineViteConfig } from 'vite-plus'
 import { playwright } from 'vite-plus/test/browser-playwright'
 
-export default defineConfig({
-  plugins: [vue()],
+const config = defineViteConfig({
   optimizeDeps: {
     entries: ['tests/browser/index.html'],
     include: ['vite-plus/test/browser'],
@@ -104,3 +103,5 @@ export default defineConfig({
     },
   },
 })
+
+export default defineConfig(config)

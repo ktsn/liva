@@ -3,6 +3,7 @@ import { ref } from 'vue'
 defineProps<{ label: string }>()
 const active = ref(false)
 </script>
+
 <template>
   <button
     :aria-label="label"
@@ -14,6 +15,7 @@ const active = ref(false)
     {{ label }}
   </button>
 </template>
+
 <liva lang="liva">
 motion motion(checked: boolean) {
   state off { box { background-color: red } }

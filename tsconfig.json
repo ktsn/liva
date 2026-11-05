@@ -16,7 +16,15 @@
     "tests/**/*.ts",
     "scripts/**/*.ts",
     "vite.config.ts",
-    "playwright.config.ts"
+    "playwright.config.ts",
+    "playground/vite.config.ts",
+    "packages/**/*.vue"
   ],
-  "exclude": ["packages/vite/wasm"]
+  "exclude": ["packages/vite/wasm"],
+  "contentMappers": [
+    {
+      "package": "vize",
+      "extensions": [".vue"]
+    }
+  ]
 }

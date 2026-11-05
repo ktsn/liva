@@ -98,7 +98,7 @@ onScopeDispose(() => {
 <template>
   <div class="page-space" :style="{ height: `${panelHeight}px` }" aria-hidden="true" />
   <div class="editor">
-    <section ref="panel" v-show="open" class="panel" aria-label="Liva motion editor">
+    <section ref="panel" v-show="open" aria-label="Liva motion editor" class="panel">
       <div class="top">
         <select
           class="instance"

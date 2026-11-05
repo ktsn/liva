@@ -5,19 +5,22 @@
   "scripts": {
     "wasm": "sh scripts/build-wasm.sh",
     "test:wasm": "node scripts/test-wasm.ts",
-    "check": "vp check",
+    "check": "pnpm typecheck && vp run lint && vp run fmt:check",
     "test": "vp test --run",
     "test:browser": "playwright test",
-    "verify": "sh scripts/verify.sh"
+    "verify": "sh scripts/verify.sh",
+    "build": "pnpm --dir playground build",
+    "typecheck": "tsc --runExternalCode --noEmit && tsc --runExternalCode --noEmit -p playground/tsconfig.json"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",
     "@types/node": "24.19.2",
-    "@vitejs/plugin-vue": "6.0.10",
     "@vitest/browser-playwright": "5.0.5",
     "@vitest/coverage-v8": "5.0.5",
-    "typescript": "6.0.3",
-    "vite-plus": "1.4.0"
+    "@vizejs/vite-plugin": "0.684.0",
+    "typescript": "7.1.0-beta",
+    "vite-plus": "1.4.0",
+    "vize": "0.684.0"
   },
   "engines": {
     "node": "24.22.1"

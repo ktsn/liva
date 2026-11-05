@@ -5,6 +5,7 @@ const inner = ref(false)
 const visible = ref(true)
 const child = ref(true)
 </script>
+
 <template>
   <button @click="visible = !visible">Mount</button>
   <button @click="child = !child">Target</button>
@@ -17,11 +18,13 @@ const child = ref(true)
     </div>
   </div>
 </template>
+
 <style>
 span {
   display: inline-block;
 }
 </style>
+
 <liva lang="liva">
 motion a {
   state off { track { opacity: 0.5 } thumb { translate: 0px } }

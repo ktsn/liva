@@ -111,7 +111,9 @@ function add(event: MouseEvent) {
         :style="{
           left: `${((drag?.kind === 'frame' && drag.offset === frame.offset ? drag.time : frame.offset * track.duration) / extent) * 100}%`,
         }"
-        :aria-label="`${track.target}.${track.property} ${Math.round(frame.offset * 100000) / 1000}%`"
+        :aria-label="
+          `${track.target}.${track.property} ${Math.round(frame.offset * 100000) / 1000}%`
+        "
         @click="emit('select', frame.offset)"
         @pointerdown.stop="begin($event, 'frame', frame.offset)"
         @pointermove="moving"

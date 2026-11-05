@@ -1,5 +1,5 @@
 <template>
-  <section class="demo" aria-labelledby="drag-title">
+  <section aria-labelledby="drag-title" class="demo">
     <h1 id="drag-title">Drag</h1>
     <div class="demo-stage">
       <div v-liva:card="{}" v-liva-target:body class="draggable-card" data-testid="draggable-card">
@@ -9,6 +9,28 @@
     </div>
   </section>
 </template>
+
+<style scoped>
+.draggable-card {
+  width: 220px;
+  padding: 2rem;
+  border-radius: 24px;
+  background: #e0eddf;
+  color: #183d31;
+  box-shadow: 0 12px 40px #173e3020;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.draggable-card:active {
+  cursor: grabbing;
+}
+.draggable-card span {
+  display: block;
+  font-size: 2rem;
+  margin-bottom: 1rem;
+}
+</style>
 
 <liva lang="liva">
 motion card {
@@ -45,25 +67,3 @@ motion card {
   }
 }
 </liva>
-
-<style scoped>
-.draggable-card {
-  width: 220px;
-  padding: 2rem;
-  border-radius: 24px;
-  background: #e0eddf;
-  color: #183d31;
-  box-shadow: 0 12px 40px #173e3020;
-  cursor: grab;
-  touch-action: none;
-  user-select: none;
-}
-.draggable-card:active {
-  cursor: grabbing;
-}
-.draggable-card span {
-  display: block;
-  font-size: 2rem;
-  margin-bottom: 1rem;
-}
-</style>
