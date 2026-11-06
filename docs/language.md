@@ -398,6 +398,26 @@ motion toggle(checked: boolean) {
 }
 ```
 
+## Reactive layer declarations
+
+`layer` is the replacement direction for simple reactive `state ... when` selection.
+An unconditional layer is always active; conditional layers are independently active
+when their Boolean expressions are true. Declaration order is preserved in Definition
+IR for property-level cascade resolution. Layers do not imply additive composition.
+
+```css
+motion button(hovered: boolean, pressed: boolean) {
+  layer base { body { scale: 1 } }
+  layer hover when hovered { body { scale: 1.05 } }
+  layer press when pressed { body { scale: 0.95 } }
+}
+```
+
+Layer names are unique within a motion. CSS values retain CSS syntax and units;
+`${expression}` interpolates scalar values. The compiler represents layers separately
+from legacy states, preserving existing state selection behavior. Runtime layer
+resolution is a separate integration step.
+
 ## Timing and easing values
 
 Animation settings are immutable expression values: `tween` and `spring` return

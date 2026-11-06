@@ -157,7 +157,7 @@ impl Parser<'_> {
                 }
 
                 if depth == 1
-                    && self.tokens[begin].text == "state"
+                    && matches!(self.tokens[begin].text, "state" | "layer")
                     && header_words == 2
                     && self.at() == "when"
                 {
@@ -572,8 +572,8 @@ fn validate_headers(node: &impl AstNode, depth: usize, diagnostics: &mut Vec<Dia
                 .is_some(),
             2 => is_name(&header),
             1 => match words.as_slice() {
-                ["state", name] => is_name(name),
-                ["state", name, "when", ..] => is_name(name) && words.len() > 3,
+                ["state" | "layer", name] => is_name(name),
+                ["state" | "layer", name, "when", ..] => is_name(name) && words.len() > 3,
                 ["transition"] | ["enter"] | ["leave"] => true,
                 ["enter" | "leave", state] => is_name(state),
                 ["transition", from, "->", to] => is_name(from) && is_name(to),

@@ -858,6 +858,12 @@ impl Compiler {
             match item {
                 syn::AnimationProperty::Shorthand(property) => {
                     let name = property.header().unwrap_or_default();
+
+                    if !liva_syntax::is_property(&name) {
+                        self.error("semantic.declaration", "Expected a CSS property", &property);
+                        continue;
+                    }
+
                     properties.push(Property {
                         name,
                         value: property.value_text().unwrap_or_default(),
@@ -1018,6 +1024,14 @@ impl Compiler {
             }
         }
 
+        for layer in node.layers() {
+            for target in layer.targets() {
+                targets
+                    .entry(target.header().unwrap_or_default())
+                    .or_insert(target);
+            }
+        }
+
         for (name, target) in targets {
             if !expression::identifier(&name) || matches!(name.as_str(), "true" | "false") {
                 self.error(
@@ -1079,6 +1093,33 @@ impl Compiler {
         scope
     }
 
+    fn style_targets(
+        &mut self,
+        node: &impl AstNode,
+        path: &str,
+        scope: &expression::Scope,
+    ) -> Vec<Target<Property>> {
+        let mut targets = vec![];
+        let mut target_names = BTreeMap::new();
+
+        for target in node.children::<syn::Target>() {
+            let target_name = target.header().unwrap_or_default();
+            self.unique(&mut target_names, &target_name, &target);
+            let target_path = format!("{path}/target/{target_name}");
+            self.mapping(&target_path, &target, "block");
+            self.declarations(&target, None, &target_path);
+
+            let properties = self.style_properties(&target, &target_path, scope);
+
+            targets.push(Target {
+                name: target_name,
+                properties,
+            });
+        }
+
+        targets
+    }
+
     fn definition(&mut self, node: &syn::Motion) -> Definition {
         let name = node.name().unwrap_or_default();
         self.mapping(&name, node, "block");
@@ -1104,6 +1145,7 @@ impl Compiler {
             leave: None,
             state_enters: vec![],
             state_leaves: vec![],
+            layers: vec![],
             states: vec![],
             general_transition: None,
             directional_transitions: vec![],
@@ -1137,34 +1179,53 @@ impl Compiler {
             }
         }
 
+        let mut layers = BTreeMap::new();
         let mut states = BTreeMap::new();
         let mut fallback_count = 0;
         let mut transitions = BTreeMap::new();
 
         for item in node.items() {
             match item {
+                syn::MotionItem::Layer(layer) => {
+                    let layer_name = layer.name().unwrap();
+                    self.unique(&mut layers, &layer_name, &layer);
+                    let layer_path = format!("{name}/layer/{layer_name}");
+                    self.mapping(&layer_path, &layer, "block");
+                    self.declarations(&layer, Some(&[]), &layer_path);
+                    let targets = self.style_targets(&layer, &layer_path, &scope);
+
+                    let condition = layer.condition();
+                    let when = condition.and_then(|condition| {
+                        let parsed = self.expression_view(&condition)?;
+
+                        match parsed.check(&scope).and_then(|value_type| {
+                            if value_type == expression::Type::Boolean {
+                                parsed.to_output()
+                            } else {
+                                Err(parsed.error("Layer condition must be Boolean"))
+                            }
+                        }) {
+                            Ok(expr) => Some(expr),
+                            Err(error) => {
+                                self.expression_error(error);
+                                None
+                            }
+                        }
+                    });
+
+                    definition.layers.push(Layer {
+                        when,
+                        name: layer_name,
+                        targets,
+                    });
+                }
                 syn::MotionItem::State(state) => {
                     let state_name = state.name().unwrap();
                     self.unique(&mut states, &state_name, &state);
                     let state_path = format!("{name}/state/{state_name}");
                     self.mapping(&state_path, &state, "block");
                     self.declarations(&state, Some(&[]), &state_path);
-                    let mut targets = vec![];
-                    let mut target_names = BTreeMap::new();
-
-                    for target in state.targets() {
-                        let target_name = target.header().unwrap_or_default();
-                        self.unique(&mut target_names, &target_name, &target);
-                        let target_path = format!("{state_path}/target/{target_name}");
-                        self.mapping(&target_path, &target, "block");
-                        self.declarations(&target, None, &target_path);
-                        let properties = self.style_properties(&target, &target_path, &scope);
-
-                        targets.push(Target {
-                            name: target_name,
-                            properties,
-                        });
-                    }
+                    let targets = self.style_targets(&state, &state_path, &scope);
 
                     let condition = state.condition();
                     if condition.is_none() {
@@ -1172,6 +1233,7 @@ impl Compiler {
                     }
                     let when = condition.and_then(|condition| {
                         let parsed = self.expression_view(&condition)?;
+
                         match parsed.check(&scope).and_then(|value_type| {
                             if value_type == expression::Type::Boolean {
                                 parsed.to_output()
@@ -1264,7 +1326,7 @@ impl Compiler {
             }
         }
 
-        if fallback_count != 1 {
+        if fallback_count != 1 && (definition.layers.is_empty() || !definition.states.is_empty()) {
             let fallbacks: Vec<_> = node
                 .states()
                 .filter(|state| state.condition().is_none())
@@ -1332,7 +1394,7 @@ impl Compiler {
     }
 
     fn validate(&mut self, def: &Definition, node: &syn::Motion) {
-        if def.states.is_empty() {
+        if def.states.is_empty() && def.layers.is_empty() {
             self.error_range(
                 "semantic.states",
                 "Definition needs at least one state",
@@ -1343,6 +1405,14 @@ impl Compiler {
 
         for state in &def.states {
             for target in &state.targets {
+                for property in &target.properties {
+                    pairs.insert((target.name.as_str(), property.name.as_str()));
+                }
+            }
+        }
+
+        for layer in &def.layers {
+            for target in &layer.targets {
                 for property in &target.properties {
                     pairs.insert((target.name.as_str(), property.name.as_str()));
                 }
