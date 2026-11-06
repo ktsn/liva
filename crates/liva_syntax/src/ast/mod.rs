@@ -81,7 +81,7 @@ pub trait HasHeader: AstNode {
     }
 
     fn header(&self) -> Option<String> {
-        self.header_node().map(|node| node.semantic_text())
+        self.header_node().map(|node| without_decorator(&node))
     }
 }
 
@@ -91,7 +91,7 @@ pub trait HasValue: AstNode {
     }
 
     fn value_text(&self) -> Option<String> {
-        self.value_node().map(|node| node.semantic_text())
+        self.value_node().map(|node| without_decorator(&node))
     }
 }
 
@@ -108,4 +108,31 @@ pub trait HasItems: AstNode {
     fn bindings(&self) -> impl Iterator<Item = LetBinding> {
         self.children()
     }
+}
+
+fn without_decorator(node: &impl AstNode) -> String {
+    if !node
+        .syntax()
+        .children()
+        .any(|child| child.kind() == Kind::Decorator)
+    {
+        return node.semantic_text();
+    }
+
+    node.syntax()
+        .children_with_tokens()
+        .filter(|element| element.kind() != Kind::Decorator)
+        .map(|element| match element {
+            rowan::NodeOrToken::Node(child) => child.semantic_text(),
+            rowan::NodeOrToken::Token(token)
+                if token.kind() == Kind::Trivia
+                    && (token.text().starts_with("/*") || token.text().starts_with("//")) =>
+            {
+                " ".into()
+            }
+            rowan::NodeOrToken::Token(token) => token.text().into(),
+        })
+        .collect::<String>()
+        .trim()
+        .into()
 }

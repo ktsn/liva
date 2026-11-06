@@ -11,6 +11,7 @@ export type Timing =
     }
 
 export interface Frame {
+  readonly easingExpression?: Expression
   readonly template?: readonly (string | Expression)[]
   readonly offset: number
   readonly value: string
@@ -48,6 +49,9 @@ export interface LetBinding {
 }
 
 export interface Property {
+  readonly timingExpression?: Expression
+  readonly timing?: Timing
+  readonly keyframes?: readonly Frame[]
   readonly template?: readonly (string | Expression)[]
   readonly name: string
   readonly value: string
@@ -65,6 +69,7 @@ export interface State {
 }
 
 export interface PropertyTransition {
+  readonly timingExpression?: Expression
   readonly name: string
   readonly timing?: Timing
   readonly keyframes?: readonly Frame[]

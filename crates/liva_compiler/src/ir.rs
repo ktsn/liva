@@ -54,6 +54,10 @@ pub struct Target<T> {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Property {
+    #[serde(rename = "timingExpression", skip_serializing_if = "Option::is_none")]
+    pub timing_expression: Option<Expression>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keyframes: Option<Vec<Frame>>,
     pub name: String,
     pub value: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -76,6 +80,8 @@ pub struct DirectionalTransition {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PropertyTransition {
+    #[serde(rename = "timingExpression", skip_serializing_if = "Option::is_none")]
+    pub timing_expression: Option<Expression>,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timing: Option<Timing>,
@@ -85,6 +91,8 @@ pub struct PropertyTransition {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Frame {
+    #[serde(rename = "easingExpression", skip_serializing_if = "Option::is_none")]
+    pub easing_expression: Option<Expression>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub template: Option<Vec<TemplatePart>>,
     pub offset: f64,

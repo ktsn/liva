@@ -123,6 +123,57 @@ impl Compiler {
         bindings
     }
 
+    fn decorator_expression(
+        &mut self,
+        node: &impl AstNode,
+        scope: &expression::Scope,
+        expected: expression::Type,
+    ) -> Option<expression::Expression> {
+        let decorator = node
+            .syntax()
+            .children()
+            .filter(|child| matches!(child.kind(), Kind::Header | Kind::Value))
+            .flat_map(|child| child.children().collect::<Vec<_>>())
+            .find(|child| child.kind() == Kind::Decorator)?;
+        let text = decorator.text().to_string();
+        let source = &text[1..];
+
+        if expected == expression::Type::Easing
+            && (matches!(
+                source.trim(),
+                "linear"
+                    | "ease"
+                    | "ease-in"
+                    | "ease-out"
+                    | "ease-in-out"
+                    | "step-start"
+                    | "step-end"
+            ) || ["cubic-bezier(", "steps(", "linear("]
+                .iter()
+                .any(|prefix| source.trim().starts_with(prefix)))
+        {
+            return None;
+        }
+
+        let result = expression::parse_with_diagnostics(source).and_then(|parsed| {
+            if parsed.check(scope)? != expected {
+                return Err(parsed.error(format!("Decorator requires {:?}", expected)));
+            }
+
+            parsed.to_output()
+        });
+
+        match result {
+            Ok(value) => Some(value),
+            Err(mut error) => {
+                error.range.start += decorator.range().start + 1;
+                error.range.end += decorator.range().start + 1;
+                self.expression_error(error);
+                None
+            }
+        }
+    }
+
     fn css_template(
         &mut self,
         node: &impl HasValue,
@@ -137,6 +188,9 @@ impl Compiler {
         let mut text = String::new();
 
         for element in syntax.syntax().children_with_tokens() {
+            if element.kind() == Kind::Decorator {
+                continue;
+            }
             if let Some(interpolation) = element
                 .as_node()
                 .filter(|n| n.kind() == Kind::Interpolation)
@@ -584,6 +638,7 @@ impl Compiler {
                     );
                 }
             }
+            let target_timing = self.decorator_expression(&target, scope, expression::Type::Timing);
             let mut properties = vec![];
             let mut property_names = BTreeMap::new();
 
@@ -613,9 +668,13 @@ impl Compiler {
                         self.mapping(&frame_path, &property, "block");
                         self.mapping(&format!("{frame_path}/value"), &value_node, "value");
                         properties.push(PropertyTransition {
+                            timing_expression: self
+                                .decorator_expression(&property, scope, expression::Type::Timing)
+                                .or_else(|| target_timing.clone()),
                             name,
                             timing: None,
                             keyframes: Some(vec![Frame {
+                                easing_expression: None,
                                 offset,
                                 value,
                                 easing: None,
@@ -630,6 +689,9 @@ impl Compiler {
                 let property_path = format!("{target_path}/property/{name}");
                 self.mapping(&property_path, &property, "block");
                 let timing = self.animation_declarations(&property, &property_path);
+                let timing_expression = self
+                    .decorator_expression(&property, scope, expression::Type::Timing)
+                    .or_else(|| timing.is_none().then(|| target_timing.clone()).flatten());
                 let mut frames = vec![];
                 let mut offsets = BTreeMap::new();
 
@@ -677,7 +739,7 @@ impl Compiler {
                         );
                     }
 
-                    if endpoint.is_none() && value.contains("${") {
+                    if endpoint.is_none() && timing_expression.is_none() && value.contains("${") {
                         let interpolations: Vec<_> = value_node
                             .syntax()
                             .descendants()
@@ -733,23 +795,36 @@ impl Compiler {
                             self.mapping(&format!("{frame_path}/easing"), &value_node, "value");
                         }
                     }
-                    let mut template = endpoint.and_then(|_| self.css_template(&frame, scope));
+                    let mut template = if endpoint.is_some() || timing_expression.is_some() {
+                        self.css_template(&frame, scope)
+                    } else {
+                        None
+                    };
                     if easing.is_some()
                         && let Some(expression::TemplatePart::Text(text)) =
                             template.as_mut().and_then(|parts| parts.last_mut())
                     {
                         *text = split_frame(text).0.trim_end().into();
                     }
+                    let easing_expression =
+                        self.decorator_expression(&frame, scope, expression::Type::Easing);
+
                     frames.push(Frame {
+                        easing_expression: easing_expression.clone(),
                         template,
                         offset,
                         value: value.into(),
-                        easing: easing.map(str::to_string),
+                        easing: if easing_expression.is_some() {
+                            None
+                        } else {
+                            easing.map(str::to_string)
+                        },
                     });
                 }
 
                 frames.sort_by(|a, b| a.offset.total_cmp(&b.offset));
                 properties.push(PropertyTransition {
+                    timing_expression,
                     name,
                     timing,
                     keyframes: if frames.is_empty() {
@@ -764,6 +839,146 @@ impl Compiler {
         }
 
         Transition { timing, targets }
+    }
+
+    fn style_properties(
+        &mut self,
+        target: &syn::Target,
+        path: &str,
+        scope: &expression::Scope,
+    ) -> Vec<Property> {
+        let default_timing = self.decorator_expression(target, scope, expression::Type::Timing);
+        let mut properties = vec![];
+        let mut seen = target
+            .properties()
+            .map(|property| (property.header().unwrap_or_default(), name_range(&property)))
+            .collect::<BTreeMap<_, _>>();
+
+        for item in target.animation_properties() {
+            match item {
+                syn::AnimationProperty::Shorthand(property) => {
+                    let name = property.header().unwrap_or_default();
+                    properties.push(Property {
+                        name,
+                        value: property.value_text().unwrap_or_default(),
+                        template: self.css_template(&property, scope),
+                        timing_expression: self
+                            .decorator_expression(&property, scope, expression::Type::Timing)
+                            .or_else(|| default_timing.clone()),
+                        keyframes: None,
+                    });
+                }
+                syn::AnimationProperty::Keyframes(track) => {
+                    let name = track.header().unwrap_or_default();
+                    self.unique(&mut seen, &name, &track);
+                    let timing_expression = self
+                        .decorator_expression(&track, scope, expression::Type::Timing)
+                        .or_else(|| default_timing.clone());
+
+                    if timing_expression.is_none() {
+                        self.error(
+                            "semantic.structure",
+                            "State targets contain declarations only",
+                            &track,
+                        );
+                        continue;
+                    }
+
+                    let track_path = format!("{path}/property/{name}");
+                    self.mapping(&track_path, &track, "block");
+                    for block in track.blocks() {
+                        self.error(
+                            "semantic.structure",
+                            "Property tracks contain inline keyframes",
+                            &block,
+                        );
+                    }
+
+                    for binding in track.bindings() {
+                        self.error(
+                            "semantic.structure",
+                            "Let declarations belong directly to a motion",
+                            &binding,
+                        );
+                    }
+
+                    for declaration in track.properties().filter(|property| {
+                        !property.header().is_some_and(|name| name.ends_with('%'))
+                    }) {
+                        self.error(
+                            "semantic.declaration",
+                            "Typed style tracks contain keyframes only",
+                            &declaration,
+                        );
+                    }
+
+                    let mut frames = vec![];
+                    let mut offsets = BTreeMap::new();
+
+                    for frame in track.keyframes() {
+                        let offset = frame
+                            .header()
+                            .unwrap_or_default()
+                            .trim_end_matches('%')
+                            .parse::<f64>()
+                            .unwrap_or(f64::NAN)
+                            / 100.0;
+
+                        if !offset.is_finite() || !(0.0..=1.0).contains(&offset) {
+                            self.error(
+                                "semantic.offset",
+                                "Frame offset must be between 0% and 100%",
+                                &frame,
+                            );
+                            continue;
+                        }
+
+                        self.unique(&mut offsets, &offset.to_string(), &frame);
+                        let frame_path = format!("{track_path}/frame/{offset}");
+                        self.mapping(&frame_path, &frame, "block");
+                        let value = frame.value_text().unwrap_or_default();
+
+                        if value.is_empty() {
+                            self.error("semantic.value", "Value must not be empty", &frame);
+                        }
+
+                        let easing_expression =
+                            self.decorator_expression(&frame, scope, expression::Type::Easing);
+                        let easing = if easing_expression.is_none() {
+                            frame.value_node().and_then(|value| {
+                                split_frame(&value.semantic_text()).1.map(str::to_owned)
+                            })
+                        } else {
+                            None
+                        };
+
+                        frames.push(Frame {
+                            offset,
+                            value,
+                            template: self.css_template(&frame, scope),
+                            easing_expression,
+                            easing,
+                        });
+                    }
+
+                    frames.sort_by(|a, b| a.offset.total_cmp(&b.offset));
+                    let Some(destination) = frames.iter().find(|frame| frame.offset == 1.0) else {
+                        self.error("semantic.endpoint", "A style keyframe track requires a 100% destination; use a transition track for implicit destinations", &track);
+                        continue;
+                    };
+
+                    properties.push(Property {
+                        name,
+                        value: destination.value.clone(),
+                        template: destination.template.clone(),
+                        timing_expression,
+                        keyframes: Some(frames),
+                    });
+                }
+            }
+        }
+
+        properties
     }
 
     fn motion_scope(
@@ -943,21 +1158,8 @@ impl Compiler {
                         let target_path = format!("{state_path}/target/{target_name}");
                         self.mapping(&target_path, &target, "block");
                         self.declarations(&target, None, &target_path);
-                        for block in target.blocks() {
-                            self.error(
-                                "semantic.structure",
-                                "State targets contain declarations only",
-                                &block,
-                            );
-                        }
-                        let properties = target
-                            .properties()
-                            .map(|p| Property {
-                                name: p.header().unwrap_or_default(),
-                                template: self.css_template(&p, &scope),
-                                value: p.value_text().unwrap_or_default(),
-                            })
-                            .collect();
+                        let properties = self.style_properties(&target, &target_path, &scope);
+
                         targets.push(Target {
                             name: target_name,
                             properties,
@@ -1217,7 +1419,7 @@ impl Compiler {
                             )
                         };
                         let timing = property.timing.as_ref().or(animation.timing.as_ref());
-                        if timing.is_none() {
+                        if timing.is_none() && property.timing_expression.is_none() {
                             self.error_range(
                                 "semantic.timing-missing",
                                 "Lifecycle property requires timing",
@@ -1322,6 +1524,23 @@ impl Compiler {
                     {
                         continue;
                     }
+                    if dp
+                        .and_then(|property| property.timing_expression.as_ref())
+                        .or_else(|| gp.and_then(|property| property.timing_expression.as_ref()))
+                        .is_some()
+                        || to
+                            .targets
+                            .iter()
+                            .find(|item| item.name == *target)
+                            .and_then(|item| {
+                                item.properties.iter().find(|item| item.name == *property)
+                            })
+                            .and_then(|property| property.timing_expression.as_ref())
+                            .is_some()
+                    {
+                        continue;
+                    }
+
                     let Some(timing) = timing else {
                         if to
                             .targets
@@ -1601,10 +1820,11 @@ fn merge_lifecycle(default: Option<&Transition>, specific: &Transition) -> Trans
                         .iter_mut()
                         .find(|item| item.name == property.name)
                     {
-                        overridden.timing = overridden
-                            .timing
-                            .clone()
-                            .or_else(|| property.timing.clone());
+                        if overridden.timing.is_none() && overridden.timing_expression.is_none() {
+                            overridden.timing = property.timing.clone();
+                            overridden.timing_expression = property.timing_expression.clone();
+                        }
+
                         overridden.keyframes = overridden
                             .keyframes
                             .clone()

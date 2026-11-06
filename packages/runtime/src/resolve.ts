@@ -1,3 +1,4 @@
+import { renderTransition, type VariableValues } from './expression.ts'
 import type { Definition, Frame, State, Timing, Transition } from './definition.ts'
 
 export interface ResolvedTrack {
@@ -21,7 +22,12 @@ export function getState(definition: Definition, name: string): State {
   return state
 }
 
-export function resolve(definition: Definition, fromName: string, toName: string): ResolvedTrack[] {
+export function resolve(
+  definition: Definition,
+  fromName: string,
+  toName: string,
+  values: VariableValues = {},
+): ResolvedTrack[] {
   const from = getState(definition, fromName)
   const to = getState(definition, toName)
 
@@ -30,9 +36,13 @@ export function resolve(definition: Definition, fromName: string, toName: string
   }
 
   const general = definition.generalTransition
-  const directional = definition.directionalTransitions.find(
+    ? renderTransition(definition.generalTransition, values)
+    : undefined
+  const selected = definition.directionalTransitions.find(
     (t) => t.from === fromName && t.to === toName,
   )?.transition
+
+  const directional = selected ? renderTransition(selected, values) : undefined
 
   const tracks: ResolvedTrack[] = []
 
@@ -48,13 +58,14 @@ export function resolve(definition: Definition, fromName: string, toName: string
 
       const gp = propertyAt(general, target.name, property.name)
       const dp = propertyAt(directional, target.name, property.name)
-      const explicitFrames = dp?.keyframes ?? gp?.keyframes
+      const explicitFrames = dp?.keyframes ?? gp?.keyframes ?? property.keyframes
 
       if (source === property.value && !explicitFrames?.length) {
         continue
       }
 
-      const timing = dp?.timing ?? gp?.timing ?? directional?.timing ?? general?.timing
+      const timing =
+        dp?.timing ?? gp?.timing ?? property.timing ?? directional?.timing ?? general?.timing
 
       if (!timing && property.template) continue
 

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vite-plus/test'
-import { evaluate, evaluateScalar, renderDefinition, renderValue } from './expression.ts'
+import {
+  evaluate,
+  evaluateScalar,
+  renderDefinition,
+  renderValue,
+  renderTransition,
+} from './expression.ts'
+import { resolve } from './resolve.ts'
 import type { Definition, Expression } from './definition.ts'
 
 const number = (value: number): Expression => ({ kind: 'number', value })
@@ -93,5 +100,82 @@ describe('expression evaluation', () => {
     expect(rendered.states[1].targets[0].properties[0].value).toBe('12px')
     expect(definition.states[1].targets[0].properties[0].value).toBe('0px')
     expect(renderValue({ value: 'auto' }, {})).toBe('auto')
+  })
+  it('resolves decorated property timing and frame easing from current values', () => {
+    const quick: Expression = {
+      kind: 'call',
+      function: 'tween',
+      arguments: [{ name: 'duration', value: { kind: 'reference', path: ['duration'] } }],
+    }
+    const definition: Definition = {
+      name: 'fade',
+      directionalTransitions: [],
+      states: [
+        { name: 'off', targets: [{ name: 'body', properties: [{ name: 'opacity', value: '0' }] }] },
+        {
+          name: 'on',
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'opacity',
+                  value: '1',
+                  timingExpression: quick,
+                  keyframes: [
+                    {
+                      offset: 0.5,
+                      value: '.7',
+                      easingExpression: { kind: 'reference', path: ['easeOut'] },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }
+
+    const rendered = renderDefinition(definition, { duration: 125 }, ['on'])
+    const [track] = resolve(rendered, 'off', 'on')
+
+    expect(track.timing).toMatchObject({ kind: 'tween', durationMs: 125 })
+    expect(track.keyframes[1]).toMatchObject({ value: '.7', easing: 'ease-out' })
+    expect(track.destinationValue).toBe('1')
+  })
+
+  it('renders transition timing, interpolation and easing as one immutable snapshot', () => {
+    const source = {
+      targets: [
+        {
+          name: 'body',
+          properties: [
+            {
+              name: 'translate',
+              timingExpression: { kind: 'call', function: 'tween', arguments: [] } as Expression,
+              keyframes: [
+                {
+                  offset: 1,
+                  value: '',
+                  template: [{ kind: 'reference', path: ['x'] } as Expression, 'px'],
+                  easingExpression: { kind: 'reference', path: ['easeIn'] } as Expression,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }
+
+    const first = renderTransition(source, { x: 10 })
+    const second = renderTransition(source, { x: 20 })
+
+    expect(first.targets[0].properties[0].keyframes?.[0]).toMatchObject({
+      value: '10px',
+      easing: 'ease-in',
+    })
+    expect(second.targets[0].properties[0].keyframes?.[0].value).toBe('20px')
+    expect(source.targets[0].properties[0].keyframes[0].value).toBe('')
   })
 })

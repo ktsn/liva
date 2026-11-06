@@ -27,6 +27,40 @@ describe('serialized definition validation', () => {
     expect(Object.isFrozen(bundle.definitions[0].states)).toBe(true)
   })
 
+  it('decodes typed decorators and rejects malformed expression payloads', () => {
+    const timingExpression = { kind: 'call', function: 'tween', arguments: [] }
+    const frame = {
+      offset: 1,
+      value: '1',
+      easingExpression: { kind: 'reference', path: ['easeOut'] },
+    }
+    const property = { name: 'opacity', value: '1', timingExpression, keyframes: [frame] }
+    const definition = {
+      ...valid,
+      states: [{ name: 'idle', targets: [{ name: 'body', properties: [property] }] }],
+      enter: { targets: [{ name: 'body', properties: [property] }] },
+    }
+
+    expect(
+      decodeBundle(JSON.stringify({ schemaVersion: 1, definitions: [definition] })).definitions[0],
+    ).toEqual(definition)
+
+    for (const changed of [
+      { ...property, timingExpression: {} },
+      { ...property, keyframes: 'invalid' },
+      { ...property, keyframes: [{ ...frame, easingExpression: {} }] },
+    ]) {
+      expectInvalidDefinition({
+        ...definition,
+        states: [{ name: 'idle', targets: [{ name: 'body', properties: [changed] }] }],
+      })
+      expectInvalidDefinition({
+        ...definition,
+        enter: { targets: [{ name: 'body', properties: [changed] }] },
+      })
+    }
+  })
+
   it('freezes lifecycle keyframes and event expression trees', () => {
     const definition = decodeBundle(JSON.stringify(presenceFixture)).definitions[0]
 
