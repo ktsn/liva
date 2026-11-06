@@ -97,3 +97,105 @@ fn layers_do_not_disable_legacy_fallback_validation() {
         );
     }
 }
+
+#[test]
+fn stateful_layers_keep_common_styles_and_state_overrides_separate() {
+    let result = valid(
+        "motion submit { layer submission { button { opacity: 1 } state idle initial { spinner { opacity: 0 } } state loading { button { opacity: .5 } spinner { opacity: 1 } } } }",
+    );
+    let layer = &result.definitions[0].layers[0];
+
+    assert_eq!(layer.initial_state.as_deref(), Some("idle"));
+    assert_eq!(layer.targets[0].properties[0].value, "1");
+    assert_eq!(layer.states[1].value("button", "opacity"), Some(".5"));
+    assert_eq!(layer.states[0].value("spinner", "opacity"), Some("0"));
+}
+
+#[test]
+fn state_names_and_initial_states_are_local_to_each_layer() {
+    let result = valid(
+        "motion submit { layer first { state idle initial {} state active {} } layer second { state idle {} state active initial {} } }",
+    );
+    let layers = &result.definitions[0].layers;
+
+    assert_eq!(layers[0].initial_state.as_deref(), Some("idle"));
+    assert_eq!(layers[1].initial_state.as_deref(), Some("active"));
+}
+
+#[test]
+fn stateful_layers_require_one_initial_state() {
+    for states in [
+        "state idle {}",
+        "state idle initial {} state loading initial {}",
+    ] {
+        let result = compile(
+            &format!("motion submit {{ layer submission {{ {states} }} }}"),
+            true,
+        );
+
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "semantic.initial-state")
+        );
+    }
+}
+
+#[test]
+fn stateful_layers_reject_guards_and_duplicate_state_names() {
+    for (layer, code) in [
+        (
+            "layer submission when true { state idle initial {} }",
+            "semantic.layer-condition",
+        ),
+        (
+            "layer submission { state idle initial {} state idle {} }",
+            "semantic.duplicate",
+        ),
+        (
+            "layer submission { state idle initial {} state loading when true {} }",
+            "semantic.layer-state",
+        ),
+    ] {
+        let result = compile(&format!("motion submit {{ {layer} }}"), true);
+
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == code),
+            "{layer}: {:?}",
+            result.diagnostics
+        );
+    }
+}
+
+#[test]
+fn layer_style_targets_reject_animation_metadata_and_frame_offsets() {
+    for declaration in ["@tween: 100ms", "50%: 1"] {
+        for body in [
+            format!("body {{ {declaration} }}"),
+            format!("state idle initial {{ body {{ {declaration} }} }}"),
+        ] {
+            let result = compile(
+                &format!("motion button {{ layer base {{ {body} }} }}"),
+                true,
+            );
+
+            assert!(result.diagnostics.iter().any(|diagnostic| matches!(
+                diagnostic.code.as_str(),
+                "syntax.expected" | "semantic.declaration"
+            )));
+        }
+    }
+}
+
+#[test]
+fn animation_target_names_do_not_enter_style_context() {
+    for target in ["state", "layer"] {
+        valid(&format!(
+            "motion button {{ state idle {{ {target} {{ opacity: 1 }} }} transition {{ {target} {{ opacity {{ @tween: 100ms; 0%: 0 }} }} }} }}"
+        ));
+    }
+}

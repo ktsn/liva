@@ -1025,7 +1025,11 @@ impl Compiler {
         }
 
         for layer in node.layers() {
-            for target in layer.targets() {
+            for target in layer.targets().chain(
+                layer
+                    .states()
+                    .flat_map(|state| state.targets().collect::<Vec<_>>()),
+            ) {
                 targets
                     .entry(target.header().unwrap_or_default())
                     .or_insert(target);
@@ -1213,7 +1217,57 @@ impl Compiler {
                         }
                     });
 
+                    let mut layer_states = vec![];
+                    let mut state_names = BTreeMap::new();
+                    let mut initial_states = vec![];
+
+                    for state in layer.states() {
+                        let state_name = state.name().unwrap_or_default();
+                        self.unique(&mut state_names, &state_name, &state);
+                        let state_path = format!("{layer_path}/state/{state_name}");
+                        self.mapping(&state_path, &state, "block");
+                        self.declarations(&state, Some(&[]), &state_path);
+
+                        if state.condition().is_some() {
+                            self.error(
+                                "semantic.layer-state",
+                                "Layer states use guarded transitions, not state when conditions",
+                                &state,
+                            );
+                        }
+
+                        if state.is_initial() {
+                            initial_states.push(state_name.clone());
+                        }
+
+                        layer_states.push(State {
+                            name: state_name,
+                            when: None,
+                            targets: self.style_targets(&state, &state_path, &scope),
+                        });
+                    }
+
+                    if !layer_states.is_empty() {
+                        if layer.condition().is_some() {
+                            self.error(
+                                "semantic.layer-condition",
+                                "Stateful layers are always active; remove when",
+                                &layer,
+                            );
+                        }
+
+                        if initial_states.len() != 1 {
+                            self.error(
+                                "semantic.initial-state",
+                                "Stateful layers require exactly one state marked initial",
+                                &layer,
+                            );
+                        }
+                    }
+
                     definition.layers.push(Layer {
+                        states: layer_states,
+                        initial_state: initial_states.into_iter().next(),
                         when,
                         name: layer_name,
                         targets,

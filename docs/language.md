@@ -418,6 +418,27 @@ Layer names are unique within a motion. CSS values retain CSS syntax and units;
 from legacy states, preserving existing state selection behavior. Runtime layer
 resolution is a separate integration step.
 
+### Stateful layers
+
+Use reactive layers for independent Boolean visual conditions. Use a stateful layer
+when an interaction must retain one of several exclusive states. Each stateful layer
+owns its state names and requires exactly one `initial` state:
+
+```css
+layer submission {
+  button { opacity: 1 }
+  state idle initial { spinner { opacity: 0 } }
+  state loading { button { opacity: 0.5 } spinner { opacity: 1 } }
+}
+```
+
+Direct target declarations are common styles. The selected state's declarations
+replace common values per CSS property. Other layers have independent current states.
+Stateful layers are always active and cannot have a `when` condition; nested states
+use guarded transitions instead of `state ... when` selection. The compiler keeps
+common declarations and state declarations separate in IR, with an `initialState`
+name. Runtime transition evaluation is handled independently of these declarations.
+
 ## Timing and easing values
 
 Animation settings are immutable expression values: `tween` and `spring` return

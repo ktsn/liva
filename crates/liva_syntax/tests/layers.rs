@@ -21,3 +21,31 @@ fn layers_retain_lossless_syntax_and_condition_ranges() {
     assert_eq!(source[range.start..range.end].trim(), "hovered");
     assert!(condition.expression().is_some());
 }
+
+#[test]
+fn nested_states_preserve_initial_marker_and_target_ranges() {
+    let source = "motion submit { layer submission { button { opacity: 1 } state idle initial { spinner { opacity: 0 } } state loading { spinner { opacity: 1 } } } }";
+    let parsed = parse(source);
+
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    assert_eq!(parsed.root.text(), source);
+
+    let layer = parsed
+        .root
+        .motions()
+        .next()
+        .unwrap()
+        .layers()
+        .next()
+        .unwrap();
+    let states = layer.states().collect::<Vec<_>>();
+
+    assert_eq!(layer.targets().count(), 1);
+    assert!(states[0].is_initial());
+    assert!(!states[1].is_initial());
+
+    let target = states[0].targets().next().unwrap();
+    let range = target.range();
+
+    assert_eq!(&source[range.start..range.end], "spinner { opacity: 0 }");
+}

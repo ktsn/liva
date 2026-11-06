@@ -39,18 +39,30 @@ node!(Motion, |n: &SyntaxNode| n.kind() == Kind::Block
     && n.parent().is_some_and(|p| p.kind() == Kind::Document));
 node!(Layer, |n: &SyntaxNode| block_depth(n) == 1
     && keyword(n, "layer"));
-node!(State, |n: &SyntaxNode| block_depth(n) == 1
-    && keyword(n, "state"));
+node!(State, |n: &SyntaxNode| keyword(n, "state")
+    && (block_depth(n) == 1
+        || n.parent()
+            .is_some_and(|parent| Layer::cast(parent).is_some())));
 node!(Transition, |n: &SyntaxNode| block_depth(n) == 1
     && (keyword(n, "transition")
         || keyword(n, "enter")
         || keyword(n, "leave")));
 node!(Target, |n: &SyntaxNode| n.kind() == Kind::Block
-    && block_depth(n) == 2);
+    && State::cast(n.clone()).is_none()
+    && n.parent().is_some_and(|parent| State::cast(
+        parent.clone()
+    )
+    .is_some()
+        || Layer::cast(parent.clone()).is_some()
+        || Transition::cast(parent).is_some()));
 node!(PropertyBlock, |n: &SyntaxNode| n.kind() == Kind::Block
-    && block_depth(n) == 3);
+    && n.parent()
+        .is_some_and(|parent| Target::cast(parent).is_some()));
 node!(Keyframe, |n: &SyntaxNode| n.kind() == Kind::Declaration
-    && block_depth(n) == 4
+    && n.parent()
+        .is_some_and(
+            |parent| PropertyBlock::cast(parent).is_some()
+        )
     && n.child::<Header>()
         .is_some_and(|h| h.semantic_text().ends_with('%')));
 node!(Property, |n: &SyntaxNode| n.kind() == Kind::Declaration);
@@ -167,6 +179,10 @@ impl Event {
 }
 
 impl Layer {
+    pub fn states(&self) -> impl Iterator<Item = State> {
+        self.children()
+    }
+
     pub fn name(&self) -> Option<String> {
         self.header()?.split_whitespace().nth(1).map(str::to_owned)
     }
@@ -181,6 +197,11 @@ impl Layer {
 }
 
 impl State {
+    pub fn is_initial(&self) -> bool {
+        self.header()
+            .is_some_and(|header| header.split_whitespace().nth(2) == Some("initial"))
+    }
+
     pub fn name(&self) -> Option<String> {
         self.header()?.split_whitespace().nth(1).map(str::to_owned)
     }

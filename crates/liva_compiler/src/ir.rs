@@ -41,8 +41,13 @@ pub struct Event {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Layer {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub states: Vec<State>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_state: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub when: Option<Expression>,
     pub targets: Vec<Target<Property>>,
