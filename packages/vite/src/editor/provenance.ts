@@ -23,6 +23,8 @@ export interface TrackProvenance {
   transition?: { from: string; to: string }
   from?: DeclarationSource
   to?: DeclarationSource
+  fromDescription?: string
+  toDescription?: string
   sharedValue: boolean
   owner: string
   overridden: DeclarationSource[]
@@ -148,6 +150,37 @@ export function trackProvenance(
       ? 'Select an existing transition in the animation owner to edit keyframes. State style tracks are not chosen automatically.'
       : undefined,
     localTiming,
+    fields,
+  }
+}
+
+export function lifecycleProvenance(
+  inspection: Inspection,
+  phase: 'enter' | 'leave',
+  target: string,
+  property: string,
+): TrackProvenance {
+  const { fields } = inspection
+  const path = `${inspection.definition.name}/${phase}`
+  const destination = `${path}/target/${target}/property/${property}`
+  const localTiming = field(fields, `${destination}/timing`)
+  const timingSource =
+    localTiming ??
+    field(fields, `${path}/target/${target}/timing`) ??
+    field(fields, `${path}/timing`)
+
+  return {
+    from: field(fields, `${destination}/frame/0/value`),
+    to: field(fields, `${destination}/frame/1/value`),
+    sharedValue: false,
+    fromDescription: 'Implicit lifecycle endpoint from the selected baseline or captured CSS.',
+    toDescription: 'Implicit lifecycle endpoint from the selected baseline or captured CSS.',
+    owner: `Motion ${phase}`,
+    overridden: [],
+    timingSource,
+    timingDestination: destination,
+    localTiming,
+    frameDestination: destination,
     fields,
   }
 }

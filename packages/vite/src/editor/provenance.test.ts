@@ -1,7 +1,12 @@
 import { resolveComposition, resolveLayerTracks } from '@liva/runtime'
 import { describe, expect, it } from 'vite-plus/test'
 import { compile } from '../compiler.ts'
-import { trackProvenance, typedEasingText, typedTimingText } from './provenance.ts'
+import {
+  trackProvenance,
+  lifecycleProvenance,
+  typedEasingText,
+  typedTimingText,
+} from './provenance.ts'
 import type { Inspection } from './communication/protocol.ts'
 
 function inspection(source: string): Inspection {
@@ -269,5 +274,41 @@ describe('typed timing serialization', () => {
 
   it('rejects easing without a typed representation', () => {
     expect(() => typedEasingText('linear(0, 1)')).toThrow('no typed representation')
+  })
+})
+
+describe('lifecycle source provenance', () => {
+  it.each([
+    ['@tween(duration: 100)', '', '', 'sample/enter/timing'],
+    ['@tween(duration: 100)', '@tween(duration: 200)', '', 'sample/enter/target/body/timing'],
+    [
+      '@tween(duration: 100)',
+      '@tween(duration: 200)',
+      '@tween(duration: 300)',
+      'sample/enter/target/body/property/opacity/timing',
+    ],
+  ])(
+    'separates inherited timing from the lifecycle write destination: %s %s %s',
+    (shared, target, property, origin) => {
+      const info = inspection(
+        `motion sample { layer base { body { opacity: 1 } } enter ${shared} { body ${target} { opacity ${property} { 0%: 0 } } } }`,
+      )
+      const result = lifecycleProvenance(info, 'enter', 'body', 'opacity')
+
+      expect(result.timingSource?.path).toBe(origin)
+      expect(result.timingDestination).toBe('sample/enter/target/body/property/opacity')
+      expect(result.from?.text).toBe('0')
+      expect(result.to).toBeUndefined()
+    },
+  )
+
+  it('offers a motion lifecycle destination without treating the baseline as editable', () => {
+    const info = inspection('motion sample { layer base { body { opacity: 1 } } }')
+    const result = lifecycleProvenance(info, 'leave', 'body', 'opacity')
+
+    expect(result.timingSource).toBeUndefined()
+    expect(result.frameDestination).toBe('sample/leave/target/body/property/opacity')
+    expect(result.from).toBeUndefined()
+    expect(result.to).toBeUndefined()
   })
 })

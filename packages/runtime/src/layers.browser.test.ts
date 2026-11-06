@@ -1514,3 +1514,92 @@ describe('typed timing playback', () => {
     expect(element.style.opacity).toBe('0')
   })
 })
+
+describe('composition lifecycle previews', () => {
+  it('samples lifecycle-only targets independently and yields to parameter updates', async () => {
+    const source: Definition = {
+      ...definition,
+      leave: {
+        timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
+        targets: [
+          { name: 'body', properties: [{ name: 'scale', keyframes: [{ offset: 1, value: '0' }] }] },
+          {
+            name: 'badge',
+            properties: [{ name: 'opacity', keyframes: [{ offset: 1, value: '0' }] }],
+          },
+        ],
+      },
+    }
+    const { instance, element } = setup(source)
+    const badge = document.createElement('div')
+    badge.style.opacity = '0.6'
+    document.body.append(badge)
+    cleanup.push(() => badge.remove())
+    instance.bind([
+      ['body', element],
+      ['badge', badge],
+    ])
+
+    instance.previewLifecycle('leave', {
+      layers: { base: true, hover: false, press: false },
+      states: {},
+    })
+    await Promise.all(instance.animations.map((animation) => animation.ready))
+    for (const animation of instance.animations) animation.currentTime = 100
+
+    expect(Number(getComputedStyle(badge).opacity)).toBeCloseTo(0.3)
+    expect(Number(getComputedStyle(element).scale)).toBeCloseTo(0.5)
+
+    instance.updateParameters({ hover: true, press: false, size: 1.4 })
+
+    expect(instance.animations).toHaveLength(0)
+    expect(badge.style.opacity).toBe('0.6')
+    expect(element.style.scale).toBe('1.4')
+  })
+
+  it.each(['enter', 'leave'] as const)(
+    'scrubs %s against an explicit baseline and restores the application composition',
+    async (phase) => {
+      const source: Definition = {
+        ...definition,
+        [phase]: {
+          timingExpression: {
+            kind: 'call',
+            function: 'tween',
+            arguments: [{ name: 'duration', value: { kind: 'number', value: 200 } }],
+          },
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                { name: 'scale', keyframes: [{ offset: phase === 'enter' ? 0 : 1, value: '0' }] },
+              ],
+            },
+          ],
+        },
+      }
+      const { instance, element } = setup(source)
+      const baseline = { layers: { base: true, hover: true, press: false }, states: {} }
+      const original = instance.composition
+
+      expect(instance.previewLifecycle(phase, baseline)).toBe(true)
+      const animation = instance.animations[0]
+      await animation.ready
+      animation.currentTime = 100
+
+      expect(Number(getComputedStyle(element).scale)).toBeGreaterThan(0)
+      expect(Number(getComputedStyle(element).scale)).toBeLessThan(1.1)
+      expect(instance.composition).toEqual(original)
+      expect(element.isConnected).toBe(true)
+
+      animation.currentTime = 200
+      expect(Number(getComputedStyle(element).scale)).toBeCloseTo(phase === 'enter' ? 1.1 : 0)
+      animation.currentTime = 0
+      expect(Number(getComputedStyle(element).scale)).toBeCloseTo(phase === 'enter' ? 0 : 1.1)
+
+      instance.endCompositionPreview()
+      expect(element.style.scale).toBe('1')
+      expect(instance.animations).toHaveLength(0)
+    },
+  )
+})

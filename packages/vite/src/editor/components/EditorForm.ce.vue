@@ -19,7 +19,7 @@ import type {
 } from '@liva/runtime'
 import { sampleSpring } from '@liva/runtime'
 import CompositionInspector from './CompositionInspector.ce.vue'
-import { trackProvenance } from '../provenance.ts'
+import { trackProvenance, lifecycleProvenance } from '../provenance.ts'
 import type { EditorController } from '../controller.ts'
 import type { Edit, Inspection } from '../communication/protocol.ts'
 import {
@@ -27,12 +27,14 @@ import {
   normalizedOffset,
   timelineTracks,
   compositionTimelineTracks,
+  compositionLifecycleTracks,
   timingText,
   type TimelineTrack,
   type LifecyclePhase,
 } from '../timeline.ts'
 import TimelineRow from './TimelineRow.ce.vue'
 import TimelineInspector from './TimelineInspector.ce.vue'
+import CompositionChoice from './CompositionChoice.ce.vue'
 import CompositionSelectors from './CompositionSelectors.ce.vue'
 import { copyComposition, compatibleTransition, selectTransition } from '../compositions.ts'
 
@@ -81,6 +83,18 @@ const timelineResult = computed(() => {
     const runtime = selectedRuntime.value
     const before = compositionFrom.value
     const after = compositionTo.value
+
+    if (phase.value) {
+      const captured = runtime.inspectLifecycle(phase.value, after, model.value)
+      return {
+        tracks: compositionLifecycleTracks(
+          model.value.name,
+          phase.value,
+          captured.presentation,
+          captured.transition,
+        ),
+      }
+    }
 
     return {
       tracks: compositionTimelineTracks(
@@ -171,14 +185,21 @@ const selection = computed(() =>
 const selectionProvenance = computed(
   () =>
     selection.value &&
-    trackProvenance(
-      candidateInspection.value,
-      compositionFrom.value,
-      compositionTo.value,
-      selectedTransition.value,
-      selection.value.target,
-      selection.value.property,
-    ),
+    (phase.value
+      ? lifecycleProvenance(
+          candidateInspection.value,
+          phase.value,
+          selection.value.target,
+          selection.value.property,
+        )
+      : trackProvenance(
+          candidateInspection.value,
+          compositionFrom.value,
+          compositionTo.value,
+          selectedTransition.value,
+          selection.value.target,
+          selection.value.property,
+        )),
 )
 
 async function changeZoom(value: number) {
@@ -249,6 +270,7 @@ async function prepare() {
         compositionFrom.value,
         compositionTo.value,
         selectedTransition.value ? [selectedTransition.value] : [],
+        phase.value,
       )
 
       if (reply && current === generation) {
@@ -594,7 +616,7 @@ onScopeDispose(() => {
 
 <template>
   <CompositionSelectors
-    v-if="layered"
+    v-if="layered && !phase"
     :layers="layers"
     :from="compositionFrom"
     :to="compositionTo"
@@ -603,15 +625,20 @@ onScopeDispose(() => {
     @swap="swapCompositions"
     @transition="chooseTransition"
   />
+  <CompositionChoice
+    v-if="layered && phase"
+    :layers="layers"
+    :value="compositionTo"
+    label="Baseline"
+    @change="changeComposition('to', $event)"
+  />
   <p v-if="timelineResult.error" role="alert">{{ String(timelineResult.error) }}</p>
   <div class="toolbar">
-    <label v-if="!layered">Editing<select
-        v-model="scope"
-        aria-label="Editing scope"
-        @change="changeDirection"
-      >
-        <option value="directional">Directional transition</option>
-        <option value="general">Common settings</option>
+    <label>Editing<select v-model="scope" aria-label="Editing scope" @change="changeDirection">
+        <option value="directional">{{
+          layered ? 'Composition' : 'Directional transition'
+        }}</option>
+        <option v-if="!layered" value="general">Common settings</option>
         <option value="enter-default">Enter · default</option>
         <option value="leave-default">Leave · default</option>
       </select></label>

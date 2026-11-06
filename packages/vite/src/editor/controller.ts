@@ -17,6 +17,7 @@ export type EditorBinding = Pick<InstanceBinding, 'component' | 'definition' | '
     | 'previewComposition'
     | 'endCompositionPreview'
     | 'inspectComposition'
+    | 'inspectLifecycle'
   >
 }
 
@@ -194,6 +195,7 @@ export class EditorController {
     from: Composition,
     to: Composition,
     transitions: readonly CompositionTransition[] = [],
+    phase?: 'enter' | 'leave',
   ): Promise<EditorReply | undefined> {
     const selected = this.selected
     const inspection = this.inspection
@@ -223,7 +225,8 @@ export class EditorController {
       return undefined
 
     this.previewActive = false
-    selected.binding.runtime.previewComposition(from, to, transitions, reply.definition)
+    if (phase) selected.binding.runtime.previewLifecycle(phase, to, reply.definition)
+    else selected.binding.runtime.previewComposition(from, to, transitions, reply.definition)
     this.previewActive = true
     this.message = 'Previewing this instance only. Source is unchanged.'
     this.notify()

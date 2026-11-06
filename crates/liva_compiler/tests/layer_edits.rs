@@ -240,3 +240,20 @@ fn easing_a_transition_shorthand_creates_a_segment_without_replacing_timing() {
             .is_some()
     );
 }
+
+#[test]
+fn typed_lifecycle_timing_creates_a_motion_level_track_for_a_layer_property() {
+    let source = "motion sample { layer base { body { opacity: 1 } } }";
+    let result = apply_edits(
+        source,
+        &[Edit::Timing {
+            path: "sample/enter/target/body/property/opacity".into(),
+            value: Some("tween(duration: 200)".into()),
+        }],
+    )
+    .unwrap();
+
+    assert!(result.compilation.definitions[0].enter.is_some());
+    assert!(result.source.contains("layer base { body { opacity: 1 } }"));
+    assert!(result.source.contains("opacity @tween(duration: 200)"));
+}

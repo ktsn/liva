@@ -348,6 +348,41 @@ fn replace_track(
 
 fn typed_destination(compiled: &Compilation, path: &str) -> Result<(String, String), String> {
     let parts: Vec<_> = path.split('/').collect();
+
+    if let [
+        name,
+        phase @ ("enter" | "leave"),
+        "target",
+        target,
+        "property",
+        property,
+    ] = parts.as_slice()
+    {
+        let definition = compiled
+            .definitions
+            .iter()
+            .find(|item| item.name == *name)
+            .ok_or("Unknown motion")?;
+        let declared = definition
+            .layers
+            .iter()
+            .flat_map(|layer| {
+                layer
+                    .targets
+                    .iter()
+                    .chain(layer.states.iter().flat_map(|state| &state.targets))
+            })
+            .any(|item| {
+                item.name == *target && item.properties.iter().any(|item| item.name == *property)
+            });
+
+        if !declared {
+            return Err("Cannot add an undeclared CSS property".into());
+        }
+
+        return Ok((format!("{name}/{phase}"), (*target).into()));
+    }
+
     let (definition_name, layer_name, transition_index, target_name, property_name) =
         match parts.as_slice() {
             [
@@ -421,8 +456,20 @@ fn ensure_typed_property(
         return insert(source, target, &property);
     }
 
-    let transition = mapping(compiled, &transition_path, "block")?;
     let target = format!("{target_name} {{ {property} }}");
+
+    if mapping(compiled, &transition_path, "block").is_err() {
+        let (name, phase) = transition_path
+            .split_once('/')
+            .ok_or("Invalid lifecycle path")?;
+        return insert(
+            source,
+            mapping(compiled, name, "block")?,
+            &format!("{phase} {{ {target} }}"),
+        );
+    }
+
+    let transition = mapping(compiled, &transition_path, "block")?;
 
     if source[transition.range.start..transition.range.end]
         .trim_end()
@@ -461,7 +508,6 @@ fn edit_typed_timing(
         source.into()
     };
     let current = compile(&prepared, true);
-    check(&current)?;
     let field = mapping(&current, path, "block")?;
     let node = property_syntax(&prepared, field)?;
     let mut result = prepared.clone();

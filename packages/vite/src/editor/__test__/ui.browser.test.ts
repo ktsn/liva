@@ -1456,3 +1456,47 @@ it('clears frame selection after a composition frame is deleted', async () => {
     { op: 'removeFrame', path: 'frames/layer/base/target/body/property/opacity/frame/0.5' },
   ])
 })
+
+it('uses one composition baseline for lifecycle rows and isolated scrub-ready playback', async () => {
+  const definition: Definition = {
+    ...compositionDefinition,
+    enter: {
+      timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
+      targets: [
+        {
+          name: 'body',
+          properties: [
+            { name: 'opacity', keyframes: [{ offset: 0, value: '0' }] },
+            { name: 'color', keyframes: [{ offset: 0, value: 'red' }] },
+          ],
+        },
+      ],
+    },
+  }
+  const { controller } = await setupEditor(undefined, definition)
+  await click('Motion editor')
+  await input('Editing scope', 'enter-default')
+
+  expect(host!.querySelector('[aria-label="FROM base enabled"]')).toBeNull()
+  expect(host!.querySelector('[aria-label="Baseline base enabled"]')).not.toBeNull()
+  await input('Baseline machine state', 'active')
+  host!.querySelector<HTMLInputElement>('[aria-label="Baseline hover enabled"]')!.click()
+  await tick()
+  await click('▸ body')
+  await click('color')
+
+  expect(host!.querySelector('[aria-label="Selection inspector"]')!.textContent).toContain(
+    'Motion enter',
+  )
+  expect(host!.querySelector('[aria-label="Selection inspector"]')!.textContent).toContain(
+    'Implicit lifecycle endpoint',
+  )
+
+  await click('Play')
+  await expect.poll(() => controller.previewActive).toBe(true)
+  expect(runtime!.animations).toHaveLength(2)
+  expect(runtime!.composition?.states.machine).toBe('idle')
+  await click('End preview')
+
+  expect(runtime!.animations).toHaveLength(0)
+})
