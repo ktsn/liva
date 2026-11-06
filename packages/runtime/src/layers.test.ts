@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vite-plus/test'
 import type { Definition, Expression, Layer } from './definition.ts'
-import { layerTargets, resolveLayers, resolveLayerTracks } from './layers.ts'
+import {
+  layerTargets,
+  resolveLayers,
+  resolveLayerTracks,
+  resolveComposition,
+  type Composition,
+} from './layers.ts'
 
 const ref = (name: string): Expression => ({ kind: 'reference', path: [name] })
 const targets = (properties: Record<string, string>) => [
@@ -340,4 +346,142 @@ describe('layer animation ownership', () => {
       durationMs: 200,
     })
   })
+})
+
+describe('explicit compositions', () => {
+  it('resolves an empty selection for definitions without layers', () => {
+    const source: Definition = { name: 'empty', states: [], directionalTransitions: [] }
+
+    const result = resolveComposition(source, {}, { layers: {}, states: {} })
+
+    expect(result.presentation.targets).toEqual([])
+    expect(() => resolveComposition(source, {}, { layers: { unknown: true }, states: {} })).toThrow(
+      'Invalid composition',
+    )
+  })
+
+  const source = definition([reactive.layers![0], reactive.layers![1], machine])
+  const from = { layers: { base: true, hover: false }, states: { submission: 'idle' } }
+  const to = { layers: { base: false, hover: true }, states: { submission: 'loading' } }
+
+  it('forces activation and states without evaluating guards', () => {
+    const result = resolveComposition(source, {}, to)
+
+    expect(styles(result)).toEqual({ scale: '.8', opacity: '1' })
+    expect(result.composition).toEqual(to)
+    expect(result.transitions.size).toBe(0)
+  })
+
+  it('selects duplicate state pairs by declaration index', () => {
+    const first = machine.transitions![0]
+    const second = {
+      ...first,
+      transition: {
+        timing: { kind: 'tween' as const, durationMs: 50, easing: 'linear' },
+        targets: [],
+      },
+    }
+    const duplicate = definition([{ ...machine, transitions: [first, second] }])
+    const before = { layers: {}, states: from.states }
+    const after = { layers: {}, states: to.states }
+
+    const result = resolveComposition(duplicate, {}, after, before, [
+      { layer: 'submission', index: 1 },
+    ])
+
+    expect(result.transitions.get('submission')).toBe(second)
+  })
+
+  it.each<Composition>([
+    { layers: { base: true }, states: from.states },
+    { layers: { ...from.layers, unknown: true }, states: from.states },
+    { layers: from.layers, states: { submission: 'missing' } },
+    { layers: from.layers, states: {} },
+  ])('rejects incomplete or unknown selections: %j', (composition) => {
+    expect(() => resolveComposition(source, {}, composition)).toThrow('Invalid composition')
+  })
+
+  it.each([-1, 9, 0.5])('rejects invalid transition index %s', (index) => {
+    expect(() =>
+      resolveComposition(source, {}, to, from, [{ layer: 'submission', index }]),
+    ).toThrow('Invalid composition transition')
+  })
+
+  it('requires FROM when selecting a transition', () => {
+    expect(() =>
+      resolveComposition(source, {}, to, undefined, [{ layer: 'submission', index: 0 }]),
+    ).toThrow('Invalid composition transition')
+  })
+
+  it('rejects multiple transitions for one layer', () => {
+    const transition = { layer: 'submission', index: 0 }
+
+    expect(() => resolveComposition(source, {}, to, from, [transition, transition])).toThrow(
+      'Invalid composition transition',
+    )
+  })
+
+  it('rejects a selected transition incompatible with its endpoints', () => {
+    expect(() =>
+      resolveComposition(source, {}, from, to, [{ layer: 'submission', index: 0 }]),
+    ).toThrow('Invalid composition transition')
+  })
+})
+
+describe('composition animation ownership', () => {
+  const timing = { kind: 'tween' as const, durationMs: 200, easing: 'linear' }
+  const source = definition([
+    {
+      name: 'base',
+      targets: [{ name: 'body', properties: [{ name: 'scale', value: '1', timing }] }],
+    },
+    {
+      name: 'machine',
+      targets: [],
+      initialState: 'idle',
+      states: [
+        { name: 'idle', targets: targets({ scale: '1' }) },
+        { name: 'active', targets: targets({ scale: '1' }) },
+      ],
+      transitions: [
+        {
+          from: 'idle',
+          to: 'active',
+          when: ref('unavailable'),
+          transition: {
+            targets: [
+              {
+                name: 'body',
+                properties: [{ name: 'scale', keyframes: [{ offset: 0.5, value: '1.5' }] }],
+              },
+            ],
+          },
+        },
+      ],
+    },
+    { name: 'cover', targets: targets({ scale: '1' }) },
+  ])
+
+  it.each([false, true])(
+    'keeps intermediate motion only for the final owner (covered=%s)',
+    (covered) => {
+      const from = { layers: { base: true, cover: covered }, states: { machine: 'idle' } }
+      const to = { ...from, states: { machine: 'active' } }
+      const previous = resolveComposition(source, {}, from)
+      const next = resolveComposition(source, {}, to, from, [{ layer: 'machine', index: 0 }])
+
+      const tracks = resolveLayerTracks(
+        previous,
+        next,
+        {},
+        () => '1',
+        () => {},
+      )
+
+      expect(tracks.map((track) => track.keyframes.map((frame) => frame.value))).toEqual(
+        covered ? [] : [['1', '1.5', '1']],
+      )
+      expect(next.presentation.targets[0].properties[0].timing).toEqual(timing)
+    },
+  )
 })

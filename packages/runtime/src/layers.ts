@@ -13,7 +13,18 @@ interface LayerProperty extends Property {
   readonly owner: string
 }
 
+export interface Composition {
+  readonly layers: Readonly<Record<string, boolean>>
+  readonly states: Readonly<Record<string, string>>
+}
+
+export interface CompositionTransition {
+  readonly layer: string
+  readonly index: number
+}
+
 export interface LayerResolution {
+  readonly composition: Composition
   readonly states: ReadonlyMap<string, string>
   readonly transitions: ReadonlyMap<string, GuardedTransition>
   readonly presentation: Omit<State, 'targets'> & {
@@ -34,6 +45,17 @@ export function resolveLayers(
   previous: ReadonlyMap<string, string> = new Map(),
   advance = true,
 ): LayerResolution {
+  return resolveLayerSelection(definition, values, previous, advance)
+}
+
+function resolveLayerSelection(
+  definition: Definition,
+  values: VariableValues,
+  previous: ReadonlyMap<string, string>,
+  advance: boolean,
+  selection?: Composition,
+): LayerResolution {
+  const activeLayers: Record<string, boolean> = Object.create(null)
   const states = new Map<string, string>()
   const transitions = new Map<string, GuardedTransition>()
   const targets = new Map<string, Map<string, LayerProperty>>()
@@ -68,7 +90,13 @@ export function resolveLayers(
   }
 
   for (const layer of definition.layers ?? []) {
-    if (layer.when && evaluate(layer.when, values) !== true) continue
+    const active = selection
+      ? Boolean(layer.states?.length) || selection.layers[layer.name]
+      : !layer.when || evaluate(layer.when, values) === true
+
+    if (!layer.states?.length) activeLayers[layer.name] = active
+
+    if (!active) continue
 
     contribute(layer.name, layer.targets)
 
@@ -93,6 +121,7 @@ export function resolveLayers(
   }
 
   return {
+    composition: { layers: activeLayers, states: Object.fromEntries(states) },
     states,
     transitions,
     presentation: {
@@ -105,6 +134,71 @@ export function resolveLayers(
         })),
       })),
     },
+  }
+}
+
+export function resolveComposition(
+  definition: Definition,
+  values: VariableValues,
+  composition: Composition,
+  from?: Composition,
+  selected: readonly CompositionTransition[] = [],
+): LayerResolution {
+  validateComposition(definition, composition)
+
+  if (from) validateComposition(definition, from)
+
+  const result = resolveLayerSelection(
+    definition,
+    values,
+    new Map(Object.entries(composition.states)),
+    false,
+    composition,
+  )
+  const transitions = new Map<string, GuardedTransition>()
+
+  for (const identity of selected) {
+    const layer = definition.layers?.find((candidate) => candidate.name === identity.layer)
+    const transition = Number.isInteger(identity.index)
+      ? layer?.transitions?.[identity.index]
+      : undefined
+
+    if (
+      !transition ||
+      !from ||
+      transition.from !== from.states[identity.layer] ||
+      transition.to !== composition.states[identity.layer] ||
+      transitions.has(identity.layer)
+    ) {
+      throw new Error(`Invalid composition transition: ${identity.layer}[${identity.index}]`)
+    }
+
+    transitions.set(identity.layer, transition)
+  }
+
+  return { ...result, transitions }
+}
+
+function validateComposition(definition: Definition, composition: Composition): void {
+  const layers = definition.layers ?? []
+  const ordinary = layers.filter((layer) => !layer.states?.length)
+  const stateful = layers.filter((layer) => layer.states?.length)
+
+  if (
+    Object.keys(composition.layers).length !== ordinary.length ||
+    Object.keys(composition.states).length !== stateful.length ||
+    ordinary.some(
+      (layer) =>
+        !Object.hasOwn(composition.layers, layer.name) ||
+        typeof composition.layers[layer.name] !== 'boolean',
+    ) ||
+    stateful.some(
+      (layer) =>
+        !Object.hasOwn(composition.states, layer.name) ||
+        !layer.states?.some((state) => state.name === composition.states[layer.name]),
+    )
+  ) {
+    throw new Error('Invalid composition: supply every ordinary layer and stateful layer state')
   }
 }
 

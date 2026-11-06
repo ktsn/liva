@@ -118,3 +118,67 @@ describe('event lifecycle', () => {
     expect(emitted).toEqual(['replacement'])
   })
 })
+
+describe('composition snapshots', () => {
+  it('does not expose a layer composition for legacy state motions', () => {
+    const instance = createInstance(false)
+
+    expect(instance.composition).toBeUndefined()
+  })
+
+  const layered: Definition = {
+    ...definition,
+    states: [],
+    layers: [
+      { name: 'visible', when: { kind: 'reference', path: ['ready'] }, targets: [] },
+      {
+        name: 'history',
+        targets: [],
+        initialState: 'idle',
+        states: [
+          { name: 'idle', targets: [] },
+          { name: 'done', targets: [] },
+        ],
+        transitions: [
+          {
+            from: 'idle',
+            to: 'done',
+            when: { kind: 'reference', path: ['ready'] },
+            transition: { targets: [] },
+          },
+        ],
+      },
+    ],
+  }
+
+  it('reads retained machine history and current ordinary layer activation', () => {
+    const instance = createInstance(false, layered)
+
+    expect(instance.composition).toEqual({
+      layers: { visible: false },
+      states: { history: 'idle' },
+    })
+
+    instance.updateParameters({ ready: true })
+    instance.updateParameters({ ready: false })
+
+    expect(instance.composition).toEqual({
+      layers: { visible: false },
+      states: { history: 'done' },
+    })
+  })
+
+  it('isolates returned snapshots and instances', () => {
+    const first = createInstance(true, layered)
+    const second = createInstance(false, layered)
+    const snapshot = first.composition
+
+    expect(snapshot).toBeDefined()
+
+    Object.assign(snapshot?.layers ?? {}, { visible: false })
+    Object.assign(snapshot?.states ?? {}, { history: 'idle' })
+
+    expect(first.composition).toEqual({ layers: { visible: true }, states: { history: 'done' } })
+    expect(second.composition).toEqual({ layers: { visible: false }, states: { history: 'idle' } })
+  })
+})
