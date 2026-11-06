@@ -139,10 +139,35 @@ test('invalid source retains last valid definition and fixed source resumes HMR'
     await page.goto(`${base}/tests/hmr.html`)
     const button = page.getByRole('button')
     await expect(button).toHaveCSS('background-color', 'rgb(255, 0, 0)')
+
+    const updated = await page.evaluateHandle(async (origin) => {
+      const { createHotContext } = await import(`${origin}/@vite/client`)
+      const hot = createHotContext('/tests/hmr-observer')
+
+      return {
+        finished: new Promise<void>((resolve) => {
+          const complete = ({ updates }: { updates: { path: string }[] }) => {
+            if (!updates.some(({ path }) => path.includes('/tests/Hmr.vue'))) return
+
+            hot.off('vite:afterUpdate', complete)
+            resolve()
+          }
+
+          hot.on('vite:afterUpdate', complete)
+        }),
+      }
+    }, base)
+
     await writeFile(file, original.replace('50ms', 'invalid'))
+
     await expect
       .poll(async () => (await page.request.get(`${base}/tests/Hmr.vue?raw`)).text())
       .toContain('invalid')
+
+    await updated.evaluate(({ finished }) => finished)
+
+    await updated.dispose()
+
     await button.click()
     await expect(button).toHaveCSS('background-color', 'rgb(0, 0, 255)')
     await expect(page.locator('vite-error-overlay')).toHaveCount(0)
