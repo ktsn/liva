@@ -12,7 +12,7 @@ previewing one mounted instance. Vue retains application state.
 | -------------------- | ----------------------------------------------------------------------- |
 | `components/`        | Vue panel, inspector and timeline rows                                  |
 | `controller.ts`      | Selection, drafts, asynchronous previews and save coordination          |
-| `timeline.ts`        | Effective tracks, coordinates and snapping                              |
+| `timeline.ts`        | Effective tracks and editable definition snapshots                      |
 | `communication/`     | Shared protocol, HTTP client, HMR subscriptions and server transactions |
 | `client.ts`, `ui.ts` | Development integration and mounting                                    |
 | `editor.css`         | Shared base styles                                                      |

@@ -4,7 +4,6 @@ import {
   type LayerResolution,
   type Definition,
   type Frame,
-  type PropertyTransition,
   type Timing,
   type Transition,
   type State,
@@ -14,21 +13,17 @@ import {
 export type LifecyclePhase = 'enter' | 'leave'
 
 export interface TimelineTrack {
-  readonly?: boolean
   fromValue?: string
   toValue?: string
   lifecycle?: LifecyclePhase
   target: string
   property: string
   path: string
-  local?: PropertyTransition
   timing?: Timing
   duration: number
   diagnostic?: string
   frames: readonly Frame[]
   explicit: readonly Frame[]
-  inheritedFrames: boolean
-  timingOrigin: string
 }
 
 export function compositionTimelineTracks(
@@ -91,9 +86,6 @@ export function compositionTimelineTracks(
           { offset: 1, value: property.value },
         ],
         explicit,
-        inheritedFrames: false,
-        timingOrigin: `Animation owner: ${property.owner}`,
-        readonly: true,
       }
     }),
   )
@@ -161,15 +153,11 @@ export function compositionLifecycleTracks(
       target,
       property,
       path: `${name}/${phase}/target/${target}/property/${property}`,
-      local,
       timing,
       duration,
       diagnostic,
       frames,
       explicit: local?.keyframes ?? [],
-      inheritedFrames: false,
-      timingOrigin: `Motion ${phase}`,
-      readonly: true,
       fromValue: frames.find((frame) => frame.offset === 0)?.value,
       toValue: phase === 'enter' ? value : frames.find((frame) => frame.offset === 1)?.value,
     }
@@ -181,29 +169,6 @@ export function timingText(timing: Timing): string {
   if (timing.kind === 'spring-duration')
     return `Spring: ${timing.durationMs} ms, bounce ${timing.bounce}`
   return `Spring: stiffness ${timing.stiffness}, damping ${timing.damping}, mass ${timing.mass}`
-}
-
-export function normalizedOffset(time: number, duration: number): number {
-  return duration > 0
-    ? Math.round(Math.max(0, Math.min(1, time / duration)) * 1000000) / 1000000
-    : 0
-}
-
-export function snapTime(
-  time: number,
-  extent: number,
-  marks: number[],
-  pixels: number,
-  bypass: boolean,
-): number {
-  if (bypass) return time
-  const step = extent / 10
-  const candidates = [...marks, Math.round(time / step) * step]
-  const closest = candidates.reduce(
-    (best, candidate) => (Math.abs(candidate - time) < Math.abs(best - time) ? candidate : best),
-    time + extent,
-  )
-  return Math.abs(closest - time) <= (extent * 7) / Math.max(1, pixels) ? closest : time
 }
 
 /** Preserve compiler-owned expression trees while creating the local editor model. */

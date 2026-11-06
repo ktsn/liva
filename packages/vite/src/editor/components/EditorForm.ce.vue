@@ -145,9 +145,6 @@ onMounted(() => {
 })
 
 const targets = computed(() => [...new Set(tracks.value.map((track) => track.target))])
-const marks = computed(() =>
-  tracks.value.flatMap((track) => track.frames.map((frame) => frame.offset * track.duration)),
-)
 const selection = computed(() =>
   tracks.value.find(
     (track) =>
@@ -558,7 +555,6 @@ onScopeDispose(() => {
               :key="track.path"
               :track="track"
               :extent="extent"
-              :marks="marks"
               :selected="selection === track ? selected?.offset : undefined"
               @select="choose(track, $event)"
             /></template>

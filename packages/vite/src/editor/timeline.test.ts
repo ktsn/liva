@@ -4,8 +4,6 @@ import { describe, expect, it } from 'vite-plus/test'
 import { compile } from '../compiler.ts'
 import { readFileSync } from 'node:fs'
 import {
-  normalizedOffset,
-  snapTime,
   compositionTimelineTracks,
   compositionLifecycleTracks,
   timingText,
@@ -36,8 +34,6 @@ describe('timeline coordinates and inheritance', () => {
     expect(scale?.duration).toBe(350)
     expect(color?.duration).toBe(200)
     expect(scale?.frames.map((frame) => frame.offset)).toEqual([0, 0.4, 0.7, 1])
-    expect(normalizedOffset(140, 350)).toBe(0.4)
-    expect(normalizedOffset(140, 200)).toBe(0.7)
   })
 
   it('uses the timing of the explicitly selected return transition', () => {
@@ -47,21 +43,6 @@ describe('timeline coordinates and inheritance', () => {
     expect(forward?.timing?.kind).toBe('spring-physics')
     expect(reverse?.timing?.kind).toBe('spring-duration')
     expect(reverse?.duration).toBe(350)
-  })
-
-  it('snaps to real-time markers and bypasses snapping with the modifier', () => {
-    expect(snapTime(143, 1000, [140], 1000, false)).toBe(140)
-    expect(snapTime(143, 1000, [140], 1000, true)).toBe(143)
-    expect(snapTime(151, 1000, [140], 1000, false)).toBe(151)
-    expect(normalizedOffset(1, 3)).toBe(0.333333)
-  })
-
-  it.each([
-    [100, 0, 0],
-    [-100, 10, 0],
-    [100, 10, 1],
-  ])('bounds offset for time %s and duration %s', (time, duration, expected) => {
-    expect(normalizedOffset(time, duration)).toBe(expected)
   })
 })
 

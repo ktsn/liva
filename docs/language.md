@@ -511,10 +511,9 @@ Interrupted properties retarget from their current displayed value. Unchanged pr
 animations continue. Properties with no timing apply immediately.
 
 Spring timing on layer tracks applies the sampled spring curve to the complete track,
-including intermediate waypoints. Legacy state-transition spring constraints remain
-unchanged. Initial state guards resolve before target binding; DOM entry animation is
-controlled by the motion's lifecycle declaration rather than replaying an initial
-machine transition during binding.
+including intermediate waypoints. Initial state guards resolve before target binding;
+DOM entry animation is controlled by the motion's lifecycle declaration rather than
+replaying an initial machine transition during binding.
 
 ## Migration from motion-level states
 

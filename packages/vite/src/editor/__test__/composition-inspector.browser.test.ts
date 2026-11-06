@@ -43,8 +43,6 @@ const track: TimelineTrack = {
     { offset: 1, value: '1' },
   ],
   explicit: [{ offset: 0.5, value: '0.5' }],
-  inheritedFrames: false,
-  timingOrigin: 'base',
 }
 
 function setup(

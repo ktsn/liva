@@ -229,8 +229,7 @@ ResolvedTrack {
   property: string
   timing: Timing
   keyframes: { offset: number, value: string, easing?: string }[]
-  fromValue: string
-  toValue: string
+  destinationValue: string
 }
 ```
 

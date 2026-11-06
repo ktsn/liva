@@ -1,18 +1,22 @@
-import { afterEach, expect, it } from 'vite-plus/test'
+import { afterEach, describe, expect, it } from 'vite-plus/test'
 import { userEvent } from 'vite-plus/test/browser'
-import { createApp, nextTick, type App } from 'vue'
+import { defineCustomElement, nextTick } from 'vue'
 import TimelineRow from './TimelineRow.ce.vue'
 import type { TimelineTrack } from '../timeline.ts'
 
-let app: App | undefined
+const RowElement = defineCustomElement(TimelineRow)
+
+customElements.define('liva-test-timeline-row', RowElement)
+
 let host: HTMLElement | undefined
 
-afterEach(() => {
-  app?.unmount()
+afterEach(async () => {
   host?.remove()
+
+  await nextTick()
 })
 
-it('converts pointer drags into frame and duration changes and validates double-click positions', async () => {
+async function setupRow(extent = 2000) {
   const track: TimelineTrack = {
     target: 'box',
     property: 'opacity',
@@ -21,68 +25,69 @@ it('converts pointer drags into frame and duration changes and validates double-
     timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
     frames: [
       { offset: 0, value: '0' },
-      { offset: 0.5, value: '0.5' },
+      { offset: 0.33333, value: '0.5' },
       { offset: 1, value: '1' },
     ],
-    explicit: [{ offset: 0.5, value: '0.5' }],
-    inheritedFrames: false,
-    timingOrigin: 'Local property',
+    explicit: [{ offset: 0.33333, value: '0.5' }],
   }
-  const moves: [number, number][] = []
-  const durations: number[] = []
-  const additions: number[] = []
-
-  host = document.createElement('div')
-  host.style.cssText = 'width:800px;margin:20px'
-  document.body.append(host)
-  app = createApp(TimelineRow, {
+  const selections: unknown[] = []
+  const element = new RowElement({
     track,
-    extent: 2000,
-    time: 0,
-    marks: [],
-    onMove: (from: number, to: number) => moves.push([from, to]),
-    onDuration: (value: number) => durations.push(value),
-    onAdd: (value: number) => additions.push(value),
+    extent,
   })
-  app.mount(host)
+
+  element.addEventListener('select', (event) => {
+    if (!(event instanceof CustomEvent)) throw new Error('Expected a selection event')
+
+    selections.push(event.detail)
+  })
+
+  element.style.cssText = 'display:block;inline-size:800px;margin:20px;--timeline-label-width:160px'
+  document.body.append(element)
+  host = element
 
   await nextTick()
 
-  const lane = host.querySelector<HTMLElement>('.lane')!
-  const key = host.querySelector<HTMLElement>('[aria-label="box.opacity 50%"]')!
-  const resize = host.querySelector<HTMLElement>('[aria-label="Resize box.opacity"]')!
+  const root = element.shadowRoot
 
-  await userEvent.dragAndDrop(key, lane, { targetPosition: { x: 300, y: 15 } })
+  if (!root) throw new Error('Missing timeline shadow root')
 
-  expect(moves[0][0]).toBe(0.5)
-  expect(moves[0][1]).toBeGreaterThan(0.5)
-  expect(moves[0][1]).toBeLessThanOrEqual(1)
+  return { element: root, selections }
+}
 
-  await userEvent.dragAndDrop(resize, lane, { targetPosition: { x: 600, y: 15 } })
+function rowElement(element: ShadowRoot, selector: string): HTMLElement {
+  const found = element.querySelector<HTMLElement>(selector)
 
-  expect(durations[0]).toBeGreaterThan(1000)
+  if (!found) throw new Error(`Missing timeline element: ${selector}`)
 
-  const rect = lane.getBoundingClientRect()
+  return found
+}
 
-  lane.dispatchEvent(
-    new MouseEvent('dblclick', {
-      bubbles: true,
-      clientX: rect.left + rect.width / 4,
-      altKey: true,
-    }),
-  )
+describe('timeline row selection', () => {
+  it.each([
+    { label: 'Select box.opacity', offset: undefined },
+    { label: 'box.opacity 33.333%', offset: 0.33333 },
+  ])('selects $label from the keyboard', async ({ label, offset }) => {
+    const { element, selections } = await setupRow()
+    const button = rowElement(element, `[aria-label="${label}"]`)
 
-  expect(additions).toEqual([0.5])
+    button.focus()
 
-  lane.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: rect.right }))
+    expect(element.activeElement).toBe(button)
 
-  expect(additions).toHaveLength(1)
+    await userEvent.keyboard('{Enter}')
 
-  key.dispatchEvent(new PointerEvent('pointerdown', { button: 2 }))
-  key.dispatchEvent(new PointerEvent('pointermove'))
-  key.dispatchEvent(new PointerEvent('pointerup'))
-  key.dispatchEvent(new PointerEvent('pointercancel'))
-  resize.dispatchEvent(new PointerEvent('pointercancel'))
+    expect(selections).toEqual([offset === undefined ? [] : [offset]])
+    expect(element.activeElement).toBe(button)
+  })
 
-  expect(moves).toHaveLength(1)
+  it.each([1000, 2000])('positions frames in the %s ms viewport', async (extent) => {
+    const { element } = await setupRow(extent)
+    const lane = rowElement(element, '.lane').getBoundingClientRect()
+    const band = rowElement(element, '.band').getBoundingClientRect()
+    const frame = rowElement(element, '[aria-label="box.opacity 33.333%"]').getBoundingClientRect()
+
+    expect(band.width / lane.width).toBeCloseTo(1000 / extent)
+    expect((frame.x + frame.width / 2 - lane.x) / lane.width).toBeCloseTo((0.33333 * 1000) / extent)
+  })
 })
