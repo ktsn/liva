@@ -124,7 +124,9 @@ export class LivaInstance {
 
       this.settledLifecycleSessions.add(session)
 
-      // Several presence boundaries can finish before their Promise callbacks run.
+      // Sessions mark themselves finished before their Promise callbacks run, so
+      // several presence boundaries may already be done here. Remove them together
+      // and mark their callbacks handled to avoid repeating restore/settle for each.
       for (const completed of sessions) {
         if (completed.isFinished) {
           sessions.delete(completed)
@@ -133,6 +135,10 @@ export class LivaInstance {
       }
 
       if (phase === 'enter' && this.layerResolution && !this.disposed) {
+        // Layers may change while enter plays toward its captured destination.
+        // Restore first to clear styles absent from the latest presentation, then
+        // apply that presentation. Preserve properties owned by remaining lifecycle
+        // sessions; settle also skips those properties until their sessions finish.
         this.restore(this.enterSessions.size > 0 || this.leaveSessions.size > 0)
         this.settle()
       }
