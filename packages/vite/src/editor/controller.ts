@@ -146,11 +146,8 @@ export class EditorController {
       this.stale
     )
       return
-    const definition = general
-      ? phase
-        ? { ...reply.definition, [phase === 'enter' ? 'stateEnters' : 'stateLeaves']: [] }
-        : { ...reply.definition, directionalTransitions: [] }
-      : reply.definition
+    const definition =
+      general && !phase ? { ...reply.definition, directionalTransitions: [] } : reply.definition
     selected.binding.runtime.replaceDefinition(
       definition,
       phase ? state : (from ?? selected.binding.requestedState),

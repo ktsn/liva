@@ -609,12 +609,8 @@ impl Compiler {
         scope: &expression::Scope,
     ) -> Transition {
         let endpoint = match node.selector() {
-            Some(syn::TransitionSelector::Enter | syn::TransitionSelector::EnterState(_)) => {
-                Some(0.0)
-            }
-            Some(syn::TransitionSelector::Leave | syn::TransitionSelector::LeaveState(_)) => {
-                Some(1.0)
-            }
+            Some(syn::TransitionSelector::Enter) => Some(0.0),
+            Some(syn::TransitionSelector::Leave) => Some(1.0),
             _ if node
                 .syntax()
                 .parent()
@@ -1154,8 +1150,6 @@ impl Compiler {
             events: vec![],
             enter: None,
             leave: None,
-            state_enters: vec![],
-            state_leaves: vec![],
             layers: vec![],
             states: vec![],
             general_transition: None,
@@ -1403,44 +1397,23 @@ impl Compiler {
                 }
                 syn::MotionItem::Transition(transition) => match transition.selector() {
                     Some(
-                        syn::TransitionSelector::EnterState(_)
-                        | syn::TransitionSelector::LeaveState(_),
-                    ) => {
-                        self.error("semantic.lifecycle-state", "State-specific enter/leave is no longer supported; use motion-level enter/leave or a layer transition", &transition);
-                    }
-
-                    Some(
                         selector
                         @ (syn::TransitionSelector::Enter | syn::TransitionSelector::Leave),
                     ) => {
-                        let phase = if matches!(
-                            selector,
-                            syn::TransitionSelector::Enter | syn::TransitionSelector::EnterState(_)
-                        ) {
+                        let phase = if matches!(selector, syn::TransitionSelector::Enter) {
                             "enter"
                         } else {
                             "leave"
                         };
-                        let state = transition.lifecycle_state();
-                        let suffix = state
-                            .as_ref()
-                            .map_or_else(|| phase.to_string(), |state| format!("{phase}/{state}"));
-                        self.unique(&mut transitions, &suffix, &transition);
+
+                        self.unique(&mut transitions, phase, &transition);
                         let value =
-                            self.transition(&transition, &format!("{name}/{suffix}"), &scope);
-                        match (phase, state) {
-                            ("enter", None) => definition.enter = Some(value),
-                            (_, None) => definition.leave = Some(value),
-                            ("enter", Some(state)) => {
-                                definition.state_enters.push(StateTransition {
-                                    state,
-                                    transition: value,
-                                })
-                            }
-                            (_, Some(state)) => definition.state_leaves.push(StateTransition {
-                                state,
-                                transition: value,
-                            }),
+                            self.transition(&transition, &format!("{name}/{phase}"), &scope);
+
+                        if phase == "enter" {
+                            definition.enter = Some(value);
+                        } else {
+                            definition.leave = Some(value);
                         }
                     }
                     Some(syn::TransitionSelector::General) => {
@@ -1468,7 +1441,7 @@ impl Compiler {
                     }
                     None => self.error(
                         "semantic.structure",
-                        "Expected state or transition",
+                        "Expected state or transition; lifecycle blocks use enter { ... } or leave { ... }",
                         &transition,
                     ),
                 },
@@ -1538,14 +1511,6 @@ impl Compiler {
         }
 
         self.validate(&definition, node);
-        for (default, overrides) in [
-            (&definition.enter, &mut definition.state_enters),
-            (&definition.leave, &mut definition.state_leaves),
-        ] {
-            for item in overrides {
-                item.transition = merge_lifecycle(default.as_ref(), &item.transition);
-            }
-        }
         definition
     }
 
@@ -1587,41 +1552,13 @@ impl Compiler {
             }
         }
 
-        for (phase, default, overrides) in [
-            ("enter", &def.enter, &def.state_enters),
-            ("leave", &def.leave, &def.state_leaves),
-        ] {
-            for (state, specific) in default.iter().map(|animation| (None, animation)).chain(
-                overrides
-                    .iter()
-                    .map(|item| (Some(item.state.as_str()), &item.transition)),
-            ) {
-                let base_path = format!("{}/{phase}", def.name);
-                let path =
-                    state.map_or_else(|| base_path.clone(), |state| format!("{base_path}/{state}"));
-                if let Some(state) = state
-                    && !def.states.iter().any(|item| item.name == state)
-                {
-                    let header = self.sources[&path].child::<syn::Header>().unwrap();
-                    let source = SourceText::new(&header);
-                    self.error_range(
-                        "semantic.reference",
-                        format!("Unknown state: {state}"),
-                        source.range(source.text.split_whitespace().nth(1).unwrap()),
-                    );
-                }
-                let animation = if state.is_some() {
-                    merge_lifecycle(default.as_ref(), specific)
-                } else {
-                    specific.clone()
-                };
+        for (phase, lifecycle) in [("enter", &def.enter), ("leave", &def.leave)] {
+            if let Some(animation) = lifecycle {
+                let path = format!("{}/{phase}", def.name);
+
                 for target in &animation.targets {
-                    let specific_target_path = format!("{path}/target/{}", target.name);
-                    let target_path = if self.sources.contains_key(&specific_target_path) {
-                        specific_target_path
-                    } else {
-                        format!("{base_path}/target/{}", target.name)
-                    };
+                    let target_path = format!("{path}/target/{}", target.name);
+
                     if !def
                         .states
                         .iter()
@@ -1641,16 +1578,7 @@ impl Compiler {
                         );
                     }
                     for property in &target.properties {
-                        let specific_property_path =
-                            format!("{path}/target/{}/property/{}", target.name, property.name);
-                        let property_path = if self.sources.contains_key(&specific_property_path) {
-                            specific_property_path
-                        } else {
-                            format!(
-                                "{base_path}/target/{}/property/{}",
-                                target.name, property.name
-                            )
-                        };
+                        let property_path = format!("{target_path}/property/{}", property.name);
                         let timing = property.timing.as_ref().or(animation.timing.as_ref());
                         if timing.is_none() && property.timing_expression.is_none() {
                             self.error_range(
@@ -2031,45 +1959,4 @@ fn split_frame(text: &str) -> (&str, Option<&str>) {
     }
 
     (text.trim(), None)
-}
-
-/// Apply the same property-first timing precedence as directional transitions.
-fn merge_lifecycle(default: Option<&Transition>, specific: &Transition) -> Transition {
-    let mut result = specific.clone();
-    result.timing = specific
-        .timing
-        .clone()
-        .or_else(|| default.and_then(|item| item.timing.clone()));
-    if let Some(default) = default {
-        for target in &default.targets {
-            if let Some(existing) = result
-                .targets
-                .iter_mut()
-                .find(|item| item.name == target.name)
-            {
-                for property in &target.properties {
-                    if let Some(overridden) = existing
-                        .properties
-                        .iter_mut()
-                        .find(|item| item.name == property.name)
-                    {
-                        if overridden.timing.is_none() && overridden.timing_expression.is_none() {
-                            overridden.timing = property.timing.clone();
-                            overridden.timing_expression = property.timing_expression.clone();
-                        }
-
-                        overridden.keyframes = overridden
-                            .keyframes
-                            .clone()
-                            .or_else(|| property.keyframes.clone());
-                    } else {
-                        existing.properties.push(property.clone());
-                    }
-                }
-            } else {
-                result.targets.push(target.clone());
-            }
-        }
-    }
-    result
 }

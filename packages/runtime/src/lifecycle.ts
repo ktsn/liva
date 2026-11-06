@@ -8,11 +8,9 @@ export function lifecycleTransitions(
   definition: Definition,
   phase: 'enter' | 'leave',
 ): readonly Transition[] {
-  const specific = phase === 'enter' ? definition.stateEnters : definition.stateLeaves
-  return [
-    ...(definition[phase] ? [definition[phase]] : []),
-    ...(specific ?? []).map((item) => item.transition),
-  ]
+  const transition = definition[phase]
+
+  return transition ? [transition] : []
 }
 
 export function hasLifecycle(definition: Definition): boolean {
@@ -26,11 +24,10 @@ export function hasLifecycle(definition: Definition): boolean {
 export function captureLifecycleDefinition(
   definition: Definition,
   phase: 'enter' | 'leave',
-  state: string,
   values: VariableValues,
 ): Transition | undefined {
-  const specific = phase === 'enter' ? definition.stateEnters : definition.stateLeaves
-  const transition = specific?.find((item) => item.state === state)?.transition ?? definition[phase]
+  const transition = definition[phase]
+
   if (!transition) return undefined
 
   return renderTransition(transition, values)

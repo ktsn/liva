@@ -206,15 +206,6 @@ export function isDefinition(value: unknown): value is Definition {
             parameter.type === 'string'),
       )) &&
     (value.letBindings === undefined || isArrayOf(value.letBindings, isLetBinding)) &&
-    [value.stateEnters, value.stateLeaves].every(
-      (items) =>
-        items === undefined ||
-        (Array.isArray(items) &&
-          items.every(
-            (item: unknown) =>
-              isRecord(item) && typeof item.state === 'string' && isTransition(item.transition),
-          )),
-    ) &&
     (value.enter === undefined || isTransition(value.enter)) &&
     (value.leave === undefined || isTransition(value.leave)) &&
     (value.events === undefined ||

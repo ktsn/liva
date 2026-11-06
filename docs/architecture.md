@@ -36,8 +36,7 @@ access to the underlying Rowan node, text, and absolute byte ranges. `Document`
 exposes `Motion` views; motions expose parameters, let bindings, states, events,
 and animation blocks. `enters()` and `leaves()` select lifecycle declarations;
 `transitions()` traverses all animation blocks, including enter and leave.
-`lifecycle_state()` exposes an optional state selector; target
-`animation_properties()` visits shorthand declarations and explicit tracks in source order.
+Target `animation_properties()` visits shorthand declarations and explicit tracks in source order.
 These iterators preserve source order, duplicates, and malformed headers so
 semantic validation can diagnose them. `events()` exposes event declarations,
 with optional name and condition accessors. Targets contain property declarations or property blocks with
@@ -141,8 +140,6 @@ Definition {
   events?: { name: string, when: Expression }[]
   enter?: Transition
   leave?: Transition
-  stateEnters?: { state: string, transition: Transition }[]
-  stateLeaves?: { state: string, transition: Transition }[]
   states: State[]
   generalTransition?: Transition
   directionalTransitions: { from: string, to: string, transition: Transition }[]
@@ -376,9 +373,8 @@ visual selection, and the adapter translates event names into DOM CustomEvents.
 
 Lifecycle CSS shorthand lowers to Frame IR at offset 0 for enter and offset 1 for
 leave. Frames retain scalar templates and typed timing/easing expressions. The
-compiler rejects state-specific and layer-local lifecycle declarations. Runtime
-validation still reads historical `stateEnters`/`stateLeaves` compiled bundles;
-new source cannot produce these fields.
+compiler accepts lifecycle declarations only at motion scope. Each motion has
+at most one enter transition and one leave transition.
 
 Boundary planning uses the motion-level lifecycle target set. At capture, the
 runtime renders the selected lifecycle and uses the instance's resolved layer

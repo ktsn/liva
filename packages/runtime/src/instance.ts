@@ -150,7 +150,7 @@ export class LivaInstance {
     )
     const work = resolveLifecycle(
       phase,
-      captureLifecycleDefinition(definition, phase, this.state, this.values),
+      captureLifecycleDefinition(definition, phase, this.values),
       this.layerResolution?.presentation ?? getState(definition, this.state),
       targets,
     )

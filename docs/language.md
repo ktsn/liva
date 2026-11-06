@@ -198,10 +198,9 @@ motion panel(open: boolean) {
 }
 ```
 
-`enter stateName` and `leave stateName` are removed and produce a migration
-diagnostic. Move DOM lifecycle animation to motion-level blocks; use guarded
-`transition A -> B` inside a stateful layer for state-change animation. Layers
-cannot declare their own enter/leave blocks.
+Declare DOM lifecycle animations directly in the motion using `enter { ... }`
+and `leave { ... }`. Use guarded `transition A -> B` inside a stateful layer for
+state-change animation. Layers cannot declare their own enter/leave blocks.
 
 A direct declaration in enter is the 0% frame; in leave it is the 100% frame.
 Explicit keyframe blocks and `${expression}` values are also supported. Duplicate

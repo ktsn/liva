@@ -320,7 +320,7 @@ fn lifecycle_property_duplicates_are_reported_in_source_order() {
 }
 
 #[test]
-fn state_specific_lifecycle_declarations_report_an_actionable_migration_error() {
+fn lifecycle_headers_reject_extra_selectors() {
     for phase in ["enter", "leave"] {
         let source = motion(&format!(
             "{phase} idle {{ @tween: 30ms; body {{ opacity: 0 }} }}"
@@ -329,10 +329,10 @@ fn state_specific_lifecycle_declarations_report_an_actionable_migration_error() 
         let diagnostic = result
             .diagnostics
             .iter()
-            .find(|diagnostic| diagnostic.code == "semantic.lifecycle-state")
+            .find(|diagnostic| diagnostic.code == "semantic.structure")
             .unwrap();
 
-        assert!(diagnostic.message.contains("motion-level"));
+        assert!(diagnostic.message.contains("enter { ... }"));
         assert!(result.definitions.is_empty());
     }
 }

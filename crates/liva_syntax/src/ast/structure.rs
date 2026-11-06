@@ -306,8 +306,6 @@ pub enum TransitionSelector {
     General,
     Enter,
     Leave,
-    EnterState(String),
-    LeaveState(String),
     Directional { from: String, to: String },
 }
 
@@ -332,27 +330,12 @@ impl Motion {
 }
 
 impl Transition {
-    pub fn lifecycle_state(&self) -> Option<String> {
-        match self.selector()? {
-            TransitionSelector::EnterState(state) | TransitionSelector::LeaveState(state) => {
-                Some(state)
-            }
-            _ => None,
-        }
-    }
-
     pub fn selector(&self) -> Option<TransitionSelector> {
         let header = self.header()?;
         match header.split_whitespace().collect::<Vec<_>>().as_slice() {
             ["transition"] => Some(TransitionSelector::General),
             ["enter"] => Some(TransitionSelector::Enter),
             ["leave"] => Some(TransitionSelector::Leave),
-            ["enter", state] if crate::is_name(state) => {
-                Some(TransitionSelector::EnterState((*state).into()))
-            }
-            ["leave", state] if crate::is_name(state) => {
-                Some(TransitionSelector::LeaveState((*state).into()))
-            }
             ["transition", from, "->", to] | ["transition", from, "->", to, "when", ..] => {
                 Some(TransitionSelector::Directional {
                     from: (*from).into(),

@@ -441,7 +441,6 @@ impl Parser<'_> {
                 let declaration = match (next.next(), next.next(), next.next()) {
                     (Some("state"), Some(name), Some("{" | "when")) => is_name(name),
                     (Some("enter" | "leave" | "transition"), Some("{"), _) => true,
-                    (Some("enter" | "leave"), Some(name), Some("{")) => is_name(name),
                     (Some("transition"), Some(name), Some("->")) => is_name(name),
                     (Some("event"), Some(name), Some("when")) => is_name(name),
                     (Some("let"), Some(name), Some("=")) => is_name(name),
@@ -612,7 +611,6 @@ fn validate_headers(node: &impl AstNode, depth: usize, diagnostics: &mut Vec<Dia
         } else if Transition::cast(block.syntax().clone()).is_some() {
             match words.as_slice() {
                 ["transition"] | ["enter"] | ["leave"] => true,
-                ["enter" | "leave", state] => is_name(state),
                 ["transition", from, "->", to] => is_name(from) && is_name(to),
                 ["transition", from, "->", to, "when", ..] => {
                     depth == 2 && is_name(from) && is_name(to) && words.len() > 5
