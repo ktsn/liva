@@ -263,3 +263,30 @@ it('does not overwrite an external edit made while the temporary save is being w
     vi.mocked(writeFile).mockImplementation(actual.writeFile)
   }
 })
+
+it.each([
+  'motion toggle { layer base { body { opacity: 1 } } }',
+  'motion toggle { state idle { body @tween(duration: 100) { opacity: 1 } } }',
+  'motion toggle { state idle { body { opacity: 1 } } enter { body { opacity { @tween: 100ms; 0%: 0 @easeIn } } } }',
+])('keeps new syntax inspectable but rejects legacy timeline mutations: %s', async (motion) => {
+  const content = `<template><div /></template><liva>${motion}</liva>`
+  await writeFile(join(root, 'Toggle.vue'), content)
+  const inspection = await service.request({ action: 'inspect', sourceId, definition: 'toggle' })
+
+  for (const action of ['preview', 'commit'] as const) {
+    await expect(
+      service.request({
+        action,
+        sourceId,
+        definition: 'toggle',
+        baseHash: inspection.hash,
+        requestId: crypto.randomUUID(),
+        instanceId: 'instance',
+        sequence: 1,
+        edits: [],
+      }),
+    ).rejects.toThrow('read-only')
+  }
+
+  expect(await readFile(join(root, 'Toggle.vue'), 'utf8')).toBe(content)
+})

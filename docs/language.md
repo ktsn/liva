@@ -178,75 +178,44 @@ Ordinary transition keyframe templates remain unsupported.
 
 ## Enter, leave, and events
 
-A Motion may declare one default `enter` and one default `leave` block, plus one
-`enter stateName` and one `leave stateName` per state. State names must resolve in
-the same Motion. Lifecycle timing is independent of ordinary state transitions.
-Targets must already be declared in the Motion's states. The root is animated
-only when explicitly bound as a named target.
+A motion may declare one `enter` and one `leave` directly in its body. Targets
+must be declared in its layers (including local states) or legacy states. The root
+is animated only when explicitly bound as a named target. Lifecycle timing is
+independent of ordinary layer timing and must be supplied on its target/property
+or through legacy timing declarations.
 
 ```css
-motion panel(open: boolean, distance: number) {
-  state closed {
-    content { opacity: 1; scale: 0.9; translate: 0px 0 }
-  }
-  state opened when open {
-    content { scale: 1 }
-  }
-  transition { @tween: 150ms }
+motion panel(open: boolean) {
+  layer base { content { opacity: 1; scale: 0.9 } }
+  layer opened when open { content { scale: 1 } }
 
   enter {
-    @tween: 250ms ease-out
-    content { opacity: 0 }
-  }
-  enter opened {
-    content { scale: 0.8 }
+    content @tween(duration: 250, easing: easeOut) { opacity: 0; scale: 0.8 }
   }
   leave {
-    @tween: 200ms ease-in
-    content { opacity: 0 }
-  }
-  leave opened {
-    content { scale: 1.2; translate: ${distance}px 0 }
+    content @tween(duration: 200, easing: easeIn) { opacity: 0; scale: 0.9 }
   }
 }
 ```
 
-The state selected at insertion/showing chooses `enter stateName`; the state
-selected at removal/hiding chooses `leave stateName`. Properties not mentioned
-by the state-specific block inherit the default. For each property, timing uses
-this precedence: state-specific property, default property, state-specific block,
-default block. Existing `@tween`, `@spring`, and their longhands retain their
-CSS-like declaration-order behavior. A property with authored frames replaces the
-entire inherited frame set; a timing-only property inherits the default frames.
+Declare DOM lifecycle animations directly in the motion using `enter { ... }`
+and `leave { ... }`. Use guarded `transition A -> B` inside a stateful layer for
+state-change animation. Layers cannot declare their own enter/leave blocks.
 
-A direct CSS declaration in a lifecycle target is endpoint shorthand:
+A direct declaration in enter is the 0% frame; in leave it is the 100% frame.
+Explicit keyframe blocks and `${expression}` values are also supported. Duplicate
+properties are errors. Enter snapshots the fully cascaded destination and its
+animation expressions at insertion/showing. Missing 100% endpoints use that
+snapshot. Leave snapshots the currently displayed presentation and its expressions
+before disposal/hiding; missing 0% endpoints use that display, including interrupted
+animations.
 
-```css
-enter { content { opacity: 0 } } // opacity { 0%: 0 }
-leave { content { opacity: 0 } } // opacity { 100%: 0 }
-```
-
-These examples show property syntax only; effective timing must also be supplied.
-Shorthand and explicit keyframes can coexist for different properties. Repeating
-a property within one target is an error, including mixing shorthand and explicit
-frames for that property. Across default and state-specific blocks, shorthand
-replaces the complete inherited frame set just like explicit keyframes.
-
-CSS names retain standard CSS spelling. Values remain CSS text; `${expression}`
-embeds a scalar from the Motion's existing expression environment. Units are never
-added automatically. Both shorthand and explicit lifecycle frames support these
-templates, evaluated only when that lifecycle starts, after state-specific
-inheritance. Ordinary state CSS declarations retain their existing meaning.
-
-Enter runs on initial insertion, subsequent insertion, and showing. Missing final
-endpoints use the captured state's resolved CSS values where available. Its initial
-presentation is installed before insertion; disconnected elements do not require
-computed styles when the state supplies the value. Completion settles to the
-captured state. Leave captures the state, expression values, and displayed
-presentation before disposal or hiding. Its omitted starting frame uses that
-presentation, including an interrupted animation, rather than blindly using state
-CSS. Explicit frames remain authored overrides. Leave ends at its final keyframe
-and then permits removal or hiding.
+Only properties explicitly animated by a lifecycle receive lifecycle precedence.
+Other properties continue to follow layer changes. Enter never retargets while
+running: completion applies the latest layer presentation, which can visibly jump
+if inputs changed. Leave ignores later layer changes and signals Vue to finish
+removal/hiding when its tracks complete. This snapshot limitation is intentional;
+smooth lifecycle retargeting and layer-local lifecycle composition are unsupported.
 
 State and expression changes do not retarget an existing lifecycle session.
 Existing cancellation and replacement behavior still applies, for example when
@@ -337,7 +306,7 @@ interpolation, or standalone preview environment. Omitted-state CSS sampling and
 additional source types are unsupported. DOM-derived state values require decisions
 about when to sample computed or animated styles, when to refresh them, and how to
 restore the CSS cascade after removing Liva-owned inline values. The editor edits transition and lifecycle parameters and frames, including
-state-specific lifecycle overrides; let/condition authoring is textual.
+motion-level lifecycle tracks on legacy motions; layer/decorator motions are read-only in the timeline, and let/condition authoring is textual.
 
 ## Toggle example
 

@@ -16,22 +16,11 @@ pub struct Definition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub leave: Option<Transition>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub state_enters: Vec<StateTransition>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub state_leaves: Vec<StateTransition>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layers: Vec<Layer>,
     pub states: Vec<State>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub general_transition: Option<Transition>,
     pub directional_transitions: Vec<DirectionalTransition>,
-}
-
-/// State-specific lifecycle definitions are merged with their default at compile time.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct StateTransition {
-    pub state: String,
-    pub transition: Transition,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

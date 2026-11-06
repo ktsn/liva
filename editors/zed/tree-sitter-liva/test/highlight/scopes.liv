@@ -26,3 +26,36 @@
       }
     }
   }
+
+motion button {
+  layer hover when true {
+//^^^^^ keyword
+//            ^^^^ keyword
+    body @tween(duration: 200) {
+//  ^ selector.class
+//       ^ attribute
+      opacity: 1
+    }
+  }
+  layer workflow {
+    state idle initial {}
+//             ^ keyword
+    state busy {}
+    transition idle -> busy when true
+//  ^ keyword
+  }
+  enter { body { opacity: 0 } }
+//^ keyword
+}
+
+motion animation(curve: easing, duration: timing) {
+//                      ^ type
+//                                        ^ type
+  layer base {
+    body @tween(duration: 200, easing: easeOut) {
+//              ^ property
+//                             ^ property
+      opacity: 1
+    }
+  }
+}

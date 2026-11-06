@@ -8,11 +8,9 @@ export function lifecycleTransitions(
   definition: Definition,
   phase: 'enter' | 'leave',
 ): readonly Transition[] {
-  const specific = phase === 'enter' ? definition.stateEnters : definition.stateLeaves
-  return [
-    ...(definition[phase] ? [definition[phase]] : []),
-    ...(specific ?? []).map((item) => item.transition),
-  ]
+  const transition = definition[phase]
+
+  return transition ? [transition] : []
 }
 
 export function hasLifecycle(definition: Definition): boolean {
@@ -26,11 +24,10 @@ export function hasLifecycle(definition: Definition): boolean {
 export function captureLifecycleDefinition(
   definition: Definition,
   phase: 'enter' | 'leave',
-  state: string,
   values: VariableValues,
 ): Transition | undefined {
-  const specific = phase === 'enter' ? definition.stateEnters : definition.stateLeaves
-  const transition = specific?.find((item) => item.state === state)?.transition ?? definition[phase]
+  const transition = definition[phase]
+
   if (!transition) return undefined
 
   return renderTransition(transition, values)
@@ -39,6 +36,8 @@ export function captureLifecycleDefinition(
 export interface LifecycleWork {
   readonly element: HTMLElement
   readonly track: ResolvedTrack
+  /** Layer owners apply the latest cascade after completion, including removing absent properties. */
+  readonly restoreOnCompletion?: boolean
 }
 
 export type LifecycleResult = 'completed' | 'superseded' | 'owner-teardown' | 'failed'
@@ -120,14 +119,24 @@ export class LifecycleSession {
   })
 
   private readonly phase: 'enter' | 'leave'
+  private readonly report: (error: unknown) => void
 
-  constructor(work: readonly LifecycleWork[], phase: 'enter' | 'leave') {
+  constructor(
+    work: readonly LifecycleWork[],
+    phase: 'enter' | 'leave',
+    report: (error: unknown) => void = console.error,
+  ) {
     this.phase = phase
+    this.report = report
     this.work = [...work]
   }
 
   owns(element: HTMLElement, property: string): boolean {
     return this.work.some((item) => item.element === element && item.track.property === property)
+  }
+
+  get isFinished(): boolean {
+    return this.ended
   }
 
   initialize() {
@@ -176,11 +185,18 @@ export class LifecycleSession {
 
       void Promise.all(this.effects.map((effect) => effect.finished)).then(
         () => this.end('completed'),
-        () => this.end('failed'),
+        (error) => this.fail(error),
       )
-    } catch {
-      this.end('failed')
+    } catch (error) {
+      this.fail(error)
     }
+  }
+
+  private fail(error: unknown) {
+    if (this.ended) return
+
+    this.end('failed')
+    this.report(error)
   }
 
   cancel(reason: 'superseded' | 'owner-teardown') {
@@ -196,7 +212,9 @@ export class LifecycleSession {
     }
 
     if (result === 'completed' && this.phase === 'enter') {
-      for (const { element, track } of this.work) {
+      for (const { element, track, restoreOnCompletion } of this.work) {
+        if (restoreOnCompletion) continue
+
         element.style.setProperty(track.property, track.destinationValue)
       }
     }

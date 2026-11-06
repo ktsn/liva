@@ -126,9 +126,9 @@ it('preserves modifiers and escapes expressions in generated bindings', () => {
   expect(result.code).toContain('v-liva-target:body.custom.compiled="{ value: (readTarget()),')
 })
 
-it('plans targets declared only by state-specific lifecycles', () => {
+it('plans targets declared only by motion-level lifecycles', () => {
   const source = `<template><div v-liva:panel><span v-if="visible" v-liva-target:body /></div></template>
-  <liva>motion panel { state idle { body { opacity: 1 } } enter idle { @tween: 10ms; body { opacity: 0 } } leave idle { @tween: 10ms; body { opacity: 0 } } }</liva>`
+  <liva>motion panel { state idle { body { opacity: 1 } } enter { @tween: 10ms; body { opacity: 0 } } leave { @tween: 10ms; body { opacity: 0 } } }</liva>`
   const result = planPresence(
     source,
     'Panel.vue',

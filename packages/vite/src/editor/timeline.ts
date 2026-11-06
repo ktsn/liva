@@ -42,13 +42,7 @@ export function transitionAt(
   general: boolean,
   phase?: LifecyclePhase,
 ): Transition | undefined {
-  if (phase) {
-    return general
-      ? definition[phase]
-      : (phase === 'enter' ? definition.stateEnters : definition.stateLeaves)?.find(
-          (item) => item.state === to,
-        )?.transition
-  }
+  if (phase) return definition[phase]
 
   return general
     ? definition.generalTransition
@@ -63,7 +57,7 @@ export function transitionPath(
   general: boolean,
   phase?: LifecyclePhase,
 ) {
-  if (phase) return `${definition.name}/${phase}${general ? '' : `/${to}`}`
+  if (phase) return `${definition.name}/${phase}`
 
   return `${definition.name}/transition/${general ? 'general' : `directional/${from}/${to}`}`
 }
@@ -147,9 +141,7 @@ export function timelineTracks(
         timingOrigin: local?.timing
           ? 'Local property'
           : inherited?.timing
-            ? phase
-              ? 'Inherited default property'
-              : 'Inherited common property'
+            ? 'Inherited common property'
             : selected?.timing
               ? 'Transition default'
               : phase
@@ -183,51 +175,7 @@ export function snapTime(
   return Math.abs(closest - time) <= (extent * 7) / Math.max(1, pixels) ? closest : time
 }
 
-/** Remove compiled lifecycle inheritance using authored source paths before editing. */
-export function editableDefinition(
-  definition: Definition,
-  fields: readonly { path: string }[],
-): Definition {
-  const paths = new Set(fields.map((field) => field.path))
-  const local = (transition: Transition, path: string): Transition => ({
-    timing: paths.has(`${path}/timing`) ? transition.timing : undefined,
-    targets: transition.targets.flatMap((target) => {
-      const targetPath = `${path}/target/${target.name}`
-      if (!paths.has(targetPath)) return []
-
-      return [
-        {
-          name: target.name,
-          properties: target.properties.flatMap((property) => {
-            const propertyPath = `${targetPath}/property/${property.name}`
-            if (!paths.has(propertyPath)) return []
-
-            const keyframes = property.keyframes?.filter((frame) =>
-              paths.has(`${propertyPath}/frame/${frame.offset}`),
-            )
-
-            return [
-              {
-                name: property.name,
-                timing: paths.has(`${propertyPath}/timing`) ? property.timing : undefined,
-                keyframes: keyframes?.length ? keyframes : undefined,
-              },
-            ]
-          }),
-        },
-      ]
-    }),
-  })
-
-  return {
-    ...structuredClone(definition),
-    stateEnters: definition.stateEnters?.map((item) => ({
-      ...item,
-      transition: local(item.transition, `${definition.name}/enter/${item.state}`),
-    })),
-    stateLeaves: definition.stateLeaves?.map((item) => ({
-      ...item,
-      transition: local(item.transition, `${definition.name}/leave/${item.state}`),
-    })),
-  }
+/** Preserve compiler-owned expression trees while creating the local editor model. */
+export function editableDefinition(definition: Definition): Definition {
+  return structuredClone(definition)
 }

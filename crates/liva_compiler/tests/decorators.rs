@@ -92,19 +92,6 @@ fn style_tracks_require_an_explicit_final_style() {
 }
 
 #[test]
-fn lifecycle_overrides_inherit_typed_timing_without_merging_configurations() {
-    let result = valid(
-        "motion button { state idle { body { opacity: 1 } } enter { body @tween(duration: 150) { opacity: 0 } } enter idle { body { opacity: 0.5 } } }",
-    );
-    let definition = &result.definitions[0];
-
-    assert_eq!(
-        definition.enter.as_ref().unwrap().targets[0].properties[0].timing_expression,
-        definition.state_enters[0].transition.targets[0].properties[0].timing_expression
-    );
-}
-
-#[test]
 fn style_tracks_preserve_legacy_css_easing_functions() {
     for easing in [
         "steps(3, end)",
@@ -121,35 +108,6 @@ fn style_tracks_preserve_legacy_css_easing_functions() {
             .unwrap()[0];
 
         assert_eq!(frame.easing.as_deref(), Some(easing));
-    }
-}
-
-#[test]
-fn lifecycle_timing_overrides_replace_inherited_typed_or_legacy_values() {
-    for (default, specific, typed) in [
-        (
-            "body @tween(duration: 150) { opacity: 0 }",
-            "body { opacity { @tween: 50ms; 0%: .5 } }",
-            false,
-        ),
-        (
-            "body { opacity { @tween: 150ms; 0%: 0 } }",
-            "body @spring() { opacity: .5 }",
-            true,
-        ),
-        (
-            "body @tween(duration: 150) { opacity: 0 }",
-            "body @spring() { opacity: .5 }",
-            true,
-        ),
-    ] {
-        let result = valid(&format!(
-            "motion button {{ state idle {{ body {{ opacity: 1 }} }} enter {{ {default} }} enter idle {{ {specific} }} }}"
-        ));
-        let property = &result.definitions[0].state_enters[0].transition.targets[0].properties[0];
-
-        assert_eq!(property.timing_expression.is_some(), typed);
-        assert_eq!(property.timing.is_some(), !typed);
     }
 }
 

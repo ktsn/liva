@@ -1,7 +1,7 @@
 //! Editor-facing type information, using the compiler's motion scope and checker.
 use crate::{Compiler, expression};
 use liva_syntax::ast::expression::{Expr, ExprView};
-use liva_syntax::ast::{AstNode, HasHeader, HasItems, HasValue};
+use liva_syntax::ast::{AstNode, HasHeader, HasItems};
 use liva_syntax::{Range, parse};
 use std::collections::BTreeMap;
 
@@ -70,53 +70,40 @@ pub fn hovers(source: &str) -> Vec<Hover> {
             if let Some(header) = binding.header_node() {
                 scan(&header.text(), header.range().start, &scope, &mut result);
             }
-            if let Some(value) = binding.value_node() {
-                expression_hovers(&value, &scope, &mut result);
+        }
+
+        expression_hovers(&motion, &scope, &mut result);
+
+        for target in motion
+            .syntax()
+            .descendants()
+            .filter_map(liva_syntax::ast::Target::cast)
+        {
+            if let Some(header) = target.header_node() {
+                scan(
+                    header.text().split('@').next().unwrap_or_default(),
+                    header.range().start,
+                    &scope,
+                    &mut result,
+                );
             }
         }
 
-        for event in motion.events() {
-            if let Some(condition) = event.condition() {
-                expression_hovers(&condition, &scope, &mut result);
-            }
-        }
+        for decorator in motion
+            .syntax()
+            .descendants()
+            .filter(|node| node.kind() == liva_syntax::Kind::Decorator)
+        {
+            let text = decorator.text().to_string();
+            let value = liva_syntax::parse_expression(&text[1..]);
+            let mut local = vec![];
 
-        for animation in motion.enters().chain(motion.leaves()) {
-            for target in animation.targets() {
-                for property in target.animation_properties() {
-                    match property {
-                        liva_syntax::ast::AnimationProperty::Shorthand(property) => {
-                            if let Some(value) = property.value_node() {
-                                expression_hovers(&value, &scope, &mut result);
-                            }
-                        }
-                        liva_syntax::ast::AnimationProperty::Keyframes(property) => {
-                            for frame in property.keyframes() {
-                                if let Some(value) = frame.value_node() {
-                                    expression_hovers(&value, &scope, &mut result);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+            expression_hovers(&value.root, &scope, &mut local);
 
-        for state in motion.states() {
-            if let Some(condition) = state.condition() {
-                expression_hovers(&condition, &scope, &mut result);
-            }
-
-            for target in state.targets() {
-                if let Some(header) = target.header_node() {
-                    scan(&header.text(), header.range().start, &scope, &mut result);
-                }
-
-                for property in target.properties() {
-                    if let Some(value) = property.value_node() {
-                        expression_hovers(&value, &scope, &mut result);
-                    }
-                }
+            for mut hover in local {
+                hover.range.start += decorator.range().start + 1;
+                hover.range.end += decorator.range().start + 1;
+                result.push(hover);
             }
         }
     }

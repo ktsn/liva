@@ -468,7 +468,7 @@ fn missing_frame_easing_is_inserted_inline() {
 }
 
 #[test]
-fn lifecycle_tracks_support_creation_shorthand_templates_and_inheritance_reset() {
+fn lifecycle_tracks_support_creation_shorthand_templates_and_removal() {
     use liva_compiler::edits::FrameEdit;
 
     let source = "motion panel(distance: number, open: boolean) {\n  state idle { body { opacity: 1 } }\n  state active when open { body { opacity: 0.8 } }\n  transition { @tween: 100ms }\n  enter { @tween: 200ms; body { opacity: 0 } }\n}\n";
@@ -487,31 +487,29 @@ fn lifecycle_tracks_support_creation_shorthand_templates_and_inheritance_reset()
         &[
             track("panel/enter/target/body/property/opacity", "0.2"),
             track(
-                "panel/enter/active/target/body/property/translate",
+                "panel/enter/target/body/property/translate",
                 "${distance}px 0",
             ),
             track("panel/leave/target/body/property/opacity", "0.4"),
-            track("panel/leave/active/target/body/property/opacity", "0.6"),
         ],
     )
     .unwrap();
 
-    assert!(edited.source.contains("enter active"));
-    assert!(edited.source.contains("leave active"));
+    assert!(edited.source.contains("leave {"));
     assert!(edited.source.contains("${distance}px 0"));
-    assert_eq!(edited.source.matches("opacity {").count(), 3);
+    assert_eq!(edited.source.matches("opacity {").count(), 2);
 
     let reset = apply_edits(
         &edited.source,
         &[Edit::Track {
-            path: "panel/leave/active/target/body/property/opacity".into(),
+            path: "panel/enter/target/body/property/translate".into(),
             timing: None,
             frames: None,
         }],
     )
     .unwrap();
 
-    assert!(!reset.source.contains("0%: 0.6"));
+    assert!(!reset.source.contains("${distance}px 0"));
     assert!(reset.source.contains("0%: 0.4"));
     assert!(
         apply_edits(

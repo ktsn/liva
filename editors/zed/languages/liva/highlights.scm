@@ -1,5 +1,5 @@
 (keyword) @keyword
-["motion" "state" "when" "transition"] @keyword
+["motion" "layer" "state" "initial" "when" "transition"] @keyword
 (type) @type
 (boolean) @boolean
 (identifier) @variable

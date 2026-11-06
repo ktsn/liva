@@ -634,7 +634,7 @@ it('stops timeline playback when application state supersedes the preview', asyn
 })
 
 it.each(['enter', 'leave'] as const)(
-  'authors default and state-specific %s tracks for a single-state motion',
+  'authors motion-level %s tracks for a single-state motion',
   async (phase) => {
     const definition = {
       name: 'single',
@@ -671,11 +671,10 @@ it.each(['enter', 'leave'] as const)(
 
     await input('Keyframe value', '0.2')
     await click('Create endpoint override')
-    await input('Editing scope', `${phase}-state`)
     host!.querySelector<HTMLButtonElement>('[aria-label="box.opacity 0%"]')!.click()
     await tick()
 
-    expect(host!.textContent).toContain('Inherited default keyframe')
+    expect(host!.textContent).toContain('Local keyframe')
 
     await input('Keyframe value', '0.4')
     await click('Apply keyframe')
@@ -685,21 +684,11 @@ it.each(['enter', 'leave'] as const)(
 
     expect(controller.draft).toContainEqual(
       expect.objectContaining({
-        path: `single/${phase}/off/target/box/property/opacity`,
+        path: `single/${phase}/target/box/property/opacity`,
         timing: '@tween: 400ms linear',
         frames: [{ offset: 0, value: '0.4' }],
       }),
     )
-
-    await click('Use default keyframes')
-    await click('Use default timing')
-
-    expect(controller.draft).toContainEqual({
-      op: 'track',
-      path: `single/${phase}/off/target/box/property/opacity`,
-      timing: undefined,
-      frames: undefined,
-    })
 
     await click('Play')
     await expect.poll(() => controller.previewActive).toBe(true)

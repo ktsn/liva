@@ -21,6 +21,7 @@ import {
   resolveLifecycle,
   captureLifecycleDefinition,
   hasLifecycle,
+  lifecycleTransitions,
   type LifecycleSession,
 } from './lifecycle.ts'
 import { sampleSpring } from './spring.ts'
@@ -72,6 +73,7 @@ export class LivaInstance {
   private active: ActiveTrack[] = []
   private enterSessions = new Set<LifecycleSession>()
   private leaveSessions = new Set<LifecycleSession>()
+  private settledLifecycleSessions = new WeakSet<LifecycleSession>()
   private owned: OwnedElement[] = []
   private generation = 0
   private manuallyPaused = false
@@ -112,8 +114,37 @@ export class LivaInstance {
 
   retainLifecycle(phase: 'enter' | 'leave', session: LifecycleSession) {
     const sessions = phase === 'enter' ? this.enterSessions : this.leaveSessions
+
+    if (sessions.has(session)) return
+
     sessions.add(session)
-    void session.finished.then(() => sessions.delete(session))
+
+    void session.finished.then(() => {
+      if (this.settledLifecycleSessions.has(session)) return undefined
+
+      this.settledLifecycleSessions.add(session)
+
+      // Sessions mark themselves finished before their Promise callbacks run, so
+      // several presence boundaries may already be done here. Remove them together
+      // and mark their callbacks handled to avoid repeating restore/settle for each.
+      for (const completed of sessions) {
+        if (completed.isFinished) {
+          sessions.delete(completed)
+          this.settledLifecycleSessions.add(completed)
+        }
+      }
+
+      if (phase === 'enter' && this.layerResolution && !this.disposed) {
+        // Layers may change while enter plays toward its captured destination.
+        // Restore first to clear styles absent from the latest presentation, then
+        // apply that presentation. Preserve properties owned by remaining lifecycle
+        // sessions; settle also skips those properties until their sessions finish.
+        this.restore(this.enterSessions.size > 0 || this.leaveSessions.size > 0)
+        this.settle()
+      }
+
+      return undefined
+    })
   }
 
   captureLifecycle(phase: 'enter' | 'leave', names: readonly string[], element?: HTMLElement) {
@@ -125,17 +156,22 @@ export class LivaInstance {
     )
     const work = resolveLifecycle(
       phase,
-      captureLifecycleDefinition(definition, phase, this.state, this.values),
+      captureLifecycleDefinition(definition, phase, this.values),
       this.layerResolution?.presentation ?? getState(definition, this.state),
       targets,
     )
 
-    return work
+    return this.layerResolution && phase === 'enter'
+      ? work.map((item) => ({ ...item, restoreOnCompletion: true }))
+      : work
   }
 
-  releaseLifecycle(names: readonly string[], element: HTMLElement) {
+  releaseLifecycle(names: readonly string[], element: HTMLElement, properties?: readonly string[]) {
     const interrupted = this.active.filter(
-      (entry) => names.includes(entry.track.target) && entry.element === element,
+      (entry) =>
+        names.includes(entry.track.target) &&
+        entry.element === element &&
+        (properties === undefined || properties.includes(entry.track.property)),
     )
     this.active = this.active.filter((entry) => !interrupted.includes(entry))
     for (const entry of interrupted) entry.animation.cancel()
@@ -223,7 +259,36 @@ export class LivaInstance {
     }
   }
 
-  private restore() {
+  private lifecycleOwns(element: HTMLElement, property: string): boolean {
+    return [...this.enterSessions, ...this.leaveSessions].some((session) =>
+      session.owns(element, property),
+    )
+  }
+
+  private restore(preserveLifecycle = false) {
+    const protectedValues = preserveLifecycle
+      ? this.owned.flatMap(({ element }) =>
+          [
+            ...new Set(
+              (['enter', 'leave'] as const).flatMap((phase) =>
+                lifecycleTransitions(this.definition, phase).flatMap((transition) =>
+                  transition.targets.flatMap((target) =>
+                    target.properties.map((property) => property.name),
+                  ),
+                ),
+              ),
+            ),
+          ]
+            .filter((property) => this.lifecycleOwns(element, property))
+            .map((property) => ({
+              element,
+              property,
+              value: element.style.getPropertyValue(property),
+              priority: element.style.getPropertyPriority(property),
+            })),
+        )
+      : []
+
     for (const { element, original, originalCss, pending, written } of this.owned) {
       const current = inlineDeclarations(element)
       const baseline = document.createElement('div')
@@ -261,7 +326,10 @@ export class LivaInstance {
       element.style.cssText = baseline.style.cssText + ';' + external.style.cssText
     }
 
-    this.owned = []
+    for (const { element, property, value, priority } of protectedValues)
+      element.style.setProperty(property, value, priority)
+
+    if (!preserveLifecycle) this.owned = []
   }
 
   private settle() {
@@ -272,6 +340,8 @@ export class LivaInstance {
     ).targets) {
       for (const element of this.targetElements.get(target.name) ?? []) {
         for (const property of target.properties) {
+          if (this.layerResolution && this.lifecycleOwns(element, property.name)) continue
+
           try {
             this.write(element, property.name, renderValue(property, this.values))
           } catch (error) {
@@ -302,7 +372,7 @@ export class LivaInstance {
 
     this.clearLetBindings()
     this.cancel(false)
-    this.restore()
+    this.restore(this.layerResolution !== undefined && this.enterSessions.size > 0)
     this.targets = next
     this.targetElements.clear()
     for (const [name, element] of entries) {
@@ -739,6 +809,8 @@ export class LivaInstance {
           if (timing.durationMs === 0) continue
 
           for (const element of this.targetElements.get(track.target) ?? []) {
+            if (this.lifecycleOwns(element, track.property)) continue
+
             const interrupted = this.active.some(
               (entry) => entry.element === element && entry.track.property === track.property,
             )
@@ -780,14 +852,16 @@ export class LivaInstance {
 
     if (this.suspended) return
 
-    if (removed) this.restore()
+    if (removed) this.restore(this.enterSessions.size > 0 || this.leaveSessions.size > 0)
 
     for (const target of next.presentation.targets) {
       for (const property of target.properties) {
         if (!removed && !changed.has(layerPropertyKey(target.name, property.name))) continue
 
-        for (const element of this.targetElements.get(target.name) ?? [])
-          this.write(element, property.name, property.value)
+        for (const element of this.targetElements.get(target.name) ?? []) {
+          if (!this.lifecycleOwns(element, property.name))
+            this.write(element, property.name, property.value)
+        }
       }
     }
 

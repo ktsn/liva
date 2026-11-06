@@ -5,6 +5,7 @@ import {
   type Definition,
   type RuntimeDiagnostic,
   type LifecycleSession,
+  type LifecycleWork,
 } from '@liva/runtime'
 
 declare module 'vue' {
@@ -233,10 +234,17 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
           key: binding.value.owner,
           entries: binding.value.entries,
           registration: {
-            release() {
+            release(work: readonly LifecycleWork[]) {
               const name = targets.get(element)?.name
               /* v8 ignore else -- @preserve: Compiled lifecycle targets always have a static target argument. */
-              if (name) explicitRoot(target)?.runtime.releaseLifecycle([name], element)
+              if (name)
+                explicitRoot(target)?.runtime.releaseLifecycle(
+                  [name],
+                  element,
+                  work
+                    .filter((item) => item.element === element && item.track.target === name)
+                    .map((item) => item.track.property),
+                )
             },
             retainLifecycle(phase: 'enter' | 'leave', session: LifecycleSession) {
               explicitRoot(target)?.runtime.retainLifecycle(phase, session)

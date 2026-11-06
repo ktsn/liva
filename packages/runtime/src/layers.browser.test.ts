@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vite-plus/test'
+import { LifecycleSession } from './lifecycle.ts'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { cdp, userEvent } from 'vite-plus/test/browser'
 import { LivaInstance, type RuntimeDiagnostic } from './instance.ts'
 import { decodeBundle, type Definition, type Expression } from './definition.ts'
@@ -701,5 +702,264 @@ describe('reactive layer instances', () => {
 
     expect(element.style.opacity).toBe('1')
     expect(errors).toEqual([])
+  })
+})
+
+function start(phase: 'enter' | 'leave', instance: LivaInstance, element: HTMLElement) {
+  const work = instance.captureLifecycle(phase, ['body'])
+  instance.releaseLifecycle(
+    ['body'],
+    element,
+    work.map(({ track }) => track.property),
+  )
+
+  const session = new LifecycleSession(work, phase)
+  session.initialize()
+  instance.retainLifecycle(phase, session)
+  session.play()
+
+  for (const animation of element.getAnimations()) {
+    animation.pause()
+    animation.currentTime = 0
+  }
+
+  cleanup.push(() => session.cancel('owner-teardown'))
+
+  return session
+}
+
+describe('layer lifecycle snapshots', () => {
+  const lifecycle = {
+    timing: { kind: 'tween', durationMs: 1000, easing: 'linear' } as const,
+    targets: [
+      { name: 'body', properties: [{ name: 'scale', keyframes: [{ offset: 0, value: '.5' }] }] },
+    ],
+  }
+
+  it('holds an enter snapshot while another property changes and settles the latest values', async () => {
+    const { instance, element } = setup({ ...timedDefinition(), enter: lifecycle })
+    const session = start('enter', instance, element)
+    const effect = element.getAnimations()[0]
+
+    instance.updateParameters({ hover: true, press: true, size: 1.4 })
+
+    expect(element.getAnimations()).toContain(effect)
+    expect(getComputedStyle(element).scale).toBe('0.5')
+    expect(element.style.opacity).toBe('0.5')
+
+    if (!(effect.effect instanceof KeyframeEffect)) throw new Error('Expected keyframe effect')
+
+    expect(effect.effect.getKeyframes().at(-1)?.scale).toBe('1')
+
+    effect.finish()
+
+    await session.finished
+
+    expect(element.style.scale).toBe('0.9')
+    expect(element.style.opacity).toBe('0.5')
+  })
+
+  it.each(['finished', 'reduced motion'] as const)(
+    'restores removed enter properties when the session ends through %s',
+    async (reason) => {
+      const source = {
+        ...definition,
+        layers: definition.layers?.filter((layer) => layer.name === 'press'),
+        enter: lifecycle,
+      }
+      const { instance, element } = setup(source, { hover: false, press: true, size: 1 })
+      const session = start('enter', instance, element)
+
+      instance.updateParameters({ hover: false, press: false, size: 1 })
+
+      expect(getComputedStyle(element).scale).toBe('0.5')
+
+      try {
+        if (reason === 'reduced motion') {
+          await cdp().send('Emulation.setEmulatedMedia', {
+            features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
+          })
+        } else {
+          for (const animation of element.getAnimations()) animation.finish()
+        }
+
+        await session.finished
+
+        expect(element.style.scale).toBe('')
+        expect(element.style.opacity).toBe('')
+        expect(element.style.color).toBe('red')
+      } finally {
+        if (reason === 'reduced motion') {
+          await cdp().send('Emulation.setEmulatedMedia', {
+            features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+          })
+        }
+      }
+    },
+  )
+
+  it('preserves enter presentation across target rebinding', async () => {
+    const { instance, element } = setup({ ...timedDefinition(), enter: lifecycle })
+    instance.updateParameters({ hover: true, press: false, size: 1.4 })
+    const session = start('enter', instance, element)
+    const other = document.createElement('div')
+    document.body.append(other)
+    cleanup.push(() => other.remove())
+
+    instance.bind([
+      ['body', element],
+      ['extra', other],
+    ])
+
+    expect(getComputedStyle(element).scale).toBe('0.5')
+
+    for (const animation of element.getAnimations()) animation.finish()
+
+    await session.finished
+
+    expect(element.style.scale).toBe('1.4')
+  })
+
+  it('releases enter properties outside the layer cascade back to stylesheet control', async () => {
+    const stylesheet = document.createElement('style')
+    stylesheet.textContent = '.lifecycle-fallback { opacity: .8 }'
+    document.head.append(stylesheet)
+    cleanup.push(() => stylesheet.remove())
+
+    const enter = {
+      ...lifecycle,
+      targets: [
+        { name: 'body', properties: [{ name: 'opacity', keyframes: [{ offset: 0, value: '0' }] }] },
+      ],
+    }
+    const { instance, element } = setup({ ...timedDefinition(), enter })
+    element.className = 'lifecycle-fallback'
+    const session = start('enter', instance, element)
+
+    for (const animation of element.getAnimations()) animation.finish()
+
+    await session.finished
+
+    expect(element.style.opacity).toBe('')
+    expect(getComputedStyle(element).opacity).toBe('0.8')
+
+    stylesheet.textContent = '.lifecycle-fallback { opacity: .2 }'
+
+    expect(getComputedStyle(element).opacity).toBe('0.2')
+  })
+
+  async function completeWithRegistrations(count: number) {
+    const { instance, element } = setup({ ...timedDefinition(), enter: lifecycle })
+    const session = start('enter', instance, element)
+    const writes = vi.spyOn(element.style, 'setProperty')
+
+    for (let index = 1; index < count; index++) instance.retainLifecycle('enter', session)
+
+    for (const animation of element.getAnimations()) animation.finish()
+
+    await session.finished
+
+    expect(element.style.scale).toBe('1')
+
+    const countWrites = writes.mock.calls.length
+
+    writes.mockRestore()
+
+    return countWrites
+  }
+
+  it('does not repeat completion writes when multiple targets retain the same session', async () => {
+    const single = await completeWithRegistrations(1)
+    const repeated = await completeWithRegistrations(5)
+
+    expect(repeated).toBe(single)
+  })
+
+  it.each([false, true])(
+    'settles boundaries without disturbing unfinished enters (together=%s)',
+    async (together) => {
+      const { instance, element } = setup({ ...timedDefinition(), enter: lifecycle })
+      const other = document.createElement('div')
+      document.body.append(other)
+      cleanup.push(() => other.remove())
+      instance.bind([
+        ['body', element],
+        ['body', other],
+      ])
+
+      const first = new LifecycleSession(
+        instance.captureLifecycle('enter', ['body'], element),
+        'enter',
+      )
+      const second = new LifecycleSession(
+        instance.captureLifecycle('enter', ['body'], other),
+        'enter',
+      )
+
+      for (const session of [first, second]) {
+        session.initialize()
+        instance.retainLifecycle('enter', session)
+        session.play()
+
+        cleanup.push(() => session.cancel('owner-teardown'))
+      }
+
+      for (const target of [element, other]) {
+        for (const animation of target.getAnimations()) {
+          animation.pause()
+          animation.currentTime = 0
+        }
+      }
+
+      instance.updateParameters({ hover: true, press: false, size: 1.4 })
+      const writes = vi.spyOn(element.style, 'setProperty')
+
+      for (const animation of element.getAnimations()) animation.finish()
+
+      if (together) {
+        for (const animation of other.getAnimations()) animation.finish()
+      }
+
+      await first.finished
+
+      expect(element.style.scale).toBe('1.4')
+      expect(
+        writes.mock.calls.filter(([property, value]) => property === 'scale' && value === '1.4'),
+      ).toHaveLength(1)
+      expect(getComputedStyle(other).scale).toBe(together ? '1.4' : '0.5')
+
+      for (const animation of other.getAnimations()) animation.finish()
+
+      await second.finished
+
+      expect(other.style.scale).toBe('1.4')
+
+      writes.mockRestore()
+    },
+  )
+
+  it('keeps a leave snapshot while layers change and permits unrelated updates', async () => {
+    const leave = {
+      ...lifecycle,
+      targets: [
+        { name: 'body', properties: [{ name: 'scale', keyframes: [{ offset: 1, value: '.5' }] }] },
+      ],
+    }
+    const { instance, element } = setup({ ...timedDefinition(), leave })
+    const session = start('leave', instance, element)
+    const effect = element.getAnimations()[0]
+
+    instance.updateParameters({ hover: true, press: true, size: 1.4 })
+
+    expect(element.getAnimations()).toContain(effect)
+
+    if (!(effect.effect instanceof KeyframeEffect)) throw new Error('Expected keyframe effect')
+
+    expect(effect.effect.getKeyframes().map((frame) => frame.scale)).toEqual(['1', '0.5'])
+    expect(element.style.opacity).toBe('0.5')
+
+    effect.finish()
+
+    expect(await session.finished).toBe('completed')
   })
 })

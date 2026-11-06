@@ -104,21 +104,17 @@ CSS-value edit, not a visual expression editor.
 
 ## Enter and leave editing
 
-Choose **Enter · default**, **Leave · default**, or their **state override** scopes
-in **Editing**. **State** selects the state captured by the preview and, in an
-override scope, the lifecycle block being edited. Default scopes ignore state
-specific overrides. The timeline includes state properties and additional properties
-already authored in the selected lifecycle. Apply timing to an unused property,
-then create an endpoint override to author a new lifecycle track; missing lifecycle
-blocks are created on save.
+The timeline edits legacy state-based motions. Layer motions and motions using
+typed decorators display a read-only notice. Preview and saving are rejected on
+both client and server so a legacy track edit cannot discard new syntax. Edit the
+Liva source and exercise the application's controls to preview these motions.
 
-Timing, keyframe values (including `${expression}` templates), offsets, and easing
-use the same inspector as ordinary transitions. Timing edits create property-level
-overrides. **Use default timing** and **Use default keyframes** independently remove
-state-specific overrides. Editing inherited frames copies their effective collection.
-Endpoint shorthand is converted to explicit frames only for the edited property.
-Implicit lifecycle endpoints describe the captured state or DOM presentation; enter
-and leave scopes do not edit state values.
+For a legacy motion, choose **Enter · default** or **Leave · default** in **Editing**.
+**State** selects the endpoint presentation used by the preview. State-specific
+lifecycle blocks are no longer supported. Timing, template values, offsets, and
+easing use the usual property inspector; edited shorthand becomes explicit frames.
+Missing motion-level lifecycle blocks are created on save. Implicit lifecycle
+endpoints describe captured state or DOM presentation and cannot edit state values.
 
 Play and scrub operate on the mounted preview instance without inserting, hiding,
 or removing application elements. Templates use that instance's current parameters

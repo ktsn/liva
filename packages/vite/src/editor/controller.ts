@@ -1,3 +1,4 @@
+import { timelineReadOnly, readOnlyMessage } from './capabilities.ts'
 import type { InstanceBinding } from '@liva/vue'
 import type { EditorReply, EditorRequest, Edit, Inspection } from './communication/protocol.ts'
 
@@ -106,7 +107,9 @@ export class EditorController {
     })
     if (this.selected !== selected || sequence !== this.sequence) return
     this.inspection = inspection
-    this.message = 'Preview affects this instance. Saving updates the shared source.'
+    this.message = timelineReadOnly(inspection.definition)
+      ? readOnlyMessage
+      : 'Preview affects this instance. Saving updates the shared source.'
     this.notify()
   }
 
@@ -123,6 +126,8 @@ export class EditorController {
     const inspection = this.inspection
     if (!selected || !inspection || !this.active(selected))
       throw new Error('Select a mounted instance')
+    if (timelineReadOnly(inspection.definition)) throw new Error(readOnlyMessage)
+
     const sequence = ++this.sequence
     const reply = await this.send({
       action: 'preview',
@@ -141,11 +146,8 @@ export class EditorController {
       this.stale
     )
       return
-    const definition = general
-      ? phase
-        ? { ...reply.definition, [phase === 'enter' ? 'stateEnters' : 'stateLeaves']: [] }
-        : { ...reply.definition, directionalTransitions: [] }
-      : reply.definition
+    const definition =
+      general && !phase ? { ...reply.definition, directionalTransitions: [] } : reply.definition
     selected.binding.runtime.replaceDefinition(
       definition,
       phase ? state : (from ?? selected.binding.requestedState),
@@ -232,6 +234,8 @@ export class EditorController {
     const selected = this.selected
     const inspection = this.inspection
     if (!selected || !inspection) throw new Error('Select an instance first')
+    if (timelineReadOnly(inspection.definition)) throw new Error(readOnlyMessage)
+
     const signature = JSON.stringify({
       sourceId: selected.sourceId,
       definition: selected.binding.definition.name,

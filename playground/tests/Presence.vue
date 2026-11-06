@@ -69,56 +69,211 @@ function updateBindings() {
 }
 </style>
 
-<liva>
+<liva lang="liva">
 motion panel {
   state idle {
-    direct { opacity: 1 }
-    directVisibility { opacity: 1 }
-    repeated { opacity: 0.8 }
-    content { opacity: 1 }
-    secondary { opacity: 1 }
-    visibility { opacity: 1 }
-    first { opacity: 1 }
-    second { opacity: 1 }
-    third { opacity: 1 }
+    direct {
+      opacity: 1
+    }
+
+    directVisibility {
+      opacity: 1
+    }
+
+    repeated {
+      opacity: 0.8
+    }
+
+    content {
+      opacity: 1
+    }
+
+    secondary {
+      opacity: 1
+    }
+
+    visibility {
+      opacity: 1
+    }
+
+    first {
+      opacity: 1
+    }
+
+    second {
+      opacity: 1
+    }
+
+    third {
+      opacity: 1
+    }
   }
+
   enter {
     @tween: 100ms
-    direct { opacity { 0%: 0 } }
-    directVisibility { opacity { 0%: 0 } }
-    content { opacity { 0%: 0 } }
-    secondary { opacity { 0%: 0 } }
-    visibility { opacity { 0%: 0 } }
-    first { opacity { 0%: 0 } }
-    second { opacity { 0%: 0 } }
-    third { opacity { 0%: 0 } }
+
+    direct {
+      opacity {
+        0%: 0
+      }
+    }
+
+    directVisibility {
+      opacity {
+        0%: 0
+      }
+    }
+
+    content {
+      opacity {
+        0%: 0
+      }
+    }
+
+    secondary {
+      opacity {
+        0%: 0
+      }
+    }
+
+    visibility {
+      opacity {
+        0%: 0
+      }
+    }
+
+    first {
+      opacity {
+        0%: 0
+      }
+    }
+
+    second {
+      opacity {
+        0%: 0
+      }
+    }
+
+    third {
+      opacity {
+        0%: 0
+      }
+    }
   }
+
   leave {
     @tween: 300ms
-    direct { opacity { 100%: 0 } }
-    directVisibility { opacity { 100%: 0 } }
-    repeated { opacity { 100%: 0 } }
-    content { opacity { 100%: 0 } }
-    secondary { opacity { @tween: 500ms; 100%: 0 } }
-    visibility { opacity { 100%: 0 } }
-    first { opacity { 100%: 0 } }
-    second { opacity { 100%: 0 } }
-    third { opacity { 100%: 0 } }
+
+    direct {
+      opacity {
+        100%: 0
+      }
+    }
+
+    directVisibility {
+      opacity {
+        100%: 0
+      }
+    }
+
+    repeated {
+      opacity {
+        100%: 0
+      }
+    }
+
+    content {
+      opacity {
+        100%: 0
+      }
+    }
+
+    secondary {
+      opacity {
+        @tween: 500ms
+        100%: 0
+      }
+    }
+
+    visibility {
+      opacity {
+        100%: 0
+      }
+    }
+
+    first {
+      opacity {
+        100%: 0
+      }
+    }
+
+    second {
+      opacity {
+        100%: 0
+      }
+    }
+
+    third {
+      opacity {
+        100%: 0
+      }
+    }
   }
 }
+
 motion nested {
-  state idle { body { opacity: 1 } }
-  state dim when false { body { opacity: 0.4 } }
-  transition { @tween: 1ms }
+  state idle {
+    body {
+      opacity: 1
+    }
+  }
+
+  state dim when false {
+    body {
+      opacity: 0.4
+    }
+  }
+
+  transition {
+    @tween: 1ms
+  }
+
   leave {
     @tween: 400ms
-    body { opacity { 100%: 0 } }
+
+    body {
+      opacity {
+        100%: 0
+      }
+    }
   }
 }
+
 motion parameters(value: boolean, owner: boolean, entries: boolean) {
-  state idle { body { opacity: 1 } }
-  state dim when value && owner && entries { body { opacity: 0.3 } }
-  transition { @tween: 1ms }
-  enter { @tween: 100ms; body { opacity { 0%: 0 } } }
+  state idle {
+    body {
+      opacity: 1
+    }
+  }
+
+  state dim when value && owner && entries {
+    body {
+      opacity: 0.3
+    }
+  }
+
+  transition {
+    @tween: 1ms
+  }
+
+  enter {
+    @tween: 100ms
+
+    body {
+      opacity {
+        0%: 0
+      }
+    }
+  }
 }
 </liva>

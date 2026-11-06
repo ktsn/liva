@@ -27,8 +27,28 @@ span {
 
 <liva lang="liva">
 motion a {
-  state off { track { opacity: 0.5 } thumb { translate: 0px } }
-  state on when true { track { opacity: 1 } thumb { translate: 20px } }
-  transition { @tween: 200ms }
+  state off {
+    track {
+      opacity: 0.5
+    }
+
+    thumb {
+      translate: 0px
+    }
+  }
+
+  state on when true {
+    track {
+      opacity: 1
+    }
+
+    thumb {
+      translate: 20px
+    }
+  }
+
+  transition {
+    @tween: 200ms
+  }
 }
 </liva>

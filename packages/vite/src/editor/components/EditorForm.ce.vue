@@ -24,9 +24,7 @@ const props = defineProps<{
   active: boolean
   stale: boolean
 }>()
-const model = shallowRef<Definition>(
-  editableDefinition(props.inspection.definition, props.inspection.fields),
-)
+const model = shallowRef<Definition>(editableDefinition(props.inspection.definition))
 const states = model.value.states.map((state) => state.name)
 const from = ref(states[0])
 const to = ref(states[1] ?? states[0])
@@ -253,11 +251,8 @@ function schedule(edit: Edit, definition: Definition) {
 
 function updateTrack(track: TimelineTrack, patch: Partial<PropertyTransition>) {
   const next = structuredClone(model.value) as MutableDefinition
-  const lifecycleStates = phase.value === 'enter' ? 'stateEnters' : 'stateLeaves'
   let transition = phase.value
-    ? general.value
-      ? next[phase.value]
-      : next[lifecycleStates]?.find((item) => item.state === to.value)?.transition
+    ? next[phase.value]
     : general.value
       ? next.generalTransition
       : next.directionalTransitions.find((item) => item.from === from.value && item.to === to.value)
@@ -267,8 +262,7 @@ function updateTrack(track: TimelineTrack, patch: Partial<PropertyTransition>) {
     transition = { targets: [] }
 
     if (phase.value) {
-      if (general.value) next[phase.value] = transition
-      else (next[lifecycleStates] ??= []).push({ state: to.value, transition })
+      next[phase.value] = transition
     } else if (general.value) next.generalTransition = transition
     else next.directionalTransitions.push({ from: from.value, to: to.value, transition })
   }
@@ -441,9 +435,7 @@ onScopeDispose(() => {
         <option value="directional">Directional transition</option>
         <option value="general">Common settings</option>
         <option value="enter-default">Enter · default</option>
-        <option value="enter-state">Enter · state override</option>
         <option value="leave-default">Leave · default</option>
-        <option value="leave-state">Leave · state override</option>
       </select></label>
     <label v-if="!phase">From<select
         v-model="from"

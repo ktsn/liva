@@ -373,10 +373,9 @@ it('does not apply previews started against an already stale inspection', async 
 })
 
 it.each(['enter', 'leave'] as const)(
-  'selects default or state-specific %s playback and restores on cancellation',
+  'previews motion-level %s and restores on cancellation',
   async (phase) => {
-    const key = phase === 'enter' ? 'stateEnters' : 'stateLeaves'
-    const lifecycle = { ...definition, [key]: [{ state: 'on', transition: { targets: [] } }] }
+    const lifecycle = { ...definition, [phase]: { targets: [] } }
     const { controller, first } = await setup(async (request) => ({
       ...reply,
       definition: lifecycle,
@@ -385,17 +384,32 @@ it.each(['enter', 'leave'] as const)(
 
     await controller.preview('on', undefined, true, phase)
 
-    expect(first.runtime.replaceDefinition).toHaveBeenLastCalledWith(
-      { ...lifecycle, [key]: [] },
-      'on',
-    )
+    expect(first.runtime.replaceDefinition).toHaveBeenLastCalledWith(lifecycle, 'on')
     expect(first.runtime.previewLifecycle).toHaveBeenLastCalledWith(phase)
     expect(first.runtime.setState).not.toHaveBeenCalled()
 
     await controller.preview('on', undefined, false, phase)
 
     expect(first.runtime.replaceDefinition).toHaveBeenLastCalledWith(lifecycle, 'on')
+
     controller.endPreview()
+
     expect(first.runtime.replaceDefinition).toHaveBeenLastCalledWith(definition, 'off')
   },
 )
+
+it('rejects timeline preview and save for layers without replacing the live definition', async () => {
+  const layered = { ...definition, layers: [{ name: 'base', targets: [] }] }
+  const send = vi
+    .fn<(request: EditorRequest) => Promise<EditorReply>>()
+    .mockResolvedValue({ ...reply, definition: layered })
+  const { controller, first } = await setup(send)
+
+  expect(controller.message).toContain('read-only')
+
+  await expect(controller.preview('on')).rejects.toThrow('read-only')
+  await expect(controller.commit()).rejects.toThrow('read-only')
+
+  expect(send).toHaveBeenCalledTimes(1)
+  expect(first.runtime.replaceDefinition).not.toHaveBeenCalled()
+})

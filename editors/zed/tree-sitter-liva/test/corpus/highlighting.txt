@@ -58,3 +58,107 @@ motion card(progress: number) {
           (punctuation)
           (number)
           (identifier))))))
+
+==================
+Layers and typed decorators
+==================
+motion card(active: boolean) {
+  layer base { body @tween(duration: 200) { opacity: 1 } }
+  layer hover when active { body { scale: 1.1 @spring(stiffness: 300) } }
+  layer machine {
+    state idle initial {}
+    state busy {}
+    transition idle -> busy when active
+    transition busy -> idle when !active { body { scale @tween(duration: 150) { 50%: 1.2 @easeOut } } }
+  }
+  enter { body @tween(duration: 200) { opacity: 0 } }
+}
+---
+
+(source_file
+  (motion
+    (identifier)
+    (parenthesized
+      (property
+        (identifier))
+      (type))
+    (block
+      (layer
+        (identifier)
+        (block
+          (selector_block
+            (identifier)
+            (decorator
+              (animation)
+              (parenthesized
+                (property
+                  (identifier))
+                (number)))
+            (block
+              (property
+                (identifier))
+              (number)))))
+      (layer
+        (identifier)
+        (identifier)
+        (block
+          (selector_block
+            (identifier)
+            (block
+              (property
+                (identifier))
+              (number)
+              (animation)
+              (parenthesized
+                (property
+                  (identifier))
+                (number))))))
+      (layer
+        (identifier)
+        (block
+          (state
+            (identifier)
+            (block))
+          (state
+            (identifier)
+            (block))
+          (transition
+            (identifier)
+            (identifier)
+            (identifier))
+          (transition
+            (identifier)
+            (identifier)
+            (operator)
+            (identifier)
+            (block
+              (selector_block
+                (identifier)
+                (block
+                  (selector_block
+                    (identifier)
+                    (decorator
+                      (animation)
+                      (parenthesized
+                        (property
+                          (identifier))
+                        (number)))
+                    (block
+                      (number)
+                      (punctuation)
+                      (number)
+                      (animation)))))))))
+      (keyword)
+      (block
+        (selector_block
+          (identifier)
+          (decorator
+            (animation)
+            (parenthesized
+              (property
+                (identifier))
+              (number)))
+          (block
+            (property
+              (identifier))
+            (number)))))))

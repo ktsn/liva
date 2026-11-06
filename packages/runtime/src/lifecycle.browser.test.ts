@@ -30,11 +30,12 @@ function setup(
       },
     },
   ]
-  const session = new LifecycleSession(work, phase)
+  const errors: unknown[] = []
+  const session = new LifecycleSession(work, phase, (error) => errors.push(error))
 
   sessions.push(session)
 
-  return { element, session }
+  return { element, session, errors }
 }
 
 afterEach(() => {
@@ -106,6 +107,7 @@ describe('lifecycle effects', () => {
 
     expect(await invalid.session.finished).toBe('failed')
     expect(invalid.element.style.opacity).toBe('0.7')
+    expect(invalid.errors[0]).toBeInstanceOf(Error)
   })
 
   it('plays spring timing', async () => {

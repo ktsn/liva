@@ -312,11 +312,6 @@ fn lifecycle_property_duplicates_are_reported_in_source_order() {
             );
             assert_eq!(error.related.len(), 1);
         }
-        assert_error(&format!("{phase} «missing» {{}}"), "semantic.reference");
-        assert_error(
-            &format!("{phase} idle {{}} «{phase} idle» {{}}"),
-            "semantic.duplicate",
-        );
         assert_error(
             &format!("{phase} {{ @tween: 1ms; body {{ translate: ${{«missing»}}px 0 }} }}"),
             "semantic.expression",
@@ -325,90 +320,20 @@ fn lifecycle_property_duplicates_are_reported_in_source_order() {
 }
 
 #[test]
-fn state_specific_lifecycles_merge_properties_and_replace_whole_frame_sets() {
+fn lifecycle_headers_reject_extra_selectors() {
     for phase in ["enter", "leave"] {
-        for (default, specific, expected) in [
-            (
-                "opacity { 0%: 0; 50%: 0.5 }",
-                "opacity: 0.2",
-                vec![if phase == "enter" { 0.0 } else { 1.0 }],
-            ),
-            ("opacity: 0", "opacity { 50%: 0.2 }", vec![0.5]),
-            (
-                "opacity { 0%: 0; 50%: 0.5 }",
-                "opacity { @tween: 90ms }",
-                vec![0.0, 0.5],
-            ),
-        ] {
-            let result = valid(&motion(&format!("{phase} idle {{ body {{ {specific} }} }}
-                {phase} {{ @tween: 30ms; body {{ {default}; translate: 10px 0 }} badge {{ opacity: 0 }} }}")));
-            let definition = &result.definitions[0];
-            let overrides = if phase == "enter" {
-                &definition.state_enters
-            } else {
-                &definition.state_leaves
-            };
-            assert_eq!(overrides[0].state, "idle");
-            let merged = &overrides[0].transition;
-            assert!(merged.property("body", "translate").is_some());
-            assert!(merged.property("badge", "opacity").is_some());
-            assert_eq!(
-                merged
-                    .property("body", "opacity")
-                    .unwrap()
-                    .keyframes
-                    .as_ref()
-                    .unwrap()
-                    .iter()
-                    .map(|frame| frame.offset)
-                    .collect::<Vec<_>>(),
-                expected
-            );
-        }
-    }
-}
+        let source = motion(&format!(
+            "{phase} idle {{ @tween: 30ms; body {{ opacity: 0 }} }}"
+        ));
+        let result = compile(&source, true);
+        let diagnostic = result
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "semantic.structure")
+            .unwrap();
 
-#[test]
-fn lifecycle_timing_uses_transition_precedence_and_declaration_order() {
-    for phase in ["enter", "leave"] {
-        for (general_property, specific_property, expected) in [
-            ("", "", 60.0),
-            ("@tween: 70ms;", "", 70.0),
-            ("@tween: 70ms;", "@tween: 80ms;", 80.0),
-        ] {
-            let result = valid(&motion(&format!("{phase} {{ @tween: 10ms; body {{ opacity {{ {general_property} 0%: 0 }} }} }}
-                {phase} idle {{ @spring: 300 20; @tween: 50ms ease-out; @tween-duration: 60ms; body {{ opacity {{ {specific_property} }} }} }}")));
-            let definition = &result.definitions[0];
-            let animation = if phase == "enter" {
-                &definition.state_enters[0].transition
-            } else {
-                &definition.state_leaves[0].transition
-            };
-            let timing = animation
-                .property("body", "opacity")
-                .unwrap()
-                .timing
-                .as_ref()
-                .or(animation.timing.as_ref())
-                .unwrap();
-            assert!(
-                matches!(timing, Timing::Tween { duration_ms, .. } if *duration_ms == expected)
-            );
-        }
-        assert_error(
-            &format!(
-                "{phase} {{ @tween: 20ms; body {{ «opacity» {{ 50%: 0.5 }} }} }} {phase} idle {{ @spring: 300 20 }}"
-            ),
-            "semantic.spring-keyframes",
-        );
-        let only_specific = valid(&motion(&format!(
-            "{phase} idle {{ @tween: 20ms; body {{ opacity: 0 }} }}"
-        )));
-        assert!(if phase == "enter" {
-            only_specific.definitions[0].enter.is_none()
-        } else {
-            only_specific.definitions[0].leave.is_none()
-        });
+        assert!(diagnostic.message.contains("enter { ... }"));
+        assert!(result.definitions.is_empty());
     }
 }
 
@@ -416,12 +341,12 @@ fn lifecycle_timing_uses_transition_precedence_and_declaration_order() {
 fn lifecycle_shorthand_maps_values_to_their_original_source() {
     for (phase, offset) in [("enter", 0), ("leave", 1)] {
         let source = motion(&format!(
-            "{phase} idle {{ @tween: 20ms; body {{ translate: ${{amount}}px 0 }} }}"
+            "{phase} {{ @tween: 20ms; body {{ translate: ${{amount}}px 0 }} }}"
         ));
         let result = valid(&source);
         let mappings = result.mappings.unwrap();
         let range = &mappings
-            [&format!("a/{phase}/idle/target/body/property/translate/frame/{offset}/value")]
+            [&format!("a/{phase}/target/body/property/translate/frame/{offset}/value")]
             .range;
         assert_eq!(source[range.start..range.end].trim(), "${amount}px 0");
     }

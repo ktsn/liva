@@ -75,17 +75,14 @@ selection changes during a save are preserved by a separate user-edit revision.
 
 ## Lifecycle editing and playback
 
-Lifecycle track paths are `<motion>/enter[/<state>]/target/<target>/property/<property>`
-and the corresponding `leave` paths. The atomic track planner creates missing
-lifecycle containers and replaces shorthand declarations through their block mapping.
-It retains the same comment-preservation and compiler-validation rules as ordinary
-transition edits.
+Lifecycle track paths are `<motion>/enter/target/<target>/property/<property>`
+and corresponding `leave` paths. State-specific lifecycle paths are rejected by
+compiler validation. Atomic track edits retain comment-preservation guarantees.
 
-State-specific lifecycle IR already includes default inheritance. Development
-mappings expose a `<block>/timing` marker for authored timing declarations. Together
-with property and frame paths, these markers let the editor reconstruct local
-lifecycle settings without serializing source metadata in production IR. The editor
-resolves inheritance for its draft; the server recompiles the source for playback.
+The legacy timeline is read-only for definitions containing layers or typed
+animation expressions. Inspection remains available. Client preview/commit guards
+and server-side guards reject unsupported mutations before source edits or writes.
+The UI shows this restriction instead of rendering an empty, misleading timeline.
 
 `LivaInstance.previewLifecycle` captures the selected lifecycle with current
 expression values and resolves every mounted target, including repeated targets.
