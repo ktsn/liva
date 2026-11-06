@@ -1474,29 +1474,78 @@ it('uses one composition baseline for lifecycle rows and isolated scrub-ready pl
     },
   }
   const { controller } = await setupEditor(undefined, definition)
+
   await click('Motion editor')
   await input('Editing scope', 'enter-default')
 
   expect(host!.querySelector('[aria-label="FROM base enabled"]')).toBeNull()
   expect(host!.querySelector('[aria-label="Baseline base enabled"]')).not.toBeNull()
+
   await input('Baseline machine state', 'active')
-  host!.querySelector<HTMLInputElement>('[aria-label="Baseline hover enabled"]')!.click()
+  const hover = host?.querySelector<HTMLInputElement>('[aria-label="Baseline hover enabled"]')
+
+  expect(hover).toBeInstanceOf(HTMLInputElement)
+
+  if (!hover) throw new Error('Missing baseline hover checkbox')
+
+  hover.click()
+
   await tick()
+
   await click('▸ body')
   await click('color')
 
-  expect(host!.querySelector('[aria-label="Selection inspector"]')!.textContent).toContain(
-    'Motion enter',
-  )
-  expect(host!.querySelector('[aria-label="Selection inspector"]')!.textContent).toContain(
-    'Implicit lifecycle endpoint',
-  )
+  const inspector = host?.querySelector('[aria-label="Selection inspector"]')
+
+  expect(inspector?.textContent).toContain('Motion enter')
+  expect(inspector?.textContent).toContain('Implicit lifecycle endpoint')
 
   await click('Play')
+
   await expect.poll(() => controller.previewActive).toBe(true)
+
   expect(runtime!.animations).toHaveLength(2)
   expect(runtime!.composition?.states.machine).toBe('idle')
+
   await click('End preview')
 
   expect(runtime!.animations).toHaveLength(0)
 })
+
+it.each(['enter', 'leave'] as const)(
+  'shows resolved %s endpoints and the phase-specific completion behavior',
+  async (phase) => {
+    const definition: Definition = {
+      ...compositionDefinition,
+      [phase]: {
+        timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'opacity',
+                keyframes: [
+                  { offset: 0, value: '0.2' },
+                  { offset: 1, value: '0.6' },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    }
+
+    await setupEditor(undefined, definition)
+    await click('Motion editor')
+    await input('Editing scope', `${phase}-default`)
+    await click('▸ body')
+    await click('opacity')
+
+    const inspector = host?.querySelector('[aria-label="Selection inspector"]')
+
+    expect(inspector?.textContent).toContain('FROM resolved: 0.2')
+    expect(inspector?.textContent).toContain(`TO resolved: ${phase === 'enter' ? '1' : '0.6'}`)
+    expect(inspector?.textContent?.includes('Completion restores')).toBe(phase === 'enter')
+  },
+)

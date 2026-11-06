@@ -112,7 +112,22 @@ export function compositionLifecycleTracks(
   }
 
   return timelineTracks(definition, presentation.name, presentation.name, true, phase).map(
-    (track) => ({ ...track, readonly: true }),
+    (track) => {
+      const baseline =
+        presentation.targets
+          .find((target) => target.name === track.target)
+          ?.properties.find((property) => property.name === track.property)?.value ?? ''
+
+      return {
+        ...track,
+        fromValue: track.explicit.find((frame) => frame.offset === 0)?.value ?? baseline,
+        toValue:
+          phase === 'enter'
+            ? baseline
+            : (track.explicit.find((frame) => frame.offset === 1)?.value ?? baseline),
+        readonly: true,
+      }
+    },
   )
 }
 

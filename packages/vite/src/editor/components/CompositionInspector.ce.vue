@@ -191,7 +191,7 @@ function saveFrame() {
     </template>
     <p v-if="provenance.framesUnavailable">{{ provenance.framesUnavailable }}</p>
 
-    <p v-if="track.explicit.some((frame) => frame.offset === 1 && frame.value !== track.toValue)"
+    <p v-if="track.lifecycle !== 'leave' && track.explicit.some((frame) => frame.offset === 1 && frame.value !== track.toValue)"
     >Completion restores the property’s resolved value after this keyframe.</p>
     <button
       v-if="provenance.frameDestination"

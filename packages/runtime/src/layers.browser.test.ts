@@ -1544,7 +1544,9 @@ describe('composition lifecycle previews', () => {
       layers: { base: true, hover: false, press: false },
       states: {},
     })
+
     await Promise.all(instance.animations.map((animation) => animation.ready))
+
     for (const animation of instance.animations) animation.currentTime = 100
 
     expect(Number(getComputedStyle(badge).opacity)).toBeCloseTo(0.3)
@@ -1583,8 +1585,11 @@ describe('composition lifecycle previews', () => {
       const original = instance.composition
 
       expect(instance.previewLifecycle(phase, baseline)).toBe(true)
+
       const animation = instance.animations[0]
+
       await animation.ready
+
       animation.currentTime = 100
 
       expect(Number(getComputedStyle(element).scale)).toBeGreaterThan(0)
@@ -1593,11 +1598,15 @@ describe('composition lifecycle previews', () => {
       expect(element.isConnected).toBe(true)
 
       animation.currentTime = 200
+
       expect(Number(getComputedStyle(element).scale)).toBeCloseTo(phase === 'enter' ? 1.1 : 0)
+
       animation.currentTime = 0
+
       expect(Number(getComputedStyle(element).scale)).toBeCloseTo(phase === 'enter' ? 0 : 1.1)
 
       instance.endCompositionPreview()
+
       expect(element.style.scale).toBe('1')
       expect(instance.animations).toHaveLength(0)
     },
