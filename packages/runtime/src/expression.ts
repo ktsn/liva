@@ -1,3 +1,4 @@
+import { easingConstant, isTimingFunction, callTiming } from './timing-values.ts'
 import type { CallExpression, Definition, Expression, Property } from './definition.ts'
 
 import type { RuntimeValue, Scalar } from './reactive-value.ts'
@@ -18,7 +19,9 @@ export function evaluate(
       return expression.value
     case 'reference': {
       const [name, ...members] = expression.path
-      let value: RuntimeValue | undefined = Object.hasOwn(values, name) ? values[name] : undefined
+      let value: RuntimeValue | undefined = Object.hasOwn(values, name)
+        ? values[name]
+        : easingConstant(name)
 
       for (const member of members) {
         value =
@@ -30,6 +33,17 @@ export function evaluate(
       throw new Error(`Unknown variable reference: ${expression.path.join('.')}`)
     }
     case 'call':
+      if (isTimingFunction(expression.function)) {
+        const args = Object.fromEntries(
+          expression.arguments.map((argument) => [
+            argument.name,
+            evaluate(argument.value, values, invoke),
+          ]),
+        )
+
+        return callTiming(expression.function, args)
+      }
+
       if (!invoke) throw new Error('Function call requires a let initializer context')
       return invoke(expression, values)
     case 'unary': {

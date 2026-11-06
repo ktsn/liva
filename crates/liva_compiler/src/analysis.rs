@@ -18,6 +18,8 @@ pub fn type_name(value: expression::Type) -> String {
         Type::Number => "number".into(),
         Type::Boolean => "boolean".into(),
         Type::String => "string".into(),
+        Type::Timing => "timing".into(),
+        Type::Easing => "easing".into(),
         Type::Target => "target".into(),
         Type::Record(fields) => format!(
             "{{ {} }}",

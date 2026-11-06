@@ -3,6 +3,7 @@ use super::{Field, Function, Parameter, Type};
 pub const DRAG: Function = Function {
     name: "drag",
     parameters: &[Parameter {
+        optional: false,
         name: "target",
         value_type: Type::Target,
     }],
