@@ -548,3 +548,26 @@ on the target or property track. Replace legacy frame suffix `@ ease-out` with
 `@easeOut`, or reference a bound easing value. Legacy animation declarations and
 CSS easing suffixes continue to parse. The lossless CST retains decorators separately
 from header names and CSS value text; source-preserving tooling must retain those nodes.
+
+### Layer animation selection
+
+Layer values and explicitly supplied timing values cascade independently. A later layer
+may replace a CSS value while retaining timing from a lower layer. Target defaults are
+expanded for the properties declared in that target; property decorators override them.
+The layer contributing the final CSS value owns its animation. Only that owner's
+selected transition may supply temporary timing or keyframes; obscured transition
+tracks do not animate or produce endpoint warnings.
+
+A transition can define a property keyframe track, or a direct property declaration
+as its final keyframe. Properties without an override use the ordinary cascaded timing.
+A missing start frame uses the displayed presentation, and a missing 100% frame uses
+the final cascaded CSS value. An explicit differing 100% frame reports a
+`runtime.endpoint` diagnostic; completion still restores the resolved CSS value.
+Interrupted properties retarget from their current displayed value. Unchanged property
+animations continue. Properties with no timing apply immediately.
+
+Spring timing on layer tracks applies the sampled spring curve to the complete track,
+including intermediate waypoints. Legacy state-transition spring constraints remain
+unchanged. Initial state guards resolve before target binding; DOM entry animation is
+controlled by the motion's lifecycle declaration rather than replaying an initial
+machine transition during binding.
