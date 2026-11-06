@@ -39,6 +39,8 @@ export function captureLifecycleDefinition(
 export interface LifecycleWork {
   readonly element: HTMLElement
   readonly track: ResolvedTrack
+  /** Layer owners apply the latest cascade after completion, including removing absent properties. */
+  readonly restoreOnCompletion?: boolean
 }
 
 export type LifecycleResult = 'completed' | 'superseded' | 'owner-teardown' | 'failed'
@@ -136,6 +138,10 @@ export class LifecycleSession {
     return this.work.some((item) => item.element === element && item.track.property === property)
   }
 
+  get isFinished(): boolean {
+    return this.ended
+  }
+
   initialize() {
     if (this.ended || this.initialized) return
     this.initialized = true
@@ -209,7 +215,9 @@ export class LifecycleSession {
     }
 
     if (result === 'completed' && this.phase === 'enter') {
-      for (const { element, track } of this.work) {
+      for (const { element, track, restoreOnCompletion } of this.work) {
+        if (restoreOnCompletion) continue
+
         element.style.setProperty(track.property, track.destinationValue)
       }
     }

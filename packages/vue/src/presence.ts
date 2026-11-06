@@ -63,19 +63,26 @@ export const LivaPresenceBoundary = defineComponent({
 
       let work = entry.capture(phase)
       if (entry.session) {
-        work = work.map(({ element: target, track }) => ({
-          element: target,
+        work = work.map((captured) => ({
+          ...captured,
           track: {
-            ...track,
-            keyframes: track.keyframes.map((frame, index) =>
+            ...captured.track,
+            keyframes: captured.track.keyframes.map((frame, index) =>
               index === 0
-                ? { ...frame, value: getComputedStyle(target).getPropertyValue(track.property) }
+                ? {
+                    ...frame,
+                    value: getComputedStyle(captured.element).getPropertyValue(
+                      captured.track.property,
+                    ),
+                  }
                 : frame,
             ),
           },
         }))
       }
+
       for (const target of entry.targets) target.release(work)
+
       entry.leaving = phase === 'leave'
       entry.cancel('superseded')
       entry.session = new LifecycleSession(work, phase)

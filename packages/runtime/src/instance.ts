@@ -73,6 +73,7 @@ export class LivaInstance {
   private active: ActiveTrack[] = []
   private enterSessions = new Set<LifecycleSession>()
   private leaveSessions = new Set<LifecycleSession>()
+  private settledLifecycleSessions = new WeakSet<LifecycleSession>()
   private owned: OwnedElement[] = []
   private generation = 0
   private manuallyPaused = false
@@ -113,9 +114,23 @@ export class LivaInstance {
 
   retainLifecycle(phase: 'enter' | 'leave', session: LifecycleSession) {
     const sessions = phase === 'enter' ? this.enterSessions : this.leaveSessions
+
+    if (sessions.has(session)) return
+
     sessions.add(session)
+
     void session.finished.then(() => {
-      sessions.delete(session)
+      if (this.settledLifecycleSessions.has(session)) return undefined
+
+      this.settledLifecycleSessions.add(session)
+
+      // Several presence boundaries can finish before their Promise callbacks run.
+      for (const completed of sessions) {
+        if (completed.isFinished) {
+          sessions.delete(completed)
+          this.settledLifecycleSessions.add(completed)
+        }
+      }
 
       if (phase === 'enter' && this.layerResolution && !this.disposed) {
         this.restore(this.enterSessions.size > 0 || this.leaveSessions.size > 0)
@@ -140,7 +155,9 @@ export class LivaInstance {
       targets,
     )
 
-    return work
+    return this.layerResolution && phase === 'enter'
+      ? work.map((item) => ({ ...item, restoreOnCompletion: true }))
+      : work
   }
 
   releaseLifecycle(names: readonly string[], element: HTMLElement, properties?: readonly string[]) {
@@ -265,6 +282,7 @@ export class LivaInstance {
             })),
         )
       : []
+
     for (const { element, original, originalCss, pending, written } of this.owned) {
       const current = inlineDeclarations(element)
       const baseline = document.createElement('div')
