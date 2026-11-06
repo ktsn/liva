@@ -49,3 +49,29 @@ fn nested_states_preserve_initial_marker_and_target_ranges() {
 
     assert_eq!(&source[range.start..range.end], "spinner { opacity: 0 }");
 }
+
+#[test]
+fn guarded_transition_statements_preserve_lossless_conditions() {
+    let source = "motion button { layer status { state idle initial {} state active {} transition idle -> active when ready;\n transition active -> idle when !ready\n } }";
+    let parsed = parse(source);
+
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    assert_eq!(parsed.root.text(), source);
+
+    let layer = parsed
+        .root
+        .motions()
+        .next()
+        .unwrap()
+        .layers()
+        .next()
+        .unwrap();
+    let transitions = layer.transitions().collect::<Vec<_>>();
+
+    assert_eq!(transitions.len(), 2);
+    assert!(
+        transitions
+            .iter()
+            .all(|transition| transition.condition().unwrap().expression().is_some())
+    );
+}

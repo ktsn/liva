@@ -43,6 +43,8 @@ pub struct Event {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Layer {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transitions: Vec<GuardedTransition>,
     pub name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub states: Vec<State>,
@@ -51,6 +53,14 @@ pub struct Layer {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub when: Option<Expression>,
     pub targets: Vec<Target<Property>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GuardedTransition {
+    pub from: String,
+    pub to: String,
+    pub when: Expression,
+    pub transition: Transition,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

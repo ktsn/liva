@@ -1,3 +1,4 @@
+import { layerTargets, resolveLayers, type LayerResolution } from './layers.ts'
 import { waapiProperty } from './animation.ts'
 export { waapiProperty } from './animation.ts'
 import { parameterValues, LetBindingGraph, targetValues } from './let-bindings.ts'
@@ -51,6 +52,7 @@ type ActiveTrack = { track: ResolvedTrack; element: HTMLElement; animation: Anim
 export class LivaInstance {
   definition: Definition
   state: string
+  private layerResolution?: LayerResolution
   private values: VariableValues = {}
   private letBindings: LetBindingGraph
   private letBindingCleanups: (() => void)[] = []
@@ -85,8 +87,16 @@ export class LivaInstance {
     this.values = this.letBindings.evaluate(variables)
     this.definition = definition
     this.evaluateEvents(false)
-    this.state = typeof state === 'string' ? state : selectState(definition, this.values)
-    getState(definition, this.state)
+    this.layerResolution = definition.layers?.length
+      ? resolveLayers(definition, this.values)
+      : undefined
+    this.state = this.layerResolution
+      ? '@layers'
+      : typeof state === 'string'
+        ? state
+        : selectState(definition, this.values)
+
+    if (!this.layerResolution) getState(definition, this.state)
     this.report = report
     this.motion = matchMedia('(prefers-reduced-motion: reduce)')
     this.motion.addEventListener('change', this.motionChanged)
@@ -108,7 +118,7 @@ export class LivaInstance {
     const work = resolveLifecycle(
       phase,
       captureLifecycleDefinition(definition, phase, this.state, this.values),
-      getState(definition, this.state),
+      this.layerResolution?.presentation ?? getState(definition, this.state),
       targets,
     )
 
@@ -124,7 +134,7 @@ export class LivaInstance {
   }
 
   get reactiveState(): string {
-    return selectState(this.definition, this.values)
+    return this.layerResolution ? this.state : selectState(this.definition, this.values)
   }
 
   get animations(): readonly Animation[] {
@@ -249,7 +259,9 @@ export class LivaInstance {
   private settle() {
     if (this.suspended || this.disposed) return
 
-    for (const target of getState(this.definition, this.state).targets) {
+    for (const target of (
+      this.layerResolution?.presentation ?? getState(this.definition, this.state)
+    ).targets) {
       for (const element of this.targetElements.get(target.name) ?? []) {
         for (const property of target.properties) {
           try {
@@ -267,9 +279,10 @@ export class LivaInstance {
 
     const next = new Map(entries)
     const duplicate = next.size !== entries.length && !hasLifecycle(this.definition)
-    const missing = this.definition.states.some((state) =>
-      state.targets.some((target) => !next.has(target.name)),
-    )
+    const missing = [
+      ...this.definition.states.flatMap((state) => state.targets),
+      ...layerTargets(this.definition),
+    ].some((target) => !next.has(target.name))
     const unchanged =
       !duplicate &&
       (!missing || hasLifecycle(this.definition)) &&
@@ -292,7 +305,19 @@ export class LivaInstance {
     this.duplicateBindings = duplicate
     this.suspended = duplicate || (missing && !hasLifecycle(this.definition))
 
-    if (this.definition.letBindings?.length || this.definition.parameters?.length) {
+    if (this.layerResolution) {
+      this.layerResolution = resolveLayers(
+        this.definition,
+        this.values,
+        this.layerResolution.states,
+        false,
+      )
+    }
+
+    if (
+      !this.layerResolution &&
+      (this.definition.letBindings?.length || this.definition.parameters?.length)
+    ) {
       this.state = selectState(this.definition, this.values)
       this.onReactiveState?.(this.state)
     }
@@ -310,7 +335,8 @@ export class LivaInstance {
 
   replaceDefinition(definition: Definition, state = this.state) {
     if (this.disposed) return
-    getState(definition, state)
+    if (!definition.layers?.length) getState(definition, state)
+
     const inputs = Object.fromEntries(
       (definition.parameters ?? [])
         .filter((parameter) =>
@@ -338,16 +364,29 @@ export class LivaInstance {
     this.definition = definition
     this.eventValues.clear()
     this.evaluateEvents(false)
-    this.state = state
+    this.layerResolution = definition.layers?.length
+      ? resolveLayers(definition, this.values)
+      : undefined
+    this.state = this.layerResolution ? '@layers' : state
     this.suspended =
       this.duplicateBindings ||
       (!hasLifecycle(definition) &&
-        definition.states.some((s) => s.targets.some((t) => !this.targets.has(t.name))))
+        [...definition.states.flatMap((s) => s.targets), ...layerTargets(definition)].some(
+          (t) => !this.targets.has(t.name),
+        ))
     if (!this.suspended) this.bindLetBindings()
     this.settle()
   }
 
   setState(state: string, options: { paused?: boolean } = {}): boolean {
+    if (this.layerResolution) {
+      this.report({
+        code: 'runtime.state',
+        message: 'Layer motions are controlled through reactive inputs',
+      })
+      return false
+    }
+
     return this.transitionTo(state, options, this.values)
   }
 
@@ -580,6 +619,44 @@ export class LivaInstance {
       this.values = values
       this.evaluateEvents()
       if (this.disposed) return
+
+      if (this.layerResolution) {
+        const previousPresentation = this.layerResolution.presentation
+        const resolution = resolveLayers(this.definition, values, this.layerResolution.states)
+        const removed = previousPresentation.targets.some((target) =>
+          target.properties.some(
+            (property) =>
+              !resolution.presentation.targets
+                .find((next) => next.name === target.name)
+                ?.properties.some((next) => next.name === property.name),
+          ),
+        )
+        this.layerResolution = resolution
+
+        if (!this.suspended) {
+          if (removed) {
+            this.restore()
+            this.settle()
+          } else {
+            for (const target of resolution.presentation.targets) {
+              for (const property of target.properties) {
+                const previousValue = previousPresentation.targets
+                  .find((item) => item.name === target.name)
+                  ?.properties.find((item) => item.name === property.name)?.value
+
+                if (previousValue === property.value) continue
+
+                for (const element of this.targetElements.get(target.name) ?? []) {
+                  this.write(element, property.name, property.value)
+                }
+              }
+            }
+          }
+        }
+
+        this.onReactiveState?.(this.state)
+        return
+      }
 
       const state = selectState(this.definition, values)
       const properties = getState(this.definition, state).targets.flatMap((target) =>

@@ -426,9 +426,22 @@ owns its state names and requires exactly one `initial` state:
 
 ```css
 layer submission {
-  button { opacity: 1 }
-  state idle initial { spinner { opacity: 0 } }
-  state loading { button { opacity: 0.5 } spinner { opacity: 1 } }
+  button {
+    opacity: 1;
+  }
+  state idle initial {
+    spinner {
+      opacity: 0;
+    }
+  }
+  state loading {
+    button {
+      opacity: 0.5;
+    }
+    spinner {
+      opacity: 1;
+    }
+  }
 }
 ```
 
@@ -438,6 +451,39 @@ Stateful layers are always active and cannot have a `when` condition; nested sta
 use guarded transitions instead of `state ... when` selection. The compiler keeps
 common declarations and state declarations separate in IR, with an `initialState`
 name. Runtime transition evaluation is handled independently of these declarations.
+
+### Layer cascade and guarded updates
+
+Active layers contribute CSS in declaration order. A later layer replaces earlier
+values per property; it does not add values or run a separate animation. A state's
+properties override its layer's common properties before the global layer cascade.
+Inactive layers contribute nothing. If a property has no remaining contribution,
+the runtime restores the element's original inline style. Interpolated values are
+re-evaluated with each input update.
+
+```css
+layer submission {
+  state idle initial { spinner { opacity: 0 } }
+  state loading { spinner { opacity: 1 } }
+  state success { spinner { opacity: 0 } }
+  transition idle -> loading when loading
+  transition loading -> success when completed
+}
+```
+
+Each stateful layer evaluates outgoing guards at initialization and once per reactive
+update. Guards read the current Boolean value, including values already true at
+initialization. The last eligible transition in declaration order wins. If none is
+eligible, the current state persists. Only one transition occurs per layer per update,
+so cycles cannot drain synchronously. A subsequent parameter or reactive-source
+notification schedules another evaluation; no internal loop or application-data
+mutation is performed. Multiple stateful layers can advance on the same update.
+
+Layer motions take parameter objects rather than explicit legacy state-name commands.
+A motion cannot mix layers with legacy motion-level states; move exclusive states
+inside a layer when migrating.
+Timing selection, transition animation ownership, and lifecycle precedence are separate
+steps of the layer animation pipeline.
 
 ## Timing and easing values
 

@@ -19,7 +19,10 @@ export function targetValues(
   previous: VariableValues = {},
 ): VariableValues {
   const names = new Set(
-    definition.states.flatMap((state) => state.targets.map((target) => target.name)),
+    [
+      ...definition.states,
+      ...(definition.layers ?? []).flatMap((layer) => [layer, ...(layer.states ?? [])]),
+    ].flatMap((state) => state.targets.map((target) => target.name)),
   )
 
   return Object.fromEntries(

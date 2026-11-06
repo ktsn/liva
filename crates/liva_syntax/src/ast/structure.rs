@@ -43,12 +43,15 @@ node!(State, |n: &SyntaxNode| keyword(n, "state")
     && (block_depth(n) == 1
         || n.parent()
             .is_some_and(|parent| Layer::cast(parent).is_some())));
-node!(Transition, |n: &SyntaxNode| block_depth(n) == 1
+node!(Transition, |n: &SyntaxNode| (block_depth(n) == 1
+    || n.parent()
+        .is_some_and(|parent| Layer::cast(parent).is_some()))
     && (keyword(n, "transition")
         || keyword(n, "enter")
         || keyword(n, "leave")));
 node!(Target, |n: &SyntaxNode| n.kind() == Kind::Block
     && State::cast(n.clone()).is_none()
+    && Transition::cast(n.clone()).is_none()
     && n.parent().is_some_and(|parent| State::cast(
         parent.clone()
     )
@@ -179,6 +182,10 @@ impl Event {
 }
 
 impl Layer {
+    pub fn transitions(&self) -> impl Iterator<Item = Transition> {
+        self.children()
+    }
+
     pub fn states(&self) -> impl Iterator<Item = State> {
         self.children()
     }
@@ -216,6 +223,10 @@ impl State {
 }
 
 impl Transition {
+    pub fn condition(&self) -> Option<Condition> {
+        self.header_node()?.child()
+    }
+
     pub fn targets(&self) -> impl Iterator<Item = Target> {
         self.children()
     }
@@ -342,10 +353,12 @@ impl Transition {
             ["leave", state] if crate::is_name(state) => {
                 Some(TransitionSelector::LeaveState((*state).into()))
             }
-            ["transition", from, "->", to] => Some(TransitionSelector::Directional {
-                from: (*from).into(),
-                to: (*to).into(),
-            }),
+            ["transition", from, "->", to] | ["transition", from, "->", to, "when", ..] => {
+                Some(TransitionSelector::Directional {
+                    from: (*from).into(),
+                    to: (*to).into(),
+                })
+            }
             _ => None,
         }
     }

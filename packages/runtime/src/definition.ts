@@ -68,6 +68,22 @@ export interface State {
   readonly targets: readonly Target<Property>[]
 }
 
+export interface GuardedTransition {
+  readonly from: string
+  readonly to: string
+  readonly when: Expression
+  readonly transition: Transition
+}
+
+export interface Layer {
+  readonly name: string
+  readonly when?: Expression
+  readonly targets: readonly Target<Property>[]
+  readonly states?: readonly State[]
+  readonly initialState?: string
+  readonly transitions?: readonly GuardedTransition[]
+}
+
 export interface PropertyTransition {
   readonly timingExpression?: Expression
   readonly name: string
@@ -87,6 +103,7 @@ export interface StateTransition {
 }
 
 export interface Definition {
+  readonly layers?: readonly Layer[]
   readonly stateEnters?: readonly StateTransition[]
   readonly stateLeaves?: readonly StateTransition[]
   readonly enter?: Transition
