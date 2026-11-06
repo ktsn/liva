@@ -18,8 +18,20 @@ const active = ref(false)
 
 <liva lang="liva">
 motion motion(checked: boolean) {
-  state off { box { background-color: red } }
-  state on when checked { box { background-color: blue } }
-  transition { @tween: 50ms }
+  state off {
+    box {
+      background-color: red
+    }
+  }
+
+  state on when checked {
+    box {
+      background-color: blue
+    }
+  }
+
+  transition {
+    @tween: 50ms
+  }
 }
 </liva>

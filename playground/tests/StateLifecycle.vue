@@ -23,17 +23,36 @@ const distance = ref(40)
 <liva lang="liva">
 motion panel(open: boolean, distance: number) {
   layer base {
-    content { opacity: 1; translate: 0px 0; border-radius: 0px }
-    badge { opacity: 1 }
+    content {
+      opacity: 1
+      translate: 0px 0
+      border-radius: 0px
+    }
+
+    badge {
+      opacity: 1
+    }
   }
 
   layer opened when open {
-    content { border-radius: 20px }
+    content {
+      border-radius: 20px
+    }
   }
 
   layer sizing {
-    state closed initial { content { scale: 0.9 } }
-    state opened { content { scale: 1 } }
+    state closed initial {
+      content {
+        scale: 0.9
+      }
+    }
+
+    state opened {
+      content {
+        scale: 1
+      }
+    }
+
     transition closed -> opened when open
     transition opened -> closed when !open
   }
@@ -44,7 +63,10 @@ motion panel(open: boolean, distance: number) {
       scale: 0.8
       translate: ${distance}px 0
     }
-    badge @tween(duration: 2000, easing: linear) { opacity: 0 }
+
+    badge @tween(duration: 2000, easing: linear) {
+      opacity: 0
+    }
   }
 
   leave {
@@ -53,7 +75,10 @@ motion panel(open: boolean, distance: number) {
       scale: 1.2
       translate: ${distance}px 0
     }
-    badge @tween(duration: 1000, easing: linear) { opacity: 0 }
+
+    badge @tween(duration: 1000, easing: linear) {
+      opacity: 0
+    }
   }
 }
 </liva>

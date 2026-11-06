@@ -38,7 +38,10 @@ motion card {
   let movement = drag(target: body)
 
   layer base {
-    body @spring(stiffness: 300, damping: 20) { translate: 0 0; scale: 1 }
+    body @spring(stiffness: 300, damping: 20) {
+      translate: 0 0
+      scale: 1
+    }
   }
 
   layer dragging when movement.active {

@@ -11,8 +11,20 @@ const active = ref(false)
 
 <liva lang="liva">
 motion hmr {
-  state off { box { background-color: red } }
-  state on when true { box { background-color: blue } }
-  transition { @tween: 50ms }
+  state off {
+    box {
+      background-color: red
+    }
+  }
+
+  state on when true {
+    box {
+      background-color: blue
+    }
+  }
+
+  transition {
+    @tween: 50ms
+  }
 }
 </liva>

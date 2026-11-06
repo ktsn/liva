@@ -59,19 +59,30 @@ motion swipeItem {
   event dismiss when movement.released && movement.offset.x > 120
 
   layer base {
-    body @spring(stiffness: 300, damping: 20) { translate: 0 0; opacity: 1 }
+    body @spring(stiffness: 300, damping: 20) {
+      translate: 0 0
+      opacity: 1
+    }
   }
 
   layer dragging when movement.active {
-    body { translate: ${movement.offset.x}px 0 @tween(duration: 0) }
+    body {
+      translate: ${movement.offset.x}px 0 @tween(duration: 0)
+    }
   }
 
   enter {
-    body @tween(duration: 350, easing: easeOut) { opacity: 0; translate: 0 -20px }
+    body @tween(duration: 350, easing: easeOut) {
+      opacity: 0
+      translate: 0 -20px
+    }
   }
 
   leave {
-    body @tween(duration: 250, easing: easeOut) { translate: 500px 0; opacity: 0 }
+    body @tween(duration: 250, easing: easeOut) {
+      translate: 500px 0
+      opacity: 0
+    }
   }
 }
 </liva>

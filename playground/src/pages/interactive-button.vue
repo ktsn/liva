@@ -41,8 +41,23 @@ motion button(hovered: boolean, pressed: boolean, focused: boolean) {
     }
   }
 
-  layer hover when hovered { body { scale: 1.08; background-color: #b5e4d1 } }
-  layer focus when focused { body { box-shadow: 0 0 0 4px #16795b } }
-  layer press when pressed { body { scale: 0.94 } }
+  layer hover when hovered {
+    body {
+      scale: 1.08
+      background-color: #b5e4d1
+    }
+  }
+
+  layer focus when focused {
+    body {
+      box-shadow: 0 0 0 4px #16795b
+    }
+  }
+
+  layer press when pressed {
+    body {
+      scale: 0.94
+    }
+  }
 }
 </liva>
