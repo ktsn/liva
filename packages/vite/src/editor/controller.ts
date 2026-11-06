@@ -16,6 +16,7 @@ export type EditorBinding = Pick<InstanceBinding, 'component' | 'definition' | '
     | 'composition'
     | 'previewComposition'
     | 'endCompositionPreview'
+    | 'inspectComposition'
   >
 }
 

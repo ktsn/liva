@@ -12,6 +12,7 @@ const inspectionVersion = ref(0)
 const panel = useTemplateRef<HTMLElement>('panel')
 const panelHeight = ref(0)
 let observer: ResizeObserver | undefined
+let resizeFrame = 0
 
 function snapshot() {
   return {
@@ -34,7 +35,7 @@ const state = shallowRef(snapshot())
 const unsubscribe = controller.subscribe(() => {
   const next = snapshot()
 
-  if (next.inspection !== state.value.inspection) {
+  if (next.inspection !== state.value.inspection || next.selectedId !== state.value.selectedId) {
     inspectionVersion.value++
   }
 
@@ -80,16 +81,20 @@ function revealInstance() {
 
 onMounted(() => {
   observer = new ResizeObserver(() => {
-    const previous = panelHeight.value
-    /* v8 ignore next -- @preserve: The observer is attached after mount and disconnected before the panel ref is released. */
-    panelHeight.value = panel.value?.getBoundingClientRect().height ?? 0
-    if (panelHeight.value > previous) revealInstance()
+    cancelAnimationFrame(resizeFrame)
+    resizeFrame = requestAnimationFrame(() => {
+      const previous = panelHeight.value
+      /* v8 ignore next -- @preserve: The observer is attached after mount; its frame is cancelled before the panel ref is released. */
+      panelHeight.value = panel.value?.getBoundingClientRect().height ?? 0
+      if (panelHeight.value > previous) revealInstance()
+    })
   })
   /* v8 ignore else -- @preserve: The unconditional panel element is mounted before onMounted runs. */
   if (panel.value) observer.observe(panel.value)
 })
 
 onScopeDispose(() => {
+  cancelAnimationFrame(resizeFrame)
   observer?.disconnect()
   controller.endPreview()
   unsubscribe()
@@ -114,7 +119,14 @@ onScopeDispose(() => {
         </select>
         <button @click="toggle">Close</button>
       </div>
-      <p v-if="state.inspection && timelineReadOnly(state.inspection.definition)" role="status">{{
+      <p
+        v-if="
+          state.inspection &&
+          !state.inspection.definition.layers?.length &&
+          timelineReadOnly(state.inspection.definition)
+        "
+        role="status"
+      >{{
         readOnlyMessage
       }}</p>
       <EditorForm

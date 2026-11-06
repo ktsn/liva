@@ -15,6 +15,7 @@ import {
   evaluate,
   renderDefinition,
   renderValue,
+  renderTransition,
   selectState,
   type VariableValues,
 } from './expression.ts'
@@ -195,6 +196,71 @@ export class LivaInstance {
 
   get animations(): readonly Animation[] {
     return this.active.map((a) => a.animation)
+  }
+
+  inspectComposition(
+    composition: Composition,
+    from?: Composition,
+    transitions: readonly CompositionTransition[] = [],
+    definition = this.definition,
+  ): LayerResolution {
+    try {
+      const values = new LetBindingGraph(
+        definition.letBindings ?? [],
+        this.values,
+        this.letBindings,
+      ).evaluate(this.values)
+
+      const resolution = resolveComposition(definition, values, composition, from, transitions)
+
+      return {
+        ...resolution,
+        transitions: new Map(
+          [...resolution.transitions].flatMap(([name, transition]) => {
+            const targets = transition.transition.targets.flatMap((target) => {
+              const properties = target.properties.filter((property) =>
+                resolution.presentation.targets
+                  .find((item) => item.name === target.name)
+                  ?.properties.some((item) => item.name === property.name && item.owner === name),
+              )
+
+              return properties.length ? [{ name: target.name, properties }] : []
+            })
+
+            if (!targets.length) return []
+
+            const rendered = renderTransition({ ...transition.transition, targets }, values)
+
+            return [
+              [
+                name,
+                {
+                  ...transition,
+                  transition: {
+                    ...rendered,
+                    targets: rendered.targets.map((target) => ({
+                      name: target.name,
+                      properties: target.properties.map((property) => ({
+                        name: property.name,
+                        timing: property.timing,
+                        keyframes: property.keyframes?.map((frame) => ({
+                          offset: frame.offset,
+                          value: frame.value,
+                          easing: frame.easing,
+                        })),
+                      })),
+                    })),
+                  },
+                },
+              ] as const,
+            ]
+          }),
+        ),
+      }
+    } catch (error) {
+      this.report({ code: 'runtime.inspection', message: String(error), error })
+      throw error
+    }
   }
 
   private motionChanged = () => {

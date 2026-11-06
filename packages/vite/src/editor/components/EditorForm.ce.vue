@@ -1,6 +1,22 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onScopeDispose, ref, shallowRef, useTemplateRef } from 'vue'
-import type { Definition, Frame, PropertyTransition, Timing } from '@liva/runtime'
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onScopeDispose,
+  ref,
+  shallowRef,
+  triggerRef,
+  useTemplateRef,
+} from 'vue'
+import type {
+  Composition,
+  CompositionTransition,
+  Definition,
+  Frame,
+  PropertyTransition,
+  Timing,
+} from '@liva/runtime'
 import { sampleSpring } from '@liva/runtime'
 import type { EditorController } from '../controller.ts'
 import type { Edit, Inspection } from '../communication/protocol.ts'
@@ -8,12 +24,15 @@ import {
   editableDefinition,
   normalizedOffset,
   timelineTracks,
+  compositionTimelineTracks,
   timingText,
   type TimelineTrack,
   type LifecyclePhase,
 } from '../timeline.ts'
 import TimelineRow from './TimelineRow.ce.vue'
 import TimelineInspector from './TimelineInspector.ce.vue'
+import CompositionSelectors from './CompositionSelectors.ce.vue'
+import { copyComposition, compatibleTransition, selectTransition } from '../compositions.ts'
 
 type Mutable<T> = T extends object ? { -readonly [K in keyof T]: Mutable<T[K]> } : T
 type MutableDefinition = Mutable<Definition>
@@ -25,6 +44,14 @@ const props = defineProps<{
   stale: boolean
 }>()
 const model = shallowRef<Definition>(editableDefinition(props.inspection.definition))
+const layers = model.value.layers ?? []
+const layered = layers.length > 0
+// An inspected form belongs to the selected instance; changing selection replaces the form.
+const selectedRuntime = shallowRef(props.controller.selected!.binding.runtime)
+const initialComposition = selectedRuntime.value.composition ?? { layers: {}, states: {} }
+const compositionFrom = shallowRef(copyComposition(initialComposition))
+const compositionTo = shallowRef(copyComposition(initialComposition))
+const selectedTransition = shallowRef<CompositionTransition>()
 const states = model.value.states.map((state) => state.name)
 const from = ref(states[0])
 const to = ref(states[1] ?? states[0])
@@ -41,9 +68,33 @@ const phase = computed<LifecyclePhase | undefined>(() =>
   scope.value.startsWith('enter') ? 'enter' : scope.value.startsWith('leave') ? 'leave' : undefined,
 )
 const general = computed(() => scope.value === 'general' || scope.value.endsWith('-default'))
-const tracks = computed(() =>
-  timelineTracks(model.value, from.value, to.value, general.value, phase.value),
-)
+const timelineResult = computed(() => {
+  try {
+    if (!layered)
+      return {
+        tracks: timelineTracks(model.value, from.value, to.value, general.value, phase.value),
+      }
+
+    const runtime = selectedRuntime.value
+    const before = compositionFrom.value
+    const after = compositionTo.value
+
+    return {
+      tracks: compositionTimelineTracks(
+        runtime.inspectComposition(before),
+        runtime.inspectComposition(
+          after,
+          before,
+          selectedTransition.value ? [selectedTransition.value] : [],
+        ),
+      ),
+    }
+  } catch (error) {
+    return { tracks: [], error }
+  }
+})
+const tracks = computed(() => timelineResult.value.tracks)
+
 const duration = computed(() => Math.max(0, ...tracks.value.map((track) => track.duration)))
 const timelineLabelWidth = 190
 
@@ -176,12 +227,19 @@ async function prepare() {
   const current = ++generation
   busy.value = true
   try {
-    await props.controller.preview(
-      to.value,
-      phase.value ? undefined : from.value,
-      general.value,
-      phase.value,
-    )
+    if (layered) {
+      await props.controller.previewComposition(
+        compositionFrom.value,
+        compositionTo.value,
+        selectedTransition.value ? [selectedTransition.value] : [],
+      )
+    } else
+      await props.controller.preview(
+        to.value,
+        phase.value ? undefined : from.value,
+        general.value,
+        phase.value,
+      )
     if (current !== generation || !props.controller.previewActive) return false
     props.controller.seek(time.value)
     return true
@@ -394,6 +452,52 @@ function changeDirection() {
   time.value = 0
 }
 
+function changeComposition(side: 'from' | 'to', composition: Composition) {
+  endPreview()
+
+  if (side === 'from') compositionFrom.value = composition
+  else compositionTo.value = composition
+
+  selectedTransition.value = compatibleTransition(
+    model.value,
+    compositionFrom.value,
+    compositionTo.value,
+    selectedTransition.value,
+  )
+  selected.value = undefined
+  time.value = 0
+}
+
+function swapCompositions() {
+  const before = compositionFrom.value
+  const after = compositionTo.value
+  endPreview()
+  compositionFrom.value = copyComposition(after)
+  compositionTo.value = copyComposition(before)
+  selectedTransition.value = compatibleTransition(
+    model.value,
+    after,
+    before,
+    selectedTransition.value,
+  )
+  selected.value = undefined
+  time.value = 0
+}
+
+function chooseTransition(identity: CompositionTransition | undefined) {
+  endPreview()
+  selectedTransition.value = identity
+
+  if (identity) {
+    const next = selectTransition(model.value, compositionFrom.value, compositionTo.value, identity)
+    compositionFrom.value = next.from
+    compositionTo.value = next.to
+  }
+
+  selected.value = undefined
+  time.value = 0
+}
+
 async function save() {
   endPreview()
   try {
@@ -412,6 +516,7 @@ async function discard() {
 }
 
 const unsubscribe = props.controller.subscribe(() => {
+  triggerRef(selectedRuntime)
   if (!props.controller.previewActive) {
     stop()
     clearTimeout(timer)
@@ -430,22 +535,37 @@ onScopeDispose(() => {
 </script>
 
 <template>
+  <CompositionSelectors
+    v-if="layered"
+    :layers="layers"
+    :from="compositionFrom"
+    :to="compositionTo"
+    :transition="selectedTransition"
+    @change="changeComposition"
+    @swap="swapCompositions"
+    @transition="chooseTransition"
+  />
+  <p v-if="timelineResult.error" role="alert">{{ String(timelineResult.error) }}</p>
   <div class="toolbar">
-    <label>Editing<select v-model="scope" aria-label="Editing scope" @change="changeDirection">
+    <label v-if="!layered">Editing<select
+        v-model="scope"
+        aria-label="Editing scope"
+        @change="changeDirection"
+      >
         <option value="directional">Directional transition</option>
         <option value="general">Common settings</option>
         <option value="enter-default">Enter · default</option>
         <option value="leave-default">Leave · default</option>
       </select></label>
-    <label v-if="!phase">From<select
+    <label v-if="!layered && !phase">From<select
         v-model="from"
         aria-label="From state"
         @change="changeDirection"
       >
         <option v-for="state in states" :key="state">{{ state }}</option>
       </select></label>
-    <span v-if="!phase">→</span>
-    <label>{{
+    <span v-if="!layered && !phase">→</span>
+    <label v-if="!layered">{{
         phase ? 'State' : 'To'
       }}<select v-model="to" aria-label="To state" @change="changeDirection">
         <option v-for="state in states" :key="state" :disabled="!phase && state === from">
@@ -454,7 +574,11 @@ onScopeDispose(() => {
       </select></label>
     <button
       :disabled="
-        busy || stale || (!phase && from === to) || tracks.some((track) => track.diagnostic)
+        busy ||
+        stale ||
+        !!timelineResult.error ||
+        (!layered && !phase && from === to) ||
+        tracks.some((track) => track.diagnostic)
       "
       @click="play"
     >
@@ -532,7 +656,7 @@ onScopeDispose(() => {
               :max="extent"
               step="1"
               :value="time"
-              :disabled="stale || (!phase && from === to)"
+              :disabled="stale || !!timelineResult.error || (!layered && !phase && from === to)"
               @input="seek(Number(($event.target as HTMLInputElement).value))"
             />
           </div>

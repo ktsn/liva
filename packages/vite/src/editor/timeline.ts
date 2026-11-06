@@ -1,5 +1,7 @@
 import {
   sampleSpring,
+  resolveLayerTracks,
+  type LayerResolution,
   type Definition,
   type Frame,
   type PropertyTransition,
@@ -10,6 +12,9 @@ import {
 export type LifecyclePhase = 'enter' | 'leave'
 
 export interface TimelineTrack {
+  readonly?: boolean
+  fromValue?: string
+  toValue?: string
   lifecycle?: LifecyclePhase
   target: string
   property: string
@@ -22,6 +27,74 @@ export interface TimelineTrack {
   explicit: readonly Frame[]
   inheritedFrames: boolean
   timingOrigin: string
+}
+
+export function compositionTimelineTracks(
+  from: LayerResolution,
+  to: LayerResolution,
+): TimelineTrack[] {
+  const tracks = resolveLayerTracks(
+    from,
+    to,
+    {},
+    (target, property) =>
+      from.presentation.targets
+        .find((item) => item.name === target)
+        ?.properties.find((item) => item.name === property)?.value ?? '',
+    () => {},
+    () => true,
+  )
+
+  return to.presentation.targets.flatMap((target) =>
+    target.properties.map((property) => {
+      const track = tracks.find(
+        (item) => item.target === target.name && item.property === property.name,
+      )
+      const initial =
+        from.presentation.targets
+          .find((item) => item.name === target.name)
+          ?.properties.find((item) => item.name === property.name)?.value ?? ''
+      const timing = track?.timing
+      let duration = 0
+      let diagnostic: string | undefined
+
+      try {
+        duration = timing
+          ? timing.kind === 'tween'
+            ? timing.durationMs
+            : sampleSpring(timing).durationMs
+          : 0
+      } catch (error) {
+        diagnostic = String(error)
+      }
+      const explicit =
+        to.transitions
+          .get(property.owner)
+          ?.transition.targets.find((item) => item.name === target.name)
+          ?.properties.find((item) => item.name === property.name)?.keyframes ??
+        property.keyframes ??
+        []
+
+      return {
+        target: target.name,
+        property: property.name,
+        path: `${target.name}/${property.name}`,
+        timing,
+        duration,
+        diagnostic,
+        fromValue: initial,
+        toValue: property.value,
+        frames: track?.keyframes ?? [
+          { offset: 0, value: initial },
+          { offset: 1, value: property.value },
+        ],
+        explicit,
+        inheritedFrames: false,
+        timingOrigin: `Animation owner: ${property.owner}`,
+        readonly: true,
+      }
+    }),
+  )
 }
 
 const propertyAt = (transition: Transition | undefined, target: string, property: string) =>

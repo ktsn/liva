@@ -1,7 +1,13 @@
+import { resolveComposition, type Definition } from '@liva/runtime'
 import { describe, expect, it } from 'vite-plus/test'
 import { compile } from '../compiler.ts'
 import { readFileSync } from 'node:fs'
-import { normalizedOffset, snapTime, timelineTracks } from './timeline.ts'
+import {
+  normalizedOffset,
+  snapTime,
+  timelineTracks,
+  compositionTimelineTracks,
+} from './timeline.ts'
 
 const definition = compile(
   readFileSync(new URL('../../../../fixtures/toggle.liv', import.meta.url), 'utf8'),
@@ -114,4 +120,120 @@ it('displays lifecycle-only targets without inventing an endpoint state', () => 
 
   expect(tracks[0].target).toBe('extra')
   expect(tracks[0].frames.map((frame) => frame.value)).toEqual(['', '0'])
+})
+
+describe('composition timeline rows', () => {
+  it('includes unchanged and untimed properties and resolves owning transition frames', () => {
+    const source: Definition = {
+      name: 'layers',
+      states: [],
+      directionalTransitions: [],
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'scale',
+                  value: '1',
+                  timing: { kind: 'tween', durationMs: 100, easing: 'linear' },
+                },
+                { name: 'opacity', value: '1' },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'machine',
+          targets: [],
+          initialState: 'idle',
+          states: [
+            {
+              name: 'idle',
+              targets: [{ name: 'body', properties: [{ name: 'scale', value: '1' }] }],
+            },
+          ],
+          transitions: [
+            {
+              from: 'idle',
+              to: 'idle',
+              when: { kind: 'boolean', value: false },
+              transition: {
+                targets: [
+                  {
+                    name: 'body',
+                    properties: [{ name: 'scale', keyframes: [{ offset: 0.5, value: '2' }] }],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    }
+    const selection = { layers: { base: true }, states: { machine: 'idle' } }
+    const from = resolveComposition(source, {}, selection)
+    const to = resolveComposition(source, {}, selection, selection, [
+      { layer: 'machine', index: 0 },
+    ])
+
+    const rows = compositionTimelineTracks(from, to)
+
+    expect(rows.map((row) => row.property)).toEqual(['scale', 'opacity'])
+    expect(rows[0].frames.map((frame) => frame.value)).toEqual(['1', '2', '1'])
+    expect(rows[0].explicit).toEqual([{ offset: 0.5, value: '2' }])
+    expect(rows[1].duration).toBe(0)
+    expect(rows[1].fromValue).toBe('1')
+    expect(rows[1].toValue).toBe('1')
+  })
+
+  it.each([
+    { timing: { kind: 'spring-duration' as const, durationMs: 300, bounce: 0.2 }, expected: 300 },
+    {
+      timing: { kind: 'spring-physics' as const, stiffness: 0.001, damping: 0.001, mass: 100 },
+      expected: 0,
+    },
+  ])('represents spring durations and diagnostics: $timing.kind', ({ timing, expected }) => {
+    const source: Definition = {
+      name: 'layers',
+      states: [],
+      directionalTransitions: [],
+      layers: [
+        {
+          name: 'base',
+          targets: [{ name: 'body', properties: [{ name: 'scale', value: '1', timing }] }],
+        },
+      ],
+    }
+    const from = resolveComposition(source, {}, { layers: { base: false }, states: {} })
+    const to = resolveComposition(source, {}, { layers: { base: true }, states: {} })
+
+    const [row] = compositionTimelineTracks(from, to)
+
+    expect(row.duration).toBe(expected)
+    expect(Boolean(row.diagnostic)).toBe(expected === 0)
+    expect(row.fromValue).toBe('')
+  })
+
+  it('keeps the resolved TO value separate from a disagreeing explicit endpoint', () => {
+    const source = compile(
+      `motion sample { layer base {
+    state idle initial { body { opacity: 1 @tween(duration: 100) } }
+    transition idle -> idle when false { body { opacity { 100%: 0 } } }
+  } }`,
+      true,
+    ).definitions[0]
+    const composition = { layers: {}, states: { base: 'idle' } }
+    const from = resolveComposition(source, {}, composition)
+    const to = resolveComposition(source, {}, composition, composition, [
+      { layer: 'base', index: 0 },
+    ])
+
+    const [row] = compositionTimelineTracks(from, to)
+
+    expect(row.toValue).toBe('1')
+    expect(row.frames.at(-1)?.value).toBe('0')
+  })
 })
