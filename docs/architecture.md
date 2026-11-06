@@ -395,8 +395,9 @@ existing motions, but cannot be mixed with layers in one motion.
 
 The timeline's legacy state-pair model cannot represent layer ownership or preserve
 typed decorators through track replacement. Such definitions are inspectable but
-read-only: the client hides editing/preview controls and the server rejects preview
-and commit requests before applying edits. Edit source and exercise application
+read-only: the client hides editing/preview controls and the server rejects previews
+with edits and all commit requests. Unchanged-source previews are available through
+the composition API. Edit source and exercise application
 controls to preview these motions. The lossless parser and language-server
 expression hovers cover layer guards and decorators. There is no standalone Liva
 formatter; tools must preserve the custom block text and decorator nodes.
@@ -422,3 +423,18 @@ pair, and identities must be refreshed after a definition replacement. Multiple
 transitions with the same endpoints remain distinct. Only the final value owner's
 transition contributes animation instructions, including intermediate motion when
 the endpoints are equal.
+
+`LivaInstance.previewComposition(from, to, transitions?, definition?)` prepares
+paused effects for explicit compositions using the instance's current input and let
+values. An optional candidate definition affects only that preview; the application
+definition and state-machine history remain intact. The `animations` interface
+supports forward and backward `currentTime` seeks, including under reduced motion.
+Equal compositions can still contain intermediate style or transition motion.
+
+`endCompositionPreview()` releases the effects and restores the application's
+composition and external CSS. Parameter or reactive-input updates, definition
+replacement, target changes, and disposal supersede the session. Preparation errors
+restore application presentation, report a diagnostic, and throw with the original
+cause. The editor rejects stale or out-of-order replies and ends previews on close,
+discard, or selection changes. Source conflict checks still apply to previews with
+no edits; source mutation remains subject to the editor's supported-edit checks.

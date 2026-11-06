@@ -1,5 +1,5 @@
 import { LifecycleSession } from './lifecycle.ts'
-import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
+import { afterEach, describe, expect, it, vi, type MockInstance } from 'vite-plus/test'
 import { cdp, userEvent } from 'vite-plus/test/browser'
 import { LivaInstance, type RuntimeDiagnostic } from './instance.ts'
 import { decodeBundle, type Definition, type Expression } from './definition.ts'
@@ -961,5 +961,412 @@ describe('layer lifecycle snapshots', () => {
     effect.finish()
 
     expect(await session.finished).toBe('completed')
+  })
+})
+
+describe('composition preview sessions', () => {
+  const from = { layers: { base: true, hover: false, press: false }, states: {} }
+  const to = { layers: { base: true, hover: true, press: false }, states: {} }
+
+  it('scrubs both directions without changing application composition and restores on end', async () => {
+    const { instance, element, errors } = setup(timedDefinition(200))
+
+    instance.previewComposition(from, to)
+    const animation = instance.animations[0]
+    await animation.ready
+    animation.currentTime = 100
+
+    expect(Number(getComputedStyle(element).scale)).toBeGreaterThan(1)
+    expect(instance.composition).toEqual(from)
+
+    animation.currentTime = 200
+    expect(Number(getComputedStyle(element).scale)).toBeCloseTo(1.1)
+
+    animation.currentTime = 0
+    expect(Number(getComputedStyle(element).scale)).toBeCloseTo(1)
+
+    instance.endCompositionPreview()
+
+    expect(instance.animations).toHaveLength(0)
+    expect(element.style.scale).toBe('1')
+    expect(errors).toEqual([])
+  })
+
+  it('isolates candidate definitions and restores the latest input update', () => {
+    const first = setup(timedDefinition())
+    const second = setup(timedDefinition())
+    const original = first.instance.definition
+    const candidate = {
+      ...original,
+      layers: original.layers?.map((layer) =>
+        layer.name === 'hover'
+          ? { ...layer, targets: [{ name: 'body', properties: [{ name: 'scale', value: '2' }] }] }
+          : layer,
+      ),
+    }
+
+    first.instance.previewComposition(from, to, [], candidate)
+
+    expect(first.instance.definition).toBe(original)
+    expect(second.instance.animations).toHaveLength(0)
+    expect(second.element.style.scale).toBe('1')
+
+    first.instance.updateParameters({ hover: true, press: false, size: 1.4 })
+    first.instance.endCompositionPreview()
+
+    expect(first.instance.composition).toEqual(to)
+    expect(first.element.style.scale).toBe('1.4')
+  })
+
+  it('restores external CSS when the application has no active property', () => {
+    const source = timedDefinition()
+    const { instance, element } = setup({
+      ...source,
+      layers: source.layers?.filter((layer) => layer.name !== 'base'),
+    })
+    element.style.scale = '.7'
+    const off = { layers: { hover: false, press: false }, states: {} }
+    const on = { layers: { hover: true, press: false }, states: {} }
+
+    instance.previewComposition(off, on)
+    expect(element.style.scale).toBe('1.1')
+
+    instance.endCompositionPreview()
+    expect(element.style.scale).toBe('0.7')
+  })
+
+  it('keeps application machine history while previewing another state', () => {
+    const { instance } = setup(
+      {
+        ...timedDefinition(),
+        layers: [
+          {
+            name: 'machine',
+            targets: [],
+            initialState: 'idle',
+            states: [
+              {
+                name: 'idle',
+                targets: [{ name: 'body', properties: [{ name: 'scale', value: '1' }] }],
+              },
+              {
+                name: 'done',
+                targets: [{ name: 'body', properties: [{ name: 'scale', value: '2' }] }],
+              },
+            ],
+            transitions: [
+              { from: 'idle', to: 'done', when: ref('hover'), transition: { targets: [] } },
+            ],
+          },
+        ],
+      },
+      { hover: true, press: false, size: 1.1 },
+    )
+    const idle = { layers: {}, states: { machine: 'idle' } }
+    const done = { layers: {}, states: { machine: 'done' } }
+
+    instance.previewComposition(done, idle)
+    instance.endCompositionPreview()
+    instance.updateParameters({ hover: false, press: false, size: 1.1 })
+
+    expect(instance.composition).toEqual(done)
+  })
+
+  it('releases preview effects on unmount and rejects further previews', () => {
+    const { instance, element } = setup(timedDefinition())
+
+    instance.previewComposition(from, to)
+    instance.dispose()
+
+    expect(instance.animations).toHaveLength(0)
+    expect(element.style.scale).toBe('')
+    expect(() => instance.previewComposition(from, to)).toThrow('mounted layer instance')
+  })
+
+  it('keeps paused scrubbing available across reduced-motion changes', async () => {
+    const session = cdp()
+    const { instance, element } = setup(timedDefinition(200))
+
+    await session.send('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
+    })
+
+    try {
+      instance.previewComposition(from, to)
+      const animation = instance.animations[0]
+      await animation.ready
+      animation.currentTime = 100
+
+      expect(Number(getComputedStyle(element).scale)).toBeGreaterThan(1)
+      expect(Number(getComputedStyle(element).scale)).toBeLessThan(1.1)
+
+      await session.send('Emulation.setEmulatedMedia', {
+        features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+      })
+      animation.currentTime = 0
+
+      expect(Number(getComputedStyle(element).scale)).toBeCloseTo(1)
+    } finally {
+      instance.endCompositionPreview()
+      await session.send('Emulation.setEmulatedMedia', {
+        features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+      })
+    }
+  })
+
+  it('scrubs duration springs using the existing sampler', async () => {
+    const source = timedDefinition()
+    const { instance, element } = setup({
+      ...source,
+      layers: source.layers?.map((layer) =>
+        layer.name === 'base'
+          ? {
+              ...layer,
+              targets: [
+                {
+                  name: 'body',
+                  properties: [
+                    {
+                      name: 'scale',
+                      value: '1',
+                      timing: { kind: 'spring-duration', durationMs: 400, bounce: 0.2 },
+                    },
+                  ],
+                },
+              ],
+            }
+          : layer,
+      ),
+    })
+
+    instance.previewComposition(from, to)
+    const animation = instance.animations[0]
+    await animation.ready
+    animation.currentTime = 400
+
+    expect(Number(getComputedStyle(element).scale)).toBeCloseTo(1.1)
+
+    animation.currentTime = 0
+    expect(Number(getComputedStyle(element).scale)).toBeCloseTo(1)
+  })
+
+  it('ends previews when targets are removed', () => {
+    const { instance, element } = setup(timedDefinition())
+
+    instance.previewComposition(from, to)
+    instance.bind([])
+
+    expect(element.style.scale).toBe('')
+    expect(instance.animations).toHaveLength(0)
+    expect(() => instance.previewComposition(from, to)).toThrow('mounted layer instance')
+  })
+
+  it('ends previews when the definition is replaced', () => {
+    const { instance, element } = setup(timedDefinition())
+
+    instance.previewComposition(from, to)
+    instance.replaceDefinition(definition)
+
+    expect(element.style.scale).toBe('1')
+    expect(instance.animations).toHaveLength(0)
+  })
+
+  it('animates equal compositions with intermediate style motion', async () => {
+    const { instance, element } = setup({
+      ...definition,
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'scale',
+                  value: '1',
+                  timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
+                  keyframes: [
+                    { offset: 0.5, value: '2' },
+                    { offset: 1, value: '1' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+    const composition = { layers: { base: true }, states: {} }
+
+    instance.previewComposition(composition, composition)
+    const animation = instance.animations[0]
+    await animation.ready
+    animation.currentTime = 100
+
+    expect(Number(getComputedStyle(element).scale)).toBeCloseTo(2)
+  })
+
+  it('reports explicit endpoint disagreement and restores the resolved destination', () => {
+    const { instance, errors } = setup({
+      ...definition,
+      layers: [
+        {
+          name: 'machine',
+          targets: [],
+          initialState: 'idle',
+          states: [
+            {
+              name: 'idle',
+              targets: [
+                {
+                  name: 'body',
+                  properties: [
+                    {
+                      name: 'scale',
+                      value: '1',
+                      timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+          transitions: [
+            {
+              from: 'idle',
+              to: 'idle',
+              when: ref('hover'),
+              transition: {
+                targets: [
+                  {
+                    name: 'body',
+                    properties: [{ name: 'scale', keyframes: [{ offset: 1, value: '2' }] }],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    })
+    const composition = { layers: {}, states: { machine: 'idle' } }
+
+    instance.previewComposition(composition, composition, [{ layer: 'machine', index: 0 }])
+
+    expect(errors.at(-1)?.code).toBe('runtime.endpoint')
+  })
+
+  it('previews mounted targets while lifecycle-managed targets are absent', () => {
+    const source = timedDefinition()
+    const { instance, element } = setup({
+      ...source,
+      enter: { targets: [] },
+      layers: [
+        ...(source.layers ?? []),
+        {
+          name: 'optional',
+          targets: [{ name: 'absent', properties: [{ name: 'opacity', value: '1' }] }],
+        },
+      ],
+    })
+    const before = { ...from, layers: { ...from.layers, optional: true } }
+    const after = { ...to, layers: { ...to.layers, optional: true } }
+
+    instance.previewComposition(before, after)
+
+    expect(instance.animations).toHaveLength(1)
+
+    instance.endCompositionPreview()
+
+    expect(element.style.scale).toBe('1')
+  })
+
+  it('cancels partially prepared effects when a later effect fails', () => {
+    const source = timedDefinition()
+    const { instance, element, errors } = setup({
+      ...source,
+      layers: source.layers?.map((layer) =>
+        layer.name === 'base'
+          ? {
+              ...layer,
+              targets: [
+                {
+                  name: 'body',
+                  properties: [
+                    {
+                      name: 'scale',
+                      value: '1',
+                      timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
+                    },
+                    {
+                      name: 'opacity',
+                      value: '1',
+                      timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
+                    },
+                  ],
+                },
+              ],
+            }
+          : layer,
+      ),
+    })
+    const NativeAnimation = Animation
+    const cancellations: MockInstance<() => void>[] = []
+    vi.stubGlobal(
+      'Animation',
+      vi.fn(function (effect: AnimationEffect, timeline: AnimationTimeline) {
+        const animation = new NativeAnimation(effect, timeline)
+        cancellations.push(vi.spyOn(animation, 'cancel'))
+
+        return animation
+      }),
+    )
+    const NativeEffect = KeyframeEffect
+    const original = new Error('second effect failure')
+    let created = 0
+    vi.stubGlobal(
+      'KeyframeEffect',
+      vi.fn(function (...args: ConstructorParameters<typeof KeyframeEffect>) {
+        if (++created === 2) throw original
+
+        return new NativeEffect(...args)
+      }),
+    )
+
+    try {
+      expect(() => instance.previewComposition(from, to)).toThrow(
+        'Could not prepare composition preview',
+      )
+      expect(cancellations).toHaveLength(1)
+      expect(cancellations[0]).toHaveBeenCalledExactlyOnceWith()
+      expect(element.getAnimations()).toHaveLength(0)
+      expect(instance.animations).toHaveLength(0)
+      expect(errors.at(-1)?.error).toMatchObject({ cause: original })
+      expect(element.style.scale).toBe('1')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('returns preparation failures with their original causes and restores the application', () => {
+    const { instance, element, errors } = setup(timedDefinition())
+    const original = new Error('effect failure')
+    vi.stubGlobal(
+      'KeyframeEffect',
+      vi.fn(function () {
+        throw original
+      }),
+    )
+
+    try {
+      expect(() => instance.previewComposition(from, to)).toThrow(
+        'Could not prepare composition preview',
+      )
+      expect(errors.at(-1)?.error).toMatchObject({ cause: original })
+      expect(instance.animations).toHaveLength(0)
+      expect(element.style.scale).toBe('1')
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

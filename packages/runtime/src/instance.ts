@@ -3,8 +3,10 @@ import {
   layerTargets,
   resolveLayers,
   resolveLayerTracks,
+  resolveComposition,
   type LayerResolution,
   type Composition,
+  type CompositionTransition,
 } from './layers.ts'
 import { waapiProperty } from './animation.ts'
 export { waapiProperty } from './animation.ts'
@@ -78,6 +80,7 @@ export class LivaInstance {
   private owned: OwnedElement[] = []
   private generation = 0
   private manuallyPaused = false
+  private compositionPreview = false
   private disposed = false
   private suspended = true
   private duplicateBindings = false
@@ -135,7 +138,7 @@ export class LivaInstance {
         }
       }
 
-      if (phase === 'enter' && this.layerResolution && !this.disposed) {
+      if (phase === 'enter' && this.layerResolution && !this.disposed && !this.compositionPreview) {
         // Layers may change while enter plays toward its captured destination.
         // Restore first to clear styles absent from the latest presentation, then
         // apply that presentation. Preserve properties owned by remaining lifecycle
@@ -202,6 +205,7 @@ export class LivaInstance {
   }
 
   private cancel(cancelEnter = true) {
+    this.compositionPreview = false
     if (cancelEnter) {
       for (const session of this.enterSessions) session.cancel('superseded')
       this.enterSessions.clear()
@@ -379,6 +383,8 @@ export class LivaInstance {
 
     if (unchanged) return
 
+    this.endCompositionPreview()
+
     this.clearLetBindings()
     this.cancel(false)
     this.restore(this.layerResolution !== undefined && this.enterSessions.size > 0)
@@ -422,6 +428,7 @@ export class LivaInstance {
 
   replaceDefinition(definition: Definition, state = this.state) {
     if (this.disposed) return
+    this.endCompositionPreview()
     if (!definition.layers?.length) getState(definition, state)
 
     const inputs = Object.fromEntries(
@@ -475,6 +482,115 @@ export class LivaInstance {
     }
 
     return this.transitionTo(state, options, this.values)
+  }
+
+  /** Preview explicit selections while retaining the application's definition and machine history. */
+  previewComposition(
+    from: Composition,
+    to: Composition,
+    transitions: readonly CompositionTransition[] = [],
+    definition = this.definition,
+  ): void {
+    if (this.disposed || this.suspended || !this.layerResolution) {
+      throw new Error('Composition preview requires a mounted layer instance')
+    }
+
+    const prepared: ActiveTrack[] = []
+
+    try {
+      const values = new LetBindingGraph(
+        definition.letBindings ?? [],
+        this.values,
+        this.letBindings,
+      ).evaluate(this.values)
+      const previous = resolveComposition(definition, values, from)
+      const next = resolveComposition(definition, values, to, from, transitions)
+
+      this.cancel()
+      this.restore()
+      this.compositionPreview = true
+
+      const present = (resolution: LayerResolution) => {
+        for (const target of resolution.presentation.targets) {
+          for (const element of this.targetElements.get(target.name) ?? []) {
+            for (const property of target.properties) {
+              this.write(element, property.name, property.value)
+            }
+          }
+        }
+      }
+
+      present(previous)
+
+      for (const [target, elements] of this.targetElements) {
+        const targetResolution = {
+          ...next,
+          presentation: {
+            ...next.presentation,
+            targets: next.presentation.targets.filter((item) => item.name === target),
+          },
+        }
+
+        for (const element of elements) {
+          const tracks = resolveLayerTracks(
+            previous,
+            targetResolution,
+            values,
+            (_name, property) => getComputedStyle(element).getPropertyValue(property),
+            (message) => this.report({ code: 'runtime.endpoint', message }),
+            () => true,
+          )
+
+          for (const track of tracks) {
+            const timing =
+              track.timing.kind === 'tween'
+                ? { durationMs: track.timing.durationMs, easing: 'linear' }
+                : sampleSpring(track.timing)
+            const animation = new Animation(
+              new KeyframeEffect(
+                element,
+                track.keyframes.map((frame) => ({
+                  [waapiProperty(track.property)]: frame.value,
+                  offset: frame.offset,
+                  easing: frame.easing,
+                })),
+                { duration: timing.durationMs, easing: timing.easing, fill: 'backwards' },
+              ),
+              document.timeline,
+            )
+
+            prepared.push({ track, element, animation })
+          }
+        }
+      }
+
+      this.restore()
+      present(next)
+      this.active = prepared
+      this.manuallyPaused = true
+
+      for (const { animation } of prepared) {
+        animation.pause()
+        animation.currentTime = 0
+      }
+    } catch (cause) {
+      for (const { animation } of prepared) animation.cancel()
+
+      this.cancel()
+      this.restore()
+      this.settle()
+      const error = new Error('Could not prepare composition preview', { cause })
+      this.report({ code: 'runtime.preview', message: error.message, error })
+      throw error
+    }
+  }
+
+  endCompositionPreview(): void {
+    if (!this.compositionPreview) return
+
+    this.cancel()
+    this.restore()
+    this.settle()
   }
 
   /** Prepare scrub-ready lifecycle effects without invoking presence removal callbacks. */
@@ -699,6 +815,7 @@ export class LivaInstance {
   }
 
   private applyVariableValues(values: VariableValues) {
+    this.endCompositionPreview()
     const previous = this.values
 
     try {

@@ -25,6 +25,9 @@ function binding(label: string) {
     definition,
     state: 'off',
     animations: [],
+    composition: undefined,
+    previewComposition: vi.fn<InstanceBinding['runtime']['previewComposition']>(),
+    endCompositionPreview: vi.fn<InstanceBinding['runtime']['endCompositionPreview']>(),
     replaceDefinition: vi.fn<InstanceBinding['runtime']['replaceDefinition']>(function (
       this: { definition: Definition },
       next: Definition,
@@ -412,4 +415,88 @@ it('rejects timeline preview and save for layers without replacing the live defi
 
   expect(send).toHaveBeenCalledTimes(1)
   expect(first.runtime.replaceDefinition).not.toHaveBeenCalled()
+})
+
+describe('composition preview coordination', () => {
+  const from = { layers: { base: true }, states: {} }
+  const to = { layers: { base: false }, states: {} }
+
+  it('applies only the latest mounted preview response without replacing application definitions', async () => {
+    const pending: ReturnType<typeof deferred<EditorReply>>[] = []
+    const requests: EditorRequest[] = []
+    const { controller, first } = await setup(async (request) => {
+      if (request.action === 'inspect') return reply
+      const item = deferred<EditorReply>()
+      pending.push(item)
+      requests.push(request)
+      return item.promise
+    })
+
+    const old = controller.previewComposition(from, to)
+    const latest = controller.previewComposition(to, from)
+    pending[1].resolve({ ...reply, sequence: requests[1].sequence })
+    await latest
+    pending[0].resolve({ ...reply, sequence: requests[0].sequence })
+    await old
+
+    expect(first.runtime.previewComposition).toHaveBeenCalledExactlyOnceWith(
+      to,
+      from,
+      [],
+      definition,
+    )
+    expect(first.runtime.replaceDefinition).not.toHaveBeenCalled()
+    expect(controller.previewActive).toBe(true)
+  })
+
+  it.each(['close', 'discard', 'selection', 'update', 'unmount'] as const)(
+    'invalidates pending replies on %s',
+    async (action) => {
+      const pending = deferred<EditorReply>()
+      let sequence: number | undefined
+      const { controller, first, second } = await setup(async (request) => {
+        if (request.action === 'inspect') return reply
+        sequence = request.sequence
+        return pending.promise
+      })
+
+      const preview = controller.previewComposition(from, to)
+
+      if (action === 'close') controller.endPreview()
+      if (action === 'discard') await controller.cancel()
+      if (action === 'selection')
+        await controller.select(
+          [...controller.entries.values()].find((entry) => entry.binding === second)!.id,
+        )
+      if (action === 'update') controller.observe('update', first)
+      if (action === 'unmount') controller.observe('unmount', first)
+
+      pending.resolve({ ...reply, sequence })
+      await preview
+
+      expect(first.runtime.previewComposition).not.toHaveBeenCalled()
+      expect(controller.previewActive).toBe(false)
+    },
+  )
+
+  it('rejects preview requests with no mounted selection', async () => {
+    const controller = new EditorController(async () => reply)
+
+    await expect(controller.previewComposition(from, to)).rejects.toThrow('mounted instance')
+  })
+
+  it('returns runtime failures to callers with their cause intact', async () => {
+    const { controller, first } = await setup(async (request) => ({
+      ...reply,
+      sequence: request.sequence,
+    }))
+    const cause = new Error('WAAPI failed')
+    const error = new Error('Preview failed', { cause })
+    first.runtime.previewComposition.mockImplementation(() => {
+      throw error
+    })
+
+    await expect(controller.previewComposition(from, to)).rejects.toBe(error)
+    expect(controller.previewActive).toBe(false)
+  })
 })
