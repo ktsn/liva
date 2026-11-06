@@ -47,3 +47,15 @@ motion button {
   enter { body { opacity: 0 } }
 //^ keyword
 }
+
+motion animation(curve: easing, duration: timing) {
+//                      ^ type
+//                                        ^ type
+  layer base {
+    body @tween(duration: 200, easing: easeOut) {
+//              ^ property
+//                             ^ property
+      opacity: 1
+    }
+  }
+}
