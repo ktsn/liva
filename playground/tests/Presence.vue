@@ -69,7 +69,7 @@ function updateBindings() {
 }
 </style>
 
-<liva>
+<liva lang="liva">
 motion panel {
   state idle {
     direct { opacity: 1 }

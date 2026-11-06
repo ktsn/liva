@@ -31,7 +31,7 @@ const focused = ref(false)
   </section>
 </template>
 
-<liva>
+<liva lang="liva">
 motion button(hovered: boolean, pressed: boolean, focused: boolean) {
   layer base {
     body @tween(duration: 180, easing: easeOut) {

@@ -20,7 +20,7 @@ const distance = ref(40)
   </div>
 </template>
 
-<liva>
+<liva lang="liva">
 motion panel(open: boolean, distance: number) {
   layer base {
     content { opacity: 1; translate: 0px 0; border-radius: 0px }

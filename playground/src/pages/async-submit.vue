@@ -34,7 +34,7 @@ onScopeDispose(() => clearTimeout(timer))
   </section>
 </template>
 
-<liva>
+<liva lang="liva">
 motion submit(busy: boolean, completed: boolean) {
   layer request {
     body @tween(duration: 240, easing: easeOut) { scale: 1; opacity: 1; background-color: #d9f3e8 }
