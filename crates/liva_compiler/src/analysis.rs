@@ -97,6 +97,7 @@ pub fn hovers(source: &str) -> Vec<Hover> {
             let text = decorator.text().to_string();
             let value = liva_syntax::parse_expression(&text[1..]);
             let mut local = vec![];
+
             expression_hovers(&value.root, &scope, &mut local);
 
             for mut hover in local {

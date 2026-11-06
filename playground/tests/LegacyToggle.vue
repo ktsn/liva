@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+
 defineProps<{ label: string }>()
 const checked = ref(false)
 </script>

@@ -93,12 +93,14 @@ it('previews motion-level lifecycle endpoints in the selected legacy state', asy
   expect(transitionPath(model, 'idle', 'idle', false, 'enter')).toBe('panel/enter')
 
   const enter = timelineTracks(model, 'idle', 'idle', true, 'enter')[0]
+
   expect(enter.frames.map((frame) => frame.value)).toEqual(['0', '1'])
   expect(enter.duration).toBe(200)
 
   const leave = timelineTracks(model, 'idle', 'idle', true, 'leave').find(
     (track) => track.property === 'translate',
   )!
+
   expect(leave.frames.map((frame) => frame.value)).toEqual(['', '10px 0'])
   expect(leave.duration).toBe(300)
 })

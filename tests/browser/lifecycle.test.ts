@@ -114,17 +114,22 @@ test('enter keeps its snapshot while unrelated properties update and completion 
     )
 
   expect(endpoints.some((frame) => frame?.scale === '1')).toBe(true)
+
   await finishAnimations(page)
 
   expect(await presentation(page)).toEqual({ opacity: '1', scale: '0.9', translate: '0px' })
+
   await page.locator('#remove').click()
   await finishAnimations(page)
+
   await expect(page.locator('#card')).toHaveCount(0)
+
   await page.locator('#remove').click()
 
   await expect
     .poll(() => page.locator('#card').evaluate((element) => element.getAnimations().length))
     .toBe(3)
+
   await finishAnimations(page)
 
   expect(await presentation(page)).toEqual({ opacity: '1', scale: '0.9', translate: '0px' })

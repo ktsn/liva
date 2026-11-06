@@ -140,6 +140,7 @@ fn layer_guards_and_decorators_expose_expression_types_at_source_offsets() {
         ("active\n", "active: boolean"),
     ] {
         let offset = source.find(text).unwrap();
+
         assert!(
             found
                 .iter()
@@ -147,6 +148,7 @@ fn layer_guards_and_decorators_expose_expression_types_at_source_offsets() {
             "{text}: {found:?}"
         );
     }
+
     assert!(found.iter().any(|hover| hover.label.starts_with("tween(")
         && hover.range.start == source.find("tween(").unwrap()));
 }
