@@ -178,58 +178,113 @@ impl ExprExt for Expr {
                 let function = self
                     .function()
                     .ok_or_else(|| self.error("Expected function name"))?;
-                let signature = crate::builtins::lookup(&function.text())
+                let metadata = crate::builtins::lookup(&function.text())
                     .map_err(|message| name_error(&function, message))?;
                 let mut seen = BTreeSet::new();
+                let arguments: Vec<_> = self.arguments().collect();
 
-                for argument in self.arguments() {
+                for argument in &arguments {
                     let name = argument
                         .name()
                         .ok_or_else(|| self.error("Expected argument name"))?;
+
                     if !seen.insert(name.text()) {
                         return Err(name_error(
                             &name,
                             format!("Duplicate argument: {}", name.text()),
                         ));
                     }
-                    let parameter = signature
-                        .parameters
-                        .iter()
-                        .find(|parameter| parameter.name == name.text())
-                        .ok_or_else(|| {
-                            name_error(
-                                &name,
-                                format!(
-                                    "Unknown argument for {}: {}",
-                                    function.text(),
-                                    name.text()
-                                ),
-                            )
-                        })?;
+                }
+
+                let mut candidates: Vec<_> = metadata.signatures.iter().collect();
+
+                for argument in &arguments {
+                    let name = argument
+                        .name()
+                        .ok_or_else(|| self.error("Expected argument name"))?;
                     let value = argument
                         .value()
                         .ok_or_else(|| self.error("Expected argument value"))?;
                     let actual = value.check(scope)?;
-                    if actual != parameter.value_type {
+                    let parameters: Vec<_> = metadata
+                        .signatures
+                        .iter()
+                        .flat_map(|signature| signature.parameters)
+                        .filter(|parameter| parameter.name == name.text())
+                        .collect();
+
+                    if parameters.is_empty() {
+                        return Err(name_error(
+                            &name,
+                            format!("Unknown argument for {}: {}", function.text(), name.text()),
+                        ));
+                    }
+
+                    if !parameters
+                        .iter()
+                        .any(|parameter| parameter.value_type == actual)
+                    {
                         return Err(value.error(format!(
                             "Invalid argument type for {}.{}: expected {:?}, got {:?}",
                             function.text(),
                             name.text(),
-                            parameter.value_type,
+                            parameters[0].value_type,
                             actual
                         )));
                     }
-                }
-                for parameter in signature.parameters {
-                    if !parameter.optional && !seen.contains(parameter.name) {
-                        return Err(self.error(format!(
-                            "Missing argument for {}: {}",
-                            function.text(),
-                            parameter.name
-                        )));
+
+                    if function.text() == "steps"
+                        && name.text() == "position"
+                        && let Ok(position) = value.string_value()
+                        && ![
+                            "start",
+                            "end",
+                            "jump-start",
+                            "jump-end",
+                            "jump-none",
+                            "jump-both",
+                        ]
+                        .contains(&position.as_str())
+                    {
+                        return Err(value.error("Unsupported step position: use start, end, jump-start, jump-end, jump-none, or jump-both"));
                     }
+
+                    candidates.retain(|signature| {
+                        signature.parameters.iter().any(|parameter| {
+                            parameter.name == name.text() && parameter.value_type == actual
+                        })
+                    });
                 }
-                Ok(signature.return_type)
+
+                if let Some(signature) = candidates.iter().find(|signature| {
+                    signature
+                        .parameters
+                        .iter()
+                        .all(|parameter| parameter.optional || seen.contains(parameter.name))
+                }) {
+                    return Ok(signature.return_type);
+                }
+
+                if let Some(signature) = candidates.first() {
+                    let missing = signature
+                        .parameters
+                        .iter()
+                        .filter(|parameter| !parameter.optional && !seen.contains(parameter.name))
+                        .map(|parameter| parameter.name)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return Err(self.error(format!(
+                        "Missing argument for {}: {}",
+                        function.text(),
+                        missing
+                    )));
+                }
+
+                Err(self.error(format!(
+                    "Incompatible argument groups for {}: {}",
+                    function.text(),
+                    seen.into_iter().collect::<Vec<_>>().join(", ")
+                )))
             }
             ExprView::Unary => {
                 let value = operand(self, 0)?;

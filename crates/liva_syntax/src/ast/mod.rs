@@ -63,6 +63,18 @@ pub trait AstNode: Sized {
     fn child<N: AstNode>(&self) -> Option<N> {
         self.children().next()
     }
+
+    fn decorators(&self) -> impl Iterator<Item = Decorator> {
+        self.syntax()
+            .children()
+            .filter(|child| matches!(child.kind(), Kind::Header | Kind::Value))
+            .flat_map(|child| {
+                child
+                    .children()
+                    .filter_map(Decorator::cast)
+                    .collect::<Vec<_>>()
+            })
+    }
 }
 
 impl AstNode for SyntaxNode {
@@ -123,7 +135,7 @@ fn without_decorator(node: &impl AstNode) -> String {
         .children_with_tokens()
         .filter(|element| element.kind() != Kind::Decorator)
         .map(|element| match element {
-            rowan::NodeOrToken::Node(child) => child.semantic_text(),
+            rowan::NodeOrToken::Node(child) => format!(" {} ", child.semantic_text()),
             rowan::NodeOrToken::Token(token)
                 if token.kind() == Kind::Trivia
                     && (token.text().starts_with("/*") || token.text().starts_with("//")) =>

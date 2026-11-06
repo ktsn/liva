@@ -1,6 +1,6 @@
 import { timingValue } from './timing-values.ts'
 import { normalizeFrames, type ResolvedTrack } from './resolve.ts'
-import type { Definition, GuardedTransition, Property, State, Target } from './definition.ts'
+import type { Definition, GuardedTransition, Layer, Property, State, Target } from './definition.ts'
 import {
   evaluate,
   renderValue,
@@ -61,27 +61,51 @@ function resolveLayerSelection(
   const targets = new Map<string, Map<string, LayerProperty>>()
   const timings = new Map<string, Map<string, NonNullable<Property['timing']>>>()
 
-  const contribute = (layerName: string, contribution: readonly Target<Property>[]) => {
-    for (const target of contribution) {
-      let properties = targets.get(target.name)
+  const contribute = (layer: Layer, state?: State) => {
+    const contributions = new Map<string, Map<string, Property>>()
+
+    for (const target of [...layer.targets, ...(state?.targets ?? [])]) {
+      let properties = contributions.get(target.name)
 
       if (!properties) {
         properties = new Map()
-        targets.set(target.name, properties)
-        timings.set(target.name, new Map())
+        contributions.set(target.name, properties)
       }
 
-      for (const property of target.properties) {
-        const timing = property.timingExpression
-          ? timingValue(evaluate(property.timingExpression, values))
-          : property.timing
+      for (const property of target.properties) properties.set(property.name, property)
+    }
+
+    for (const [targetName, contribution] of contributions) {
+      let properties = targets.get(targetName)
+
+      if (!properties) {
+        properties = new Map()
+        targets.set(targetName, properties)
+        timings.set(targetName, new Map())
+      }
+
+      const commonTarget = layer.targets.find((target) => target.name === targetName)
+      const stateTarget = state?.targets.find((target) => target.name === targetName)
+
+      for (const property of contribution.values()) {
+        const provider = [
+          stateTarget?.properties.find((item) => item.name === property.name),
+          stateTarget,
+          state,
+          commonTarget?.properties.find((item) => item.name === property.name),
+          commonTarget,
+          layer,
+        ].find((item) => item?.timingExpression || item?.timing)
+        const timing = provider?.timingExpression
+          ? timingValue(evaluate(provider.timingExpression, values))
+          : provider?.timing
 
         // Timing and property maps are initialized together for each target.
-        if (timing) timings.get(target.name)!.set(property.name, timing)
+        if (timing) timings.get(targetName)!.set(property.name, timing)
 
         properties.set(property.name, {
           ...property,
-          owner: layerName,
+          owner: layer.name,
           value: renderValue(property, values),
           keyframes: property.keyframes?.map((frame) => renderFrame(frame, values)),
         })
@@ -98,9 +122,10 @@ function resolveLayerSelection(
 
     if (!active) continue
 
-    contribute(layer.name, layer.targets)
-
-    if (!layer.states?.length) continue
+    if (!layer.states?.length) {
+      contribute(layer)
+      continue
+    }
 
     const current = previous.get(layer.name) ?? layer.initialState
     const selected = advance
@@ -117,7 +142,7 @@ function resolveLayerSelection(
 
     if (selected) transitions.set(layer.name, selected)
 
-    contribute(layer.name, state.targets)
+    contribute(layer, state)
   }
 
   return {
@@ -233,22 +258,36 @@ export function resolveLayerTracks(
     for (const property of target.properties) {
       const owner = property.owner
       const transition = next.transitions.get(owner)?.transition
-      const instruction = transition?.targets
-        .find((item) => item.name === target.name)
-        ?.properties.find((item) => item.name === property.name)
+      const transitionTarget = transition?.targets.find((item) => item.name === target.name)
+      const instruction = transitionTarget?.properties.find((item) => item.name === property.name)
       if (
         !layerPropertyChanged(previous, target.name, property) &&
         !instruction &&
+        !transition?.timingExpression &&
+        !transition?.timing &&
+        !transitionTarget?.timingExpression &&
+        !transitionTarget?.timing &&
         !retarget(target.name, property.name)
       )
         continue
 
-      const override = instruction
-        ? renderTransition({ targets: [{ name: target.name, properties: [instruction] }] }, values)
-            .targets[0].properties[0]
+      const rendered = transition
+        ? renderTransition(
+            {
+              ...transition,
+              targets: [
+                {
+                  ...transitionTarget,
+                  name: target.name,
+                  properties: [instruction ?? { name: property.name }],
+                },
+              ],
+            },
+            values,
+          )
         : undefined
-      const timing =
-        override?.timing ?? (instruction ? transition?.timing : undefined) ?? property.timing
+      const override = rendered?.targets[0].properties[0]
+      const timing = override?.timing ?? rendered?.timing ?? property.timing
 
       if (!timing) continue
 
@@ -267,7 +306,8 @@ export function resolveLayerTracks(
         timing,
         destinationValue: property.value,
         implicitStart: !explicit?.some((frame) => frame.offset === 0),
-        directionalOwner: instruction ? owner : undefined,
+        directionalOwner:
+          instruction || rendered?.timing || rendered?.targets[0].timing ? owner : undefined,
         ownerState: next.states.get(owner),
         keyframes: normalizeFrames(
           displayed(target.name, property.name),

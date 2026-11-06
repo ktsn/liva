@@ -106,4 +106,118 @@ describe('typed timing values', () => {
     expect(() => timingValue(value)).toThrow('Expected timing value')
     expect(easingConstant('missing')).toBeUndefined()
   })
+
+  it('evaluates dynamic duration springs and preserves requested duration', () => {
+    const graph = new LetBindingGraph(
+      [
+        {
+          name: 'motion',
+          initializer: call('spring', {
+            duration: reference('duration'),
+            bounce: reference('bounce'),
+          }),
+        },
+      ],
+      { duration: 400, bounce: 0.25 },
+    )
+    const before = timingValue(graph.evaluate({ duration: 400, bounce: 0.25 }).motion)
+    const after = timingValue(graph.evaluate({ duration: 700, bounce: 0 }).motion)
+
+    expect(before).toEqual({ kind: 'spring-duration', durationMs: 400, bounce: 0.25 })
+    if (before.kind !== 'spring-duration' || after.kind !== 'spring-duration') {
+      throw new Error('Expected duration springs')
+    }
+
+    expect(sampleSpring(before).durationMs).toBe(400)
+    expect(sampleSpring(after).durationMs).toBe(700)
+    expect(() => graph.evaluate({ duration: 0, bounce: 0 })).toThrow('duration')
+  })
+
+  it('defaults duration spring bounce to zero', () => {
+    const value = evaluate(call('spring', { duration: number(400) }), {})
+
+    expect(timingValue(value)).toEqual({ kind: 'spring-duration', durationMs: 400, bounce: 0 })
+    expect(Object.isFrozen(value)).toBe(true)
+  })
+
+  it.each<Parameters<typeof callTiming>[1]>([
+    { duration: 0 },
+    { duration: -1 },
+    { duration: Infinity },
+    { duration: NaN },
+    { duration: 400, bounce: -0.1 },
+    { duration: 400, bounce: 1 },
+    { duration: 400, bounce: Infinity },
+    { bounce: 0.25 },
+    { duration: 400, damping: 20 },
+  ])('rejects invalid duration spring arguments: %j', (args) => {
+    expect(() => callTiming('spring', args)).toThrow(/Spring|Expected/)
+  })
+
+  it.each([
+    { kind: 'spring-duration', durationMs: '400', bounce: 0 },
+    { kind: 'spring-duration', durationMs: 400, bounce: '0' },
+    { kind: 'spring-duration', durationMs: Infinity, bounce: 0 },
+    { kind: 'spring-duration', durationMs: 400, bounce: Infinity },
+  ])('rejects malformed duration spring values: %j', (value) => {
+    expect(() => timingValue(value)).toThrow(/Spring|Expected/)
+  })
+
+  it.each(['start', 'end', 'jump-start', 'jump-end', 'jump-none', 'jump-both'])(
+    'serializes step position %s for the browser',
+    (position) => {
+      const value = evaluate(
+        call('steps', { count: number(4), position: { kind: 'string', value: position } }),
+        {},
+      )
+
+      expect(easingCss(value)).toBe(`steps(4, ${position})`)
+    },
+  )
+
+  it('evaluates dynamic step count and position and validates subsequent updates', () => {
+    const graph = new LetBindingGraph(
+      [
+        {
+          name: 'curve',
+          initializer: call('steps', {
+            count: reference('count'),
+            position: reference('position'),
+          }),
+        },
+      ],
+      { count: 4, position: 'jump-end' },
+    )
+
+    expect(easingCss(graph.evaluate({ count: 4, position: 'jump-end' }).curve)).toBe(
+      'steps(4, jump-end)',
+    )
+    expect(easingCss(graph.evaluate({ count: 2, position: 'start' }).curve)).toBe('steps(2, start)')
+    expect(() => graph.evaluate({ count: 1, position: 'jump-none' })).toThrow('at least 2')
+  })
+
+  it('defaults steps to end', () => {
+    expect(easingCss(evaluate(call('steps', { count: number(3) }), {}))).toBe('steps(3, end)')
+  })
+
+  it.each([
+    ['stepStart', 'step-start'],
+    ['stepEnd', 'step-end'],
+  ])('resolves the %s easing constant', (name, css) => {
+    expect(easingCss(evaluate(reference(name), {}))).toBe(css)
+  })
+
+  it.each<Parameters<typeof callTiming>[1]>([
+    { count: 0 },
+    { count: -1 },
+    { count: 1.5 },
+    { count: Infinity },
+    { count: NaN },
+    { count: '4' },
+    { count: 4, position: 'middle' },
+    { count: 4, position: 1 },
+    { count: 1, position: 'jump-none' },
+  ])('rejects invalid step easing arguments: %j', (args) => {
+    expect(() => callTiming('steps', args)).toThrow(/Step count|step position|Expected/)
+  })
 })

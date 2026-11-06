@@ -224,10 +224,21 @@ export class LivaInstance {
                   ?.properties.some((item) => item.name === property.name && item.owner === name),
               )
 
-              return properties.length ? [{ name: target.name, properties }] : []
+              return resolution.presentation.targets.some(
+                (item) =>
+                  item.name === target.name &&
+                  item.properties.some((property) => property.owner === name),
+              )
+                ? [{ ...target, properties }]
+                : []
             })
 
-            if (!targets.length) return []
+            if (
+              !resolution.presentation.targets.some((target) =>
+                target.properties.some((property) => property.owner === name),
+              )
+            )
+              return []
 
             const rendered = renderTransition({ ...transition.transition, targets }, values)
 
@@ -237,9 +248,10 @@ export class LivaInstance {
                 {
                   ...transition,
                   transition: {
-                    ...rendered,
+                    timing: rendered.timing,
                     targets: rendered.targets.map((target) => ({
                       name: target.name,
+                      timing: target.timing,
                       properties: target.properties.map((property) => ({
                         name: property.name,
                         timing: property.timing,

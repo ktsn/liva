@@ -197,7 +197,9 @@ test('normal Vue playground includes a draggable card selectable in the editor',
   expect(await page.evaluate(() => window.__LIVA_EDITOR__.selected?.binding.definition.name)).toBe(
     'card',
   )
-  expect(await page.evaluate(() => window.__LIVA_EDITOR__.message)).toContain('read-only')
+  expect(await page.evaluate(() => window.__LIVA_EDITOR__.message)).toContain(
+    'Saving updates the shared source',
+  )
   await expect(card).toHaveCSS('scale', '1')
 })
 

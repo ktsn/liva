@@ -18,6 +18,8 @@ import type {
   Timing,
 } from '@liva/runtime'
 import { sampleSpring } from '@liva/runtime'
+import CompositionInspector from './CompositionInspector.ce.vue'
+import { trackProvenance } from '../provenance.ts'
 import type { EditorController } from '../controller.ts'
 import type { Edit, Inspection } from '../communication/protocol.ts'
 import {
@@ -43,6 +45,7 @@ const props = defineProps<{
   active: boolean
   stale: boolean
 }>()
+const candidateInspection = shallowRef(props.inspection)
 const model = shallowRef<Definition>(editableDefinition(props.inspection.definition))
 const layers = model.value.layers ?? []
 const layered = layers.length > 0
@@ -81,11 +84,12 @@ const timelineResult = computed(() => {
 
     return {
       tracks: compositionTimelineTracks(
-        runtime.inspectComposition(before),
+        runtime.inspectComposition(before, undefined, [], model.value),
         runtime.inspectComposition(
           after,
           before,
           selectedTransition.value ? [selectedTransition.value] : [],
+          model.value,
         ),
       ),
     }
@@ -164,6 +168,19 @@ const selection = computed(() =>
   ),
 )
 
+const selectionProvenance = computed(
+  () =>
+    selection.value &&
+    trackProvenance(
+      candidateInspection.value,
+      compositionFrom.value,
+      compositionTo.value,
+      selectedTransition.value,
+      selection.value.target,
+      selection.value.property,
+    ),
+)
+
 async function changeZoom(value: number) {
   const scroller = timeline.value!
   const lane = rulerLane.value!
@@ -228,11 +245,16 @@ async function prepare() {
   busy.value = true
   try {
     if (layered) {
-      await props.controller.previewComposition(
+      const reply = await props.controller.previewComposition(
         compositionFrom.value,
         compositionTo.value,
         selectedTransition.value ? [selectedTransition.value] : [],
       )
+
+      if (reply && current === generation) {
+        candidateInspection.value = reply
+        model.value = reply.definition
+      }
     } else
       await props.controller.preview(
         to.value,
@@ -286,6 +308,32 @@ async function play() {
     else stop()
   }
   frameId = requestAnimationFrame(tick)
+}
+
+async function editComposition(edits: Edit[]) {
+  endPreview()
+  const editingSelection = selected.value
+  const previous = props.controller.draft
+  const candidate = [...previous, ...edits]
+  props.controller.setDraft(candidate)
+  const succeeded = await prepare()
+
+  if (!succeeded && props.controller.draft === candidate) props.controller.setDraft(previous)
+
+  if (succeeded && selected.value === editingSelection && editingSelection) {
+    for (const edit of edits) {
+      if (edit.op === 'addFrame')
+        selected.value = { ...editingSelection, offset: (edit.offset * 100) / 100, pending: false }
+      else if (edit.op === 'set' && edit.path.endsWith('/offset'))
+        selected.value = {
+          ...editingSelection,
+          offset: parseFloat(edit.value) / 100,
+          pending: false,
+        }
+      else if (edit.op === 'removeFrame')
+        selected.value = { target: editingSelection.target, property: editingSelection.property }
+    }
+  }
 }
 
 function schedule(edit: Edit, definition: Definition) {
@@ -698,8 +746,18 @@ onScopeDispose(() => {
         <div aria-hidden="true" class="playhead-overlay"><span /></div>
       </div>
     </div>
+    <CompositionInspector
+      v-if="selection && layered"
+      :track="selection"
+      :provenance="selectionProvenance!"
+      :offset="selected?.offset"
+      :pending="selected?.pending"
+      @edit="editComposition"
+      @add="add(selection!, time / selection!.duration)"
+      @error="report"
+    />
     <TimelineInspector
-      v-if="selection"
+      v-else-if="selection"
       :track="selection"
       :offset="selected?.offset"
       :pending="selected?.pending"

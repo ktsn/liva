@@ -181,8 +181,8 @@ Ordinary transition keyframe templates remain unsupported.
 A motion may declare one `enter` and one `leave` directly in its body. Targets
 must be declared in its layers (including local states) or legacy states. The root
 is animated only when explicitly bound as a named target. Lifecycle timing is
-independent of ordinary layer timing and must be supplied on its target/property
-or through legacy timing declarations.
+independent of ordinary layer timing. Lifecycle property timing overrides target
+timing, which overrides the lifecycle shared decorator. All are captured at start.
 
 ```css
 motion panel(open: boolean) {
@@ -457,7 +457,7 @@ steps of the layer animation pipeline.
 ## Timing and easing values
 
 Animation settings are immutable expression values: `tween` and `spring` return
-`timing`; easing constants and `cubicBezier` return `easing`. They describe an
+`timing`; easing constants, `cubicBezier`, and `steps` return `easing`. They describe an
 animation without starting one. Bind and reuse them through `let`:
 
 ```css
@@ -473,9 +473,15 @@ carry no implicit CSS units. The available signatures are:
   milliseconds. Zero duration settles immediately.
 - `spring(stiffness: number = 100, damping: number = 10, mass: number = 1)`:
   positive, finite physical parameters consumed by the runtime spring sampler.
+- `spring(duration: number, bounce: number = 0)`: duration is required, finite,
+  and positive in milliseconds; bounce is finite and in `[0, 1)`. This overload
+  cannot be mixed with stiffness, damping, or mass.
+- `steps(count: number, position: string = "end")`: count is a positive integer.
+  Position is `start`, `end`, `jump-start`, `jump-end`, `jump-none`, or `jump-both`;
+  `jump-none` requires at least two steps.
 - `cubicBezier(x1: number, y1: number, x2: number, y2: number)`: all arguments are
   required and finite; x coordinates must be in `[0, 1]`. Y coordinates may overshoot.
-- Easing constants: `linear`, `ease`, `easeIn`, `easeOut`, `easeInOut`.
+- Easing constants: `linear`, `ease`, `easeIn`, `easeOut`, `easeInOut`, `stepStart`, `stepEnd`.
 
 A timing value is replaced as a whole. Different calls never merge their parameters.
 Timing and easing values cannot be interpolated into CSS or used as Boolean guards.
@@ -486,8 +492,9 @@ expression decorators provide the migration path for these values.
 
 ### Typed animation decorators
 
-Use `@expression` to apply a timing value to a target, a single declaration, or an
-entire property track. A keyframe segment accepts an easing value:
+Use `@expression` to apply a timing value to a layer, state, transition, lifecycle,
+target, single declaration, or entire property track. Motion, let, and event
+declarations cannot have timing decorators. A keyframe segment accepts an easing value:
 
 ```css
 motion button {
@@ -521,8 +528,29 @@ from header names and CSS value text; source-preserving tooling must retain thos
 ### Layer animation selection
 
 Layer values and explicitly supplied timing values cascade independently. A later layer
-may replace a CSS value while retaining timing from a lower layer. Target defaults are
-expanded for the properties declared in that target; property decorators override them.
+may replace a CSS value while retaining timing from a lower layer. Within a layer,
+timing precedence, from highest to lowest, is:
+
+1. Selected transition property, target, then shared timing.
+2. Destination-state property, target, then shared timing.
+3. Layer-common property, target, then shared timing.
+
+State defaults also cover properties inherited from the layer's common style.
+Shared transition timing can animate resolved properties without declaring tracks.
+Headers can span lines, and a guarded transition can omit its body:
+
+```css
+layer interaction @tween(duration: 200) {
+  body { opacity: 1 }
+  state idle initial {}
+  state active @spring(duration: 400) { body { opacity: 0.5 } }
+  transition idle -> active
+    @tween(duration: 300, easing: steps(count: 4))
+    when enabled
+}
+```
+
+Timing remains scoped in the IR so source tools can distinguish defaults and overrides.
 The layer contributing the final CSS value owns its animation. Only that owner's
 selected transition may supply temporary timing or keyframes; obscured transition
 tracks do not animate or produce endpoint warnings.

@@ -11,8 +11,8 @@ import type { EditorRequest, EditorReply, Inspection } from './protocol.ts'
 export class EditorError extends Error {
   readonly status: number
 
-  constructor(status: number, message: string) {
-    super(message)
+  constructor(status: number, message: string, options?: ErrorOptions) {
+    super(message, options)
     this.status = status
   }
 }
@@ -71,6 +71,7 @@ export class EditorService {
       .map(([path, field]) => ({
         path,
         kind: field.kind,
+        range: field.range,
         value:
           field.kind === 'value'
             ? bytes.subarray(field.range.start, field.range.end).toString().trim()
@@ -99,7 +100,7 @@ export class EditorService {
     try {
       changed = applyEdits(snapshot.block, request.edits)
     } catch (error) {
-      throw new EditorError(422, String(error))
+      throw new EditorError(422, String(error), { cause: error })
     }
     const bytes = Buffer.from(snapshot.source)
     const source = Buffer.concat([

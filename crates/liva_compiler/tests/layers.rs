@@ -245,7 +245,7 @@ fn directional_tracks_support_decorators_interpolation_and_implicit_destinations
     let transitions = &result.definitions[0].layers[0].transitions;
 
     assert!(
-        transitions[0].transition.targets[0].properties[0]
+        transitions[0].transition.targets[0]
             .timing_expression
             .is_some()
     );

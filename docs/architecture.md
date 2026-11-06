@@ -91,7 +91,8 @@ references, not dependencies on their full language tooling stacks.
 has its own module; `drag.rs` declares its target argument and return fields.
 The compiler builds one typed variable scope from parameters, inferred let expression types,
 and the targets declared across states. The generic call checker evaluates argument
-types through the expression checker and compares them with the signature.
+types through the expression checker and selects a matching overload. Required
+arguments and incompatible overload groups produce diagnostics.
 Let type inference follows dependencies and rejects cycles. Expression member checking
 follows the variable's inferred type. The syntax parser
 uses ordinary call/argument nodes without knowing any built-in function names.
@@ -138,25 +139,57 @@ Definition {
   parameters?: MotionParameter[]
   letBindings?: LetBinding[]
   events?: { name: string, when: Expression }[]
+  layers?: Layer[]
   enter?: Transition
   leave?: Transition
   states: State[]
   generalTransition?: Transition
   directionalTransitions: { from: string, to: string, transition: Transition }[]
 }
+Layer {
+  name: string
+  when?: Expression
+  timingExpression?: Expression
+  targets: Target<Property>[]
+  states?: State[]
+  initialState?: string
+  transitions?: { from: string, to: string, when: Expression, transition: Transition }[]
+}
 State {
   name: string
   when?: Expression
-  targets: { name: string, properties: { name: string, value: string, template?: (string | Expression)[] }[] }[]
+  timingExpression?: Expression
+  targets: Target<Property>[]
+}
+Target<T> {
+  name: string
+  timingExpression?: Expression
+  properties: T[]
+}
+Property {
+  name: string
+  value: string
+  template?: (string | Expression)[]
+  timingExpression?: Expression
+  keyframes?: Frame[]
 }
 Transition {
   timing?: Timing
-  targets: { name: string, properties: PropertyTransition[] }[]
+  timingExpression?: Expression
+  targets: Target<PropertyTransition>[]
 }
 PropertyTransition {
   name: string
   timing?: Timing
-  keyframes?: { offset: number, value: string, easing?: string, template?: (string | Expression)[] }[]
+  timingExpression?: Expression
+  keyframes?: Frame[]
+}
+Frame {
+  offset: number
+  value: string
+  template?: (string | Expression)[]
+  easing?: string
+  easingExpression?: Expression
 }
 Timing =
   { kind: "tween", durationMs: number, easing: string }

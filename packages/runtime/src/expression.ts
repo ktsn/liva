@@ -159,13 +159,22 @@ export function renderFrame(frame: Frame, values: VariableValues): Frame {
 export function renderTransition(transition: Transition, values: VariableValues): Transition {
   return {
     ...transition,
+    timing: transition.timingExpression
+      ? timingValue(evaluate(transition.timingExpression, values))
+      : transition.timing,
     targets: transition.targets.map((target) => ({
       ...target,
+      timing: target.timingExpression
+        ? timingValue(evaluate(target.timingExpression, values))
+        : target.timing,
       properties: target.properties.map((property) => ({
         ...property,
         timing: property.timingExpression
           ? timingValue(evaluate(property.timingExpression, values))
-          : property.timing,
+          : (property.timing ??
+            (target.timingExpression
+              ? timingValue(evaluate(target.timingExpression, values))
+              : target.timing)),
         keyframes: property.keyframes?.map((frame) => renderFrame(frame, values)),
       })),
     })),

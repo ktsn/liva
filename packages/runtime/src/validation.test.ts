@@ -61,6 +61,19 @@ describe('serialized definition validation', () => {
     }
   })
 
+  it.each(
+    [
+      { layers: [{ name: 'base', timingExpression: {}, targets: [] }] },
+      {
+        layers: [
+          { name: 'base', targets: [{ name: 'body', timingExpression: {}, properties: [] }] },
+        ],
+      },
+      { enter: { targets: [{ name: 'body', timingExpression: {}, properties: [] }] } },
+      { enter: { timingExpression: {}, targets: [] } },
+    ].map((patch) => ({ ...valid, ...patch })),
+  )('rejects malformed shared timing expressions: %j', expectInvalidDefinition)
+
   it('freezes lifecycle keyframes and event expression trees', () => {
     const definition = decodeBundle(JSON.stringify(presenceFixture)).definitions[0]
 

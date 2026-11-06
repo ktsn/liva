@@ -402,8 +402,14 @@ it.each(['enter', 'leave'] as const)(
   },
 )
 
-it('rejects timeline preview and save for layers without replacing the live definition', async () => {
-  const layered = { ...definition, layers: [{ name: 'base', targets: [] }] }
+it('rejects legacy typed timeline preview and save without replacing the live definition', async () => {
+  const layered = {
+    ...definition,
+    enter: {
+      timingExpression: { kind: 'call' as const, function: 'tween', arguments: [] },
+      targets: [],
+    },
+  }
   const send = vi
     .fn<(request: EditorRequest) => Promise<EditorReply>>()
     .mockResolvedValue({ ...reply, definition: layered })
@@ -415,6 +421,18 @@ it('rejects timeline preview and save for layers without replacing the live defi
   await expect(controller.commit()).rejects.toThrow('read-only')
 
   expect(send).toHaveBeenCalledTimes(1)
+  expect(first.runtime.replaceDefinition).not.toHaveBeenCalled()
+})
+
+it('requires the composition API for layer playback', async () => {
+  const layered = { ...definition, layers: [{ name: 'base', targets: [] }] }
+  const send = vi
+    .fn<(request: EditorRequest) => Promise<EditorReply>>()
+    .mockResolvedValue({ ...reply, definition: layered })
+  const { controller, first } = await setup(send)
+
+  await expect(controller.preview('on')).rejects.toThrow('composition previews')
+
   expect(first.runtime.replaceDefinition).not.toHaveBeenCalled()
 })
 

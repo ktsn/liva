@@ -265,7 +265,6 @@ it('does not overwrite an external edit made while the temporary save is being w
 })
 
 it.each([
-  'motion toggle { layer base { body { opacity: 1 } } }',
   'motion toggle { state idle { body @tween(duration: 100) { opacity: 1 } } }',
   'motion toggle { state idle { body { opacity: 1 } } enter { body { opacity { @tween: 100ms; 0%: 0 @easeIn } } } }',
 ])('keeps new syntax inspectable but rejects legacy timeline mutations: %s', async (motion) => {
@@ -287,6 +286,27 @@ it.each([
       }),
     ).rejects.toThrow('read-only')
   }
+
+  expect(await readFile(join(root, 'Toggle.vue'), 'utf8')).toBe(content)
+})
+
+it('rejects a typed preview with a missing edits array as malformed', async () => {
+  const content =
+    '<template><div /></template><liva>motion toggle { state idle { body @tween(duration: 100) { opacity: 1 } } }</liva>'
+  await writeFile(join(root, 'Toggle.vue'), content)
+  const inspection = await service.request({ action: 'inspect', sourceId, definition: 'toggle' })
+
+  await expect(
+    service.request({
+      action: 'preview',
+      sourceId,
+      definition: 'toggle',
+      baseHash: inspection.hash,
+      requestId: crypto.randomUUID(),
+      instanceId: 'instance',
+      sequence: 1,
+    }),
+  ).rejects.toThrow('Invalid edit list')
 
   expect(await readFile(join(root, 'Toggle.vue'), 'utf8')).toBe(content)
 })
@@ -333,6 +353,63 @@ describe('unchanged composition preview transactions', () => {
 
     await expect(service.request({ ...previewRequest, baseHash: 'stale' })).rejects.toThrow(
       'Source changed',
+    )
+  })
+})
+
+describe('typed layer source transactions', () => {
+  it('previews and saves typed value, timing and frame edits with fresh ranges and backups', async () => {
+    const block =
+      '// 日本語😀\r\nmotion toggle(amount: number) { layer base @tween(duration: 200) { body { opacity: ${amount}; scale: 1 } } }'
+    const content = `<template><div /></template><liva>${block}</liva>`
+    await writeFile(join(root, 'Toggle.vue'), content)
+    const inspection = await service.request({ action: 'inspect', sourceId, definition: 'toggle' })
+    const path = 'toggle/layer/base/target/body/property/opacity'
+    const original = inspection.fields.find((field) => field.path === `${path}/value`)!
+
+    expect(
+      Buffer.from(block).subarray(original.range!.start, original.range!.end).toString().trim(),
+    ).toBe('${amount}')
+
+    const edits: NonNullable<EditorRequest['edits']> = [
+      { op: 'set', path: `${path}/value`, value: '${amount / 2}' },
+      { op: 'timing', path, value: 'tween(duration: 300, easing: steps(count: 4))' },
+      { op: 'addFrame', path, offset: 0.5, value: '${amount / 4}', easing: 'stepEnd' },
+    ]
+    const preview = await service.request({
+      action: 'preview',
+      sourceId,
+      definition: 'toggle',
+      baseHash: inspection.hash,
+      instanceId: 'instance',
+      sequence: 1,
+      edits,
+    })
+
+    expect(await readFile(join(root, 'Toggle.vue'), 'utf8')).toBe(content)
+    expect(preview.fields.find((field) => field.path === `${path}/frame/1/value`)?.value).toBe(
+      '${amount / 2}',
+    )
+    expect(preview.fields.find((field) => field.path === `${path}/frame/0.5/easing`)?.value).toBe(
+      'stepEnd',
+    )
+
+    const saved = await service.request({
+      action: 'commit',
+      sourceId,
+      definition: 'toggle',
+      baseHash: inspection.hash,
+      requestId: crypto.randomUUID(),
+      edits,
+    })
+    const written = await readFile(join(root, 'Toggle.vue'), 'utf8')
+
+    expect(saved.hash).not.toBe(inspection.hash)
+    expect(written).toContain('scale: 1')
+    expect(written).toContain('// 日本語😀\r\n')
+    expect(written).toContain('steps(count: 4)')
+    expect(await readFile(join(root, '.liva-backups', `${inspection.hash}.vue`), 'utf8')).toBe(
+      content,
     )
   })
 })

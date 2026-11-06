@@ -39,12 +39,12 @@ fn lifecycle_and_transition_tracks_accept_target_defaults_and_references() {
     let definition = &result.definitions[0];
 
     assert!(
-        definition.enter.as_ref().unwrap().targets[0].properties[0]
+        definition.enter.as_ref().unwrap().targets[0]
             .timing_expression
             .is_some()
     );
     assert!(
-        definition.general_transition.as_ref().unwrap().targets[0].properties[0]
+        definition.general_transition.as_ref().unwrap().targets[0]
             .timing_expression
             .is_some()
     );
