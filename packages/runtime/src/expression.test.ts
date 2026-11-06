@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test'
-import {
-  evaluate,
-  evaluateScalar,
-  renderDefinition,
-  renderValue,
-  renderTransition,
-} from './expression.ts'
-import { resolve } from './resolve.ts'
+import { evaluate, evaluateScalar, renderValue, renderTransition } from './expression.ts'
+import { resolveComposition, resolveLayerTracks } from './layers.ts'
 import type { Definition, Expression } from './definition.ts'
 
 const number = (value: number): Expression => ({ kind: 'number', value })
@@ -74,11 +68,10 @@ describe('expression evaluation', () => {
     ).toThrow('Unsupported expression operator')
   })
 
-  it('renders only requested states without mutating the definition', () => {
+  it('renders only selected layers without mutating the definition', () => {
     const definition: Definition = {
       name: 'position',
-      directionalTransitions: [],
-      states: ['off', 'on'].map((name) => ({
+      layers: ['off', 'on'].map((name) => ({
         name,
         targets: [
           {
@@ -94,11 +87,15 @@ describe('expression evaluation', () => {
         ],
       })),
     }
-    const rendered = renderDefinition(definition, { x: 12 }, ['on'])
+    const rendered = resolveComposition(
+      definition,
+      { x: 12 },
+      { layers: { off: false, on: true }, states: {} },
+    )
 
-    expect(rendered.states[0]).toBe(definition.states[0])
-    expect(rendered.states[1].targets[0].properties[0].value).toBe('12px')
-    expect(definition.states[1].targets[0].properties[0].value).toBe('0px')
+    expect(rendered.composition.layers).toEqual({ off: false, on: true })
+    expect(rendered.presentation.targets[0].properties[0].value).toBe('12px')
+    expect(definition.layers[1].targets[0].properties[0].value).toBe('0px')
     expect(renderValue({ value: 'auto' }, {})).toBe('auto')
   })
   it('resolves decorated property timing and frame easing from current values', () => {
@@ -109,8 +106,7 @@ describe('expression evaluation', () => {
     }
     const definition: Definition = {
       name: 'fade',
-      directionalTransitions: [],
-      states: [
+      layers: [
         { name: 'off', targets: [{ name: 'body', properties: [{ name: 'opacity', value: '0' }] }] },
         {
           name: 'on',
@@ -137,8 +133,17 @@ describe('expression evaluation', () => {
       ],
     }
 
-    const rendered = renderDefinition(definition, { duration: 125 }, ['on'])
-    const [track] = resolve(rendered, 'off', 'on')
+    const from = { layers: { off: true, on: false }, states: {} }
+    const to = { layers: { off: false, on: true }, states: {} }
+    const previous = resolveComposition(definition, { duration: 125 }, from)
+    const next = resolveComposition(definition, { duration: 125 }, to)
+    const [track] = resolveLayerTracks(
+      previous,
+      next,
+      { duration: 125 },
+      () => '0',
+      () => {},
+    )
 
     expect(track.timing).toMatchObject({ kind: 'tween', durationMs: 125 })
     expect(track.keyframes[1]).toMatchObject({ value: '.7', easing: 'ease-out' })

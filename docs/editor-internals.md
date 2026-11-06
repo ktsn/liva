@@ -19,7 +19,7 @@ previewing one mounted instance. Vue retains application state.
 
 Vue custom-element compilation injects `.ce.vue` scoped styles into the shadow
 root. Shallow controller snapshots avoid proxying DOM elements and animation
-instances. Scope disposal removes subscriptions and pending preview timers.
+instances. Scope disposal removes subscriptions and invalidates pending preview requests.
 
 Inspect returns source revision and editable fields. Preview sends semantic edits
 to the server for compilation and returns instance-local IR without writing files.
@@ -29,8 +29,8 @@ Development mappings use half-open UTF-8 ranges; Vite converts SFC UTF-16 offset
 
 ## Source edit planning
 
-`apply_edits` accepts semantic field paths, frame additions/removals, and directional
-property timing overrides. It resolves paths against fresh compiler mappings,
+`apply_edits` accepts semantic field paths, frame additions/removals, and typed timing/easing
+overrides. It resolves paths against fresh compiler mappings,
 preserves boundary whitespace, and validates every intermediate edit before returning
 a candidate source. Transactions never partially persist. Frame values should be
 edited before moving their offset because offset changes their semantic identity.
@@ -44,10 +44,10 @@ declaration. Authors can make those edits directly in source.
 
 The WASM wrapper exposes the same planner; filesystem policy belongs to the server.
 
-The `track` operation replaces one property's timing and frames atomically,
-creating missing containers. Omitting timing or frames restores their inheritance
-independently. An empty frame collection also means inheritance; the language has
-no empty override. State-value edits use individual field operations.
+The supported operations are `set`, `timing`, `easing`, `addFrame`, and `removeFrame`.
+Typed timing removal reveals inherited timing. Ordinary-value conversion preserves
+the required 100% frame. Existing guarded transitions and motion-level lifecycles
+can gain missing target/property containers without replacing neighboring source.
 
 ## Save transactions and preview lifecycle
 
@@ -68,7 +68,7 @@ editor sessions are unsupported.
 
 Preview replies carry instance/sequence identity and cannot outlive selection,
 application state updates, source revisions, or unmount. Cancel restores the latest
-Vue-requested state. Failed saves retain the draft. Save acknowledgment requires
+application composition. Failed saves retain the draft. Save acknowledgment requires
 both the current source hash and every mounted shared instance to match; delayed
 HMR reports pending synchronization and preserves an idempotent retry. New edits or
 selection changes during a save are preserved by a separate user-edit revision.
@@ -77,7 +77,7 @@ selection changes during a save are preserved by a separate user-edit revision.
 
 Lifecycle track paths are `<motion>/enter/target/<target>/property/<property>`
 and corresponding `leave` paths. State-specific lifecycle paths are rejected by
-compiler validation. Atomic track edits retain comment-preservation guarantees.
+compiler validation. Typed field and frame edits retain comment-preservation guarantees.
 
 Layer composition editing uses source-mapped value, typed timing, and frame operations.
 The inspector separates effective declaration provenance from the local write destination.
@@ -89,8 +89,6 @@ explicit transition selections, and `transitionPropertySources` resolves their
 timing precedence. The editor converts these resolved sources into mapping paths
 and applies editing restrictions; it does not implement a separate cascade.
 Candidates recompile before preview; failed candidates leave the previous draft intact.
-The legacy timeline remains read-only for typed animation expressions, preventing
-legacy track replacement from discarding typed syntax.
 
 `LivaInstance.previewLifecycle` accepts an explicit composition and candidate definition
 for layer previews. It resolves the baseline and captures lifecycle expressions once,
@@ -98,6 +96,6 @@ without replacing the application definition or state-machine history. It resolv
 every mounted target, including repeated targets and targets absent from the active
 baseline. The inspector uses the same expression snapshot and lifecycle-only rows.
 Paused effects participate in the instance's existing animation ownership and
-cleanup. Enter settles to state CSS at its end; leave holds its last frame. The
+cleanup. Enter settles to the baseline composition at its end; leave holds its last frame. The
 controller restores the committed definition on cancellation and never invokes Vue
 presence completion callbacks or removes DOM elements.

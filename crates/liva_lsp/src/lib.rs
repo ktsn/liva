@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn vue_blocks_map_types_and_errors_to_original_document() {
-        let text = "<script setup>const s = '<liva>fake</liva>'</script>\r\n<template><div title=\">\"><liva>html</liva></div></template>\r\n<!-- <liva>ignored</liva> -->\r\n<liva lang=\"liva\">\r\nmotion a(value: number) {\r\n let wrong = value + true\r\n state idle { body { opacity: ${value} } }\r\n}\r\n</liva>\r\n<liva>motion b(value: string) { state idle { body { content: ${value} } } }</liva>";
+        let text = "<script setup>const s = '<liva>fake</liva>'</script>\r\n<template><div title=\">\"><liva>html</liva></div></template>\r\n<!-- <liva>ignored</liva> -->\r\n<liva lang=\"liva\">\r\nmotion a(value: number) {\r\n let wrong = value + true\r\n layer idle { body { opacity: ${value} } }\r\n}\r\n</liva>\r\n<liva>motion b(value: string) { layer idle { body { content: ${value} } } }</liva>";
         let document = Document::new(text.into(), 1, "file:///test.vue");
 
         assert_eq!(vue::blocks(text).len(), 2);

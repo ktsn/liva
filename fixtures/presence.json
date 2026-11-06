@@ -74,10 +74,25 @@
         }
       ],
       "enter": {
-        "timing": {
-          "kind": "tween",
-          "durationMs": 250.0,
-          "easing": "ease-out"
+        "timingExpression": {
+          "kind": "call",
+          "function": "tween",
+          "arguments": [
+            {
+              "name": "duration",
+              "value": {
+                "kind": "number",
+                "value": 250.0
+              }
+            },
+            {
+              "name": "easing",
+              "value": {
+                "kind": "reference",
+                "path": ["easeOut"]
+              }
+            }
+          ]
         },
         "targets": [
           {
@@ -107,12 +122,27 @@
             "name": "badge",
             "properties": [
               {
-                "name": "opacity",
-                "timing": {
-                  "kind": "spring-duration",
-                  "durationMs": 350.0,
-                  "bounce": 0.2
+                "timingExpression": {
+                  "kind": "call",
+                  "function": "spring",
+                  "arguments": [
+                    {
+                      "name": "duration",
+                      "value": {
+                        "kind": "number",
+                        "value": 350.0
+                      }
+                    },
+                    {
+                      "name": "bounce",
+                      "value": {
+                        "kind": "number",
+                        "value": 0.2
+                      }
+                    }
+                  ]
                 },
+                "name": "opacity",
                 "keyframes": [
                   {
                     "offset": 0.0,
@@ -125,10 +155,25 @@
         ]
       },
       "leave": {
-        "timing": {
-          "kind": "tween",
-          "durationMs": 200.0,
-          "easing": "ease-in"
+        "timingExpression": {
+          "kind": "call",
+          "function": "tween",
+          "arguments": [
+            {
+              "name": "duration",
+              "value": {
+                "kind": "number",
+                "value": 200.0
+              }
+            },
+            {
+              "name": "easing",
+              "value": {
+                "kind": "reference",
+                "path": ["easeIn"]
+              }
+            }
+          ]
         },
         "targets": [
           {
@@ -158,12 +203,20 @@
             "name": "badge",
             "properties": [
               {
-                "name": "opacity",
-                "timing": {
-                  "kind": "tween",
-                  "durationMs": 100.0,
-                  "easing": "linear"
+                "timingExpression": {
+                  "kind": "call",
+                  "function": "tween",
+                  "arguments": [
+                    {
+                      "name": "duration",
+                      "value": {
+                        "kind": "number",
+                        "value": 100.0
+                      }
+                    }
+                  ]
                 },
+                "name": "opacity",
                 "keyframes": [
                   {
                     "offset": 1.0,
@@ -175,9 +228,94 @@
           }
         ]
       },
-      "states": [
+      "layers": [
         {
-          "name": "idle",
+          "transitions": [
+            {
+              "from": "idle",
+              "to": "dragging",
+              "when": {
+                "kind": "reference",
+                "path": ["movement", "active"]
+              },
+              "transition": {
+                "targets": []
+              }
+            },
+            {
+              "from": "dragging",
+              "to": "idle",
+              "when": {
+                "kind": "unary",
+                "operator": "!",
+                "operand": {
+                  "kind": "reference",
+                  "path": ["movement", "active"]
+                }
+              },
+              "transition": {
+                "targets": [
+                  {
+                    "name": "body",
+                    "properties": [
+                      {
+                        "timingExpression": {
+                          "kind": "call",
+                          "function": "spring",
+                          "arguments": [
+                            {
+                              "name": "stiffness",
+                              "value": {
+                                "kind": "number",
+                                "value": 300.0
+                              }
+                            },
+                            {
+                              "name": "damping",
+                              "value": {
+                                "kind": "number",
+                                "value": 20.0
+                              }
+                            }
+                          ]
+                        },
+                        "name": "translate"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "name": "interaction",
+          "states": [
+            {
+              "name": "idle",
+              "targets": []
+            },
+            {
+              "name": "dragging",
+              "targets": [
+                {
+                  "name": "body",
+                  "properties": [
+                    {
+                      "name": "translate",
+                      "value": "${movement.offset.x}px 0",
+                      "template": [
+                        {
+                          "kind": "reference",
+                          "path": ["movement", "offset", "x"]
+                        },
+                        "px 0"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "initialState": "idle",
           "targets": [
             {
               "name": "body",
@@ -202,68 +340,6 @@
               ]
             }
           ]
-        },
-        {
-          "name": "dragging",
-          "when": {
-            "kind": "reference",
-            "path": ["movement", "active"]
-          },
-          "targets": [
-            {
-              "name": "body",
-              "properties": [
-                {
-                  "name": "translate",
-                  "value": "${movement.offset.x}px 0",
-                  "template": [
-                    {
-                      "kind": "reference",
-                      "path": ["movement", "offset", "x"]
-                    },
-                    "px 0"
-                  ]
-                },
-                {
-                  "name": "opacity",
-                  "value": "1"
-                }
-              ]
-            },
-            {
-              "name": "badge",
-              "properties": [
-                {
-                  "name": "opacity",
-                  "value": "1"
-                }
-              ]
-            }
-          ]
-        }
-      ],
-      "directionalTransitions": [
-        {
-          "from": "dragging",
-          "to": "idle",
-          "transition": {
-            "targets": [
-              {
-                "name": "body",
-                "properties": [
-                  {
-                    "name": "translate",
-                    "timing": {
-                      "kind": "spring-physics",
-                      "stiffness": 300.0,
-                      "damping": 20.0,
-                      "mass": 1.0
-                    }
-                  }
-                ]
-              }
-            ]
-          }
         }
       ]
     }

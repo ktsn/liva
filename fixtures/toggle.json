@@ -3,14 +3,211 @@
   "definitions": [
     {
       "name": "toggle",
-      "states": [
+      "parameters": [
         {
-          "name": "off",
+          "name": "mode",
+          "type": "string"
+        }
+      ],
+      "layers": [
+        {
+          "timingExpression": {
+            "kind": "call",
+            "function": "tween",
+            "arguments": [
+              {
+                "name": "duration",
+                "value": {
+                  "kind": "number",
+                  "value": 350.0
+                }
+              },
+              {
+                "name": "easing",
+                "value": {
+                  "kind": "reference",
+                  "path": ["easeOut"]
+                }
+              }
+            ]
+          },
+          "transitions": [
+            {
+              "from": "off",
+              "to": "on",
+              "when": {
+                "kind": "binary",
+                "operator": "==",
+                "left": {
+                  "kind": "reference",
+                  "path": ["mode"]
+                },
+                "right": {
+                  "kind": "string",
+                  "value": "on"
+                }
+              },
+              "transition": {
+                "targets": [
+                  {
+                    "name": "thumb",
+                    "properties": [
+                      {
+                        "name": "scale",
+                        "keyframes": [
+                          {
+                            "easingExpression": {
+                              "kind": "reference",
+                              "path": ["easeIn"]
+                            },
+                            "offset": 0.4,
+                            "value": "1.3 1"
+                          },
+                          {
+                            "easingExpression": {
+                              "kind": "reference",
+                              "path": ["easeOut"]
+                            },
+                            "offset": 0.7,
+                            "value": "0.95 1"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "from": "on",
+              "to": "off",
+              "when": {
+                "kind": "unary",
+                "operator": "!",
+                "operand": {
+                  "kind": "binary",
+                  "operator": "==",
+                  "left": {
+                    "kind": "reference",
+                    "path": ["mode"]
+                  },
+                  "right": {
+                    "kind": "string",
+                    "value": "on"
+                  }
+                }
+              },
+              "transition": {
+                "targets": [
+                  {
+                    "name": "thumb",
+                    "properties": [
+                      {
+                        "timingExpression": {
+                          "kind": "call",
+                          "function": "spring",
+                          "arguments": [
+                            {
+                              "name": "duration",
+                              "value": {
+                                "kind": "number",
+                                "value": 350.0
+                              }
+                            },
+                            {
+                              "name": "bounce",
+                              "value": {
+                                "kind": "number",
+                                "value": 0.25
+                              }
+                            }
+                          ]
+                        },
+                        "name": "translate"
+                      },
+                      {
+                        "name": "scale",
+                        "keyframes": [
+                          {
+                            "easingExpression": {
+                              "kind": "reference",
+                              "path": ["easeIn"]
+                            },
+                            "offset": 0.4,
+                            "value": "1.3 1"
+                          },
+                          {
+                            "easingExpression": {
+                              "kind": "reference",
+                              "path": ["easeOut"]
+                            },
+                            "offset": 0.7,
+                            "value": "0.95 1"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "name": "toggle",
+          "states": [
+            {
+              "name": "off",
+              "targets": []
+            },
+            {
+              "name": "on",
+              "targets": [
+                {
+                  "name": "track",
+                  "properties": [
+                    {
+                      "name": "background-color",
+                      "value": "#34b27b"
+                    }
+                  ]
+                },
+                {
+                  "name": "thumb",
+                  "properties": [
+                    {
+                      "name": "translate",
+                      "value": "24px 0"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "initialState": "off",
           "targets": [
             {
               "name": "track",
               "properties": [
                 {
+                  "timingExpression": {
+                    "kind": "call",
+                    "function": "tween",
+                    "arguments": [
+                      {
+                        "name": "duration",
+                        "value": {
+                          "kind": "number",
+                          "value": 200.0
+                        }
+                      },
+                      {
+                        "name": "easing",
+                        "value": {
+                          "kind": "reference",
+                          "path": ["easeInOut"]
+                        }
+                      }
+                    ]
+                  },
                   "name": "background-color",
                   "value": "#888"
                 }
@@ -20,6 +217,26 @@
               "name": "thumb",
               "properties": [
                 {
+                  "timingExpression": {
+                    "kind": "call",
+                    "function": "spring",
+                    "arguments": [
+                      {
+                        "name": "stiffness",
+                        "value": {
+                          "kind": "number",
+                          "value": 300.0
+                        }
+                      },
+                      {
+                        "name": "damping",
+                        "value": {
+                          "kind": "number",
+                          "value": 20.0
+                        }
+                      }
+                    ]
+                  },
                   "name": "translate",
                   "value": "0 0"
                 },
@@ -30,111 +247,6 @@
               ]
             }
           ]
-        },
-        {
-          "name": "on",
-          "when": {
-            "kind": "boolean",
-            "value": true
-          },
-          "targets": [
-            {
-              "name": "track",
-              "properties": [
-                {
-                  "name": "background-color",
-                  "value": "#34b27b"
-                }
-              ]
-            },
-            {
-              "name": "thumb",
-              "properties": [
-                {
-                  "name": "translate",
-                  "value": "24px 0"
-                },
-                {
-                  "name": "scale",
-                  "value": "1"
-                }
-              ]
-            }
-          ]
-        }
-      ],
-      "generalTransition": {
-        "timing": {
-          "kind": "tween",
-          "durationMs": 350.0,
-          "easing": "ease-out"
-        },
-        "targets": [
-          {
-            "name": "track",
-            "properties": [
-              {
-                "name": "background-color",
-                "timing": {
-                  "kind": "tween",
-                  "durationMs": 200.0,
-                  "easing": "ease-in-out"
-                }
-              }
-            ]
-          },
-          {
-            "name": "thumb",
-            "properties": [
-              {
-                "name": "translate",
-                "timing": {
-                  "kind": "spring-physics",
-                  "stiffness": 300.0,
-                  "damping": 20.0,
-                  "mass": 1.0
-                }
-              },
-              {
-                "name": "scale",
-                "keyframes": [
-                  {
-                    "offset": 0.4,
-                    "value": "1.3 1",
-                    "easing": "ease-in"
-                  },
-                  {
-                    "offset": 0.7,
-                    "value": "0.95 1",
-                    "easing": "ease-out"
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      "directionalTransitions": [
-        {
-          "from": "on",
-          "to": "off",
-          "transition": {
-            "targets": [
-              {
-                "name": "thumb",
-                "properties": [
-                  {
-                    "name": "translate",
-                    "timing": {
-                      "kind": "spring-duration",
-                      "durationMs": 350.0,
-                      "bounce": 0.25
-                    }
-                  }
-                ]
-              }
-            ]
-          }
         }
       ]
     }

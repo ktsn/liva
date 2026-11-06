@@ -4,6 +4,7 @@ import type { CDPSession } from '@vitest/browser-playwright'
 import fixture from '../../../fixtures/toggle.json'
 import reactiveFixture from '../../../fixtures/reactive-toggle.json'
 import cardFixture from '../../../fixtures/card.json'
+import { layerTargets } from './layers.ts'
 import { decodeBundle } from './definition.ts'
 import { LivaInstance, type RuntimeDiagnostic } from './instance.ts'
 import { LifecycleSession } from './lifecycle.ts'
@@ -12,11 +13,16 @@ const definition = decodeBundle(JSON.stringify(fixture)).definitions[0]
 const instances: LivaInstance[] = []
 const elements: HTMLElement[] = []
 
-function setup(def = definition, state: string | Record<string, unknown> = 'off') {
+function setup(
+  def = definition,
+  inputs: Record<string, unknown> = def.parameters?.some((parameter) => parameter.name === 'mode')
+    ? { mode: 'off' }
+    : {},
+) {
   const errors: RuntimeDiagnostic[] = []
-  const instance = new LivaInstance(def, state, (error) => errors.push(error))
+  const instance = new LivaInstance(def, inputs, (error) => errors.push(error))
   const targets = new Map(
-    def.states[0].targets.map(({ name }) => {
+    layerTargets(def).map(({ name }) => {
       const element = document.createElement('div')
 
       document.body.append(element)
@@ -31,6 +37,14 @@ function setup(def = definition, state: string | Record<string, unknown> = 'off'
   return { instance, targets, errors }
 }
 
+function updateMode(instance: LivaInstance, mode: string, options: { paused?: boolean } = {}) {
+  instance.updateParameters({ mode })
+
+  if (options.paused) {
+    for (const animation of instance.animations) animation.pause()
+  }
+}
+
 afterEach(() => {
   for (const instance of instances.splice(0)) instance.dispose()
 
@@ -38,11 +52,35 @@ afterEach(() => {
 })
 
 describe('browser animation execution', () => {
+  it('keeps missing bindings suspended across definition replacement and empty input updates', () => {
+    const source = {
+      name: 'static',
+      layers: [
+        {
+          name: 'base',
+          targets: [{ name: 'body', properties: [{ name: 'opacity', value: '1' }] }],
+        },
+      ],
+    }
+    const { instance, targets } = setup(source)
+
+    instance.bind([])
+    instance.replaceDefinition(source)
+    instance.updateParameters({})
+
+    expect(instance.animations).toHaveLength(0)
+    expect(targets.get('body')!.style.opacity).toBe('')
+
+    instance.bind([...targets])
+
+    expect(targets.get('body')!.style.opacity).toBe('1')
+  })
+
   it('interpolates a paused transition and restores owned styles on disposal', () => {
     const { instance, targets, errors } = setup()
     const thumb = targets.get('thumb')!
 
-    expect(instance.setState('on', { paused: true })).toBe(true)
+    updateMode(instance, 'on', { paused: true })
     expect(instance.animations.length).toBeGreaterThan(0)
 
     for (const animation of instance.animations) animation.currentTime = 100
@@ -54,17 +92,17 @@ describe('browser animation execution', () => {
 
     expect(instance.animations).toEqual([])
     expect(thumb.style.scale).toBe('')
-    expect(instance.setState('off')).toBe(false)
+    updateMode(instance, 'off')
 
     instance.bind([...targets])
     instance.replaceDefinition(definition)
-    instance.updateParameters({})
+    instance.updateParameters({ mode: 'on' })
   })
 
   it('completes animations and settles destination styles', async () => {
     const { instance, targets } = setup()
 
-    expect(instance.setState('on')).toBe(true)
+    updateMode(instance, 'on')
 
     const animations = [...instance.animations]
 
@@ -77,23 +115,23 @@ describe('browser animation execution', () => {
 
     expect(instance.animations).toEqual([])
     expect(targets.get('thumb')!.style.scale).toBe('1')
-    expect(instance.setState('on')).toBe(true)
+    updateMode(instance, 'on')
   })
 
-  it('handles interruption, rebinding and invalid states without losing the current state', () => {
+  it('handles interruption, rebinding and invalid parameters without losing the composition', () => {
     const { instance, targets, errors } = setup()
 
-    instance.setState('on', { paused: true })
+    updateMode(instance, 'on', { paused: true })
 
     const first = instance.animations[0]
 
     first.currentTime = 100
-    instance.setState('off', { paused: true })
+    updateMode(instance, 'off', { paused: true })
 
     expect(first.playState).toBe('idle')
-    expect(instance.setState('missing')).toBe(false)
-    expect(instance.state).toBe('off')
-    expect(errors.at(-1)?.code).toBe('runtime.state')
+    instance.updateParameters({ mode: false })
+    expect(instance.composition.states.toggle).toBe('off')
+    expect(errors.at(-1)?.code).toBe('runtime.parameter')
 
     instance.bind([...targets])
 
@@ -103,7 +141,7 @@ describe('browser animation execution', () => {
 
     expect(instance.animations).toEqual([])
     expect(errors.at(-1)?.message).toBe('Missing target binding')
-    expect(instance.setState('on')).toBe(true)
+    updateMode(instance, 'on')
 
     instance.bind([...targets, ['thumb', targets.get('thumb')!]])
 
@@ -123,7 +161,7 @@ describe('browser animation execution', () => {
 
     thumb.style.cssText = 'scale: 2 !important; color: red; margin: 4px'
 
-    const replacement = new LivaInstance(definition, 'off')
+    const replacement = new LivaInstance(definition, { mode: 'off' })
 
     instances.push(replacement)
     replacement.bind([...targets])
@@ -143,21 +181,20 @@ describe('browser animation execution', () => {
 
     instance.updateParameters({ checked: true })
 
-    expect(instance.state).toBe('on')
-    expect(instance.reactiveState).toBe('on')
+    expect(instance.composition.states.toggle).toBe('on')
 
     instance.replaceDefinition(structuredClone(reactive))
 
-    expect(instance.state).toBe('on')
+    expect(instance.composition.states.toggle).toBe('on')
 
     instance.updateParameters({ checked: 'invalid' })
 
     expect(errors.at(-1)?.code).toBe('runtime.parameter')
-    expect(instance.state).toBe('on')
+    expect(instance.composition.states.toggle).toBe('on')
 
     instance.updateParameters({ checked: false })
 
-    expect(instance.state).toBe('off')
+    expect(instance.composition.states.toggle).toBe('off')
   })
 })
 
@@ -165,8 +202,8 @@ it('updates template values in place and recovers from non-finite expressions', 
   const templated = {
     name: 'size',
     parameters: [{ name: 'x', type: 'number' } as const],
-    directionalTransitions: [],
-    states: [
+
+    layers: [
       {
         name: 'idle',
         targets: [
@@ -192,7 +229,9 @@ it('updates template values in place and recovers from non-finite expressions', 
       },
     ],
   } satisfies import('./definition.ts').Definition
-  const { instance, targets, errors } = setup(templated, { x: 0 })
+  const { instance, targets, errors } = setup(templated, { x: 1 })
+
+  instance.updateParameters({ x: 0 })
 
   expect(errors.at(-1)?.code).toBe('runtime.expression')
 
@@ -201,7 +240,11 @@ it('updates template values in place and recovers from non-finite expressions', 
   instance.retainLifecycle('enter', enter)
   instance.updateParameters({ x: 2 })
 
-  expect(await enter.finished).toBe('superseded')
+  expect(enter.isFinished).toBe(false)
+
+  enter.play()
+
+  expect(await enter.finished).toBe('completed')
   expect(targets.get('box')!.style.width).toBe('50px')
 
   instance.updateParameters({ x: 2 })
@@ -217,13 +260,12 @@ it('updates template values in place and recovers from non-finite expressions', 
 it('restores variable shorthands and preserves external priority changes', () => {
   const def = {
     name: 'spacing',
-    states: [
+    layers: [
       {
         name: 'on',
         targets: [{ name: 'box', properties: [{ name: 'margin', value: 'var(--b)' }] }],
       },
     ],
-    directionalTransitions: [],
   }
   const element = document.createElement('div')
 
@@ -231,7 +273,7 @@ it('restores variable shorthands and preserves external priority changes', () =>
   document.body.append(element)
   elements.push(element)
 
-  const instance = new LivaInstance(def, 'on')
+  const instance = new LivaInstance(def)
 
   instances.push(instance)
   instance.bind([['box', element]])
@@ -244,7 +286,7 @@ it('restores variable shorthands and preserves external priority changes', () =>
   expect(element.style.getPropertyPriority('width')).toBe('')
   expect(element.style.color).toBe('')
 
-  const second = new LivaInstance(def, 'on')
+  const second = new LivaInstance(def)
 
   instances.push(second)
   second.bind([['box', element]])
@@ -255,44 +297,36 @@ it('restores variable shorthands and preserves external priority changes', () =>
   expect(element.style.getPropertyPriority('margin')).toBe('important')
 })
 
-it('skips zero-duration effects and rolls back invalid browser easing', () => {
+it('skips zero-duration layer effects', () => {
   const base = {
     name: 'fade',
-    states: ['off', 'on'].map((name) => ({
+    parameters: [{ name: 'mode', type: 'string' as const }],
+    layers: ['off', 'on'].map((name) => ({
       name,
+      when: {
+        kind: 'binary' as const,
+        operator: '==',
+        left: { kind: 'reference' as const, path: ['mode'] },
+        right: { kind: 'string' as const, value: name },
+      },
+      timing: { kind: 'tween' as const, durationMs: 0, easing: 'linear' },
       targets: [
         { name: 'box', properties: [{ name: 'opacity', value: name === 'off' ? '0' : '1' }] },
       ],
     })),
-    directionalTransitions: [],
-    generalTransition: {
-      timing: { kind: 'tween', durationMs: 0, easing: 'linear' } as const,
-      targets: [],
-    },
   }
-  const { instance, targets, errors } = setup(base)
+  const { instance, targets } = setup(base)
 
-  expect(instance.setState('on')).toBe(true)
+  updateMode(instance, 'on')
+
   expect(instance.animations).toEqual([])
   expect(targets.get('box')!.style.opacity).toBe('1')
-
-  instance.replaceDefinition({
-    ...base,
-    generalTransition: {
-      timing: { kind: 'tween', durationMs: 100, easing: 'invalid-easing' },
-      targets: [],
-    },
-  })
-
-  expect(instance.setState('off')).toBe(false)
-  expect(instance.state).toBe('on')
-  expect(errors.at(-1)?.code).toBe('runtime.animation')
 })
 
 it('settles active effects when reduced motion is enabled but preserves manual previews', async () => {
   const { instance, targets } = setup()
 
-  instance.setState('on')
+  updateMode(instance, 'on')
 
   const session: CDPSession = cdp()
 
@@ -306,7 +340,11 @@ it('settles active effects when reduced motion is enabled but preserves manual p
     await expect.poll(() => instance.animations.length).toBe(0)
     expect(targets.get('thumb')!.style.translate).toBe('24px')
 
-    instance.setState('off', { paused: true })
+    instance.previewComposition(
+      { layers: {}, states: { toggle: 'on' } },
+      { layers: {}, states: { toggle: 'off' } },
+      [{ layer: 'toggle', index: 1 }],
+    )
 
     expect(instance.animations.length).toBeGreaterThan(0)
 
@@ -335,7 +373,7 @@ it('settles active effects when reduced motion is enabled but preserves manual p
 it('releases only matching lifecycle effects and protects leave-owned properties', async () => {
   const { instance, targets } = setup()
 
-  instance.setState('on', { paused: true })
+  updateMode(instance, 'on', { paused: true })
 
   const before = instance.animations.length
 
@@ -367,7 +405,7 @@ it('releases only matching lifecycle effects and protects leave-owned properties
   )
 
   instance.retainLifecycle('leave', session)
-  instance.setState('off', { paused: true })
+  updateMode(instance, 'off', { paused: true })
 
   expect(
     instance.animations.every(
@@ -386,19 +424,23 @@ it('restores parameter snapshots when a reactive transition cannot be prepared',
   const def = decodeBundle(JSON.stringify(reactiveFixture)).definitions[0]
   const broken = {
     ...def,
-    generalTransition: {
-      targets: [],
-      timing: { kind: 'tween', durationMs: 100, easing: 'invalid' } as const,
-    },
-    directionalTransitions: [],
+    layers: def.layers.map((layer) => ({
+      ...layer,
+      transitions: layer.transitions?.map((transition) => ({
+        ...transition,
+        transition: {
+          targets: [],
+          timing: { kind: 'tween' as const, durationMs: 100, easing: 'invalid' },
+        },
+      })),
+    })),
   }
   const { instance, errors } = setup(broken, { checked: false })
 
   instance.updateParameters({ checked: true })
 
-  expect(errors.at(-1)?.code).toBe('runtime.animation')
-  expect(instance.state).toBe('off')
-  expect(instance.reactiveState).toBe('off')
+  expect(errors.at(-1)?.code).toBe('runtime.expression')
+  expect(instance.composition.states.toggle).toBe('off')
 })
 
 it('stops a reactive update when an event listener disposes its owner', () => {
@@ -413,7 +455,7 @@ it('stops a reactive update when an event listener disposes its owner', () => {
   instance.updateParameters({ checked: true })
 
   expect(instance.animations).toEqual([])
-  expect(instance.setState('on')).toBe(false)
+  updateMode(instance, 'on')
 })
 
 it.each(['dispose', 'replace', 'release'] as const)(
@@ -421,7 +463,7 @@ it.each(['dispose', 'replace', 'release'] as const)(
   async (operation) => {
     const { instance, targets } = setup()
 
-    instance.setState('on')
+    updateMode(instance, 'on')
 
     const animation = instance.animations[0]
 
@@ -431,15 +473,17 @@ it.each(['dispose', 'replace', 'release'] as const)(
     const finished = animation.finished
 
     if (operation === 'dispose') instance.dispose()
-    else if (operation === 'replace') instance.replaceDefinition(definition, 'off')
+    else if (operation === 'replace') instance.replaceDefinition(definition)
     else instance.releaseLifecycle(['track'], targets.get('track')!)
+
+    targets.get('track')!.style.backgroundColor = 'blue'
 
     await finished
 
     await Promise.resolve()
 
     expect(instance.animations).not.toContain(animation)
-    expect(targets.get('track')!.style.backgroundColor).not.toBe('rgb(52, 178, 123)')
+    expect(targets.get('track')!.style.backgroundColor).toBe('blue')
   },
 )
 
@@ -495,14 +539,11 @@ it('replaces only an animated template property when its value changes within a 
       { name: 'checked', type: 'boolean' },
       { name: 'x', type: 'number' },
     ] as const,
-    directionalTransitions: [],
-    generalTransition: {
-      timing: { kind: 'tween', durationMs: 1000, easing: 'linear' } as const,
-      targets: [],
-    },
-    states: [
+
+    layers: [
       {
         name: 'off',
+        timing: { kind: 'tween', durationMs: 1000, easing: 'linear' } as const,
         targets: [
           {
             name: 'box',
@@ -516,6 +557,7 @@ it('replaces only an animated template property when its value changes within a 
       },
       {
         name: 'on',
+        timing: { kind: 'tween', durationMs: 1000, easing: 'linear' } as const,
         when: { kind: 'reference', path: ['checked'] } as const,
         targets: [
           {
@@ -542,9 +584,12 @@ it('replaces only an animated template property when its value changes within a 
 
   expect(instance.animations).toHaveLength(3)
 
+  const previous = [...instance.animations]
+
   instance.updateParameters({ checked: true, x: 20 })
 
-  expect(instance.animations).toHaveLength(2)
+  expect(instance.animations).toHaveLength(3)
+  expect(previous.filter((animation) => instance.animations.includes(animation))).toHaveLength(2)
   expect(targets.get('box')!.style.width).toBe('20px')
 })
 
@@ -557,7 +602,7 @@ it('restores removed owned declarations but preserves external removals', () => 
 
   const def = {
     name: 'remove',
-    states: [
+    layers: [
       {
         name: 'off',
         targets: [
@@ -571,9 +616,8 @@ it('restores removed owned declarations but preserves external removals', () => 
         ],
       },
     ],
-    directionalTransitions: [],
   }
-  const instance = new LivaInstance(def, 'off')
+  const instance = new LivaInstance(def)
 
   instances.push(instance)
   instance.bind([['box', element]])
@@ -587,15 +631,19 @@ it('restores removed owned declarations but preserves external removals', () => 
   expect(element.style.height).toBe('')
 })
 
-it('cancels retained enters on state changes and owner disposal', async () => {
+it('retains enter snapshots on input changes and cancels them on owner disposal', async () => {
   const { instance } = setup()
   const interrupted = new LifecycleSession([], 'enter')
 
   instance.retainLifecycle('enter', interrupted)
-  instance.updateParameters({})
+  instance.updateParameters({ mode: 'on' })
 
-  expect(instance.state).toBe('on')
-  expect(await interrupted.finished).toBe('superseded')
+  expect(instance.composition.states.toggle).toBe('on')
+  expect(interrupted.isFinished).toBe(false)
+
+  interrupted.play()
+
+  expect(await interrupted.finished).toBe('completed')
 
   const disposed = new LifecycleSession([], 'enter')
 
@@ -609,9 +657,9 @@ it('updates template snapshots while lifecycle targets are absent', () => {
   const def = {
     name: 'missing',
     parameters: [{ name: 'x', type: 'number' } as const],
-    directionalTransitions: [],
+
     enter: { targets: [] },
-    states: [
+    layers: [
       {
         name: 'off',
         targets: [
@@ -634,49 +682,55 @@ it('updates template snapshots while lifecycle targets are absent', () => {
   instance.bind([])
   instance.updateParameters({ x: 2 })
 
-  expect(instance.state).toBe('off')
+  expect(instance.composition.layers.off).toBe(true)
   expect(errors).toEqual([])
 })
 
 it('cancels effects prepared before a later track fails browser validation', () => {
   const broken = {
     ...definition,
-    generalTransition: {
-      ...definition.generalTransition!,
-      targets: definition.generalTransition!.targets.map((target) => ({
-        ...target,
-        properties: target.properties.map((property) =>
-          property.name === 'scale'
-            ? {
-                ...property,
-                timing: { kind: 'tween', durationMs: 100, easing: 'invalid' } as const,
-              }
-            : property,
-        ),
+    layers: definition.layers.map((layer) => ({
+      ...layer,
+      transitions: layer.transitions?.map((transition) => ({
+        ...transition,
+        transition: {
+          ...transition.transition,
+          targets: transition.transition.targets.map((target) => ({
+            ...target,
+            properties: target.properties.map((property) =>
+              property.name === 'scale'
+                ? {
+                    ...property,
+                    timing: { kind: 'tween' as const, durationMs: 100, easing: 'invalid' },
+                  }
+                : property,
+            ),
+          })),
+        },
       })),
-    },
+    })),
   }
   const { instance, errors } = setup(broken)
 
-  expect(instance.setState('on')).toBe(false)
-  expect(instance.state).toBe('off')
+  updateMode(instance, 'on')
+  expect(instance.composition.states.toggle).toBe('off')
   expect(instance.animations).toEqual([])
-  expect(errors.at(-1)?.code).toBe('runtime.animation')
+  expect(errors.at(-1)?.code).toBe('runtime.expression')
 })
 
 it.each(['enter', 'leave'] as const)(
-  'scrubs %s templates on repeated targets and restores the requested state',
+  'scrubs %s templates on repeated targets and restores the application composition',
   (phase) => {
     const def = {
       name: 'panel',
       parameters: [{ name: 'opacity', type: 'number' as const }],
-      states: [
+      layers: [
         {
           name: 'idle',
           targets: [{ name: 'body', properties: [{ name: 'opacity', value: '1' }] }],
         },
       ],
-      directionalTransitions: [],
+
       [phase]: {
         timing: { kind: 'tween' as const, durationMs: 200, easing: 'linear' },
         targets: [
@@ -707,7 +761,7 @@ it.each(['enter', 'leave'] as const)(
       ['body', second],
     ])
 
-    expect(instance.previewLifecycle(phase)).toBe(true)
+    instance.previewLifecycle(phase)
     expect(instance.animations).toHaveLength(2)
 
     for (const animation of instance.animations) animation.currentTime = 100
@@ -717,21 +771,21 @@ it.each(['enter', 'leave'] as const)(
       expect(element.isConnected).toBe(true)
     }
 
-    instance.replaceDefinition(def, 'idle')
+    instance.replaceDefinition(def)
 
     expect(instance.animations).toHaveLength(0)
     expect(getComputedStyle(second).opacity).toBe('1')
     expect(errors).toEqual([])
 
     instance.dispose()
-    expect(instance.previewLifecycle(phase)).toBe(false)
+    expect(() => instance.previewLifecycle(phase)).toThrow('mounted')
   },
 )
 
 it('keeps lifecycle preview preparation atomic on invalid easing and supports spring scrubbing', () => {
   const def = {
     name: 'panel',
-    states: [
+    layers: [
       {
         name: 'off',
         targets: [
@@ -745,7 +799,7 @@ it('keeps lifecycle preview preparation atomic on invalid easing and supports sp
         ],
       },
     ],
-    directionalTransitions: [],
+
     leave: {
       timing: { kind: 'spring-duration' as const, durationMs: 200, bounce: 0.2 },
       targets: [
@@ -765,9 +819,9 @@ it('keeps lifecycle preview preparation atomic on invalid easing and supports sp
   }
   const { instance, targets, errors } = setup(def)
 
-  expect(instance.previewLifecycle('leave')).toBe(false)
+  expect(() => instance.previewLifecycle('leave')).toThrow('Could not prepare composition preview')
   expect(targets.get('body')!.getAnimations()).toHaveLength(0)
-  expect(errors.at(-1)?.code).toBe('runtime.animation')
+  expect(errors.at(-1)?.code).toBe('runtime.preview')
 
   const valid = {
     ...def,
@@ -778,6 +832,6 @@ it('keeps lifecycle preview preparation atomic on invalid easing and supports sp
   }
   instance.replaceDefinition(valid)
 
-  expect(instance.previewLifecycle('leave')).toBe(true)
+  instance.previewLifecycle('leave')
   expect(instance.animations).toHaveLength(1)
 })

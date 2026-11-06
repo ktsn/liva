@@ -145,12 +145,11 @@ function isLetBinding(value: unknown): value is LetBinding {
   return isRecord(value) && typeof value.name === 'string' && isExpression(value.initializer)
 }
 
-function isState(value: unknown): value is State {
+function isStyleScope(value: unknown): value is State {
   return (
     isRecord(value) &&
     typeof value.name === 'string' &&
     (value.timingExpression === undefined || isExpression(value.timingExpression)) &&
-    (value.when === undefined || isExpression(value.when)) &&
     Array.isArray(value.targets) &&
     value.targets.every(
       (target: unknown) =>
@@ -175,10 +174,15 @@ function isState(value: unknown): value is State {
   )
 }
 
+function isState(value: unknown): value is State {
+  return isStyleScope(value) && !('when' in value)
+}
+
 function isLayer(value: unknown): value is Layer {
   return (
-    isState(value) &&
+    isStyleScope(value) &&
     isRecord(value) &&
+    (value.when === undefined || isExpression(value.when)) &&
     (value.states === undefined || isArrayOf(value.states, isState)) &&
     (value.initialState === undefined || typeof value.initialState === 'string') &&
     (value.transitions === undefined ||
@@ -198,7 +202,7 @@ export function isDefinition(value: unknown): value is Definition {
   return (
     isRecord(value) &&
     typeof value.name === 'string' &&
-    (value.layers === undefined || isArrayOf(value.layers, isLayer)) &&
+    isArrayOf(value.layers, isLayer) &&
     (value.parameters === undefined ||
       isArrayOf(
         value.parameters,
@@ -218,15 +222,8 @@ export function isDefinition(value: unknown): value is Definition {
           (event: unknown) =>
             isRecord(event) && typeof event.name === 'string' && isExpression(event.when),
         ))) &&
-    isArrayOf(value.states, isState) &&
-    (value.generalTransition === undefined || isTransition(value.generalTransition)) &&
-    Array.isArray(value.directionalTransitions) &&
-    value.directionalTransitions.every(
-      (direction: unknown) =>
-        isRecord(direction) &&
-        typeof direction.from === 'string' &&
-        typeof direction.to === 'string' &&
-        isTransition(direction.transition),
-    )
+    !('states' in value) &&
+    !('generalTransition' in value) &&
+    !('directionalTransitions' in value)
   )
 }

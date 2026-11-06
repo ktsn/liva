@@ -43,8 +43,7 @@ fn event_conditions_lower_to_boolean_expression_ir_in_source_order() {
         serde_json::to_value(&events[2].when).unwrap(),
         json!({"kind": "boolean", "value": true})
     );
-    assert_eq!(result.definitions[0].states.len(), 1);
-    assert!(result.definitions[0].general_transition.is_none());
+    assert_eq!(result.definitions[0].layers.len(), 1);
 }
 
 #[test]
@@ -63,7 +62,7 @@ fn event_names_use_motion_local_event_namespace() {
     }
 
     let source = format!(
-        "{}\nmotion other {{ event dismiss when true; state idle {{}} }}",
+        "{}\nmotion other {{ event dismiss when true; layer idle {{}} }}",
         motion("event dismiss when enabled")
     );
     let result = valid(&source);
@@ -107,7 +106,7 @@ fn event_names_and_conditions_reject_invalid_types_and_references_at_their_range
     }
 
     let source = format!(
-        "{}\nmotion other {{ event dismiss when enabled; state idle {{}} }}",
+        "{}\nmotion other {{ event dismiss when enabled; layer idle {{}} }}",
         motion("")
     );
     let result = compile(&source, false);
@@ -121,7 +120,7 @@ fn event_names_and_conditions_reject_invalid_types_and_references_at_their_range
 }
 
 #[test]
-fn drag_release_conditions_and_fallback_inheritance_compile_together() {
+fn drag_release_conditions_and_shared_layer_styles_compile_together() {
     let result = valid(include_str!("../../../fixtures/presence.liv"));
     let definition = &result.definitions[0];
 
@@ -135,8 +134,22 @@ fn drag_release_conditions_and_fallback_inheritance_compile_together() {
         json["right"]["left"],
         json!({"kind": "reference", "path": ["movement", "offset", "x"]})
     );
-    assert_eq!(definition.states[1].value("body", "opacity"), Some("1"));
-    assert_eq!(definition.states[1].value("badge", "opacity"), Some("1"));
+    assert_eq!(
+        definition.layers[0].targets[0]
+            .properties
+            .iter()
+            .find(|property| property.name == "opacity")
+            .map(|property| property.value.as_str()),
+        Some("1")
+    );
+    assert_eq!(
+        definition.layers[0].targets[1]
+            .properties
+            .iter()
+            .find(|property| property.name == "opacity")
+            .map(|property| property.value.as_str()),
+        Some("1")
+    );
 }
 
 #[test]

@@ -7,8 +7,7 @@ import { decodeBundle, type Definition, type Expression } from './definition.ts'
 const ref = (name: string): Expression => ({ kind: 'reference', path: [name] })
 const definition: Definition = {
   name: 'button',
-  states: [],
-  directionalTransitions: [],
+
   parameters: [
     { name: 'hover', type: 'boolean' },
     { name: 'press', type: 'boolean' },
@@ -53,7 +52,7 @@ function timedDefinition(duration = 300): Definition {
 
   return {
     ...definition,
-    layers: definition.layers?.map((layer) =>
+    layers: definition.layers.map((layer) =>
       layer.name === 'base'
         ? {
             ...layer,
@@ -130,18 +129,19 @@ describe('reactive layer instances', () => {
     expect(second.element.style.scale).toBe('1')
   })
 
-  it('rejects manual state selection and exposes the reactive presentation state', () => {
-    const { instance, errors } = setup()
+  it('exposes the current layer composition', () => {
+    const { instance } = setup()
 
-    expect(instance.setState('idle')).toBe(false)
-    expect(instance.reactiveState).toBe(instance.state)
-    expect(errors[0].message).toContain('reactive inputs')
+    expect(instance.composition).toEqual({
+      layers: { base: true, hover: false, press: false },
+      states: {},
+    })
   })
 
   it('replaces layer definitions using current parameter values', () => {
     const { instance, element } = setup(definition, { hover: true, press: false, size: 1.4 })
 
-    instance.replaceDefinition({ ...definition, layers: definition.layers?.slice(0, 1) })
+    instance.replaceDefinition({ ...definition, layers: definition.layers.slice(0, 1) })
 
     expect(element.style.scale).toBe('1')
   })
@@ -205,7 +205,7 @@ describe('reactive layer instances', () => {
     document.body.append(replacement)
     cleanup.push(() => replacement.remove())
     let rebound = false
-    instance.onReactiveState = () => {
+    instance.onUpdate = () => {
       if (!rebound && element.style.opacity === '0.5') {
         rebound = true
         instance.bind([['body', replacement]])
@@ -229,7 +229,7 @@ describe('reactive layer instances', () => {
     }
     const source: Definition = {
       ...definition,
-      layers: definition.layers?.map((layer) =>
+      layers: definition.layers.map((layer) =>
         layer.name === 'base'
           ? {
               ...layer,
@@ -773,7 +773,7 @@ describe('layer lifecycle snapshots', () => {
     async (reason) => {
       const source = {
         ...definition,
-        layers: definition.layers?.filter((layer) => layer.name === 'press'),
+        layers: definition.layers.filter((layer) => layer.name === 'press'),
         enter: lifecycle,
       }
       const { instance, element } = setup(source, { hover: false, press: true, size: 1 })
@@ -1386,8 +1386,7 @@ describe('typed timing playback', () => {
           { name: 'amount', type: 'number' },
           { name: 'count', type: 'number' },
         ],
-        states: [],
-        directionalTransitions: [],
+
         layers: [
           {
             name: 'base',
@@ -1449,8 +1448,7 @@ describe('typed timing playback', () => {
         { name: 'duration', type: 'number' },
         { name: 'bounce', type: 'number' },
       ],
-      states: [],
-      directionalTransitions: [],
+
       layers: [
         {
           name: 'machine',
@@ -1579,7 +1577,7 @@ describe('composition lifecycle previews', () => {
       const baseline = { layers: { base: true, hover: true, press: false }, states: {} }
       const original = instance.composition
 
-      expect(instance.previewLifecycle(phase, baseline)).toBe(true)
+      instance.previewLifecycle(phase, baseline)
 
       const animation = instance.animations[0]
 

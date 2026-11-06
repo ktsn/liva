@@ -127,8 +127,8 @@ describe('composition source provenance', () => {
   })
 
   it('has no source destinations when the property comes entirely from external CSS', () => {
-    const info = inspection('motion empty { state idle {} }')
-    const composition = { layers: {}, states: {} }
+    const info = inspection('motion empty { layer base {} }')
+    const composition = { layers: { base: true }, states: {} }
     const result = trackProvenance(info, composition, composition, undefined, 'body', 'opacity')
 
     expect(result.owner).toBe('External CSS')

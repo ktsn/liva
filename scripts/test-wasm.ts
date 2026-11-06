@@ -12,17 +12,20 @@ for (const name of ['toggle', 'reactive-toggle', 'card', 'derived', 'presence', 
   const result = JSON.parse(compile(source, false))
   assert.deepEqual(result, expected)
   const bundle = decodeBundle(JSON.stringify(result))
-  assert.equal(Object.isFrozen(bundle.definitions[0].states), true)
+  assert.equal(Object.isFrozen(bundle.definitions[0].layers), true)
   assert.equal('mappings' in bundle, false)
 }
 assert.throws(() => decodeBundle('{"schemaVersion":2,"definitions":[]}'), /Unsupported/)
 
-const unicode = '// 😀\r\nmotion a { state on {} transition { @tween-duration: 1s } }'
+const unicode = '// 😀\r\nmotion a { layer on @tween(duration: 1000) {} }'
 const development: Compilation = JSON.parse(compile(unicode, true))
 assert.deepEqual(development.diagnostics, [])
 assert(development.mappings)
-const range = development.mappings['a/transition/general/timing/duration'].range
-assert.equal(Buffer.from(unicode).subarray(range.start, range.end).toString(), ' 1s ')
+const range = development.mappings['a/layer/on/timing'].range
+assert.equal(
+  Buffer.from(unicode).subarray(range.start, range.end).toString(),
+  'tween(duration: 1000) ',
+)
 console.log(
   'Node WASM golden contract, immutable TS view, schema rejection, and UTF-8 mappings passed',
 )

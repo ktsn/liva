@@ -54,7 +54,7 @@ fn lifecycle_unsaved_changes_hover_diagnostics_and_close() {
     notify(&client, "initialized", json!({}));
 
     let uri = "file:///example.liv";
-    let valid = "motion a(value: number) {\n let twice = value * 2\n state idle { body { opacity: ${twice} } }\n}";
+    let valid = "motion a(value: number) {\n let twice = value * 2\n layer idle { body { opacity: ${twice} } }\n}";
     notify(
         &client,
         "textDocument/didOpen",
@@ -201,22 +201,22 @@ fn diagnostic_ranges_map_to_utf16_in_liva_and_vue() {
     for (uri, text, expected) in [
         (
             "file:///range.liv",
-            "motion a {\r\n let value = /* 日本😀 */ 1 + true;\r\n state idle {}\r\n}",
+            "motion a {\r\n let value = /* 日本😀 */ 1 + true;\r\n layer idle {}\r\n}",
             json!({ "start": { "line": 1, "character": 28 }, "end": { "line": 1, "character": 32 } }),
         ),
         (
             "file:///range.vue",
-            "<template>😀</template>\r\n<liva lang=\"liva\">\r\nmotion a {\r\n let value = /* 日本😀 */ 1 + true;\r\n state idle {}\r\n}\r\n</liva>",
+            "<template>😀</template>\r\n<liva lang=\"liva\">\r\nmotion a {\r\n let value = /* 日本😀 */ 1 + true;\r\n layer idle {}\r\n}\r\n</liva>",
             json!({ "start": { "line": 3, "character": 28 }, "end": { "line": 3, "character": 32 } }),
         ),
         (
             "file:///inline.vue",
-            "<template>😀</template><liva lang=\"liva\">motion a { let value = 1 + true; state idle {} }</liva>",
+            "<template>😀</template><liva lang=\"liva\">motion a { let value = 1 + true; layer idle {} }</liva>",
             json!({ "start": { "line": 0, "character": 68 }, "end": { "line": 0, "character": 72 } }),
         ),
         (
             "file:///multiline.liv",
-            "motion a {\n let value = drag(target: (1 +\n 2));\n state idle { body { opacity: 1 } }\n}",
+            "motion a {\n let value = drag(target: (1 +\n 2));\n layer idle { body { opacity: 1 } }\n}",
             json!({ "start": { "line": 1, "character": 26 }, "end": { "line": 2, "character": 3 } }),
         ),
     ] {

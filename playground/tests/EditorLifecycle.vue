@@ -18,37 +18,11 @@ const active = ref(false)
 
 <liva lang="liva">
 motion panel(active: boolean, start: number) {
-  state idle {
-    body {
-      opacity: 1
-      scale: 1
-    }
+  layer base @tween(duration: 100) {
+    body { opacity: 1; scale: 1 }
   }
-
-  state active when active {
-    body {
-      opacity: 0.8
-    }
-  }
-
-  transition {
-    @tween: 100ms
-  }
-
-  enter {
-    @tween: 200ms
-
-    body {
-      opacity: ${start}
-    }
-  }
-
-  leave {
-    @tween: 200ms
-
-    body {
-      opacity: 0
-    }
-  }
+  layer active when active { body { opacity: 0.8 } }
+  enter @tween(duration: 200, easing: linear) { body { opacity: ${start} } }
+  leave @tween(duration: 200, easing: linear) { body { opacity: 0 } }
 }
 </liva>

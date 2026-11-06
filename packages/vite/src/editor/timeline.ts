@@ -8,6 +8,7 @@ import {
   type Timing,
   type Transition,
   type State,
+  resolveLifecycleTracks,
 } from '@liva/runtime'
 
 export type LifecyclePhase = 'enter' | 'leave'
@@ -104,159 +105,82 @@ export function compositionLifecycleTracks(
   presentation: State,
   transition: Transition | undefined,
 ): TimelineTrack[] {
-  const definition: Definition = {
-    name,
-    states: [presentation],
-    directionalTransitions: [],
-    [phase]: transition,
+  const resolved = resolveLifecycleTracks(
+    phase,
+    transition,
+    presentation,
+    (target, property) =>
+      presentation.targets
+        .find((item) => item.name === target)
+        ?.properties.find((item) => item.name === property)?.value ?? '',
+  )
+  const pairs = new Map<string, { target: string; property: string; value: string }>()
+
+  for (const target of presentation.targets) {
+    for (const property of target.properties)
+      pairs.set(`${target.name}/${property.name}`, {
+        target: target.name,
+        property: property.name,
+        value: property.value,
+      })
   }
 
-  return timelineTracks(definition, presentation.name, presentation.name, true, phase).map(
-    (track) => {
-      const baseline =
-        presentation.targets
-          .find((target) => target.name === track.target)
-          ?.properties.find((property) => property.name === track.property)?.value ?? ''
-
-      return {
-        ...track,
-        fromValue: track.explicit.find((frame) => frame.offset === 0)?.value ?? baseline,
-        toValue:
-          phase === 'enter'
-            ? baseline
-            : (track.explicit.find((frame) => frame.offset === 1)?.value ?? baseline),
-        readonly: true,
-      }
-    },
-  )
-}
-
-const propertyAt = (transition: Transition | undefined, target: string, property: string) =>
-  transition?.targets
-    .find((item) => item.name === target)
-    ?.properties.find((item) => item.name === property)
-
-export function timingText(timing: Timing): string {
-  if (timing.kind === 'tween') return `@tween: ${timing.durationMs}ms ${timing.easing}`
-  if (timing.kind === 'spring-duration') return `@spring: ${timing.durationMs}ms ${timing.bounce}`
-  return `@spring: ${timing.stiffness} ${timing.damping} ${timing.mass}`
-}
-
-export function transitionAt(
-  definition: Definition,
-  from: string,
-  to: string,
-  general: boolean,
-  phase?: LifecyclePhase,
-): Transition | undefined {
-  if (phase) return definition[phase]
-
-  return general
-    ? definition.generalTransition
-    : definition.directionalTransitions.find((item) => item.from === from && item.to === to)
-        ?.transition
-}
-
-export function transitionPath(
-  definition: Definition,
-  from: string,
-  to: string,
-  general: boolean,
-  phase?: LifecyclePhase,
-) {
-  if (phase) return `${definition.name}/${phase}`
-
-  return `${definition.name}/transition/${general ? 'general' : `directional/${from}/${to}`}`
-}
-
-export function timelineTracks(
-  definition: Definition,
-  from: string,
-  to: string,
-  general: boolean,
-  phase?: LifecyclePhase,
-): TimelineTrack[] {
-  const source = definition.states.find((state) => state.name === (phase ? to : from))
-  const destination = definition.states.find((state) => state.name === to)
-  const common = phase ? definition[phase] : definition.generalTransition
-  const selected = transitionAt(definition, from, to, general, phase)
-
-  const targets = (destination?.targets ?? []).map((target) => ({
-    ...target,
-    properties: [...target.properties],
-  }))
-
-  if (phase) {
-    for (const transition of [common, selected]) {
-      for (const target of transition?.targets ?? []) {
-        let row = targets.find((item) => item.name === target.name)
-
-        if (!row) {
-          row = { name: target.name, properties: [] }
-          targets.push(row)
-        }
-
-        for (const property of target.properties) {
-          if (!row.properties.some((item) => item.name === property.name)) {
-            row.properties.push({ name: property.name, value: '' })
-          }
-        }
-      }
+  for (const target of transition?.targets ?? []) {
+    for (const property of target.properties) {
+      const key = `${target.name}/${property.name}`
+      if (!pairs.has(key))
+        pairs.set(key, { target: target.name, property: property.name, value: '' })
     }
   }
 
-  return targets.flatMap((target) =>
-    target.properties.map((property) => {
-      const local = propertyAt(selected, target.name, property.name)
-      const inherited = general ? undefined : propertyAt(common, target.name, property.name)
-      const timing = local?.timing ?? inherited?.timing ?? selected?.timing ?? common?.timing
-      const explicit = local?.keyframes ?? inherited?.keyframes ?? []
-      const frames = [...explicit]
-      const initial =
-        source?.targets
-          .find((item) => item.name === target.name)
-          ?.properties.find((item) => item.name === property.name)?.value ?? property.value
+  return [...pairs.values()].map(({ target, property, value }) => {
+    const track = resolved.find((item) => item.target === target && item.property === property)
+    const local = transition?.targets
+      .find((item) => item.name === target)
+      ?.properties.find((item) => item.name === property)
+    const timing = track?.timing
+    const frames = track?.keyframes ?? [
+      { offset: 0, value },
+      { offset: 1, value },
+    ]
+    let duration = 0
+    let diagnostic: string | undefined
 
-      if (!frames.some((frame) => frame.offset === 0)) frames.push({ offset: 0, value: initial })
-      if (!frames.some((frame) => frame.offset === 1))
-        frames.push({ offset: 1, value: property.value })
+    try {
+      duration = timing
+        ? timing.kind === 'spring-physics'
+          ? sampleSpring(timing).durationMs
+          : timing.durationMs
+        : 0
+    } catch (error) {
+      diagnostic = String(error)
+    }
 
-      let duration = 0
-      let diagnostic: string | undefined
-      try {
-        duration = timing
-          ? timing.kind === 'spring-physics'
-            ? sampleSpring(timing).durationMs
-            : timing.durationMs
-          : 0
-      } catch (error) {
-        diagnostic = String(error)
-      }
+    return {
+      lifecycle: phase,
+      target,
+      property,
+      path: `${name}/${phase}/target/${target}/property/${property}`,
+      local,
+      timing,
+      duration,
+      diagnostic,
+      frames,
+      explicit: local?.keyframes ?? [],
+      inheritedFrames: false,
+      timingOrigin: `Motion ${phase}`,
+      readonly: true,
+      fromValue: frames.find((frame) => frame.offset === 0)?.value,
+      toValue: phase === 'enter' ? value : frames.find((frame) => frame.offset === 1)?.value,
+    }
+  })
+}
 
-      return {
-        lifecycle: phase,
-        target: target.name,
-        property: property.name,
-        path: `${transitionPath(definition, from, to, general, phase)}/target/${target.name}/property/${property.name}`,
-        local,
-        timing,
-        duration,
-        diagnostic,
-        frames: frames.toSorted((a, b) => a.offset - b.offset),
-        explicit,
-        inheritedFrames: !general && !local?.keyframes && !!inherited?.keyframes,
-        timingOrigin: local?.timing
-          ? 'Local property'
-          : inherited?.timing
-            ? 'Inherited common property'
-            : selected?.timing
-              ? 'Transition default'
-              : phase
-                ? 'Lifecycle default'
-                : 'Inherited common default',
-      }
-    }),
-  )
+export function timingText(timing: Timing): string {
+  if (timing.kind === 'tween') return `Tween: ${timing.durationMs} ms, ${timing.easing}`
+  if (timing.kind === 'spring-duration')
+    return `Spring: ${timing.durationMs} ms, bounce ${timing.bounce}`
+  return `Spring: stiffness ${timing.stiffness}, damping ${timing.damping}, mass ${timing.mass}`
 }
 
 export function normalizedOffset(time: number, duration: number): number {

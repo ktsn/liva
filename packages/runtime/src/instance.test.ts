@@ -5,8 +5,8 @@ import type { Definition } from './definition.ts'
 const definition: Definition = {
   name: 'event',
   parameters: [{ name: 'ready', type: 'boolean' }],
-  states: [{ name: 'idle', targets: [] }],
-  directionalTransitions: [],
+  layers: [{ name: 'idle', targets: [] }],
+
   events: [{ name: 'dismiss', when: { kind: 'reference', path: ['ready'] } }],
 }
 const instances: LivaInstance[] = []
@@ -45,7 +45,7 @@ describe('conditional event edges', () => {
 
       expect(observed).toEqual(counts)
       expect(emitted).toEqual(['dismiss', 'dismiss'])
-      expect(instance.state).toBe('idle')
+      expect(instance.composition).toEqual({ layers: { idle: true }, states: {} })
     },
   )
 
@@ -83,7 +83,7 @@ describe('conditional event edges', () => {
     instance.updateParameters({ ready: true })
 
     expect(emitted).toEqual(['reset', 'dismiss'])
-    expect(instance.state).toBe('idle')
+    expect(instance.composition).toEqual({ layers: { idle: true }, states: {} })
   })
 })
 
@@ -120,15 +120,15 @@ describe('event lifecycle', () => {
 })
 
 describe('composition snapshots', () => {
-  it('does not expose a layer composition for legacy state motions', () => {
+  it('exposes the active ordinary layer composition', () => {
     const instance = createInstance(false)
 
-    expect(instance.composition).toBeUndefined()
+    expect(instance.composition).toEqual({ layers: { idle: true }, states: {} })
   })
 
   const layered: Definition = {
     ...definition,
-    states: [],
+
     layers: [
       { name: 'visible', when: { kind: 'reference', path: ['ready'] }, targets: [] },
       {
@@ -175,8 +175,8 @@ describe('composition snapshots', () => {
 
     expect(snapshot).toBeDefined()
 
-    Object.assign(snapshot?.layers ?? {}, { visible: false })
-    Object.assign(snapshot?.states ?? {}, { history: 'idle' })
+    Object.assign(snapshot.layers, { visible: false })
+    Object.assign(snapshot.states, { history: 'idle' })
 
     expect(first.composition).toEqual({ layers: { visible: true }, states: { history: 'done' } })
     expect(second.composition).toEqual({ layers: { visible: false }, states: { history: 'idle' } })

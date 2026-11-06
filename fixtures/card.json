@@ -21,9 +21,126 @@
           }
         }
       ],
-      "states": [
+      "layers": [
         {
-          "name": "idle",
+          "transitions": [
+            {
+              "from": "idle",
+              "to": "dragging",
+              "when": {
+                "kind": "reference",
+                "path": ["movement", "active"]
+              },
+              "transition": {
+                "targets": []
+              }
+            },
+            {
+              "from": "dragging",
+              "to": "idle",
+              "when": {
+                "kind": "unary",
+                "operator": "!",
+                "operand": {
+                  "kind": "reference",
+                  "path": ["movement", "active"]
+                }
+              },
+              "transition": {
+                "targets": [
+                  {
+                    "name": "body",
+                    "properties": [
+                      {
+                        "timingExpression": {
+                          "kind": "call",
+                          "function": "spring",
+                          "arguments": [
+                            {
+                              "name": "stiffness",
+                              "value": {
+                                "kind": "number",
+                                "value": 300.0
+                              }
+                            },
+                            {
+                              "name": "damping",
+                              "value": {
+                                "kind": "number",
+                                "value": 20.0
+                              }
+                            }
+                          ]
+                        },
+                        "name": "translate"
+                      },
+                      {
+                        "timingExpression": {
+                          "kind": "call",
+                          "function": "tween",
+                          "arguments": [
+                            {
+                              "name": "duration",
+                              "value": {
+                                "kind": "number",
+                                "value": 180.0
+                              }
+                            },
+                            {
+                              "name": "easing",
+                              "value": {
+                                "kind": "reference",
+                                "path": ["easeOut"]
+                              }
+                            }
+                          ]
+                        },
+                        "name": "scale"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "name": "interaction",
+          "states": [
+            {
+              "name": "idle",
+              "targets": []
+            },
+            {
+              "name": "dragging",
+              "targets": [
+                {
+                  "name": "body",
+                  "properties": [
+                    {
+                      "name": "translate",
+                      "value": "${movement.offset.x}px ${movement.offset.y}px",
+                      "template": [
+                        {
+                          "kind": "reference",
+                          "path": ["movement", "offset", "x"]
+                        },
+                        "px ",
+                        {
+                          "kind": "reference",
+                          "path": ["movement", "offset", "y"]
+                        },
+                        "px"
+                      ]
+                    },
+                    {
+                      "name": "scale",
+                      "value": "1.05"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "initialState": "idle",
           "targets": [
             {
               "name": "body",
@@ -33,86 +150,38 @@
                   "value": "0 0"
                 },
                 {
+                  "timingExpression": {
+                    "kind": "call",
+                    "function": "tween",
+                    "arguments": [
+                      {
+                        "name": "duration",
+                        "value": {
+                          "kind": "number",
+                          "value": 200.0
+                        }
+                      },
+                      {
+                        "name": "easing",
+                        "value": {
+                          "kind": "reference",
+                          "path": ["easeOut"]
+                        }
+                      }
+                    ]
+                  },
+                  "keyframes": [
+                    {
+                      "offset": 1.0,
+                      "value": "1"
+                    }
+                  ],
                   "name": "scale",
                   "value": "1"
                 }
               ]
             }
           ]
-        },
-        {
-          "name": "dragging",
-          "when": {
-            "kind": "reference",
-            "path": ["movement", "active"]
-          },
-          "targets": [
-            {
-              "name": "body",
-              "properties": [
-                {
-                  "name": "translate",
-                  "value": "${movement.offset.x}px ${movement.offset.y}px",
-                  "template": [
-                    {
-                      "kind": "reference",
-                      "path": ["movement", "offset", "x"]
-                    },
-                    "px ",
-                    {
-                      "kind": "reference",
-                      "path": ["movement", "offset", "y"]
-                    },
-                    "px"
-                  ]
-                },
-                {
-                  "name": "scale",
-                  "value": "1.05"
-                }
-              ]
-            }
-          ]
-        }
-      ],
-      "generalTransition": {
-        "timing": {
-          "kind": "tween",
-          "durationMs": 200.0,
-          "easing": "ease-out"
-        },
-        "targets": []
-      },
-      "directionalTransitions": [
-        {
-          "from": "dragging",
-          "to": "idle",
-          "transition": {
-            "targets": [
-              {
-                "name": "body",
-                "properties": [
-                  {
-                    "name": "translate",
-                    "timing": {
-                      "kind": "spring-physics",
-                      "stiffness": 300.0,
-                      "damping": 20.0,
-                      "mass": 1.0
-                    }
-                  },
-                  {
-                    "name": "scale",
-                    "timing": {
-                      "kind": "tween",
-                      "durationMs": 180.0,
-                      "easing": "ease-out"
-                    }
-                  }
-                ]
-              }
-            ]
-          }
         }
       ]
     }

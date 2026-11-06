@@ -26,7 +26,6 @@ fn layers_preserve_source_order_without_lowering_to_exclusive_states() {
             .collect::<Vec<_>>(),
         ["base", "hover", "press"]
     );
-    assert!(definition.states.is_empty());
 }
 
 #[test]
@@ -84,7 +83,7 @@ fn incomplete_layer_headers_report_diagnostics_without_panicking() {
 }
 
 #[test]
-fn layers_do_not_disable_legacy_fallback_validation() {
+fn layers_do_not_enable_removed_motion_states() {
     for states in ["state hover when true {}", "state first {} state second {}"] {
         let source = format!("motion button {{ layer base {{}} {states} }}");
         let result = compile(&source, true);
@@ -93,7 +92,7 @@ fn layers_do_not_disable_legacy_fallback_validation() {
             result
                 .diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.code == "semantic.fallback")
+                .any(|diagnostic| diagnostic.code == "semantic.state-migration")
         );
     }
 }
@@ -185,7 +184,7 @@ fn layer_style_targets_reject_animation_metadata_and_frame_offsets() {
 
             assert!(result.diagnostics.iter().any(|diagnostic| matches!(
                 diagnostic.code.as_str(),
-                "syntax.expected" | "semantic.declaration"
+                "syntax.expected" | "semantic.declaration" | "semantic.timing-migration"
             )));
         }
     }
@@ -195,7 +194,7 @@ fn layer_style_targets_reject_animation_metadata_and_frame_offsets() {
 fn animation_target_names_do_not_enter_style_context() {
     for target in ["state", "layer"] {
         valid(&format!(
-            "motion button {{ state idle {{ {target} {{ opacity: 1 }} }} transition {{ {target} {{ opacity {{ @tween: 100ms; 0%: 0 }} }} }} }}"
+            "motion button {{ layer base {{ state idle initial {{ {target} {{ opacity: 1 }} }} transition idle -> idle @tween(duration: 100) when true {{ {target} {{ opacity {{ 0%: 0 }} }} }} }} }}"
         ));
     }
 }

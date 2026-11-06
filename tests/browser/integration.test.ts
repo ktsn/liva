@@ -158,7 +158,7 @@ test('invalid source retains last valid definition and fixed source resumes HMR'
       }
     }, base)
 
-    await writeFile(file, original.replace('50ms', 'invalid'))
+    await writeFile(file, original.replace('duration: 50', 'duration: invalid'))
 
     await expect
       .poll(async () => (await page.request.get(`${base}/tests/Hmr.vue?raw`)).text())

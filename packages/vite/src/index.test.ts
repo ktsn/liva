@@ -105,7 +105,7 @@ describe('Vite compilation hooks', () => {
       code: source,
     })
 
-    const replacement = 'motion replacement { state idle { box { opacity: 1 } } }'
+    const replacement = 'motion replacement { layer idle { box { opacity: 1 } } }'
     const transformed = await call('transform', replacement, `${file}?vue&type=liva&index=0`)
     expect(transformed.code).toContain('replacement')
     expect(transformed.code).not.toContain('toggle')
@@ -196,7 +196,7 @@ describe('Vite compilation hooks', () => {
 it('reports presence ownership conflicts with the source location', async () => {
   const { call } = hooks()
   const conflict =
-    '<template><div v-liva:fade><Transition><div v-if="shown" v-liva-target:box /></Transition></div></template><liva>motion fade { state idle { box { opacity: 1 } } enter { @tween: 100ms; box { opacity { 0%: 0 } } } }</liva>'
+    '<template><div v-liva:fade><Transition><div v-if="shown" v-liva-target:box /></Transition></div></template><liva>motion fade { layer idle { box { opacity: 1 } } enter @tween(duration: 100) { box { opacity { 0%: 0 } } } }</liva>'
 
   await writeFile(file, conflict)
 

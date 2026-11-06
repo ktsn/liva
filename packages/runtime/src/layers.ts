@@ -39,7 +39,7 @@ export interface LayerResolution {
 }
 
 export function layerTargets(definition: Definition): readonly Target<Property>[] {
-  return (definition.layers ?? []).flatMap((layer) => [
+  return definition.layers.flatMap((layer) => [
     ...layer.targets,
     ...(layer.states ?? []).flatMap((state) => state.targets),
   ])
@@ -174,7 +174,7 @@ export function compositionTransitions(
   const transitions = new Map<string, GuardedTransition>()
 
   for (const identity of selected) {
-    const layer = definition.layers?.find((candidate) => candidate.name === identity.layer)
+    const layer = definition.layers.find((candidate) => candidate.name === identity.layer)
     const transition = Number.isInteger(identity.index)
       ? layer?.transitions?.[identity.index]
       : undefined
@@ -196,7 +196,7 @@ export function compositionTransitions(
 }
 
 function validateComposition(definition: Definition, composition: Composition): void {
-  const layers = definition.layers ?? []
+  const layers = definition.layers
   const ordinary = layers.filter((layer) => !layer.states?.length)
   const stateful = layers.filter((layer) => layer.states?.length)
 
@@ -310,7 +310,6 @@ export function resolveLayerTracks(
           property.value,
           explicit,
           timing,
-          true,
         ),
       })
     }

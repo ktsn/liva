@@ -56,7 +56,7 @@ fn css_template_json_preserves_quotes_comments_and_text_segments() {
         ),
     ] {
         let source = format!(
-            "motion demo(label: string) {{ state idle {{ body {{ content: {value} }} }} }}"
+            "motion demo(label: string) {{ layer idle {{ body {{ content: {value} }} }} }}"
         );
         let compiled = liva_compiler::compile(&source, false);
 
@@ -65,7 +65,7 @@ fn css_template_json_preserves_quotes_comments_and_text_segments() {
             "{:?}",
             compiled.diagnostics
         );
-        let property = &compiled.definitions[0].states[0].targets[0].properties[0];
+        let property = &compiled.definitions[0].layers[0].targets[0].properties[0];
         assert_eq!(serde_json::to_value(&property.template).unwrap(), expected);
     }
 }
@@ -73,7 +73,7 @@ fn css_template_json_preserves_quotes_comments_and_text_segments() {
 #[test]
 fn call_initializers_serialize_named_arguments() {
     let result = valid(
-        "motion card { let movement=drag(\n target: card_body,\n)\n state idle { card_body { translate: ${movement.offset.x}px 0 } } }",
+        "motion card { let movement=drag(\n target: card_body,\n)\n layer idle { card_body { translate: ${movement.offset.x}px 0 } } }",
     );
     let initializer = serde_json::to_value(&result.definitions[0].let_bindings[0]).unwrap();
 
@@ -95,9 +95,8 @@ fn hyphenated_bindings_compile_to_reference_and_binary_ir() {
     let source = r#"motion demo(max-value: number) {
   let adjusted-value = max-value - 1
   let pointer-state = drag(target: main-body)
-  state idle { main-body { opacity: ${adjusted-value} } }
-  state active when pointer-state.active { main-body { opacity: ${max-value} } }
-  transition { @tween: 100ms }
+  layer idle { main-body { opacity: ${adjusted-value} } }
+  layer active when pointer-state.active { main-body { opacity: ${max-value} } }
 }"#;
     let result = compile(source, false);
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
@@ -120,7 +119,7 @@ fn hyphenated_bindings_compile_to_reference_and_binary_ir() {
 fn css_units_urls_and_escapes_keep_their_output_spelling() {
     let source = r#"motion demo(label: string) {
   let newline = "\n"
-  state idle {
+  layer idle {
     body {
       width: calc(100% - 20px);
       background-image: url("https://example.com/a.png");
@@ -136,7 +135,7 @@ fn css_units_urls_and_escapes_keep_their_output_spelling() {
         serde_json::to_value(&definition.let_bindings[0].initializer).unwrap(),
         json!({"kind": "string", "value": "\n"})
     );
-    let properties = &definition.states[0].targets[0].properties;
+    let properties = &definition.layers[0].targets[0].properties;
     assert_eq!(properties[0].value, "calc(100% - 20px)");
     assert_eq!(properties[1].value, r#"url("https://example.com/a.png")"#);
     assert_eq!(properties[2].value, r#""\41 ${label /* 😀 */} \n""#);
@@ -157,7 +156,7 @@ fn quoted_templates_preserve_nested_quotes_and_escapes() {
         r#""${label // comment}""#,
     ] {
         let source = format!(
-            "motion a(label: string) {{ state idle {{ body {{ content: {template} }} }} }}"
+            "motion a(label: string) {{ layer idle {{ body {{ content: {template} }} }} }}"
         );
         let result = compile(&source, false);
         assert!(
@@ -166,7 +165,7 @@ fn quoted_templates_preserve_nested_quotes_and_escapes() {
             result.diagnostics
         );
         assert_eq!(
-            result.definitions[0].states[0].targets[0].properties[0].value,
+            result.definitions[0].layers[0].targets[0].properties[0].value,
             template
         );
     }

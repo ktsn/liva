@@ -16,10 +16,9 @@ import { LivaPresenceBoundary, type PresenceEntry } from './presence.ts'
 
 const definition: Definition = {
   name: 'fade',
-  states: [
+  layers: [
     { name: 'idle', targets: [{ name: 'box', properties: [{ name: 'opacity', value: '1' }] }] },
   ],
-  directionalTransitions: [],
   enter: {
     timing: { kind: 'tween', durationMs: 50, easing: 'linear' },
     targets: [
@@ -80,7 +79,7 @@ async function mount(persisted: boolean, group = false, motion = definition) {
               },
             ),
           ]),
-          [[root, { value: 'idle', owner: ['root'] }, 'fade', { compiled: true }]],
+          [[root, { value: {}, owner: ['root'] }, 'fade', { compiled: true }]],
         )
     },
   })

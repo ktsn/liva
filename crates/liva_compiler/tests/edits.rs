@@ -1,5 +1,8 @@
 use liva_compiler::edits::{Edit, apply_edits};
 
+const SOURCE: &str = include_str!("../../../fixtures/toggle.liv");
+const TRACK: &str = "toggle/layer/toggle/transition/0/target/thumb/property/scale";
+
 fn set(path: &str, value: &str) -> Edit {
     Edit::Set {
         path: path.into(),
@@ -7,27 +10,41 @@ fn set(path: &str, value: &str) -> Edit {
     }
 }
 
+fn timing(path: &str, value: &str) -> Edit {
+    Edit::Timing {
+        path: path.into(),
+        value: Some(value.into()),
+    }
+}
+
+fn frame(offset: f64, value: &str, easing: Option<&str>) -> Edit {
+    Edit::AddFrame {
+        path: TRACK.into(),
+        offset,
+        value: value.into(),
+        easing: easing.map(str::to_owned),
+    }
+}
+
 #[test]
 fn targeted_edits_preserve_unicode_comments_and_crlf() {
-    let source = format!(
-        "// 日本語😀\r\n{}",
-        include_str!("../../../fixtures/toggle.liv").replace('\n', "\r\n")
-    );
+    let source = format!("// 日本語😀\r\n{}", SOURCE.replace('\n', "\r\n"));
     let result = apply_edits(
         &source,
         &[
-            set("toggle/transition/general/timing/duration", "500ms"),
             set(
-                "toggle/transition/general/target/thumb/property/scale/frame/0.4/value",
-                "1.5 1",
+                "toggle/layer/toggle/timing",
+                "tween(duration: 500, easing: easeOut)",
             ),
+            set(&format!("{TRACK}/frame/0.4/value"), "1.5 1"),
         ],
     )
     .unwrap();
+
     assert_eq!(
         result.source,
         source
-            .replacen("duration: 350ms", "duration: 500ms", 1)
+            .replacen("duration: 350,", "duration: 500,", 1)
             .replacen("40%: 1.3 1", "40%: 1.5 1", 1)
     );
     assert_eq!(
@@ -37,262 +54,85 @@ fn targeted_edits_preserve_unicode_comments_and_crlf() {
 }
 
 #[test]
-fn comments_and_field_injection_fail_safely() {
-    let source = include_str!("../../../fixtures/toggle.liv");
-    let commented = source.replacen("350ms", "/* preserve */ 350ms", 1);
-    assert!(
-        apply_edits(
-            &commented,
-            &[set("toggle/transition/general/timing/duration", "500ms")]
-        )
-        .unwrap_err()
-        .contains("comments")
-    );
-    assert!(
-        apply_edits(
-            source,
-            &[set(
-                "toggle/transition/general/timing/duration",
-                "500ms, easing: linear"
-            )]
-        )
-        .is_err()
-    );
-    assert!(
-        apply_edits(
-            source,
-            &[set(
-                "toggle/transition/general/target/thumb/property/scale/frame/0.4/value",
-                "1.5\neasing: steps(2)"
-            )]
-        )
-        .is_err()
-    );
-}
-
-#[test]
-fn adds_directional_override_and_adds_removes_frames() {
-    let source = include_str!("../../../fixtures/toggle.liv");
-    let result = apply_edits(
-        source,
-        &[
-            Edit::Override {
-                definition: "toggle".into(),
-                from: "off".into(),
-                to: "on".into(),
-                target: "track".into(),
-                property: "background-color".into(),
-                timing: "@tween: 800ms".into(),
-            },
-            Edit::AddFrame {
-                path: "toggle/transition/general/target/thumb/property/scale".into(),
-                offset: 0.6,
-                value: "1.2".into(),
-                easing: None,
-            },
-            Edit::RemoveFrame {
-                path: "toggle/transition/general/target/thumb/property/scale/frame/0.7".into(),
-            },
-        ],
-    )
-    .unwrap();
-    assert!(result.source.contains("transition off -> on"));
-    assert!(result.source.contains("60%"));
-    assert!(!result.source.contains("70%"));
-    assert!(result.source.contains("@spring: 300 20"));
-    assert!(
-        apply_edits(
-            source,
-            &[Edit::AddFrame {
-                path: "toggle/transition/general/target/thumb/property/scale".into(),
-                offset: 0.4,
-                value: "2".into(),
-                easing: None
-            }]
-        )
-        .is_err()
-    );
-}
-
-#[test]
-fn frame_offsets_move_by_semantic_identity_and_reject_collisions() {
-    let source = include_str!("../../../fixtures/toggle.liv");
-    let result = apply_edits(
-        source,
-        &[set(
-            "toggle/transition/general/target/thumb/property/scale/frame/0.4/offset",
-            "55%",
-        )],
-    )
-    .unwrap();
-    assert_eq!(result.source, source.replacen("40%", "55%", 1));
-    assert!(
-        apply_edits(
-            source,
-            &[set(
-                "toggle/transition/general/target/thumb/property/scale/frame/0.4/offset",
-                "70.0%"
-            )]
-        )
-        .is_err()
-    );
-}
-
-#[test]
-fn new_comments_cannot_consume_neighbors() {
-    let source = "motion a { state off { t { x: 0 } } state on when true { t { x: 1 } } transition { @tween-duration: 1ms\nt { x { 50%: 1 @ ease-in\n } } } }";
-    assert!(
-        apply_edits(
-            source,
-            &[set(
-                "a/transition/general/target/t/property/x/frame/0.5/value",
-                "2 //"
-            )]
-        )
-        .is_err()
-    );
-    assert!(
-        apply_edits(
-            source,
-            &[set("a/transition/general/timing/duration", "2ms /*")]
-        )
-        .is_err()
-    );
-}
-
-#[test]
-fn compact_insertions_preserve_crlf() {
-    let source = "// header\r\nmotion a { state off { t { x: 0 } } state on when true { t { x: 1 } } transition { @tween-duration: 1ms\r\nt { x {} } } }\r\n";
-    let result = apply_edits(
-        source,
-        &[
-            Edit::AddFrame {
-                path: "a/transition/general/target/t/property/x".into(),
-                offset: 0.5,
-                value: "2".into(),
-                easing: None,
-            },
-            Edit::Override {
-                definition: "a".into(),
-                from: "off".into(),
-                to: "on".into(),
-                target: "t".into(),
-                property: "x".into(),
-                timing: "@tween: 2ms".into(),
-            },
-        ],
-    )
-    .unwrap();
-    assert_eq!(
-        result.source.matches('\n').count(),
-        result.source.matches("\r\n").count()
-    );
-    assert!(result.source.starts_with("// header\r\nmotion a { state off { t { x: 0 } } state on when true { t { x: 1 } } transition { @tween-duration: 1ms\r\nt { x {"));
-}
-
-#[test]
-fn track_edits_copy_frames_and_restore_inheritance_independently() {
-    use liva_compiler::edits::FrameEdit;
-    let source = include_str!("../../../fixtures/toggle.liv");
-    let path = "toggle/transition/directional/off/on/target/thumb/property/scale";
-    let edit = |timing, frames| Edit::Track {
-        path: path.into(),
-        timing,
-        frames,
-    };
-    let copied = apply_edits(
-        source,
-        &[edit(
-            None,
-            Some(vec![
-                FrameEdit {
-                    offset: 0.4,
-                    value: "1.4".into(),
-                    easing: Some("ease-in".into()),
-                },
-                FrameEdit {
-                    offset: 0.7,
-                    value: "0.95 1".into(),
-                    easing: None,
-                },
-            ]),
-        )],
-    )
-    .unwrap();
-
-    assert!(copied.source.contains("transition off -> on"));
-    assert!(copied.source.contains("40%: 1.4"));
-    assert!(copied.source.contains("40%: 1.3 1"));
-
-    let restored =
-        apply_edits(&copied.source, &[edit(Some("@tween: 200ms".into()), None)]).unwrap();
-    let direction = restored.compilation.definitions[0]
-        .directional_transitions
-        .iter()
-        .find(|d| d.from == "off")
-        .unwrap();
-    let track = &direction.transition.targets[0].properties[0];
-    assert!(track.keyframes.is_none());
-    assert!(track.timing.is_some());
-
-    let removed = apply_edits(&restored.source, &[edit(None, None)]).unwrap();
-    assert!(!removed.source.contains("@tween: 200ms"));
-}
-
-#[test]
-fn track_edits_reject_injection_collisions_and_comment_loss() {
-    use liva_compiler::edits::FrameEdit;
-    let source = include_str!("../../../fixtures/toggle.liv");
-    let path = "toggle/transition/general/target/thumb/property/scale";
-    let edit = |frames| Edit::Track {
-        path: path.into(),
-        timing: None,
-        frames: Some(frames),
-    };
-    let frame = |value: &str| FrameEdit {
-        offset: 0.4,
-        value: value.into(),
-        easing: None,
-    };
-
-    for frames in [
-        vec![frame("1\neasing: ease")],
-        vec![frame("1; 60%: 2")],
-        vec![frame("1"), frame("2")],
-    ] {
-        assert!(apply_edits(source, &[edit(frames)]).is_err());
-    }
-
-    let commented = source.replace("40%: 1.3 1", "40%: /* keep */ 1.3 1");
-    assert!(
-        apply_edits(&commented, &[edit(vec![frame("1")])])
-            .unwrap_err()
-            .contains("comments")
-    );
-}
-
-#[test]
-fn track_edits_accept_opaque_grouped_values_and_preserve_surrounding_crlf() {
-    use liva_compiler::edits::FrameEdit;
-    let source = include_str!("../../../fixtures/toggle.liv").replace('\n', "\r\n");
-    let path = "toggle/transition/general/target/thumb/property/scale";
+fn replacing_a_commented_expression_is_rejected() {
+    let source = SOURCE.replacen("duration: 350", "duration: /* preserve */ 350", 1);
     let result = apply_edits(
         &source,
-        &[Edit::Track {
-            path: path.into(),
-            timing: Some("@tween: 500ms linear(\n 0,\n 1\n)".into()),
-            frames: Some(vec![
-                FrameEdit {
-                    offset: 0.5,
-                    value: "var(--scale,\n 1.5)".into(),
-                    easing: Some("linear".into()),
-                },
-                FrameEdit {
-                    offset: 0.7,
-                    value: "\"a;b{}\"".into(),
-                    easing: None,
-                },
-            ]),
+        &[set("toggle/layer/toggle/timing", "tween(duration: 500)")],
+    );
+
+    assert!(result.unwrap_err().contains("comments"));
+}
+
+#[test]
+fn field_edits_reject_injected_declarations_and_comments() {
+    for value in ["1.5\neasing: steps(2)", "2 //", "2 /*", "1; 60%: 2"] {
+        let result = apply_edits(SOURCE, &[set(&format!("{TRACK}/frame/0.4/value"), value)]);
+
+        assert!(result.is_err(), "{value}");
+    }
+}
+
+#[test]
+fn adds_and_removes_frames_without_changing_other_transition_tracks() {
+    let result = apply_edits(
+        SOURCE,
+        &[
+            frame(0.6, "1.2", Some("easeIn")),
+            Edit::RemoveFrame {
+                path: format!("{TRACK}/frame/0.7"),
+            },
+        ],
+    )
+    .unwrap();
+    let transition = &result.compilation.definitions[0].layers[0].transitions[0].transition;
+    let frames = transition.targets[0].properties[0]
+        .keyframes
+        .as_ref()
+        .unwrap();
+
+    assert_eq!(
+        frames.iter().map(|frame| frame.offset).collect::<Vec<_>>(),
+        [0.4, 0.6]
+    );
+    assert_eq!(result.source.matches("70%:").count(), 1);
+    assert!(result.source.contains("60%: 1.2 @easeIn"));
+}
+
+#[test]
+fn added_frames_reject_offset_collisions() {
+    let result = apply_edits(SOURCE, &[frame(0.4, "2", None)]);
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn frame_offsets_move_by_semantic_identity() {
+    let result = apply_edits(SOURCE, &[set(&format!("{TRACK}/frame/0.4/offset"), "55%")]).unwrap();
+
+    assert_eq!(result.source, SOURCE.replacen("40%", "55%", 1));
+}
+
+#[test]
+fn moving_a_frame_rejects_offset_collisions() {
+    let result = apply_edits(
+        SOURCE,
+        &[set(&format!("{TRACK}/frame/0.4/offset"), "70.0%")],
+    );
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn compact_frame_insertions_preserve_crlf() {
+    let source = "// header\r\nmotion a { layer base { t { x: 0 } state off initial {} state on {} transition off -> on @tween(duration: 1) when true {\r\nt { x {} } } } }\r\n";
+    let result = apply_edits(
+        source,
+        &[Edit::AddFrame {
+            path: "a/layer/base/transition/0/target/t/property/x".into(),
+            offset: 0.5,
+            value: "2".into(),
+            easing: None,
         }],
     )
     .unwrap();
@@ -301,232 +141,111 @@ fn track_edits_accept_opaque_grouped_values_and_preserve_surrounding_crlf() {
         result.source.matches('\n').count(),
         result.source.matches("\r\n").count()
     );
-    let original_range = &liva_compiler::compile(&source, true).mappings.unwrap()[path].range;
-    let new_range = &result.compilation.mappings.as_ref().unwrap()[path].range;
-    assert_eq!(
-        &source[..original_range.start],
-        &result.source[..new_range.start]
-    );
-    assert_eq!(
-        &source[original_range.end..],
-        &result.source[new_range.end..]
+    assert!(
+        result
+            .source
+            .starts_with(source.split("x {}").next().unwrap())
     );
 }
 
 #[test]
-fn track_formatting_does_not_indent_inside_opaque_values() {
-    use liva_compiler::edits::FrameEdit;
-    let source = include_str!("../../../fixtures/toggle.liv");
-    let value = "\"a\\\nb\"";
-    for path in [
-        "toggle/transition/general/target/thumb/property/scale",
-        "toggle/transition/directional/off/on/target/thumb/property/scale",
-    ] {
-        let result = apply_edits(
-            source,
-            &[Edit::Track {
-                path: path.into(),
-                timing: None,
-                frames: Some(vec![FrameEdit {
-                    offset: 0.5,
-                    value: value.into(),
-                    easing: None,
-                }]),
-            }],
-        )
-        .unwrap();
-        let mapping =
-            &result.compilation.mappings.as_ref().unwrap()[&format!("{path}/frame/0.5/value")];
+fn frame_insertion_preserves_opaque_grouped_values_and_surrounding_source() {
+    for value in ["var(--scale,\n 1.5)", "\"a;b{}\"", "\"a\\\nb\""] {
+        let source = SOURCE.replace('\n', "\r\n");
+        let value = value.replace('\n', "\r\n");
+        let result = apply_edits(&source, &[frame(0.5, &value, Some("linear"))]).unwrap();
+        let old = &liva_compiler::compile(&source, true).mappings.unwrap()[TRACK].range;
+        let mappings = result.compilation.mappings.unwrap();
+        let new = &mappings[TRACK].range;
+        let value_range = &mappings[&format!("{TRACK}/frame/0.5/value")].range;
+
+        assert_eq!(&source[..old.start], &result.source[..new.start]);
+        assert_eq!(&source[old.end..], &result.source[new.end..]);
         assert_eq!(
-            liva_syntax::semantic_text(&result.source[mapping.range.start..mapping.range.end]),
-            value
+            liva_syntax::semantic_text(&result.source[value_range.start..value_range.end]),
+            liva_syntax::semantic_text(&value)
+        );
+        assert_eq!(
+            result.source.matches('\n').count(),
+            result.source.matches("\r\n").count()
         );
     }
 }
 
 #[test]
-fn track_edits_preserve_surrounding_source() {
-    use liva_compiler::edits::{Edit, FrameEdit, apply_edits};
-    let source = include_str!("../../../fixtures/reactive-toggle.liv").replace('\n', "\r\n");
-    let path = "toggle/transition/general/target/thumb/property/scale";
+fn commented_frame_values_are_not_replaced() {
+    let source = SOURCE.replace("40%: 1.3 1", "40%: /* 😀 preserve */ 1.3 1");
     let result = apply_edits(
         &source,
-        &[Edit::Track {
-            path: path.into(),
-            timing: Some("@tween: 200ms ease-in".into()),
-            frames: Some(vec![FrameEdit {
-                offset: 0.5,
-                value: "1.2 1".into(),
-                easing: Some("steps(2, end)".into()),
-            }]),
-        }],
-    )
-    .unwrap();
-    let old = liva_compiler::compile(&source, true).mappings.unwrap()[path]
-        .range
-        .clone();
-    let new = result.compilation.mappings.unwrap()[path].range.clone();
-
-    assert_eq!(&source[..old.start], &result.source[..new.start]);
-    assert_eq!(&source[old.end..], &result.source[new.end..]);
-    assert!(result.source.contains("50%: 1.2 1 @ steps(2, end)"));
-}
-
-#[test]
-fn inline_frame_field_edits_preserve_comments_or_reject() {
-    use liva_compiler::edits::{Edit, apply_edits};
-    let source = include_str!("../../../fixtures/reactive-toggle.liv");
-    let path = "toggle/transition/general/target/thumb/property/scale/frame/0.4/value";
-    let edit = Edit::Set {
-        path: path.into(),
-        value: "1.5 1".into(),
-    };
-    let result = apply_edits(source, &[edit]).unwrap();
-    assert_eq!(result.source, source.replacen("1.3 1", "1.5 1", 1));
-
-    let source = source.replace("40%: 1.3 1", "40%: /* 😀 preserve */ 1.3 1");
-    let edit = Edit::Set {
-        path: path.into(),
-        value: "1.5 1".into(),
-    };
-    assert!(
-        apply_edits(&source, &[edit])
-            .unwrap_err()
-            .contains("comments")
+        &[set(&format!("{TRACK}/frame/0.4/value"), "1.5 1")],
     );
+
+    assert!(result.unwrap_err().contains("comments"));
 }
 
 #[test]
-fn timing_edits_reject_extra_declarations() {
-    let source = include_str!("../../../fixtures/toggle.liv");
+fn timing_edits_reject_removed_syntax_and_injection() {
+    for value in [
+        "@tween: 1ms",
+        "tween(duration: 1); @spring: 300 20",
+        "tween() } } }",
+    ] {
+        let result = apply_edits(SOURCE, &[timing(TRACK, value)]);
 
-    for timing in ["@tween: 1ms; @spring: 300 20", "@tween: 1ms } } }"] {
-        for edit in [
-            Edit::Track {
-                path: "toggle/transition/general/target/thumb/property/scale".into(),
-                timing: Some(timing.into()),
-                frames: None,
-            },
-            Edit::Override {
-                definition: "toggle".into(),
-                from: "off".into(),
-                to: "on".into(),
-                target: "thumb".into(),
-                property: "scale".into(),
-                timing: timing.into(),
-            },
-        ] {
-            assert!(apply_edits(source, &[edit]).is_err(), "{timing}");
-        }
+        assert!(result.is_err(), "{value}");
     }
 }
 
 #[test]
-fn directional_override_preserves_existing_frames_and_comments() {
-    let source = "motion a { state off { t { x: 0 } } state on when true { t { x: 1 } } transition { @tween: 1s } transition off -> on { t { x { @tween: 2s; 40%: 2 /* keep */ } } } }";
+fn timing_edits_preserve_existing_frames_and_comments() {
+    let source = SOURCE.replacen("40%: 1.3 1", "40%: 1.3 1 /* keep */", 1);
     let result = apply_edits(
-        source,
-        &[Edit::Override {
-            definition: "a".into(),
-            from: "off".into(),
-            to: "on".into(),
-            target: "t".into(),
-            property: "x".into(),
-            timing: "@tween: 3s ease-in".into(),
-        }],
+        &source,
+        &[timing(TRACK, "tween(duration: 3000, easing: easeIn)")],
     )
     .unwrap();
 
-    assert!(result.source.contains("40%: 2 /* keep */"));
-    let track = &result.compilation.definitions[0].directional_transitions[0]
-        .transition
-        .targets[0]
-        .properties[0];
-    assert_eq!(track.keyframes.as_ref().unwrap()[0].value, "2");
-    assert_eq!(
-        track.timing,
-        Some(liva_compiler::ir::Timing::Tween {
-            duration_ms: 3000.0,
-            easing: "ease-in".into(),
-        })
+    assert!(result.source.contains("40%: 1.3 1 /* keep */"));
+    assert!(
+        result
+            .source
+            .contains("scale @tween(duration: 3000, easing: easeIn)")
     );
 }
 
 #[test]
-fn missing_frame_easing_is_inserted_inline() {
-    let source = "motion a { state idle { t { x: 0 } } transition { @tween: 1s; t { x { 40%: 2; 70%: 3 } } } }";
+fn missing_frame_easing_is_inserted_as_a_typed_decorator() {
+    let source = SOURCE.replacen(" @easeIn", "", 1);
     let result = apply_edits(
-        source,
-        &[set(
-            "a/transition/general/target/t/property/x/frame/0.4/easing",
-            "ease-in",
-        )],
-    )
-    .unwrap();
-
-    assert_eq!(result.source, source.replace("40%: 2", "40%: 2 @ ease-in"));
-}
-
-#[test]
-fn lifecycle_tracks_support_creation_shorthand_templates_and_removal() {
-    use liva_compiler::edits::FrameEdit;
-
-    let source = "motion panel(distance: number, open: boolean) {\n  state idle { body { opacity: 1 } }\n  state active when open { body { opacity: 0.8 } }\n  transition { @tween: 100ms }\n  enter { @tween: 200ms; body { opacity: 0 } }\n}\n";
-    let track = |path: &str, value: &str| Edit::Track {
-        path: path.into(),
-        timing: Some("@tween: 400ms ease-out".into()),
-        frames: Some(vec![FrameEdit {
-            offset: 0.0,
-            value: value.into(),
-            easing: None,
-        }]),
-    };
-
-    let edited = apply_edits(
-        source,
-        &[
-            track("panel/enter/target/body/property/opacity", "0.2"),
-            track(
-                "panel/enter/target/body/property/translate",
-                "${distance}px 0",
-            ),
-            track("panel/leave/target/body/property/opacity", "0.4"),
-        ],
-    )
-    .unwrap();
-
-    assert!(edited.source.contains("leave {"));
-    assert!(edited.source.contains("${distance}px 0"));
-    assert_eq!(edited.source.matches("opacity {").count(), 2);
-
-    let reset = apply_edits(
-        &edited.source,
-        &[Edit::Track {
-            path: "panel/enter/target/body/property/translate".into(),
-            timing: None,
-            frames: None,
+        &source,
+        &[Edit::Easing {
+            path: format!("{TRACK}/frame/0.4"),
+            value: Some("easeIn".into()),
         }],
     )
     .unwrap();
 
-    assert!(!reset.source.contains("${distance}px 0"));
-    assert!(reset.source.contains("0%: 0.4"));
-    assert!(
-        apply_edits(
-            source,
-            &[track(
-                "panel/enter/missing/target/body/property/opacity",
-                "0"
-            )]
-        )
-        .is_err()
-    );
-    assert!(
-        apply_edits(
-            &source.replace("opacity: 0", "opacity: /* keep */ 0"),
-            &[track("panel/enter/target/body/property/opacity", "0.2")]
-        )
-        .unwrap_err()
-        .contains("comments")
-    );
+    assert_eq!(result.source, SOURCE);
+}
+
+#[test]
+fn removed_edit_operations_are_rejected_at_the_request_boundary() {
+    for operation in ["track", "override"] {
+        let request = serde_json::json!({"op": operation, "path": TRACK});
+
+        assert!(serde_json::from_value::<Edit>(request).is_err());
+    }
+}
+
+#[test]
+fn removed_paths_do_not_create_motion_level_declarations() {
+    for path in [
+        "toggle/transition/general/target/thumb/property/scale",
+        "toggle/transition/directional/off/on/target/thumb/property/scale",
+        "toggle/state/off/target/thumb/property/scale",
+    ] {
+        let result = apply_edits(SOURCE, &[timing(path, "tween(duration: 100)")]);
+
+        assert!(result.is_err(), "{path}");
+    }
 }

@@ -4,10 +4,10 @@ Types, expressions, CSS, and comments
 // comment
 motion card(progress: number) {
   let movement = drag(target: body)
-  state on when movement.active {
+  layer on when movement.active {
     body { translate: ${movement.offset.x}px 0; color: #fff }
   }
-  transition { @tween: 100ms ease-out }
+  enter @tween(duration: 100, easing: easeOut) { body { opacity: 0 } }
 }
 ---
 
@@ -29,7 +29,7 @@ motion card(progress: number) {
           (property
             (identifier))
           (identifier)))
-      (state
+      (layer
         (identifier)
         (identifier)
         (punctuation)
@@ -52,12 +52,23 @@ motion card(progress: number) {
               (property
                 (identifier))
               (css_token)))))
-      (transition
-        (block
-          (animation)
-          (punctuation)
-          (number)
-          (identifier))))))
+      (keyword)
+      (animation)
+      (parenthesized
+        (property
+          (identifier))
+        (number)
+        (punctuation)
+        (property
+          (identifier))
+        (identifier))
+      (block
+        (selector_block
+          (identifier)
+          (block
+            (property
+              (identifier))
+            (number)))))))
 
 ==================
 Layers and typed decorators

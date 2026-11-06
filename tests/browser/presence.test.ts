@@ -316,7 +316,7 @@ test('reset restores only removed cards and preserves remaining elements', async
   expect(await page.evaluate(() => document.getAnimations().length)).toBe(0)
 })
 
-test('presence metadata preserves manual state and colliding parameter names on updates', async ({
+test('presence metadata preserves parameter objects with colliding names on updates', async ({
   page,
 }) => {
   await page.goto(base + '/tests/presence.html')

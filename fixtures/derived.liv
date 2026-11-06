@@ -5,11 +5,11 @@ motion derived(progress: number, divisor: number) {
   let selected = body
   let active = movement.active
 
-  state idle {
+  layer idle {
     body { translate: ${translated}px 0; }
   }
 
-  state dragging when active {
+  layer dragging when active {
     body { translate: ${translated}px 0; }
   }
 }

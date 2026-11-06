@@ -9,36 +9,21 @@ import {
   triggerRef,
   useTemplateRef,
 } from 'vue'
-import type {
-  Composition,
-  CompositionTransition,
-  Definition,
-  Frame,
-  PropertyTransition,
-  Timing,
-} from '@liva/runtime'
-import { sampleSpring } from '@liva/runtime'
+import type { Composition, CompositionTransition, Definition } from '@liva/runtime'
 import CompositionInspector from './CompositionInspector.ce.vue'
 import { trackProvenance, lifecycleProvenance } from '../provenance.ts'
 import type { EditorController } from '../controller.ts'
 import type { Edit, Inspection } from '../communication/protocol.ts'
 import {
   editableDefinition,
-  normalizedOffset,
-  timelineTracks,
   compositionTimelineTracks,
   compositionLifecycleTracks,
-  timingText,
   type TimelineTrack,
   type LifecyclePhase,
 } from '../timeline.ts'
 import TimelineRow from './TimelineRow.ce.vue'
-import TimelineInspector from './TimelineInspector.ce.vue'
 import CompositionSelectors from './CompositionSelectors.ce.vue'
 import { copyComposition, compatibleTransition, selectTransition } from '../compositions.ts'
-
-type Mutable<T> = T extends object ? { -readonly [K in keyof T]: Mutable<T[K]> } : T
-type MutableDefinition = Mutable<Definition>
 
 const props = defineProps<{
   inspection: Inspection
@@ -48,37 +33,26 @@ const props = defineProps<{
 }>()
 const candidateInspection = shallowRef(props.inspection)
 const model = shallowRef<Definition>(editableDefinition(props.inspection.definition))
-const layers = model.value.layers ?? []
-const layered = layers.length > 0
+const layers = model.value.layers
 // An inspected form belongs to the selected instance; changing selection replaces the form.
 const selectedRuntime = shallowRef(props.controller.selected!.binding.runtime)
-const initialComposition = selectedRuntime.value.composition ?? { layers: {}, states: {} }
+const initialComposition = selectedRuntime.value.composition
 const compositionFrom = shallowRef(copyComposition(initialComposition))
 const compositionTo = shallowRef(copyComposition(initialComposition))
 const selectedTransition = shallowRef<CompositionTransition>()
-const states = model.value.states.map((state) => state.name)
-const from = ref(states[0])
-const to = ref(states[1] ?? states[0])
-const scope = ref('directional')
+const scope = ref('composition')
 const expanded = ref<string[]>([])
 const selected = ref<{ target: string; property: string; offset?: number; pending?: boolean }>()
 const time = ref(0)
 const playing = ref(false)
 const busy = ref(false)
 let frameId = 0
-let timer: ReturnType<typeof setTimeout> | undefined
 let generation = 0
 const phase = computed<LifecyclePhase | undefined>(() =>
   scope.value.startsWith('enter') ? 'enter' : scope.value.startsWith('leave') ? 'leave' : undefined,
 )
-const general = computed(() => scope.value === 'general' || scope.value.endsWith('-default'))
 const timelineResult = computed(() => {
   try {
-    if (!layered)
-      return {
-        tracks: timelineTracks(model.value, from.value, to.value, general.value, phase.value),
-      }
-
     const runtime = selectedRuntime.value
     const before = compositionFrom.value
     const after = compositionTo.value
@@ -255,7 +229,6 @@ function stop() {
 
 function endPreview() {
   generation++
-  clearTimeout(timer)
   stop()
   busy.value = false
   props.controller.endPreview()
@@ -265,25 +238,17 @@ async function prepare() {
   const current = ++generation
   busy.value = true
   try {
-    if (layered) {
-      const reply = await props.controller.previewComposition(
-        compositionFrom.value,
-        compositionTo.value,
-        selectedTransition.value ? [selectedTransition.value] : [],
-        phase.value,
-      )
+    const reply = await props.controller.previewComposition(
+      compositionFrom.value,
+      compositionTo.value,
+      selectedTransition.value ? [selectedTransition.value] : [],
+      phase.value,
+    )
 
-      if (reply && current === generation) {
-        candidateInspection.value = reply
-        model.value = reply.definition
-      }
-    } else
-      await props.controller.preview(
-        to.value,
-        phase.value ? undefined : from.value,
-        general.value,
-        phase.value,
-      )
+    if (reply && current === generation) {
+      candidateInspection.value = reply
+      model.value = reply.definition
+    }
     if (current !== generation || !props.controller.previewActive) return false
     props.controller.seek(time.value)
     return true
@@ -307,7 +272,6 @@ async function play() {
     stop()
     return
   }
-  clearTimeout(timer)
   if (time.value >= duration.value) time.value = 0
   if (!props.controller.previewActive && !(await prepare())) return
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -358,175 +322,25 @@ async function editComposition(edits: Edit[]) {
   }
 }
 
-function schedule(edit: Edit, definition: Definition) {
-  endPreview()
-  model.value = definition
-  props.controller.setDraft([
-    ...props.controller.draft.filter(
-      (old) =>
-        !(
-          'path' in old &&
-          old.path ===
-            ('path' in edit
-              ? edit.path
-              : /* v8 ignore next -- @preserve: This form schedules only set and track edits, both with paths. */ '')
-        ),
-    ),
-    edit,
-  ])
-  timer = setTimeout(() => void prepare(), 150)
-}
-
-function updateTrack(track: TimelineTrack, patch: Partial<PropertyTransition>) {
-  const next = structuredClone(model.value) as MutableDefinition
-  let transition = phase.value
-    ? next[phase.value]
-    : general.value
-      ? next.generalTransition
-      : next.directionalTransitions.find((item) => item.from === from.value && item.to === to.value)
-          ?.transition
-
-  if (!transition) {
-    transition = { targets: [] }
-
-    if (phase.value) {
-      next[phase.value] = transition
-    } else if (general.value) next.generalTransition = transition
-    else next.directionalTransitions.push({ from: from.value, to: to.value, transition })
-  }
-
-  let target = transition.targets.find((item) => item.name === track.target)
-
-  if (!target) {
-    target = { name: track.target, properties: [] }
-    transition.targets.push(target)
-  }
-
-  const property = structuredClone({
-    ...track.local,
-    name: track.property,
-    ...patch,
-  }) as Mutable<PropertyTransition>
-  const index = target.properties.findIndex((item) => item.name === track.property)
-  if (index < 0) target.properties.push(property)
-  else target.properties[index] = property
-  schedule(
-    {
-      op: 'track',
-      path: track.path,
-      timing: property.timing ? timingText(property.timing) : undefined,
-      frames: property.keyframes,
-    },
-    next,
-  )
-}
-
 function choose(track: TimelineTrack, offset?: number) {
   selected.value = { target: track.target, property: track.property, offset }
 }
 
 function add(track: TimelineTrack, offset: number) {
-  if (track.timing?.kind !== 'tween' || track.duration === 0 || offset < 0 || offset > 1) return
+  // Only the tween inspector emits add; its playhead is nonnegative.
+  if (track.duration === 0 || offset > 1) return
 
   choose(track, offset)
 
   // choose selects an existing track, so a layered selection has provenance.
-  const existing = layered
-    ? selectionProvenance.value!.fields.some(
-        (field) =>
-          field.path === `${selectionProvenance.value!.frameDestination}/frame/${offset}/value`,
-      )
-    : track.frames.some((frame) => frame.offset === offset)
+  const existing = selectionProvenance.value!.fields.some(
+    (field) => field.path === `${selectionProvenance.value!.frameDestination}/frame/${offset}/value`,
+  )
 
   if (!existing) selected.value!.pending = true
 }
 
-function changeFrame(track: TimelineTrack, frame: Frame) {
-  const old = selected.value?.offset
-  if (
-    track.explicit.some(
-      (item) => item.offset === frame.offset && (item.offset !== old || selected.value?.pending),
-    )
-  ) {
-    report('A keyframe already exists at this position.')
-    return
-  }
-  if (track.timing?.kind !== 'tween' && ((frame.offset > 0 && frame.offset < 1) || frame.easing)) {
-    report('Spring tracks only support endpoints without easing.')
-    return
-  }
-  const frames = track.explicit.filter((item) => item.offset !== old)
-  updateTrack(track, { keyframes: [...frames, frame].toSorted((a, b) => a.offset - b.offset) })
-  choose(track, frame.offset)
-}
-
-function move(track: TimelineTrack, old: number, offset: number) {
-  if (!track.explicit.some((frame) => frame.offset === old)) {
-    report('State endpoints cannot be moved. Create an endpoint override first.')
-    return
-  }
-  choose(track, old)
-  changeFrame(track, { ...track.explicit.find((frame) => frame.offset === old)!, offset })
-}
-
-function remove(track: TimelineTrack) {
-  let frames = track.explicit.filter((frame) => frame.offset !== selected.value?.offset)
-  // An empty source collection means inherit. Explicit endpoints suppress inherited intermediates.
-  if (!general.value && frames.length === 0)
-    frames = track.frames
-      .filter((frame) => frame.offset === 0 || frame.offset === 1)
-      .map(({ offset, value }) => ({ offset, value }))
-  updateTrack(track, { keyframes: frames.length ? frames : undefined })
-  choose(track)
-}
-
-function timing(track: TimelineTrack, value: Timing) {
-  try {
-    if (value.kind === 'tween') {
-      if (!Number.isFinite(value.durationMs) || value.durationMs < 0 || !value.easing.trim())
-        throw new Error('Enter a nonnegative duration and easing.')
-    } else sampleSpring(value)
-    if (
-      value.kind !== 'tween' &&
-      track.explicit.some((frame) => (frame.offset > 0 && frame.offset < 1) || frame.easing)
-    )
-      throw new Error('Remove intermediate keyframes and frame easing before choosing Spring.')
-    updateTrack(track, { timing: value })
-  } catch (error) {
-    report(error)
-  }
-}
-
-function resize(track: TimelineTrack, value: number) {
-  /* v8 ignore else -- @preserve: TimelineRow renders resize handles only for duration-based timing. */
-  if (track.timing && track.timing.kind !== 'spring-physics')
-    timing(track, { ...track.timing, durationMs: value })
-}
-
-function stateValue(track: TimelineTrack, value: string) {
-  if (!value.trim()) {
-    report('Enter a state value.')
-    return
-  }
-  const name = selected.value?.offset === 0 ? from.value : to.value
-  const next = structuredClone(model.value) as MutableDefinition
-  next.states
-    .find((state) => state.name === name)!
-    .targets.find((target) => target.name === track.target)!
-    .properties.find((property) => property.name === track.property)!.value = value
-  schedule(
-    {
-      op: 'set',
-      path: `${next.name}/state/${name}/target/${track.target}/${track.property}`,
-      value,
-    },
-    next,
-  )
-}
-
 function changeDirection() {
-  if (!phase.value && from.value === to.value)
-    to.value = states.find((state) => state !== from.value) ?? from.value
   endPreview()
   selected.value = undefined
   time.value = 0
@@ -570,7 +384,7 @@ function choosePhase(value: LifecyclePhase) {
 }
 
 function chooseTransition(identity: CompositionTransition | undefined) {
-  scope.value = 'directional'
+  scope.value = 'composition'
   endPreview()
   selectedTransition.value = identity
 
@@ -605,7 +419,6 @@ const unsubscribe = props.controller.subscribe(() => {
   triggerRef(selectedRuntime)
   if (!props.controller.previewActive) {
     stop()
-    clearTimeout(timer)
     generation++
     busy.value = false
   }
@@ -615,14 +428,12 @@ onScopeDispose(() => {
   timelineObserver?.disconnect()
   unsubscribe()
   stop()
-  clearTimeout(timer)
   generation++
 })
 </script>
 
 <template>
   <CompositionSelectors
-    v-if="layered"
     :layers="layers"
     :from="compositionFrom"
     :to="compositionTo"
@@ -635,40 +446,10 @@ onScopeDispose(() => {
   />
   <p v-if="timelineResult.error" role="alert">{{ String(timelineResult.error) }}</p>
   <div class="toolbar">
-    <label v-if="!layered">Editing<select
-        v-model="scope"
-        aria-label="Editing scope"
-        @change="changeDirection"
-      >
-        <option value="directional">{{
-          layered ? 'Composition' : 'Directional transition'
-        }}</option>
-        <option v-if="!layered" value="general">Common settings</option>
-        <option value="enter-default">Enter · default</option>
-        <option value="leave-default">Leave · default</option>
-      </select></label>
-    <label v-if="!layered && !phase">From<select
-        v-model="from"
-        aria-label="From state"
-        @change="changeDirection"
-      >
-        <option v-for="state in states" :key="state">{{ state }}</option>
-      </select></label>
-    <span v-if="!layered && !phase">→</span>
-    <label v-if="!layered">{{
-        phase ? 'State' : 'To'
-      }}<select v-model="to" aria-label="To state" @change="changeDirection">
-        <option v-for="state in states" :key="state" :disabled="!phase && state === from">
-          {{ state }}
-        </option>
-      </select></label>
+
     <button
       :disabled="
-        busy ||
-        stale ||
-        !!timelineResult.error ||
-        (!layered && !phase && from === to) ||
-        tracks.some((track) => track.diagnostic)
+        busy || stale || !!timelineResult.error || tracks.some((track) => track.diagnostic)
       "
       @click="play"
     >
@@ -746,7 +527,7 @@ onScopeDispose(() => {
               :max="extent"
               step="1"
               :value="time"
-              :disabled="stale || !!timelineResult.error || (!layered && !phase && from === to)"
+              :disabled="stale || !!timelineResult.error"
               @input="seek(Number(($event.target as HTMLInputElement).value))"
             />
           </div>
@@ -780,38 +561,18 @@ onScopeDispose(() => {
               :marks="marks"
               :selected="selection === track ? selected?.offset : undefined"
               @select="choose(track, $event)"
-              @add="add(track, $event)"
-              @move="(old, offset) => move(track, old, offset)"
-              @duration="resize(track, $event)"
             /></template>
         </template>
         <div aria-hidden="true" class="playhead-overlay"><span /></div>
       </div>
     </div>
     <CompositionInspector
-      v-if="selection && layered"
+      v-if="selection"
       :track="selection"
       :provenance="selectionProvenance!"
       :offset="selected?.offset"
       :pending="selected?.pending"
       @edit="editComposition"
-      @add="add(selection!, time / selection!.duration)"
-      @error="report"
-    />
-    <TimelineInspector
-      v-else-if="selection"
-      :track="selection"
-      :offset="selected?.offset"
-      :pending="selected?.pending"
-      :from="from"
-      :to="to"
-      :general="general"
-      @frame="changeFrame(selection!, $event)"
-      @remove="remove(selection!)"
-      @timing="timing(selection!, $event)"
-      @reset-frames="updateTrack(selection!, { keyframes: undefined })"
-      @reset-timing="updateTrack(selection!, { timing: undefined })"
-      @state="stateValue(selection!, $event)"
       @add="add(selection!, time / selection!.duration)"
       @error="report"
     />

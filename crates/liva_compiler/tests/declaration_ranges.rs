@@ -75,97 +75,97 @@ fn assert_diagnostic(marked: &str, code: &str, message: &str) {
 fn identifiers_and_duplicate_declarations_use_names_and_related_names() {
     for (source, code, message) in [
         (
-            "motion a(x«») { state idle {} }",
+            "motion a(x«») { layer idle {} }",
             "semantic.type",
             "Expected primitive",
         ),
         (
-            "motion a(x:«») { state idle {} }",
+            "motion a(x:«») { layer idle {} }",
             "semantic.type",
             "Expected primitive",
         ),
         (
-            "motion a(«»: number) { state idle {} }",
+            "motion a(«»: number) { layer idle {} }",
             "semantic.parameter",
             "Invalid parameter",
         ),
         (
-            "motion a(«true»: number) { state idle {} }",
+            "motion a(«true»: number) { layer idle {} }",
             "semantic.parameter",
             "Invalid parameter",
         ),
         (
-            "motion a { let «true» = 1; state idle {} }",
+            "motion a { let «true» = 1; layer idle {} }",
             "semantic.binding",
             "Invalid let",
         ),
         (
-            "motion a { state idle { «true» { x: 0 } } }",
+            "motion a { layer idle { «true» { x: 0 } } }",
             "semantic.variable",
             "Target variables",
         ),
         (
-            "motion ‹a› { state idle {} } motion «a» { state idle {} }",
+            "motion ‹a› { layer idle {} } motion «a» { layer idle {} }",
             "semantic.duplicate",
             "Duplicate declaration",
         ),
         (
-            "motion a(‹x›: number, «x»: number) { state idle {} }",
+            "motion a(‹x›: number, «x»: number) { layer idle {} }",
             "semantic.duplicate",
             "Duplicate declaration",
         ),
         (
-            "motion a { let ‹x› = 1; let «x» = 2; state idle {} }",
+            "motion a { let ‹x› = 1; let «x» = 2; layer idle {} }",
             "semantic.duplicate",
             "Duplicate declaration",
         ),
         (
-            "motion a { state ‹idle› {} state «idle» when true {} }",
+            "motion a { layer ‹idle› {} layer «idle» when true {} }",
             "semantic.duplicate",
             "Duplicate declaration",
         ),
         (
-            "motion a { state idle { ‹t› { x: 0 } «t» { x: 0 } } }",
+            "motion a { layer idle { ‹t› { x: 0 } «t» { x: 0 } } }",
             "semantic.duplicate",
             "Duplicate declaration",
         ),
         (
-            "motion a { state idle { t { ‹x›: 0; «x»: 1 } } }",
+            "motion a { layer idle { t { ‹x›: 0; «x»: 1 } } }",
             "semantic.duplicate",
             "Duplicate declaration",
         ),
         (
-            "motion a { state idle {} ‹transition› {} «transition» {} }",
+            "motion a { layer idle {} ‹enter› {} «enter» {} }",
             "semantic.duplicate",
             "Duplicate declaration",
         ),
         (
-            "motion a { state idle {} ‹transition idle -> idle› {} «transition idle -> idle» {} }",
+            "motion a { layer idle {} ‹leave› {} «leave» {} }",
             "semantic.duplicate",
             "Duplicate declaration",
         ),
         (
-            "motion a { state idle { t { x: 0 } } transition { ‹t› {} «t» {} } }",
+            "motion a { layer idle { t { x: 0 } } enter @tween() { ‹t› {} «t» {} } }",
             "semantic.duplicate",
             "Duplicate declaration",
         ),
         (
-            "motion a { state idle { t { x: 0 } } transition { t { ‹x› {} «x» {} } } }",
+            "motion a { layer idle { t { x: 0 } } enter @tween() { t { ‹x› {} «x» {} } } }",
             "semantic.duplicate",
             "Duplicate declaration",
         ),
         (
-            "motion a(‹x›: number) { let «x» = 1; state idle {} }",
+            "motion a(‹x›: number) { let «x» = 1; layer idle {} }",
             "semantic.duplicate",
             "Duplicate variable",
         ),
         (
-            "motion a(‹t›: number) { state idle { «t» { x: 0 } } }",
+            "motion a(‹t›: number) { layer idle { «t» { x: 0 } } }",
             "semantic.duplicate",
             "Duplicate variable",
         ),
         (
-            "motion a { let «t» = 1; state idle { ‹t› { x: 0 } } }",
+            "motion a { let «t» = 1; layer idle { ‹t› { x: 0 } } }",
             "semantic.duplicate",
             "Duplicate variable",
         ),
@@ -175,80 +175,55 @@ fn identifiers_and_duplicate_declarations_use_names_and_related_names() {
 }
 
 #[test]
-fn declarations_and_structure_errors_point_to_the_misplaced_item() {
+fn misplaced_declarations_have_local_ranges() {
     for (source, code, message) in [
         (
-            "«unknown»: 1; motion a { state idle {} }",
+            "«unknown»: 1; motion a { layer base {} }",
             "semantic.declaration",
             "Unknown declaration",
         ),
         (
-            "motion a { «unknown»: 1; state idle {} }",
+            "motion a { «unknown»: 1; layer base {} }",
             "semantic.declaration",
             "Unknown declaration",
         ),
         (
-            "motion a { state idle { «unknown»: 1 } }",
+            "motion a { layer base { «unknown»: 1 } }",
             "semantic.declaration",
             "Unknown declaration",
         ),
         (
-            "motion a { state idle {} transition { t { «unknown»: 1 } } }",
-            "semantic.declaration",
-            "Unknown declaration",
-        ),
-        (
-            "motion a { state idle {} transition { «@unknown»: 1 } }",
-            "semantic.declaration",
-            "Unknown animation",
-        ),
-        (
-            "motion a { state idle {} transition { «@tween-delay»: 1ms } }",
-            "semantic.declaration",
-            "Unknown animation",
-        ),
-        (
-            "motion a { state idle { t { x:«» } } }",
+            "motion a { layer base { t { x:«» } } }",
             "semantic.value",
             "Value must not be empty",
         ),
         (
-            "motion a { state idle { t { x:«»/* 😀 */ } } }",
+            "motion a { layer base { t { x:«»/* 😀 */ } } }",
             "semantic.value",
             "Value must not be empty",
         ),
         (
-            "motion a { state idle { «let x = 1»; } }",
+            "motion a { layer base { «let x = 1»; } }",
             "semantic.structure",
             "Let declarations",
         ),
         (
-            "motion a { state idle {} transition { «let x = 1»; } }",
+            "motion a { layer base {} enter { «let x = 1»; } }",
             "semantic.structure",
             "Let declarations",
         ),
         (
-            "motion a { state idle {} transition { «40%»: 1 } }",
+            "motion a { layer base {} «unknown block» {} }",
             "semantic.structure",
-            "Keyframes belong",
+            "Expected layer",
         ),
         (
-            "motion a { state idle { t { «nested» { x: 0 } } } }",
+            "motion a { layer base {} «transition broken» {} }",
             "semantic.structure",
-            "State targets",
+            "Expected layer",
         ),
         (
-            "motion a { state idle {} «unknown block» {} }",
-            "semantic.structure",
-            "Expected state",
-        ),
-        (
-            "motion a { state idle {} «transition broken» {} }",
-            "semantic.structure",
-            "Expected state",
-        ),
-        (
-            "motion a { state idle { t { x: 0 } } transition { t { x { «unexpected» {} } } } }",
+            "motion a { layer base { t { x: 0 } } enter @tween() { t { x { «unexpected» {} } } } }",
             "semantic.structure",
             "Property tracks",
         ),
@@ -258,65 +233,48 @@ fn declarations_and_structure_errors_point_to_the_misplaced_item() {
 }
 
 #[test]
-fn timing_errors_point_to_values_fields_or_missing_field_owners() {
-    for (timing, code, message) in [
-        ("@tween: «-1ms»", "semantic.number", "duration"),
-        ("@tween: «10»", "semantic.number", "duration"),
-        (
-            "@tween-duration: /* 😀 */ «NaNms» /* tail */",
-            "semantic.number",
-            "duration",
-        ),
-        ("@spring: «0ms»", "semantic.number", "duration"),
-        ("@spring: 1s «1»", "semantic.bounce", "Bounce"),
-        ("@spring: 1s «-0.1»", "semantic.number", "bounce"),
-        ("@spring: «0» 20", "semantic.number", "stiffness"),
-        ("@spring: 300 /* 😀 */ «0» 1", "semantic.number", "damping"),
-        ("@spring: 300 20 «-1»", "semantic.number", "mass"),
-        (
-            "@spring: 300 20 1 «2 3»",
-            "semantic.timing",
-            "Invalid spring",
-        ),
-        ("@spring:«»", "semantic.timing", "Invalid spring"),
-        ("«@spring»: 300", "semantic.number", "damping"),
-        ("«@tween-easing»: linear", "semantic.number", "duration"),
-        (
-            "@tween-duration: 1s; @tween-easing:«»",
-            "semantic.easing",
-            "Easing",
-        ),
-        (
-            "@spring-duration: 1s; «@spring-stiffness»: 300",
-            "semantic.argument",
-            "stiffness",
-        ),
-        (
-            "@spring: 300 20; @spring-damping: «0»",
-            "semantic.number",
-            "damping",
-        ),
-        (
-            "@tween: 1s; @spring: 1s /* 😀 */ «1» /* tail */",
-            "semantic.bounce",
-            "Bounce",
-        ),
+fn removed_timing_declarations_point_to_the_field_name() {
+    for field in [
+        "@tween",
+        "@spring",
+        "@tween-duration",
+        "@tween-easing",
+        "@spring-duration",
+        "@spring-bounce",
+        "@spring-stiffness",
+        "@spring-damping",
+        "@spring-mass",
     ] {
         for body in [
-            format!("transition {{ {timing}\n }}"),
-            format!("transition {{ t {{ x {{ {timing}\n }} }} }}"),
+            format!("enter {{ «{field}»: 1; }}"),
+            format!("enter {{ t {{ x {{ «{field}»: 1; 0%: 0 }} }} }}"),
         ] {
             assert_diagnostic(
-                &format!("motion a {{ state idle {{ t {{ x: 0 }} }} {body} }}"),
-                code,
-                message,
+                &format!("motion a {{ layer base {{ t {{ x: 1 }} }} {body} }}"),
+                "semantic.timing-migration",
+                "typed timing decorator",
             );
         }
     }
 }
 
 #[test]
-fn keyframes_point_to_offsets_values_and_interpolations() {
+fn typed_timing_errors_point_to_the_invalid_argument() {
+    for (expression, message) in [
+        ("tween(duration: «true»)", "Invalid argument type"),
+        ("spring(«speed»: 1)", "Unknown argument"),
+        ("tween(easing: «1»)", "Invalid argument type"),
+    ] {
+        assert_diagnostic(
+            &format!("motion a {{ layer base {{ t {{ x: 1 @{expression} }} }} }}"),
+            "semantic.expression",
+            message,
+        );
+    }
+}
+
+#[test]
+fn keyframe_errors_point_to_offsets_and_missing_values() {
     for (frames, code, message) in [
         ("«101%»: 1", "semantic.offset", "offset"),
         ("«-1%»: 1", "semantic.offset", "offset"),
@@ -326,27 +284,10 @@ fn keyframes_point_to_offsets_values_and_interpolations() {
             "Duplicate declaration",
         ),
         ("40%:«»", "semantic.frame", "Frame requires"),
-        ("40%:«»@ linear", "semantic.frame", "Frame requires"),
-        ("40%: 2 @«»", "semantic.frame", "Frame requires"),
-        (
-            "40%: «${1}»",
-            "semantic.frame-template",
-            "Runtime interpolation",
-        ),
-        (
-            "40%: /* 日本😀 */ var(--x, «${1}»)",
-            "semantic.frame-template",
-            "Runtime interpolation",
-        ),
-        (
-            "40%: \"prefix «${1}» suffix\"",
-            "semantic.frame-template",
-            "Runtime interpolation",
-        ),
     ] {
         assert_diagnostic(
             &format!(
-                "motion a {{ state idle {{ t {{ x: 0 }} }} transition {{ @tween: 1s; t {{ x {{ {frames}\n }} }} }} }}"
+                "motion a {{ layer base {{ t {{ x: 1 }} }} enter @tween() {{ t {{ x {{ {frames}\n }} }} }} }}"
             ),
             code,
             message,
@@ -355,91 +296,26 @@ fn keyframes_point_to_offsets_values_and_interpolations() {
 }
 
 #[test]
-fn definition_and_transition_requirements_point_to_headers_or_references() {
+fn layer_requirements_and_removed_declarations_have_actionable_ranges() {
     for (source, code, message) in [
-        ("«motion a» {}", "semantic.states", "at least one state"),
+        ("«motion a» {}", "semantic.layers", "at least one layer"),
         (
-            "«motion a» { state idle when true {} }",
-            "semantic.fallback",
-            "fallback",
+            "motion a { layer base {} state «idle» {} }",
+            "semantic.state-migration",
+            "states inside a stateful layer",
         ),
         (
-            "motion a { ‹state first› {} «state second» {} }",
-            "semantic.fallback",
-            "fallback",
+            "motion a { layer base {} «transition» {} }",
+            "semantic.transition-migration",
+            "guarded transitions",
         ),
         (
-            "motion a { state idle {} transition idle -> /* 😀 */ «absent» {} }",
-            "semantic.reference",
-            "absent",
-        ),
-        (
-            "motion a { state idle {} transition «absent» -> idle {} }",
-            "semantic.reference",
-            "absent",
-        ),
-        (
-            "motion a { «state idle» {} state active when true { t { x: 0 } } }",
-            "semantic.completeness",
-            "in state idle",
-        ),
-        (
-            "motion a { state idle { «t» { x: 0 } } state active when true { t { x: 0; y: 1 } } }",
-            "semantic.completeness",
-            "in state idle",
-        ),
-        (
-            "motion a { state idle { t { x: 0 } } «state active when true» { t { x: 1 } } }",
-            "semantic.timing-missing",
-            "idle -> active",
-        ),
-        (
-            "motion a { state idle { t { x: 0 } } state active when true { t { x: 1 } } «transition» {} }",
-            "semantic.timing-missing",
-            "idle -> active",
-        ),
-        (
-            "motion a { state idle { t { x: 0 } } state active when true { t { x: 1 } } transition { t { «x» {} } } }",
-            "semantic.timing-missing",
-            "idle -> active",
-        ),
-        (
-            "motion a { state idle { t { x: 0 } } state active when true { t { x: 1 } } «transition idle -> active» {} }",
-            "semantic.timing-missing",
-            "idle -> active",
+            "motion a { layer base {} «transition idle -> active» {} }",
+            "semantic.transition-migration",
+            "guarded transitions",
         ),
     ] {
         assert_diagnostic(source, code, message);
-    }
-}
-
-#[test]
-fn spring_frame_conflicts_keep_origins_through_inheritance() {
-    for transitions in [
-        "transition { ‹@spring›: 300 20; t { x { «40%»: 2 } } }",
-        "transition { @tween: 1s; t { x { «40%»: 2 } } } transition idle -> active { ‹@spring›: 300 20 }",
-        "transition { @tween: 1s } transition idle -> active { t { x { ‹@spring›: 300 20; «40%»: 2 } } }",
-        "transition { @tween: 1s; t { x { ‹@spring›: 300 20; «40%»: 2 } } } transition idle -> active { @tween: 2s }",
-        "transition { ‹@spring›: 300 20; t { x { 0%: 0 @ «ease-in» } } }",
-    ] {
-        assert_diagnostic(
-            &format!(
-                "motion a {{ state idle {{ t {{ x: 0 }} }} state active when true {{ t {{ x: 1 }} }} {transitions} }}"
-            ),
-            "semantic.spring-frames",
-            "idle -> active",
-        );
-    }
-}
-
-#[test]
-fn endpoint_warnings_point_to_values_or_unused_easing() {
-    for source in [
-        "motion a { state idle { t { x: ‹0› } } state active when true { t { x: 1 } } transition idle -> active { @tween: 1s; t { x { 0%: /* 😀 */ «2» /* tail */ } } } }",
-        "motion a { state idle { t { x: 0 } } state active when true { t { x: ‹1› } } transition idle -> active { @tween: 1s; t { x { 100%: «2» } } } }",
-        "motion a { state idle { t { x: 0 } } state active when true { t { x: 1 } } transition idle -> active { @tween: 1s; t { x { 100%: 1 @ /* 😀 */ «ease-out» /* tail */ } } } }",
-    ] {
-        assert_diagnostic(source, "semantic.endpoint", "explicit endpoint");
     }
 }
 

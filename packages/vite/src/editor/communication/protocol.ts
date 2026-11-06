@@ -1,28 +1,11 @@
-import {
-  isArrayOf,
-  isDefinition,
-  isFrame,
-  isRecord,
-  type Definition,
-  type Frame,
-} from '@liva/runtime'
+import { isArrayOf, isDefinition, isFrame, isRecord, type Definition } from '@liva/runtime'
 
 export type Edit =
   | { op: 'easing'; path: string; value?: string }
   | { op: 'timing'; path: string; value?: string }
-  | { op: 'track'; path: string; timing?: string; frames?: readonly Frame[] }
   | { op: 'set'; path: string; value: string }
   | { op: 'removeFrame'; path: string }
   | { op: 'addFrame'; path: string; offset: number; value: string; easing?: string }
-  | {
-      op: 'override'
-      definition: string
-      from: string
-      to: string
-      target: string
-      property: string
-      timing: string
-    }
 
 export interface EditorRequest {
   action: 'inspect' | 'preview' | 'commit'
@@ -58,11 +41,6 @@ declare module 'vue' {
 
 function isEdit(value: unknown): value is Edit {
   if (!isRecord(value)) return false
-  if (value.op === 'override') {
-    return ['definition', 'from', 'to', 'target', 'property', 'timing'].every(
-      (key) => typeof value[key] === 'string',
-    )
-  }
   if (typeof value.path !== 'string') return false
 
   switch (value.op) {
@@ -75,11 +53,6 @@ function isEdit(value: unknown): value is Edit {
       return true
     case 'addFrame':
       return isFrame(value)
-    case 'track':
-      return (
-        (value.timing === undefined || typeof value.timing === 'string') &&
-        (value.frames === undefined || isArrayOf(value.frames, isFrame))
-      )
     default:
       return false
   }

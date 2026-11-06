@@ -18,8 +18,6 @@ const targets = (properties: Record<string, string>) => [
 const definition = (layers: readonly Layer[]): Definition => ({
   name: 'button',
   layers,
-  states: [],
-  directionalTransitions: [],
 })
 const styles = (result: ReturnType<typeof resolveLayers>) =>
   Object.fromEntries(
@@ -51,7 +49,7 @@ const machine: Layer = {
 
 describe('layer cascade', () => {
   it('contributes no styles when the definition has no layers', () => {
-    const result = resolveLayers({ name: 'empty', states: [], directionalTransitions: [] }, {})
+    const result = resolveLayers({ name: 'empty', layers: [] }, {})
 
     expect(result.presentation.targets).toEqual([])
   })
@@ -143,7 +141,7 @@ describe('layer state machines', () => {
       ['other', 'loading'],
     ])
     expect(styles(result).scale).toBe('.5')
-    expect(layerTargets(source).length).toBeGreaterThan(source.layers!.length)
+    expect(layerTargets(source).length).toBeGreaterThan(source.layers.length)
   })
 })
 
@@ -350,7 +348,7 @@ describe('layer animation ownership', () => {
 
 describe('explicit compositions', () => {
   it('resolves an empty selection for definitions without layers', () => {
-    const source: Definition = { name: 'empty', states: [], directionalTransitions: [] }
+    const source: Definition = { name: 'empty', layers: [] }
 
     const result = resolveComposition(source, {}, { layers: {}, states: {} })
 
@@ -360,7 +358,7 @@ describe('explicit compositions', () => {
     )
   })
 
-  const source = definition([reactive.layers![0], reactive.layers![1], machine])
+  const source = definition([reactive.layers[0], reactive.layers[1], machine])
   const from = { layers: { base: true, hover: false }, states: { submission: 'idle' } }
   const to = { layers: { base: false, hover: true }, states: { submission: 'loading' } }
 

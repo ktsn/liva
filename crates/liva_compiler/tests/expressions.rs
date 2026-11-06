@@ -3,7 +3,7 @@ use liva_compiler::compile;
 use support::valid;
 
 #[test]
-fn state_conditions_accept_boolean_expressions_and_reject_invalid_types() {
+fn layer_conditions_accept_boolean_expressions_and_reject_invalid_types() {
     for condition in [
         "checked && !false",
         "(1 + 2 * 3) == 7",
@@ -11,7 +11,7 @@ fn state_conditions_accept_boolean_expressions_and_reject_invalid_types() {
         "checked || 1 / 0 > 0",
     ] {
         valid(&format!(
-            "motion a(checked: boolean) {{ state idle {{}} state active when {condition} {{}} }}"
+            "motion a(checked: boolean) {{ layer idle {{}} layer active when {condition} {{}} }}"
         ));
     }
 
@@ -26,7 +26,7 @@ fn state_conditions_accept_boolean_expressions_and_reject_invalid_types() {
     ] {
         assert!(
             compile(
-                &format!("motion a(checked: boolean) {{ state idle {{}} state active when {condition} {{}} }}"),
+                &format!("motion a(checked: boolean) {{ layer idle {{}} layer active when {condition} {{}} }}"),
                 false
             )
             .definitions
@@ -39,9 +39,9 @@ fn state_conditions_accept_boolean_expressions_and_reject_invalid_types() {
 #[test]
 fn bindings_belong_directly_to_a_motion() {
     for source in [
-        "motion a { state idle { let movement = drag(target: body); } }",
-        "let movement = drag(target: body); motion a { state idle {} }",
-        "motion a { state idle {} transition { let movement = drag(target: body); } }",
+        "motion a { layer idle { let movement = drag(target: body); } }",
+        "let movement = drag(target: body); motion a { layer idle {} }",
+        "motion a { layer idle {} enter { let movement = drag(target: body); } }",
     ] {
         assert!(
             compile(source, false)
@@ -62,10 +62,9 @@ fn typed_parameters_are_declarations_and_share_expression_scope_with_let_binding
         label: string,
     ) {
         let movement = drag(target: body)
-        state idle { body { translate: ${progress + movement.offset.x}px 0; content: ${label} } }
-        state active when enabled && label != "" { body { translate: ${progress}px 0; content: ${label} } }
-        transition { @tween: 100ms }
-    }"#,
+        layer idle { body { translate: ${progress + movement.offset.x}px 0; content: ${label} } }
+        layer active when enabled && label != "" { body { translate: ${progress}px 0; content: ${label} } }
+          }"#,
     );
     let json = serde_json::to_value(&result.definitions[0]).unwrap();
 
@@ -84,7 +83,7 @@ fn typed_parameters_are_declarations_and_share_expression_scope_with_let_binding
         "motion empty()",
         "motion empty(motion: number)",
     ] {
-        let result = valid(&format!("{header} {{ state idle {{}} }}"));
+        let result = valid(&format!("{header} {{ layer idle {{}} }}"));
         assert_eq!(
             result.definitions[0].parameters.len(),
             usize::from(header.contains("number"))
@@ -109,7 +108,7 @@ fn invalid_parameter_declarations_are_diagnosed() {
         "motion a()suffix",
         "motion ()a",
     ] {
-        let result = compile(&format!("{header} {{ state idle {{}} }}"), false);
+        let result = compile(&format!("{header} {{ layer idle {{}} }}"), false);
 
         assert!(result.definitions.is_empty(), "{header}");
         assert!(
@@ -122,7 +121,7 @@ fn invalid_parameter_declarations_are_diagnosed() {
 #[test]
 fn parameters_are_local_and_cannot_be_redeclared_as_bindings() {
     let shadowed = compile(
-        "motion a(value: number) { let value = 1; state idle {} }",
+        "motion a(value: number) { let value = 1; layer idle {} }",
         false,
     );
     assert!(shadowed.definitions.is_empty());
@@ -134,7 +133,7 @@ fn parameters_are_local_and_cannot_be_redeclared_as_bindings() {
     );
 
     let result = compile(
-        "motion a(value: boolean) { state idle {} } motion b { state idle {} state active when value {} }",
+        "motion a(value: boolean) { layer idle {} } motion b { layer idle {} layer active when value {} }",
         false,
     );
     assert_eq!(result.definitions.len(), 1);
@@ -150,7 +149,7 @@ fn parameters_are_local_and_cannot_be_redeclared_as_bindings() {
 #[test]
 fn target_variables_share_motion_scope_and_use_reference_expressions() {
     let result = valid(
-        "motion card { let movement = drag(target: (body)); state idle { body { opacity: 1 } } }",
+        "motion card { let movement = drag(target: (body)); layer idle { body { opacity: 1 } } }",
     );
     let initializer =
         serde_json::to_value(&result.definitions[0].let_bindings[0].initializer).unwrap();
@@ -162,15 +161,15 @@ fn target_variables_share_motion_scope_and_use_reference_expressions() {
 
     for (source, code) in [
         (
-            "motion card(body: string) { state idle { body { opacity: 1 } } }",
+            "motion card(body: string) { layer idle { body { opacity: 1 } } }",
             "semantic.duplicate",
         ),
         (
-            "motion card { let body = drag(target: other); state idle { body { opacity: 1 } other { opacity: 1 } } }",
+            "motion card { let body = drag(target: other); layer idle { body { opacity: 1 } other { opacity: 1 } } }",
             "semantic.duplicate",
         ),
         (
-            "motion card(body: string) { let movement = drag(target: body); state idle { other { opacity: 1 } } }",
+            "motion card(body: string) { let movement = drag(target: body); layer idle { other { opacity: 1 } } }",
             "semantic.expression",
         ),
     ] {
@@ -188,7 +187,7 @@ fn target_variables_share_motion_scope_and_use_reference_expressions() {
     }
 
     let result = compile(
-        "motion first { state idle { body { opacity: 1 } } } motion second { let movement = drag(target: body); state idle { other { opacity: 1 } } }",
+        "motion first { layer idle { body { opacity: 1 } } } motion second { let movement = drag(target: body); layer idle { other { opacity: 1 } } }",
         false,
     );
 
@@ -214,8 +213,8 @@ fn let_expressions_infer_types_and_resolve_dependencies() {
         let active = movement.active;
         let label = "ready";
         let constant = 42;
-        state idle { body { translate: ${doubled}px ${offset.y}px; } }
-        state moving when active { body { translate: ${doubled}px ${offset.y}px; } }
+        layer idle { body { translate: ${doubled}px ${offset.y}px; } }
+        layer moving when active { body { translate: ${doubled}px ${offset.y}px; } }
     }"#,
     );
 
@@ -231,7 +230,7 @@ fn let_expressions_infer_types_and_resolve_dependencies() {
             "Incompatible expression operands",
         ),
     ] {
-        let source = format!("motion example {{ {declarations} state idle {{}} }}");
+        let source = format!("motion example {{ {declarations} layer idle {{}} }}");
         let result = compile(&source, true);
 
         assert!(result.definitions.is_empty(), "{source}");

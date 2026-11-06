@@ -138,7 +138,7 @@ test('ordinary property keyframes preserve the destination and typed easing on s
 
     const saved = await readFile(file, 'utf8')
 
-    expect(saved).toContain('50%: purple @ stepStart')
+    expect(saved).toContain('50%: purple @stepStart')
     expect(saved).toContain('100%: #888')
     expect(saved).toContain('track @tween(duration: 200, easing: easeInOut)')
   } finally {

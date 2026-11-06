@@ -2,34 +2,45 @@ import { describe, expect, it } from 'vite-plus/test'
 import cardFixture from '../../../../fixtures/card.json'
 import toggleFixture from '../../../../fixtures/reactive-toggle.json'
 import { decodeBundle, type Definition, type Expression } from '../definition.ts'
-import { evaluate, renderValue, selectState } from '../expression.ts'
+import { evaluate, renderValue } from '../expression.ts'
+import { resolveLayers } from '../layers.ts'
 import { parameterValues } from '../let-bindings.ts'
 
 const toggle = decodeBundle(JSON.stringify(toggleFixture)).definitions[0]
 const card = decodeBundle(JSON.stringify(cardFixture)).definitions[0]
 
 describe('reactive selection and CSS templates', () => {
-  it('selects fallback and last matching state in declaration order', () => {
+  it('uses the last matching transition in declaration order', () => {
+    const layer = toggle.layers[0]
+    // The compiled toggle fixture declares its two states and guarded transitions.
     const definition: Definition = {
       ...toggle,
-      states: [...toggle.states, { ...toggle.states[1], name: 'last' }],
+      layers: [
+        {
+          ...layer,
+          states: [...layer.states!, { name: 'last', targets: [] }],
+          transitions: [...layer.transitions!, { ...layer.transitions![0], to: 'last' }],
+        },
+      ],
     }
-    expect(selectState(definition, { checked: false })).toBe('off')
-    expect(selectState(definition, { checked: true })).toBe('last')
+
+    expect(resolveLayers(definition, { checked: false }).composition.states.toggle).toBe('off')
+    expect(resolveLayers(definition, { checked: true }).composition.states.toggle).toBe('last')
   })
 
   it('accepts boolean parameter updates without coercion', () => {
     const values = parameterValues(toggle.parameters!, {}, { checked: false })
-    expect(selectState(toggle, values)).toBe('off')
+    expect(resolveLayers(toggle, values).composition.states.toggle).toBe('off')
     const next = parameterValues(toggle.parameters!, values, { checked: true })
-    expect(selectState(toggle, next)).toBe('on')
+    expect(resolveLayers(toggle, next).composition.states.toggle).toBe('on')
     expect(values.checked).toBe(false)
     expect(() => parameterValues(toggle.parameters!, next, { checked: 'false' })).toThrow('boolean')
   })
 
   it('renders explicit CSS units and never appends units to expressions', () => {
     const values = { movement: { active: true, offset: { x: 32, y: -14 } } }
-    const property = card.states[1].targets[0].properties[0]
+    // The card fixture declares a dragging state with an interpolated translate value.
+    const property = card.layers[0].states![1].targets[0].properties[0]
     expect(renderValue(property, values)).toBe('32px -14px')
     expect(renderValue({ ...property, template: [property.template![0]] }, values)).toBe('32')
   })

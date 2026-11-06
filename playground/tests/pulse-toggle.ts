@@ -1,6 +1,6 @@
 import { createApp, h, ref } from 'vue'
 import plugin from '@liva/vue'
-import Toggle from './LegacyToggle.vue'
+import Toggle from './PulseToggle.vue'
 
 createApp({
   setup() {

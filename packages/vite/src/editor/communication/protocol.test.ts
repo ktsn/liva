@@ -7,27 +7,13 @@ const reply = { hash: 'revision', definition: fixture.definitions[0], fields: []
 
 describe('editor message validation', () => {
   it.each([
-    { op: 'set', path: 'toggle/state/off/target/thumb/scale', value: '1' },
-    {
-      op: 'track',
-      path: 'toggle/transition/general/target/thumb/property/scale',
-      frames: [{ offset: 0.5, value: '2' }],
-    },
+    { op: 'set', path: 'toggle/layer/base/target/thumb/property/scale/value', value: '1' },
     { op: 'addFrame', path: 'track', offset: 0.5, value: '2', easing: 'linear' },
     { op: 'removeFrame', path: 'frame' },
     { op: 'timing', path: 'property', value: 'spring(duration: 400)' },
     { op: 'timing', path: 'property' },
     { op: 'easing', path: 'frame', value: 'stepStart' },
     { op: 'easing', path: 'frame' },
-    {
-      op: 'override',
-      definition: 'toggle',
-      from: 'off',
-      to: 'on',
-      target: 'thumb',
-      property: 'scale',
-      timing: '@tween: 100ms',
-    },
   ])('accepts the structural shape of %j', (edit) => {
     expect(isEditorRequest({ ...request, edits: [edit] })).toBe(true)
   })
@@ -42,6 +28,26 @@ describe('editor message validation', () => {
     { ...request, edits: [{ op: 'override', definition: 'toggle' }] },
   ])('rejects malformed requests: %j', (value) => {
     expect(isEditorRequest(value)).toBe(false)
+  })
+
+  it.each(['track', 'override'])('rejects the removed %s operation', (op) => {
+    expect(
+      isEditorRequest({
+        ...request,
+        edits: [
+          {
+            op,
+            path: 'field',
+            timing: '@tween: 100ms',
+            definition: 'toggle',
+            from: 'off',
+            to: 'on',
+            target: 'thumb',
+            property: 'scale',
+          },
+        ],
+      }),
+    ).toBe(false)
   })
 
   it('accepts inspection replies and rejects malformed fields and error envelopes', () => {
@@ -73,7 +79,7 @@ describe('editor optional fields', () => {
         instanceId: 'instance',
         baseHash: 'hash',
         requestId: 'request',
-        edits: [{ op: 'track', path: 'field', timing: '@tween: 1s' }],
+        edits: [{ op: 'timing', path: 'field', value: 'tween(duration: 1000)' }],
       }),
     ).toBe(true)
     expect(isEditorRequest({ ...request, action, instanceId: 42 })).toBe(false)
