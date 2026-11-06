@@ -23,6 +23,26 @@ async function seek(page: Page, time: number) {
   await expect.poll(() => page.evaluate(() => window.__LIVA_EDITOR__.previewActive)).toBe(true)
 }
 
+async function expectCapturedStart(page: Page, value: string) {
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        [...window.__LIVA_EDITOR__.entries.values()].map(({ binding }) => {
+          const composition = binding.runtime.composition
+
+          if (!composition) throw new Error('Missing lifecycle composition')
+
+          return binding.runtime
+            .inspectLifecycle('enter', composition)
+            .transition?.targets.find((target) => target.name === 'body')
+            ?.properties.find((property) => property.name === 'opacity')
+            ?.keyframes?.find((frame) => frame.offset === 0)?.value
+        }),
+      ),
+    )
+    .toEqual([value, value])
+}
+
 for (const phase of ['enter', 'leave']) {
   test(`${phase} retains rows for lifecycle-only targets`, async ({ page }) => {
     await open(page)
@@ -98,23 +118,7 @@ test('typed lifecycle source expressions save and reach shared instances through
     await page.getByRole('button', { name: 'Save to source', exact: true }).click()
 
     await expect.poll(() => page.evaluate(() => window.__LIVA_EDITOR__.message)).toContain('Saved')
-    await expect
-      .poll(() =>
-        page.evaluate(() =>
-          [...window.__LIVA_EDITOR__.entries.values()].map(({ binding }) => {
-            const composition = binding.runtime.composition
-
-            if (!composition) throw new Error('Missing lifecycle composition')
-
-            return binding.runtime
-              .inspectLifecycle('enter', composition)
-              .transition?.targets.find((target) => target.name === 'body')
-              ?.properties.find((property) => property.name === 'opacity')
-              ?.keyframes?.find((frame) => frame.offset === 0)?.value
-          }),
-        ),
-      )
-      .toEqual(['0.4', '0.4'])
+    await expectCapturedStart(page, '0.4')
 
     for (const label of ['First lifecycle', 'Second lifecycle']) {
       const option = page
@@ -143,6 +147,8 @@ test('typed lifecycle source expressions save and reach shared instances through
     )
   } finally {
     await writeFile(file, original)
+
+    await expectCapturedStart(page, '0.2')
   }
 })
 
