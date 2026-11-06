@@ -66,6 +66,17 @@ function timedDefinition(duration = 300): Definition {
   }
 }
 
+async function setReducedMotion(reduced: boolean) {
+  await cdp().send('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-motion', value: reduced ? 'reduce' : 'no-preference' }],
+  })
+
+  // Media-query changes are dispatched during rendering, after the CDP command completes.
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+
+  expect(matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(reduced)
+}
+
 const cleanup: (() => void)[] = []
 
 function setup(
@@ -335,10 +346,7 @@ describe('reactive layer instances', () => {
   })
 
   it('skips animation while reduced motion is enabled', async () => {
-    const session = cdp()
-    await session.send('Emulation.setEmulatedMedia', {
-      features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
-    })
+    await setReducedMotion(true)
 
     try {
       const { instance, element } = setup(timedDefinition())
@@ -347,9 +355,7 @@ describe('reactive layer instances', () => {
       expect(element.style.scale).toBe('1.4')
       expect(instance.animations).toEqual([])
     } finally {
-      await session.send('Emulation.setEmulatedMedia', {
-        features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
-      })
+      await setReducedMotion(false)
     }
   })
 
@@ -779,9 +785,7 @@ describe('layer lifecycle snapshots', () => {
 
       try {
         if (reason === 'reduced motion') {
-          await cdp().send('Emulation.setEmulatedMedia', {
-            features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
-          })
+          await setReducedMotion(true)
         } else {
           for (const animation of element.getAnimations()) animation.finish()
         }
@@ -793,9 +797,7 @@ describe('layer lifecycle snapshots', () => {
         expect(element.style.color).toBe('red')
       } finally {
         if (reason === 'reduced motion') {
-          await cdp().send('Emulation.setEmulatedMedia', {
-            features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
-          })
+          await setReducedMotion(false)
         }
       }
     },
@@ -1087,12 +1089,9 @@ describe('composition preview sessions', () => {
   })
 
   it('keeps paused scrubbing available across reduced-motion changes', async () => {
-    const session = cdp()
     const { instance, element } = setup(timedDefinition(200))
 
-    await session.send('Emulation.setEmulatedMedia', {
-      features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
-    })
+    await setReducedMotion(true)
 
     try {
       instance.previewComposition(from, to)
@@ -1103,17 +1102,13 @@ describe('composition preview sessions', () => {
       expect(Number(getComputedStyle(element).scale)).toBeGreaterThan(1)
       expect(Number(getComputedStyle(element).scale)).toBeLessThan(1.1)
 
-      await session.send('Emulation.setEmulatedMedia', {
-        features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
-      })
+      await setReducedMotion(false)
       animation.currentTime = 0
 
       expect(Number(getComputedStyle(element).scale)).toBeCloseTo(1)
     } finally {
       instance.endCompositionPreview()
-      await session.send('Emulation.setEmulatedMedia', {
-        features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
-      })
+      await setReducedMotion(false)
     }
   })
 
