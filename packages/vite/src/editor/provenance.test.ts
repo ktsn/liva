@@ -344,15 +344,15 @@ describe('lifecycle source provenance', () => {
   })
 })
 
-it('retains shared explicit-self timing provenance when mixed with implicit properties', () => {
+it('keeps implicit-root timing local to its property', () => {
   const source = inspection(
-    'motion sample { layer base { opacity: 1; @tween(duration: 200) self { scale: 1 } } }',
+    'motion sample { layer base { opacity: 1; scale: 1 @tween(duration: 200) } }',
   )
   const composition = { layers: { base: true }, states: {} }
   const scale = trackProvenance(source, composition, composition, undefined, 'self', 'scale')
   const opacity = trackProvenance(source, composition, composition, undefined, 'self', 'opacity')
 
-  expect(scale.timingSource?.path).toBe('sample/layer/base/target/self/timing')
-  expect(scale.localTiming).toBeUndefined()
+  expect(scale.timingSource?.path).toBe('sample/layer/base/target/self/property/scale/timing')
+  expect(scale.localTiming).toBeDefined()
   expect(opacity.timingSource).toBeUndefined()
 })

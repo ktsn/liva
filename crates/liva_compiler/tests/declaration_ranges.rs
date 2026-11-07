@@ -112,12 +112,12 @@ fn identifiers_and_duplicate_declarations_use_names_and_related_names() {
         (
             "motion a(‹x›: number, «x»: number) { layer idle {} }",
             "semantic.duplicate",
-            "Duplicate declaration",
+            "Duplicate variable",
         ),
         (
             "motion a { let ‹x› = 1; let «x» = 2; layer idle {} }",
             "semantic.duplicate",
-            "Duplicate declaration",
+            "Duplicate variable",
         ),
         (
             "motion a { layer ‹idle› {} layer «idle» when true {} }",
@@ -165,9 +165,24 @@ fn identifiers_and_duplicate_declarations_use_names_and_related_names() {
             "Duplicate variable",
         ),
         (
-            "motion a { let «t» = 1; layer idle { ‹t› { x: 0 } } }",
+            "motion a { let ‹t› = 1; layer idle { «t» { x: 0 } } }",
             "semantic.duplicate",
             "Duplicate variable",
+        ),
+        (
+            "motion a(«self»: number) { layer idle {} }",
+            "semantic.variable",
+            "reserved built-in target",
+        ),
+        (
+            "motion a { let «self» = 1; layer idle {} }",
+            "semantic.variable",
+            "reserved built-in target",
+        ),
+        (
+            "motion a { layer idle { «self» { opacity: 1 } } }",
+            "semantic.variable",
+            "implicit target",
         ),
     ] {
         assert_diagnostic(source, code, message);

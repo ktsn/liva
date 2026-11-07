@@ -6,33 +6,54 @@ use liva_compiler::{
 };
 use support::valid;
 
+const ANIMATION_SCOPES: &[&str] = &[
+    "@tween()\nlayer base { BODY }",
+    "@tween()\nlayer base { BODY state off initial {} state on {} transition off -> on when true {} }",
+    "@tween()\nlayer base { state off initial { BODY } state on {} transition off -> on when true {} }",
+    "layer base { opacity: 1; scale: 1; state off initial {} state on {} @tween()\ntransition off -> on when true { BODY } }",
+    "layer base {} @tween()\nenter { BODY }",
+    "layer base {} @tween()\nleave { BODY }",
+];
+
 #[test]
-fn every_animation_scope_lowers_direct_declarations_to_the_explicit_self_destination() {
-    let declarations = "opacity: .5; @tween(duration: 120) scale ~> { 0%: .8; 100%: 1 }";
-    let explicit = format!("self {{ {declarations} }}");
-
-    for scope in [
-        "@tween() layer base { BODY }",
-        "@tween() layer base { BODY state off initial {} state on {} transition off -> on when true {} }",
-        "@tween() layer base { state off initial { BODY } state on {} transition off -> on when true {} }",
-        "layer base { opacity: 1; scale: 1; state off initial {} state on {} @tween() transition off -> on when true { BODY } }",
-        "layer base {} @tween() enter { BODY }",
-        "layer base {} @tween() leave { BODY }",
-    ] {
-        let implicit = valid(&format!(
+fn every_animation_scope_lowers_direct_declarations_to_the_implicit_root() {
+    for scope in ANIMATION_SCOPES {
+        let result = valid(&format!(
             "motion example {{ {} }}",
-            scope.replace("BODY", declarations)
+            scope.replace("BODY", "opacity: .5; scale ~> { 100%: 1 }")
         ));
-        let named = valid(&format!(
-            "motion example {{ {} }}",
-            scope.replace("BODY", &explicit)
-        ));
+        let mappings = result.mappings.unwrap();
+        let root = mappings.iter().find(|(path, mapping)| {
+            path.strip_suffix("/target/self").is_some_and(|parent| {
+                mapping.range == mappings[parent].range
+                    && mappings.contains_key(&format!("{path}/property/opacity"))
+                    && !mappings.contains_key(&format!("{path}/timing"))
+            })
+        });
 
-        assert_eq!(
-            serde_json::to_value(&implicit.definitions).unwrap(),
-            serde_json::to_value(&named.definitions).unwrap(),
-            "{scope}"
+        assert!(root.is_some(), "{scope}");
+    }
+}
+
+#[test]
+fn explicit_self_blocks_are_rejected_in_every_animation_scope() {
+    for scope in ANIMATION_SCOPES {
+        let result = compile(
+            &format!(
+                "motion example {{ {} }}",
+                scope.replace("BODY", "self { opacity: .5 }")
+            ),
+            true,
         );
+        let error = result
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.message.contains("implicit target"));
+
+        assert!(result.definitions.is_empty(), "{scope}");
+        let error = error.unwrap();
+        assert_eq!(error.code, "semantic.variable");
+        assert_eq!(error.range.end - error.range.start, "self".len());
     }
 }
 
@@ -78,40 +99,27 @@ fn target_names_css_properties_and_custom_tracks_are_distinguished_by_delimiters
 }
 
 #[test]
-fn implicit_and_explicit_self_share_duplicate_property_validation() {
-    for body in [
-        "opacity: 1; self { opacity: .5 }",
-        "self { opacity: 1 } opacity: .5",
-        "opacity: 1; opacity ~> { 100%: 1 }",
-        "self { opacity ~> { 100%: 1 } } opacity: .5",
-    ] {
-        let result = compile(
-            &format!("motion example {{ @tween() layer base {{ {body} }} }}"),
-            true,
-        );
-        let errors: Vec<_> = result
-            .diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic.code == "semantic.duplicate")
-            .collect();
+fn duplicate_implicit_root_properties_are_rejected_in_every_animation_scope() {
+    for scope in ANIMATION_SCOPES {
+        for body in [
+            "opacity: 1; opacity: .5",
+            "opacity: 1; opacity ~> { 100%: 1 }",
+        ] {
+            let result = compile(
+                &format!("motion example {{ {} }}", scope.replace("BODY", body)),
+                true,
+            );
+            let errors: Vec<_> = result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "semantic.duplicate")
+                .collect();
 
-        assert!(result.definitions.is_empty(), "{body}");
-        assert_eq!(errors.len(), 1, "{body}: {:?}", result.diagnostics);
-        assert_eq!(errors[0].related.len(), 1);
+            assert!(result.definitions.is_empty(), "{scope}: {body}");
+            assert_eq!(errors.len(), 1, "{:?}", result.diagnostics);
+            assert_eq!(errors[0].related.len(), 1);
+        }
     }
-}
-
-#[test]
-fn disjoint_self_blocks_keep_each_blocks_property_timing() {
-    let result = valid(
-        "motion example { @tween(duration: 100) layer base { opacity: .5; @tween(duration: 200) self { scale: 1 } } }",
-    );
-    let target = &result.definitions[0].layers[0].targets[0];
-
-    assert_eq!(target.properties.len(), 2);
-    assert!(target.timing_expression.is_none());
-    assert!(target.properties[0].timing_expression.is_none());
-    assert!(target.properties[1].timing_expression.is_some());
 }
 
 #[test]
@@ -139,53 +147,64 @@ fn editor_track_edits_preserve_implicit_self_and_surrounding_source() {
 }
 
 #[test]
-fn root_fragment_timing_matches_property_timing_in_styles_and_transitions() {
-    let mixed = "opacity: .5; @tween(duration: 200)\nself { scale: 1; rotate: 20deg @tween(duration: 300) }";
-    let flattened =
-        "opacity: .5; scale: 1 @tween(duration: 200); rotate: 20deg @tween(duration: 300)";
-
+fn implicit_root_properties_keep_their_own_timing_in_styles_and_transitions() {
     for scope in [
         "@tween(duration: 100)\nlayer base { BODY }",
         "layer base {} @tween(duration: 100)\nenter { BODY }",
         "layer base {} @tween(duration: 100)\nleave { BODY }",
     ] {
-        let mixed = valid(&format!(
+        let result = valid(&format!(
             "motion example {{ {} }}",
-            scope.replace("BODY", mixed)
+            scope.replace("BODY", "opacity: .5; scale: 1 @tween(duration: 200)")
         ));
-        let flattened = valid(&format!(
-            "motion example {{ {} }}",
-            scope.replace("BODY", flattened)
-        ));
+        let definition = &result.definitions[0];
+        let (timing, properties): (_, Vec<_>) =
+            if let Some(transition) = definition.enter.as_ref().or(definition.leave.as_ref()) {
+                let target = &transition.targets[0];
+                (
+                    &target.timing_expression,
+                    target
+                        .properties
+                        .iter()
+                        .map(|property| &property.timing_expression)
+                        .collect(),
+                )
+            } else {
+                let target = &definition.layers[0].targets[0];
+                (
+                    &target.timing_expression,
+                    target
+                        .properties
+                        .iter()
+                        .map(|property| &property.timing_expression)
+                        .collect(),
+                )
+            };
 
-        assert_eq!(mixed.definitions, flattened.definitions, "{scope}");
+        assert!(timing.is_none());
+        assert!(properties[0].is_none());
+        assert!(properties[1].is_some());
     }
 }
 
 #[test]
-fn explicit_target_duplicates_remain_errors_after_root_fragment_merging() {
+fn explicit_named_target_duplicates_remain_errors() {
     for scope in ["layer base { BODY }", "layer base {} enter { BODY }"] {
-        for declarations in [
-            "self { opacity: 1 } self { scale: 1 }",
-            "box { opacity: 1 } box { scale: 1 }",
-        ] {
-            let result = compile(
-                &format!(
-                    "motion example {{ {} }}",
-                    scope.replace("BODY", declarations)
-                ),
-                true,
-            );
+        let result = compile(
+            &format!(
+                "motion example {{ {} }}",
+                scope.replace("BODY", "box { opacity: 1 } box { scale: 1 }")
+            ),
+            true,
+        );
 
-            assert!(result.definitions.is_empty());
-            assert!(
-                result.diagnostics.iter().any(|diagnostic| {
-                    diagnostic.code == "semantic.duplicate"
-                        && diagnostic.message.starts_with("Duplicate declaration:")
-                }),
-                "{:?}",
-                result.diagnostics
-            );
-        }
+        assert!(result.definitions.is_empty());
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "semantic.duplicate"
+                    && diagnostic.related.len() == 1)
+        );
     }
 }

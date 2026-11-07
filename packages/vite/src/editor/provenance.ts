@@ -44,12 +44,7 @@ function field(fields: Inspection['fields'], path: string): DeclarationSource | 
 }
 
 function timingField(fields: Inspection['fields'], path: string): DeclarationSource | undefined {
-  return (
-    field(fields, `${path}/timing`) ??
-    (path.includes('/target/self/property/')
-      ? field(fields, `${path.split('/property/')[0]}/timing`)
-      : undefined)
-  )
+  return field(fields, `${path}/timing`)
 }
 
 function scopePath(motion: string, source: TimingSource | PropertySource) {

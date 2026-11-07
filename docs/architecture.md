@@ -91,8 +91,12 @@ references, not dependencies on their full language tooling stacks.
 
 `crates/liva_compiler/src/builtins/` registers function signatures. Each function
 has its own module; `drag.rs` and `interaction.rs` declare target arguments and typed return fields.
-The compiler builds one typed variable scope from parameters, inferred let expression types,
-the built-in `self` target, and the targets declared across layers and local states. The generic call checker evaluates argument
+The compiler places functions, easing constants, and the reserved `self` target in a
+built-in parent scope. A Motion child scope holds parameters, named targets, and let
+bindings; all names are declared before dependency inference. Same-scope duplicates
+are errors, while child declarations shadow ordinary built-ins. `self` cannot be
+shadowed or written as an explicit target block. References, calls, hover, and
+completion use the same symbol lookup. The generic call checker evaluates argument
 types through the expression checker and selects a matching overload. Required
 arguments and incompatible overload groups produce diagnostics.
 Let type inference follows dependencies and rejects cycles. Expression member checking

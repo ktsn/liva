@@ -79,8 +79,8 @@ pub(crate) struct TypeError {
     pub range: Range,
 }
 
+pub use crate::scope::{Scope, SymbolKind};
 pub use liva_syntax::is_identifier as identifier;
-pub type Scope = BTreeMap<String, Type>;
 
 impl Type {
     pub fn is_scalar(self) -> bool {
@@ -119,9 +119,13 @@ impl ExprExt for Expr {
     fn dependencies(&self) -> BTreeMap<String, Range> {
         let mut result = BTreeMap::new();
         for node in self.syntax().descendants().filter_map(Expr::cast) {
-            if matches!(node.view(), ExprView::Reference)
-                && let Some(name) = node.names().next()
-            {
+            let name = match node.view() {
+                ExprView::Reference => node.names().next(),
+                ExprView::Call => node.function(),
+                _ => None,
+            };
+
+            if let Some(name) = name {
                 result.entry(name.text()).or_insert_with(|| name.range());
             }
         }
@@ -145,13 +149,21 @@ impl ExprExt for Expr {
                 let first = path
                     .first()
                     .ok_or_else(|| self.error("Expected variable name"))?;
-                let mut value_type = scope
-                    .get(&first.text())
-                    .copied()
-                    .or_else(|| crate::builtins::constant_type(&first.text()))
-                    .ok_or_else(|| {
-                        name_error(first, format!("Unknown variable: {}", first.text()))
-                    })?;
+                let symbol = scope.get(&first.text()).ok_or_else(|| {
+                    name_error(first, format!("Unknown variable: {}", first.text()))
+                })?;
+                let mut value_type = match symbol.kind {
+                    SymbolKind::Value(value_type) => value_type,
+                    SymbolKind::Function(_) => {
+                        return Err(name_error(first, "Functions cannot be used as values"));
+                    }
+                    SymbolKind::Pending => {
+                        return Err(name_error(
+                            first,
+                            format!("Unresolved variable: {}", first.text()),
+                        ));
+                    }
+                };
 
                 for member in path.iter().skip(1) {
                     let error = || {
@@ -178,8 +190,15 @@ impl ExprExt for Expr {
                 let function = self
                     .function()
                     .ok_or_else(|| self.error("Expected function name"))?;
-                let metadata = crate::builtins::lookup(&function.text())
-                    .map_err(|message| name_error(&function, message))?;
+                let symbol = scope.get(&function.text()).ok_or_else(|| {
+                    name_error(&function, format!("Unknown function: {}", function.text()))
+                })?;
+                let SymbolKind::Function(metadata) = symbol.kind else {
+                    return Err(name_error(
+                        &function,
+                        format!("Value is not callable: {}", function.text()),
+                    ));
+                };
                 let mut seen = BTreeSet::new();
                 let arguments: Vec<_> = self.arguments().collect();
 

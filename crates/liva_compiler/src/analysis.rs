@@ -1,5 +1,8 @@
 //! Editor-facing type information, using the compiler's motion scope and checker.
-use crate::{Compiler, expression};
+use crate::{
+    Compiler, expression,
+    scope::{Symbol, SymbolKind},
+};
 use liva_syntax::ast::expression::{Expr, ExprView};
 use liva_syntax::ast::{AstNode, HasHeader, HasItems};
 use liva_syntax::{Range, parse};
@@ -65,7 +68,11 @@ pub fn completions(source: &str, offset: usize) -> Vec<Completion> {
 
     if let Some((parent, partial)) = typed.rsplit_once('.') {
         let mut path = parent.split('.');
-        let Some(mut value_type) = path.next().and_then(|name| scope.get(name)).copied() else {
+        let Some(mut value_type) = path
+            .next()
+            .and_then(|name| scope.get(name))
+            .and_then(Symbol::value_type)
+        else {
             return vec![];
         };
 
@@ -92,44 +99,55 @@ pub fn completions(source: &str, offset: usize) -> Vec<Completion> {
         };
     }
 
-    let mut result: Vec<_> = scope
+    scope
         .iter()
         .filter(|(name, _)| name.starts_with(typed))
-        .map(|(name, value_type)| Completion {
-            label: name.clone(),
-            detail: type_name(*value_type),
+        .filter_map(|(name, symbol)| {
+            symbol_detail(symbol).map(|detail| Completion {
+                label: name.into(),
+                detail,
+            })
         })
-        .collect();
-    result.extend(
-        crate::builtins::functions()
-            .filter(|function| function.name.starts_with(typed))
-            .map(|function| Completion {
-                label: function.name.into(),
-                detail: function
-                    .signatures
-                    .iter()
-                    .map(|signature| {
-                        format!(
-                            "{}({}): {}",
-                            function.name,
-                            signature
-                                .parameters
-                                .iter()
-                                .map(|parameter| format!(
-                                    "{}: {}",
-                                    parameter.name,
-                                    type_name(parameter.value_type)
-                                ))
-                                .collect::<Vec<_>>()
-                                .join(", "),
-                            type_name(signature.return_type)
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            }),
-    );
-    result
+        .collect()
+}
+
+fn symbol_detail(symbol: &Symbol) -> Option<String> {
+    match symbol.kind {
+        SymbolKind::Value(value_type) => Some(type_name(value_type)),
+        SymbolKind::Pending => None,
+        SymbolKind::Function(function) => Some(
+            function
+                .signatures
+                .iter()
+                .map(|signature| {
+                    format!(
+                        "{}({}): {}",
+                        function.name,
+                        signature
+                            .parameters
+                            .iter()
+                            .map(|parameter| format!(
+                                "{}{}: {}",
+                                parameter.name,
+                                if parameter.optional { "?" } else { "" },
+                                type_name(parameter.value_type),
+                            ))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        type_name(signature.return_type),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ),
+    }
+}
+
+fn symbol_label(name: &str, symbol: &Symbol) -> Option<String> {
+    symbol_detail(symbol).map(|detail| match symbol.kind {
+        SymbolKind::Function(_) => detail,
+        _ => format!("{name}: {detail}"),
+    })
 }
 
 pub fn hovers(source: &str) -> Vec<Hover> {
@@ -260,7 +278,7 @@ fn scan(text: &str, base: usize, scope: &expression::Scope, result: &mut Vec<Hov
         let previous_end = start + word.len();
         let label = scope
             .get(word)
-            .map(|value_type| format!("{word}: {}", type_name(*value_type)));
+            .and_then(|symbol| symbol_label(word, symbol));
 
         if let Some(label) = label {
             result.push(Hover {
@@ -283,7 +301,7 @@ fn expression_hovers(node: &impl AstNode, scope: &expression::Scope, result: &mu
                     continue;
                 };
                 let mut path = first.text();
-                let Some(mut value_type) = scope.get(&path).copied() else {
+                let Some(mut value_type) = scope.get(&path).and_then(Symbol::value_type) else {
                     continue;
                 };
                 result.push(Hover {
@@ -311,34 +329,15 @@ fn expression_hovers(node: &impl AstNode, scope: &expression::Scope, result: &mu
                 let Some(name) = expr.function() else {
                     continue;
                 };
-                let Ok(function) = crate::builtins::lookup(&name.text()) else {
+                let Some(label) = scope
+                    .get(&name.text())
+                    .and_then(|symbol| symbol_label(&name.text(), symbol))
+                else {
                     continue;
                 };
                 result.push(Hover {
                     range: name.range(),
-                    label: function
-                        .signatures
-                        .iter()
-                        .map(|signature| {
-                            format!(
-                                "{}({}): {}",
-                                function.name,
-                                signature
-                                    .parameters
-                                    .iter()
-                                    .map(|p| format!(
-                                        "{}{}: {}",
-                                        p.name,
-                                        if p.optional { "?" } else { "" },
-                                        type_name(p.value_type)
-                                    ))
-                                    .collect::<Vec<_>>()
-                                    .join(", "),
-                                type_name(signature.return_type)
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n"),
+                    label,
                 });
             }
             _ => {}

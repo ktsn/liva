@@ -191,12 +191,26 @@ paths. Non-finite runtime arithmetic reports a diagnostic and retains valid styl
 CSS validity is delegated to the browser. Omitted properties expose lower active
 layers or external CSS. There is no requirement for a complete fallback state.
 
+## Expression names and shadowing
+
+Built-in functions and easing constants belong to a parent scope. Each Motion has
+one child scope shared by parameters, `let` bindings, and named targets. A name
+may be declared only once in that Motion, regardless of declaration order. Reusing
+a named target across layers or states refers to the same target rather than
+redeclaring a variable.
+
+Motion declarations may shadow ordinary built-ins. References and calls resolve
+the closest declaration: with `let tween = 1`, `tween` is a number and `tween()` is
+an error. There is no fallback to the built-in function. Functions cannot be used
+as values. Forward let references follow the same rules and cycles are errors.
+Only `self` is reserved against all declarations.
+
 ## The Motion root and implicit declarations
 
 `self` is the built-in target bound to the Motion root (the element carrying `v-liva`).
 It is always available to target-taking functions such as `drag(target: self)`.
-A parameter or `let` cannot shadow it. `self { ... }` explicitly names this same root;
-no `v-liva-target` directive is needed for it.
+It is reserved: parameters, `let` bindings, and explicit `self { ... }` target blocks
+cannot declare it. Write root styles directly; no `v-liva-target` directive is needed.
 
 CSS declarations and tracks directly inside a reactive layer, stateful layer's common
 styles, state, directional transition, `enter`, or `leave` apply to `self`:
@@ -214,11 +228,9 @@ motion button {
 }
 ```
 
-Direct declarations can mix with named target blocks. Explicit and implicit `self`
-declarations share a property namespace: declaring the same property twice in one
-scope, including a value plus a track, reports a duplicate. Disjoint explicit `self`
-properties may coexist with implicit ones; target timing applies to the properties
-inside that explicit block.
+Direct declarations can mix with named target blocks. Declaring the same root
+property twice in one animation scope, including a value plus a track, reports a
+duplicate. Property timing decorators apply only to their property.
 
 The delimiter determines the meaning without consulting CSS property names:
 `property: value` is a value, `property ~> { ... }` is a track, and `target { ... }`

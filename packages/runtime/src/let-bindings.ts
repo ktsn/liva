@@ -209,7 +209,10 @@ function dependencies(expression: Expression): string[] {
     case 'binary':
       return [...dependencies(expression.left), ...dependencies(expression.right)]
     case 'call':
-      return expression.arguments.flatMap((argument) => dependencies(argument.value))
+      return [
+        expression.function,
+        ...expression.arguments.flatMap((argument) => dependencies(argument.value)),
+      ]
     default:
       return []
   }

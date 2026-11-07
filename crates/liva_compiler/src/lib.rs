@@ -4,6 +4,7 @@ mod diagnostic_source;
 pub mod edits;
 pub mod expression;
 pub mod ir;
+pub mod scope;
 mod target;
 
 use diagnostic_source::{header_range, name_range, significant_range};
@@ -14,7 +15,7 @@ use liva_syntax::ast::{self as syn, AstNode, HasHeader, HasItems, HasValue};
 use liva_syntax::{Diagnostic, Kind, Range, parse};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use target::{TargetId, TargetOrigin, TimedProperty};
+use target::{TargetId, TargetOrigin};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,7 +36,6 @@ pub struct Mapping {
 struct BindingView {
     name: String,
     initializer: Expr,
-    name_range: Range,
 }
 
 struct Compiler {
@@ -47,11 +47,9 @@ struct Compiler {
 impl Compiler {
     fn parameters(&mut self, node: &syn::Motion) -> Vec<MotionParameter> {
         let mut parameters = vec![];
-        let mut seen = BTreeMap::new();
 
         for parameter in node.parameters() {
             let name = parameter.header().unwrap_or_default();
-            self.unique(&mut seen, &name, &parameter);
 
             if !expression::identifier(&name) || matches!(name.as_str(), "true" | "false") {
                 self.error(
@@ -96,11 +94,9 @@ impl Compiler {
 
     fn let_bindings(&mut self, node: &syn::Motion) -> Vec<BindingView> {
         let mut bindings = vec![];
-        let mut seen = BTreeMap::new();
 
         for binding in node.bindings() {
             let name = binding.header().unwrap_or_default();
-            self.unique(&mut seen, &name, &binding);
 
             if !expression::identifier(&name) || matches!(name.as_str(), "true" | "false") {
                 self.error("semantic.binding", "Invalid let identifier", &binding);
@@ -112,11 +108,7 @@ impl Compiler {
             let result = self.expression_view(&value);
 
             match result {
-                Some(initializer) => bindings.push(BindingView {
-                    name,
-                    initializer,
-                    name_range: name_range(&binding),
-                }),
+                Some(initializer) => bindings.push(BindingView { name, initializer }),
                 None => continue,
             }
         }
@@ -698,38 +690,22 @@ impl Compiler {
         parameters: &[MotionParameter],
         bindings: &[BindingView],
     ) -> expression::Scope {
-        use expression::Type;
-        let mut scope = expression::Scope::from([(TargetId::Root.name().into(), Type::Target)]);
-        let mut declared: BTreeMap<_, _> = node
-            .parameters()
-            .map(|parameter| {
-                (
-                    parameter.header().unwrap_or_default(),
-                    name_range(&parameter),
-                )
-            })
-            .collect();
+        use expression::{SymbolKind, Type};
+        let mut scope = expression::Scope::motion();
+        let mut declarations = vec![];
 
-        for parameter in parameters {
-            if TargetId::from_name(parameter.name.clone()) == TargetId::Root {
-                let parameter = node
-                    .parameters()
-                    .find(|item| item.header().as_deref() == Some(TargetId::Root.name()))
-                    .unwrap();
-                self.error(
-                    "semantic.variable",
-                    "self is a reserved built-in target",
-                    &parameter,
-                );
-                continue;
-            }
-
-            let value_type = match parameter.value_type {
-                PrimitiveType::Number => Type::Number,
-                PrimitiveType::Boolean => Type::Boolean,
-                PrimitiveType::String => Type::String,
+        for parameter in node.parameters() {
+            let name = parameter.header().unwrap_or_default();
+            let kind = match parameters.iter().find(|item| item.name == name) {
+                Some(metadata) => SymbolKind::Value(match metadata.value_type {
+                    PrimitiveType::Number => Type::Number,
+                    PrimitiveType::Boolean => Type::Boolean,
+                    PrimitiveType::String => Type::String,
+                }),
+                // Invalid declarations still hide parent symbols while editing.
+                None => SymbolKind::Pending,
             };
-            scope.insert(parameter.name.clone(), value_type);
+            declarations.push((name, kind, name_range(&parameter)));
         }
 
         let mut targets = BTreeMap::new();
@@ -755,49 +731,56 @@ impl Compiler {
                 );
             }
 
-            if TargetId::from_name(name.clone()) == TargetId::Root {
-                continue;
-            }
-
-            if scope.insert(name.clone(), Type::Target).is_some() {
-                let mut diagnostic = Diagnostic::error(
-                    "semantic.duplicate",
-                    format!("Duplicate variable: {name}"),
-                    name_range(&target),
-                );
-                diagnostic.related.extend(declared.get(&name).cloned());
-                self.diagnostics.push(diagnostic);
-            }
-            declared.entry(name).or_insert_with(|| name_range(&target));
-        }
-
-        for binding in bindings {
-            if scope.contains_key(&binding.name) {
-                let mut diagnostic = Diagnostic::error(
-                    "semantic.duplicate",
-                    format!("Duplicate variable: {}", binding.name),
-                    binding.name_range.clone(),
-                );
-                diagnostic
-                    .related
-                    .extend(declared.get(&binding.name).cloned());
-                self.diagnostics.push(diagnostic);
+            // Explicit reserved targets are rejected where their animation scope
+            // is compiled, including lifecycle blocks that introduce no variable.
+            if !scope.is_reserved(&name) {
+                declarations.push((name, SymbolKind::Value(Type::Target), name_range(&target)));
             }
         }
 
-        let initial_scope = scope.clone();
-        let by_name: BTreeMap<_, _> = bindings
-            .iter()
-            .map(|binding| (binding.name.clone(), &binding.initializer))
-            .collect();
+        declarations.extend(node.bindings().map(|binding| {
+            (
+                binding.header().unwrap_or_default(),
+                SymbolKind::Pending,
+                name_range(&binding),
+            )
+        }));
+        declarations.sort_by_key(|(_, _, range)| range.start);
+
+        for (name, kind, range) in declarations {
+            if let Err(error) = scope.declare(name, kind, range.clone()) {
+                let mut diagnostic = Diagnostic::error(
+                    if error.previous.is_some() {
+                        "semantic.duplicate"
+                    } else {
+                        "semantic.variable"
+                    },
+                    error.message,
+                    range,
+                );
+                diagnostic.related.extend(error.previous);
+                self.diagnostics.push(diagnostic);
+            }
+        }
+
+        let mut by_name = BTreeMap::new();
 
         for binding in bindings {
-            let name = &binding.name;
-            if initial_scope.contains_key(name) {
+            by_name
+                .entry(binding.name.clone())
+                .or_insert(&binding.initializer);
+        }
+
+        for binding in bindings {
+            if !matches!(
+                scope.local(&binding.name).map(|symbol| symbol.kind),
+                Some(SymbolKind::Pending)
+            ) {
                 continue;
             }
 
-            if let Err(error) = infer_let_type(name, &by_name, &mut scope, &mut BTreeSet::new())
+            if let Err(error) =
+                infer_let_type(&binding.name, &by_name, &mut scope, &mut BTreeSet::new())
                 && !self.diagnostics.iter().any(|diagnostic| {
                     diagnostic.code == "semantic.expression"
                         && diagnostic.range == error.range
@@ -822,7 +805,7 @@ impl Compiler {
         })
     }
 
-    fn compile_targets<P: TimedProperty>(
+    fn compile_targets<P>(
         &mut self,
         node: &impl AstNode,
         path: &str,
@@ -855,9 +838,7 @@ impl Compiler {
         }));
 
         let mut targets: Vec<Target<P>> = vec![];
-        let mut root_index: Option<usize> = None;
         let mut target_names = BTreeMap::new();
-        let mut root_properties = BTreeMap::new();
 
         for binding in node.children::<syn::LetBinding>() {
             self.error(
@@ -869,6 +850,16 @@ impl Compiler {
 
         for (id, origin, source) in declarations {
             let name = id.name();
+
+            if matches!(origin, TargetOrigin::Explicit) && scope.is_reserved(name) {
+                self.error(
+                    "semantic.variable",
+                    "self is an implicit target; write root properties directly",
+                    &source,
+                );
+                continue;
+            }
+
             let target_path = format!("{path}/target/{name}");
             self.mapping(&target_path, &source, origin.mapping_kind());
 
@@ -889,38 +880,13 @@ impl Compiler {
                 }
             };
 
-            let mut local_properties = BTreeMap::new();
-            let seen = match id {
-                TargetId::Root => &mut root_properties,
-                TargetId::Named(_) => &mut local_properties,
-            };
-            let mut properties = compile_properties(self, &source, &target_path, seen);
-
-            match id {
-                TargetId::Root => {
-                    // A fragment's timing belongs only to its own properties, even
-                    // when implicit and explicit root declarations are merged.
-                    for property in &mut properties {
-                        property.inherit_timing(&timing);
-                    }
-
-                    if let Some(index) = root_index {
-                        targets[index].properties.extend(properties);
-                    } else {
-                        root_index = Some(targets.len());
-                        targets.push(Target {
-                            name: id.name().into(),
-                            timing_expression: None,
-                            properties,
-                        });
-                    }
-                }
-                TargetId::Named(name) => targets.push(Target {
-                    name,
-                    timing_expression: timing,
-                    properties,
-                }),
-            }
+            let mut seen = BTreeMap::new();
+            let properties = compile_properties(self, &source, &target_path, &mut seen);
+            targets.push(Target {
+                name: name.into(),
+                timing_expression: timing,
+                properties,
+            });
         }
 
         targets
@@ -1281,15 +1247,20 @@ fn infer_let_type(
     scope: &mut expression::Scope,
     visiting: &mut BTreeSet<String>,
 ) -> Result<expression::Type, expression::TypeError> {
-    if let Some(value_type) = scope.get(name) {
-        return Ok(*value_type);
+    if let Some(value_type) = scope.local(name).and_then(scope::Symbol::value_type) {
+        return Ok(value_type);
     }
 
     visiting.insert(name.into());
     let binding = bindings[name];
     let result = (|| {
         for (dependency, range) in binding.dependencies() {
-            if !bindings.contains_key(&dependency) || scope.contains_key(&dependency) {
+            if !bindings.contains_key(&dependency)
+                || scope
+                    .local(&dependency)
+                    .and_then(scope::Symbol::value_type)
+                    .is_some()
+            {
                 continue;
             }
             if visiting.contains(&dependency) {
@@ -1303,7 +1274,7 @@ fn infer_let_type(
         }
 
         let value_type = binding.check(scope)?;
-        scope.insert(name.into(), value_type);
+        scope.resolve(name, value_type);
         Ok(value_type)
     })();
     visiting.remove(name);

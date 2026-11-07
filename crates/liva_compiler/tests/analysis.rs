@@ -199,3 +199,49 @@ fn completes_registered_interaction_function_and_inferred_record_members() {
     assert_eq!(found[0].label, "interaction");
     assert!(found[0].detail.contains("target: target"));
 }
+
+#[test]
+fn builtin_completions_respect_local_shadows_without_duplicate_candidates() {
+    use liva_compiler::analysis::completions;
+
+    for (declarations, prefix, detail) in [
+        ("", "easeO", "easing"),
+        ("let easeOut = 2;", "easeO", "number"),
+        ("let tween = 2;", "twee", "number"),
+    ] {
+        let source =
+            format!("motion example {{ {declarations} layer base {{ opacity: ${{{prefix}}} }} }}");
+        let found = completions(
+            &source,
+            source.find(&format!("${{{prefix}")).unwrap() + 2 + prefix.len(),
+        );
+
+        assert_eq!(found.len(), 1, "{source}: {found:?}");
+        assert_eq!(found[0].detail, detail);
+    }
+}
+
+#[test]
+fn call_hovers_show_the_shadowing_value_instead_of_a_builtin_signature() {
+    let source = "motion example { let tween = 2; @tween()\nlayer base {} }";
+    let offset = source.find("@tween").unwrap() + 1;
+    let found = hovers(source);
+
+    assert!(
+        found
+            .iter()
+            .any(|hover| hover.range.start == offset && hover.label == "tween: number")
+    );
+    assert!(!found.iter().any(|hover| hover.label.starts_with("tween(")));
+}
+
+#[test]
+fn incomplete_local_declarations_hide_builtin_completions() {
+    use liva_compiler::analysis::completions;
+
+    let source = "motion example { let tween = ; layer base { opacity: ${twee} } }";
+    let offset = source.find("${twee}").unwrap() + "${twee".len();
+    let found = completions(source, offset);
+
+    assert!(found.is_empty(), "{found:?}");
+}
