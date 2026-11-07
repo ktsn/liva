@@ -50,6 +50,18 @@ function binding(label: string) {
   return result
 }
 
+function pendingDomBinding() {
+  const record: EditorBinding = binding('')
+  record.root.getAttribute = () => null
+
+  return {
+    record,
+    mount(label: string) {
+      record.root.getAttribute = () => label
+    },
+  }
+}
+
 async function setup(send: (request: EditorRequest) => Promise<EditorReply>) {
   const controller = new EditorController(send)
   const first = binding('First')
@@ -239,6 +251,8 @@ describe('editor selection and saves', () => {
 
     controller.observe('mount', replacement)
 
+    await Promise.resolve()
+
     expect(controller.selected?.binding).toBe(replacement)
     expect(listener).toHaveBeenCalledTimes(2)
 
@@ -246,6 +260,119 @@ describe('editor selection and saves', () => {
     controller.report('A diagnostic')
 
     expect(listener).toHaveBeenCalledTimes(2)
+  })
+
+  it('reconnects the same labeled DOM instance when HMR reverses mount order', async () => {
+    const controller = new EditorController(async () => reply)
+    const first = pendingDomBinding()
+    const second = pendingDomBinding()
+    const other = pendingDomBinding()
+    const replacement = pendingDomBinding()
+
+    controller.observe('mount', first.record)
+    controller.observe('mount', second.record)
+    first.mount('First')
+    second.mount('Second')
+
+    await Promise.resolve()
+    await controller.select([...controller.entries.keys()][0])
+
+    controller.observe('unmount', first.record)
+    controller.observe('unmount', second.record)
+    controller.observe('mount', other.record)
+    controller.observe('mount', replacement.record)
+    other.mount('Second')
+    replacement.mount('First')
+
+    await Promise.resolve()
+
+    expect(controller.selected?.binding).toBe(replacement.record)
+    expect([...controller.entries.values()].map((entry) => entry.label)).toEqual([
+      'Second',
+      'First',
+    ])
+  })
+
+  it('ignores label resolution for an instance removed before DOM setup finishes', async () => {
+    const { controller, first } = await setup(async () => reply)
+    const replacement = pendingDomBinding()
+
+    controller.observe('unmount', first)
+    controller.observe('mount', replacement.record)
+    controller.observe('unmount', replacement.record)
+    replacement.mount('First')
+
+    await Promise.resolve()
+
+    expect(controller.selected?.binding).toBe(first)
+    expect(
+      [...controller.entries.values()].some((entry) => entry.binding === replacement.record),
+    ).toBe(false)
+  })
+
+  it('restarts inspection when HMR remounts an instance during source loading', async () => {
+    const originalInspection = deferred<EditorReply>()
+    const replacementInspection = deferred<EditorReply>()
+    const send = vi
+      .fn<(request: EditorRequest) => Promise<EditorReply>>()
+      .mockReturnValueOnce(originalInspection.promise)
+      .mockReturnValueOnce(replacementInspection.promise)
+    const controller = new EditorController(send)
+    const first = binding('First')
+    const replacement = pendingDomBinding()
+
+    controller.observe('mount', first)
+
+    await Promise.resolve()
+
+    const selecting = controller.select([...controller.entries.keys()][0])
+    controller.observe('unmount', first)
+    controller.observe('mount', replacement.record)
+    replacement.mount('First')
+
+    await Promise.resolve()
+
+    expect(send).toHaveBeenCalledTimes(2)
+
+    originalInspection.resolve({ ...reply, hash: 'obsolete' })
+    replacementInspection.resolve(reply)
+
+    await selecting
+    await Promise.resolve()
+
+    expect(controller.selected?.binding).toBe(replacement.record)
+    expect(controller.inspection).toBe(reply)
+  })
+
+  it('reports a failed inspection restarted after remount', async () => {
+    const originalInspection = deferred<EditorReply>()
+    const failure = new Error('Inspection unavailable')
+    const send = vi
+      .fn<(request: EditorRequest) => Promise<EditorReply>>()
+      .mockReturnValueOnce(originalInspection.promise)
+      .mockRejectedValueOnce(failure)
+    const controller = new EditorController(send)
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const first = binding('First')
+
+    controller.observe('mount', first)
+
+    await Promise.resolve()
+
+    const selecting = controller.select([...controller.entries.keys()][0])
+    controller.observe('unmount', first)
+    controller.observe('mount', binding('First'))
+
+    await vi.waitFor(() => {
+      expect(controller.message).toContain('Inspection unavailable')
+    })
+    expect(reported).toHaveBeenCalledWith('[Liva editor]', failure)
+
+    originalInspection.resolve(reply)
+
+    await selecting
+
+    reported.mockRestore()
   })
 
   it('previews compositions, seeks, and restores after application updates', async () => {
@@ -360,12 +487,16 @@ it('ignores unrelated instance updates and only reattaches matching remounts', a
   controller.observe('unmount', first)
   controller.observe('mount', binding('Different'))
 
+  await Promise.resolve()
+
   expect(controller.selected?.binding).toBe(first)
 
   const otherSource = binding('First')
 
   otherSource.component.livaSource = 'other-source'
   controller.observe('mount', otherSource)
+
+  await Promise.resolve()
 
   expect(controller.selected?.binding).toBe(first)
 })
