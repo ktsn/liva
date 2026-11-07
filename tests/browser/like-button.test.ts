@@ -74,7 +74,7 @@ test.describe('like button', () => {
     await page.keyboard.press('Space')
 
     await expect(button).toHaveAttribute('aria-pressed', 'false')
-    await expect(button.locator('.heart')).toHaveCSS('color', 'rgb(141, 153, 146)')
+    await expect(button.locator('.heart')).toHaveCSS('color', 'rgb(123, 137, 129)')
     await expect
       .poll(() => button.evaluate((element) => element.getAnimations({ subtree: true }).length))
       .toBe(0)

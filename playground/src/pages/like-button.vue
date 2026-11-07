@@ -67,7 +67,7 @@ motion like(liked: boolean) {
   @tween(duration: 180, easing: easeOut)
   layer favorite {
     heart {
-      color: #8d9992
+      color: #7b8981
       scale: 1
     }
 
