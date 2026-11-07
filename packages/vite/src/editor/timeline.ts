@@ -7,6 +7,7 @@ import {
   type PropertyTransition,
   type Timing,
   type Transition,
+  type State,
 } from '@liva/runtime'
 
 export type LifecyclePhase = 'enter' | 'leave'
@@ -94,6 +95,39 @@ export function compositionTimelineTracks(
         readonly: true,
       }
     }),
+  )
+}
+
+export function compositionLifecycleTracks(
+  name: string,
+  phase: LifecyclePhase,
+  presentation: State,
+  transition: Transition | undefined,
+): TimelineTrack[] {
+  const definition: Definition = {
+    name,
+    states: [presentation],
+    directionalTransitions: [],
+    [phase]: transition,
+  }
+
+  return timelineTracks(definition, presentation.name, presentation.name, true, phase).map(
+    (track) => {
+      const baseline =
+        presentation.targets
+          .find((target) => target.name === track.target)
+          ?.properties.find((property) => property.name === track.property)?.value ?? ''
+
+      return {
+        ...track,
+        fromValue: track.explicit.find((frame) => frame.offset === 0)?.value ?? baseline,
+        toValue:
+          phase === 'enter'
+            ? baseline
+            : (track.explicit.find((frame) => frame.offset === 1)?.value ?? baseline),
+        readonly: true,
+      }
+    },
   )
 }
 

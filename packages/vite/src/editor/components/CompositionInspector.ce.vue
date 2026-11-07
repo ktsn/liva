@@ -54,7 +54,9 @@ const editingPath = computed(() =>
 function locationLabel(path?: string) {
   if (!path) return 'External CSS'
 
-  const [, , layer, scope, name] = path.split('/')
+  const [, kind, layer, scope, name] = path.split('/')
+
+  if (kind === 'enter' || kind === 'leave') return `Motion ${kind}`
   const label = `Layer: ${layer}`
 
   if (scope === 'state') return `${label} · State: ${name}`
@@ -142,9 +144,10 @@ function saveFrame() {
         <button type="submit">Apply value</button>
       </template>
       <p v-else>{{
-        editingPath
-          ? 'Source editing is unavailable for this declaration.'
-          : 'External CSS has no editable source declaration.'
+        (offset === 0 ? provenance.fromDescription : provenance.toDescription) ||
+          (editingPath
+            ? 'Source editing is unavailable for this declaration.'
+            : 'External CSS has no editable source declaration.')
       }}</p>
     </form>
     <form v-if="editingFrame && canChangeFrame && offset !== undefined" @submit.prevent="saveFrame">
@@ -191,7 +194,11 @@ function saveFrame() {
     </template>
     <p v-if="provenance.framesUnavailable">{{ provenance.framesUnavailable }}</p>
 
-    <p v-if="track.explicit.some((frame) => frame.offset === 1 && frame.value !== track.toValue)"
+    <p
+      v-if="
+        track.lifecycle !== 'leave' &&
+        track.explicit.some((frame) => frame.offset === 1 && frame.value !== track.toValue)
+      "
     >Completion restores the property’s resolved value after this keyframe.</p>
     <button
       v-if="provenance.frameDestination"

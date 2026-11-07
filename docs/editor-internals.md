@@ -92,8 +92,11 @@ Candidates recompile before preview; failed candidates leave the previous draft 
 The legacy timeline remains read-only for typed animation expressions, preventing
 legacy track replacement from discarding typed syntax.
 
-`LivaInstance.previewLifecycle` captures the selected lifecycle with current
-expression values and resolves every mounted target, including repeated targets.
+`LivaInstance.previewLifecycle` accepts an explicit composition and candidate definition
+for layer previews. It resolves the baseline and captures lifecycle expressions once,
+without replacing the application definition or state-machine history. It resolves
+every mounted target, including repeated targets and targets absent from the active
+baseline. The inspector uses the same expression snapshot and lifecycle-only rows.
 Paused effects participate in the instance's existing animation ownership and
 cleanup. Enter settles to state CSS at its end; leave holds its last frame. The
 controller restores the committed definition on cancellation and never invokes Vue

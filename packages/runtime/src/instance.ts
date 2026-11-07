@@ -23,6 +23,7 @@ import type { Definition } from './definition.ts'
 import { getState, resolve, type ResolvedTrack } from './resolve.ts'
 import {
   resolveLifecycle,
+  resolveLifecycleTracks,
   captureLifecycleDefinition,
   hasLifecycle,
   lifecycleTransitions,
@@ -196,6 +197,23 @@ export class LivaInstance {
 
   get animations(): readonly Animation[] {
     return this.active.map((a) => a.animation)
+  }
+
+  inspectLifecycle(
+    phase: 'enter' | 'leave',
+    composition: Composition,
+    definition = this.definition,
+  ) {
+    const values = new LetBindingGraph(
+      definition.letBindings ?? [],
+      this.values,
+      this.letBindings,
+    ).evaluate(this.values)
+
+    return {
+      presentation: resolveComposition(definition, values, composition).presentation,
+      transition: captureLifecycleDefinition(definition, phase, values),
+    }
   }
 
   inspectComposition(
@@ -569,6 +587,16 @@ export class LivaInstance {
     transitions: readonly CompositionTransition[] = [],
     definition = this.definition,
   ): void {
+    this.prepareCompositionPreview(from, to, transitions, definition)
+  }
+
+  private prepareCompositionPreview(
+    from: Composition,
+    to: Composition,
+    transitions: readonly CompositionTransition[],
+    definition: Definition,
+    phase?: 'enter' | 'leave',
+  ): void {
     if (this.disposed || this.suspended || !this.layerResolution) {
       throw new Error('Composition preview requires a mounted layer instance')
     }
@@ -583,6 +611,7 @@ export class LivaInstance {
       ).evaluate(this.values)
       const previous = resolveComposition(definition, values, from)
       const next = resolveComposition(definition, values, to, from, transitions)
+      const lifecycle = phase ? captureLifecycleDefinition(definition, phase, values) : undefined
 
       this.cancel()
       this.restore()
@@ -610,14 +639,18 @@ export class LivaInstance {
         }
 
         for (const element of elements) {
-          const tracks = resolveLayerTracks(
-            previous,
-            targetResolution,
-            values,
-            (_name, property) => getComputedStyle(element).getPropertyValue(property),
-            (message) => this.report({ code: 'runtime.endpoint', message }),
-            () => true,
-          )
+          const tracks = phase
+            ? resolveLifecycleTracks(phase, lifecycle, next.presentation, (name, property) =>
+                name === target ? getComputedStyle(element).getPropertyValue(property) : undefined,
+              )
+            : resolveLayerTracks(
+                previous,
+                targetResolution,
+                values,
+                (_name, property) => getComputedStyle(element).getPropertyValue(property),
+                (message) => this.report({ code: 'runtime.endpoint', message }),
+                () => true,
+              )
 
           for (const track of tracks) {
             const timing =
@@ -632,7 +665,11 @@ export class LivaInstance {
                   offset: frame.offset,
                   easing: frame.easing,
                 })),
-                { duration: timing.durationMs, easing: timing.easing, fill: 'backwards' },
+                {
+                  duration: timing.durationMs,
+                  easing: timing.easing,
+                  fill: phase === 'leave' ? 'both' : 'backwards',
+                },
               ),
               document.timeline,
             )
@@ -672,7 +709,16 @@ export class LivaInstance {
   }
 
   /** Prepare scrub-ready lifecycle effects without invoking presence removal callbacks. */
-  previewLifecycle(phase: 'enter' | 'leave'): boolean {
+  previewLifecycle(
+    phase: 'enter' | 'leave',
+    composition?: Composition,
+    definition = this.definition,
+  ): boolean {
+    if (composition) {
+      this.prepareCompositionPreview(composition, composition, [], definition, phase)
+      return true
+    }
+
     if (this.disposed || this.suspended) return false
 
     const prepared: ActiveTrack[] = []

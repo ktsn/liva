@@ -23,6 +23,8 @@ export interface TrackProvenance {
   transition?: { from: string; to: string }
   from?: DeclarationSource
   to?: DeclarationSource
+  fromDescription?: string
+  toDescription?: string
   sharedValue: boolean
   owner: string
   overridden: DeclarationSource[]
@@ -148,6 +150,47 @@ export function trackProvenance(
       ? 'Select an existing transition in the animation owner to edit keyframes. State style tracks are not chosen automatically.'
       : undefined,
     localTiming,
+    fields,
+  }
+}
+
+export function lifecycleProvenance(
+  inspection: Inspection,
+  phase: 'enter' | 'leave',
+  baseline: Composition,
+  target: string,
+  property: string,
+): TrackProvenance {
+  const { fields } = inspection
+  const baselineSource = trackProvenance(
+    inspection,
+    baseline,
+    baseline,
+    undefined,
+    target,
+    property,
+  )
+  const path = `${inspection.definition.name}/${phase}`
+  const destination = `${path}/target/${target}/property/${property}`
+  const localTiming = field(fields, `${destination}/timing`)
+  const timingSource =
+    localTiming ??
+    field(fields, `${path}/target/${target}/timing`) ??
+    field(fields, `${path}/timing`)
+
+  return {
+    fromDeclarationPath: baselineSource.fromDeclarationPath,
+    toDeclarationPath: baselineSource.toDeclarationPath,
+    frameDeclarationPath: destination,
+    from: field(fields, `${destination}/frame/0/value`) ?? baselineSource.from,
+    to: field(fields, `${destination}/frame/1/value`) ?? baselineSource.to,
+    sharedValue: false,
+    owner: `Motion ${phase}`,
+    overridden: [],
+    timingSource,
+    timingDestination: destination,
+    localTiming,
+    frameDestination: destination,
     fields,
   }
 }

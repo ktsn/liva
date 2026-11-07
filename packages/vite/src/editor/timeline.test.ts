@@ -7,6 +7,7 @@ import {
   snapTime,
   timelineTracks,
   compositionTimelineTracks,
+  compositionLifecycleTracks,
 } from './timeline.ts'
 
 const definition = compile(
@@ -235,5 +236,51 @@ describe('composition timeline rows', () => {
 
     expect(row.toValue).toBe('1')
     expect(row.frames.at(-1)?.value).toBe('0')
+  })
+})
+
+describe('composition lifecycle resolved endpoints', () => {
+  it.each(['enter', 'leave'] as const)(
+    'distinguishes explicit %s endpoints from the completion baseline',
+    (phase) => {
+      const presentation = {
+        name: 'baseline',
+        targets: [{ name: 'body', properties: [{ name: 'opacity', value: '1' }] }],
+      }
+      const transition = {
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'opacity',
+                keyframes: [
+                  { offset: 0, value: '0.2' },
+                  { offset: 1, value: '0.6' },
+                ],
+              },
+            ],
+          },
+        ],
+      }
+
+      const [track] = compositionLifecycleTracks('panel', phase, presentation, transition)
+
+      expect(track.fromValue).toBe('0.2')
+      expect(track.toValue).toBe(phase === 'enter' ? '1' : '0.6')
+      expect(track.frames.at(-1)?.value).toBe('0.6')
+    },
+  )
+
+  it.each(['enter', 'leave'] as const)('uses implicit baseline endpoints for %s', (phase) => {
+    const presentation = {
+      name: 'baseline',
+      targets: [{ name: 'body', properties: [{ name: 'opacity', value: '0.8' }] }],
+    }
+
+    const [track] = compositionLifecycleTracks('panel', phase, presentation, undefined)
+
+    expect(track.fromValue).toBe('0.8')
+    expect(track.toValue).toBe('0.8')
   })
 })

@@ -104,8 +104,17 @@ CSS-value edit, not a visual expression editor.
 
 ## Enter and leave editing
 
-Layer motions use the composition preview controls described below. Their lifecycle
-source editing is not yet available. Legacy motions using typed decorators remain
+For layer motions, choose **Enter** or **Leave** in **Existing transition**.
+A single **Baseline** composition selects the settled layer presentation used for
+lifecycle endpoints. The baseline is independent of application state and does not
+create state-specific lifecycle declarations. Lifecycle-only properties and targets
+from inactive layers remain visible in the timeline. Explicit endpoints edit lifecycle
+keyframes. Implicit endpoints show and edit the contributing layer or state declaration
+from the baseline; captured CSS has no editable source declaration.
+Typed timing and keyframe edits use motion-level paths. A local timing override can
+create a missing lifecycle block for a property already declared in a layer.
+
+Legacy motions using typed decorators remain
 read-only in the legacy editor. The server rejects unsupported edits and saves so
 legacy track replacement cannot discard typed syntax.
 
@@ -118,7 +127,7 @@ endpoints describe captured state or DOM presentation and cannot edit state valu
 
 Play and scrub operate on the mounted preview instance without inserting, hiding,
 or removing application elements. Templates use that instance's current parameters
-and bindings. Leave starts from the selected state's settled presentation; it does
+and bindings. Leave starts from the selected baseline's settled presentation; it does
 not simulate removal during an interrupted application animation. The final leave
 pose remains visible until preview ends. End preview, closing the dock, application
 updates, and source invalidation restore the committed definition and application
