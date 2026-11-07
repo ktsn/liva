@@ -219,7 +219,7 @@ export function parameterValues(
   inputs: Readonly<Record<string, unknown>>,
 ): VariableValues {
   if (typeof inputs !== 'object' || inputs === null || Array.isArray(inputs)) {
-    throw new Error('Motion inputs must be a parameter object; string-state bindings were removed')
+    throw new Error('Motion inputs must be a parameter object')
   }
 
   const next = { ...values }
