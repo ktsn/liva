@@ -1,6 +1,12 @@
+import {
+  compositionLayerSelection,
+  resolveLayerCascade,
+  transitionPropertySources,
+  type LayerSelection,
+} from './layer-cascade.ts'
 import { timingValue } from './timing-values.ts'
 import { normalizeFrames, type ResolvedTrack } from './resolve.ts'
-import type { Definition, GuardedTransition, Layer, Property, State, Target } from './definition.ts'
+import type { Definition, GuardedTransition, Property, State, Target } from './definition.ts'
 import {
   evaluate,
   renderValue,
@@ -58,92 +64,67 @@ function resolveLayerSelection(
   const activeLayers: Record<string, boolean> = Object.create(null)
   const states = new Map<string, string>()
   const transitions = new Map<string, GuardedTransition>()
-  const targets = new Map<string, Map<string, LayerProperty>>()
-  const timings = new Map<string, Map<string, NonNullable<Property['timing']>>>()
 
-  const contribute = (layer: Layer, state?: State) => {
-    const contributions = new Map<string, Map<string, Property>>()
+  function* selectLayers(): Generator<LayerSelection> {
+    if (selection) {
+      Object.assign(activeLayers, selection.layers)
 
-    for (const target of [...layer.targets, ...(state?.targets ?? [])]) {
-      let properties = contributions.get(target.name)
+      for (const selected of compositionLayerSelection(definition, selection)) {
+        if (selected.state) states.set(selected.layer.name, selected.state.name)
 
-      if (!properties) {
-        properties = new Map()
-        contributions.set(target.name, properties)
+        yield selected
       }
 
-      for (const property of target.properties) properties.set(property.name, property)
+      return
     }
 
-    for (const [targetName, contribution] of contributions) {
-      let properties = targets.get(targetName)
+    for (const layer of definition.layers ?? []) {
+      const active = !layer.when || evaluate(layer.when, values) === true
 
-      if (!properties) {
-        properties = new Map()
-        targets.set(targetName, properties)
-        timings.set(targetName, new Map())
+      if (!layer.states?.length) activeLayers[layer.name] = active
+
+      if (!active) continue
+
+      if (!layer.states?.length) {
+        yield { layer }
+
+        continue
       }
 
-      const commonTarget = layer.targets.find((target) => target.name === targetName)
-      const stateTarget = state?.targets.find((target) => target.name === targetName)
+      const current = previous.get(layer.name) ?? layer.initialState
+      const selected = advance
+        ? layer.transitions?.findLast(
+            (transition) =>
+              transition.from === current && evaluate(transition.when, values) === true,
+          )
+        : undefined
+      const next = selected?.to ?? current
+      const state = layer.states.find((candidate) => candidate.name === next)
 
-      for (const property of contribution.values()) {
-        const provider = [
-          stateTarget?.properties.find((item) => item.name === property.name),
-          stateTarget,
-          state,
-          commonTarget?.properties.find((item) => item.name === property.name),
-          commonTarget,
-          layer,
-        ].find((item) => item?.timingExpression || item?.timing)
-        const timing = provider?.timingExpression
-          ? timingValue(evaluate(provider.timingExpression, values))
-          : provider?.timing
+      if (!state) throw new Error(`Unknown current state in layer ${layer.name}: ${next}`)
 
-        // Timing and property maps are initialized together for each target.
-        if (timing) timings.get(targetName)!.set(property.name, timing)
+      states.set(layer.name, state.name)
 
-        properties.set(property.name, {
-          ...property,
-          owner: layer.name,
-          value: renderValue(property, values),
-          keyframes: property.keyframes?.map((frame) => renderFrame(frame, values)),
-        })
-      }
+      if (selected) transitions.set(layer.name, selected)
+
+      yield { layer, state }
     }
   }
 
-  for (const layer of definition.layers ?? []) {
-    const active = selection
-      ? Boolean(layer.states?.length) || selection.layers[layer.name]
-      : !layer.when || evaluate(layer.when, values) === true
-
-    if (!layer.states?.length) activeLayers[layer.name] = active
-
-    if (!active) continue
-
-    if (!layer.states?.length) {
-      contribute(layer)
-      continue
-    }
-
-    const current = previous.get(layer.name) ?? layer.initialState
-    const selected = advance
-      ? layer.transitions?.findLast(
-          (transition) => transition.from === current && evaluate(transition.when, values) === true,
-        )
-      : undefined
-    const next = selected?.to ?? current
-    const state = layer.states.find((candidate) => candidate.name === next)
-
-    if (!state) throw new Error(`Unknown current state in layer ${layer.name}: ${next}`)
-
-    states.set(layer.name, state.name)
-
-    if (selected) transitions.set(layer.name, selected)
-
-    contribute(layer, state)
-  }
+  const targets = resolveLayerCascade(
+    selectLayers(),
+    ({ layer, property }) => ({
+      ...property,
+      owner: layer.name,
+      value: renderValue(property, values),
+      keyframes: property.keyframes?.map((frame) => renderFrame(frame, values)),
+    }),
+    // The cascade invokes mapTiming only for a declaration with a timing expression or value.
+    ({ declaration }) =>
+      declaration.timingExpression
+        ? timingValue(evaluate(declaration.timingExpression, values))
+        : declaration.timing!,
+  )
 
   return {
     composition: { layers: activeLayers, states: Object.fromEntries(states) },
@@ -151,11 +132,11 @@ function resolveLayerSelection(
     transitions,
     presentation: {
       name: '@layers',
-      targets: [...targets].map(([name, properties]) => ({
-        name,
-        properties: [...properties.values()].map((property) => ({
-          ...property,
-          timing: timings.get(name)?.get(property.name),
+      targets: targets.map((target) => ({
+        name: target.name,
+        properties: target.properties.map((property) => ({
+          ...property.value,
+          timing: property.timing,
         })),
       })),
     },
@@ -180,6 +161,16 @@ export function resolveComposition(
     false,
     composition,
   )
+
+  return { ...result, transitions: compositionTransitions(definition, composition, from, selected) }
+}
+
+export function compositionTransitions(
+  definition: Definition,
+  composition: Composition,
+  from: Composition | undefined,
+  selected: readonly CompositionTransition[],
+): ReadonlyMap<string, GuardedTransition> {
   const transitions = new Map<string, GuardedTransition>()
 
   for (const identity of selected) {
@@ -201,7 +192,7 @@ export function resolveComposition(
     transitions.set(identity.layer, transition)
   }
 
-  return { ...result, transitions }
+  return transitions
 }
 
 function validateComposition(definition: Definition, composition: Composition): void {
@@ -258,8 +249,11 @@ export function resolveLayerTracks(
     for (const property of target.properties) {
       const owner = property.owner
       const transition = next.transitions.get(owner)?.transition
-      const transitionTarget = transition?.targets.find((item) => item.name === target.name)
-      const instruction = transitionTarget?.properties.find((item) => item.name === property.name)
+      const { target: transitionTarget, property: instruction } = transitionPropertySources(
+        transition,
+        target.name,
+        property.name,
+      )
       if (
         !layerPropertyChanged(previous, target.name, property) &&
         !instruction &&
@@ -287,7 +281,9 @@ export function resolveLayerTracks(
           )
         : undefined
       const override = rendered?.targets[0].properties[0]
-      const timing = override?.timing ?? rendered?.timing ?? property.timing
+      const timing =
+        transitionPropertySources(rendered, target.name, property.name).timing?.timing ??
+        property.timing
 
       if (!timing) continue
 

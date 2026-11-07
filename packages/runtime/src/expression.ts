@@ -1,3 +1,4 @@
+import { timingProvider, type TimingDeclaration } from './layer-cascade.ts'
 import {
   easingConstant,
   isTimingFunction,
@@ -167,16 +168,17 @@ export function renderTransition(transition: Transition, values: VariableValues)
       timing: target.timingExpression
         ? timingValue(evaluate(target.timingExpression, values))
         : target.timing,
-      properties: target.properties.map((property) => ({
-        ...property,
-        timing: property.timingExpression
-          ? timingValue(evaluate(property.timingExpression, values))
-          : (property.timing ??
-            (target.timingExpression
-              ? timingValue(evaluate(target.timingExpression, values))
-              : target.timing)),
-        keyframes: property.keyframes?.map((frame) => renderFrame(frame, values)),
-      })),
+      properties: target.properties.map((property) => {
+        const provider = timingProvider<TimingDeclaration>(property, target)
+
+        return {
+          ...property,
+          timing: provider?.timingExpression
+            ? timingValue(evaluate(provider.timingExpression, values))
+            : provider?.timing,
+          keyframes: property.keyframes?.map((frame) => renderFrame(frame, values)),
+        }
+      }),
     })),
   }
 }

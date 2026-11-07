@@ -1,10 +1,12 @@
-import type {
-  Composition,
-  CompositionTransition,
-  Definition,
-  Layer,
-  Property,
-  Target,
+import {
+  compositionLayerSelection,
+  compositionTransitions,
+  resolveLayerCascade,
+  transitionPropertySources,
+  type Composition,
+  type CompositionTransition,
+  type PropertySource,
+  type TimingSource,
 } from '@liva/runtime'
 import type { Inspection } from './communication/protocol.ts'
 
@@ -35,44 +37,18 @@ function field(fields: Inspection['fields'], path: string): DeclarationSource | 
   return found ? { path, text: found.value, label: path } : undefined
 }
 
-function propertyAt(targets: readonly Target<Property>[], target: string, property: string) {
-  return targets
-    .find((item) => item.name === target)
-    ?.properties.find((item) => item.name === property)
+function scopePath(motion: string, source: TimingSource | PropertySource) {
+  let path = `${motion}/layer/${source.layer.name}`
+
+  if (source.state) path += `/state/${source.state.name}`
+  if (source.target) path += `/target/${source.target.name}`
+  if (source.property) path += `/property/${source.property.name}`
+
+  return path
 }
 
-function activeLayers(definition: Definition, composition: Composition) {
-  return (definition.layers ?? []).filter(
-    (layer) => layer.states?.length || composition.layers[layer.name],
-  )
-}
-
-function valueDeclarations(
-  definition: Definition,
-  composition: Composition,
-  target: string,
-  property: string,
-) {
-  const result: { layer: Layer; path: string }[] = []
-
-  for (const layer of activeLayers(definition, composition)) {
-    const path = `${definition.name}/layer/${layer.name}`
-    const state = layer.states?.find((item) => item.name === composition.states[layer.name])
-
-    for (const [scope, targets] of [
-      [path, layer.targets],
-      [`${path}/state/${state?.name}`, state?.targets ?? []],
-    ] as const) {
-      const declaration = propertyAt(targets, target, property)
-
-      if (declaration) {
-        const suffix = declaration.keyframes ? '/frame/1/value' : '/value'
-        result.push({ layer, path: `${scope}/target/${target}/property/${property}${suffix}` })
-      }
-    }
-  }
-
-  return result
+function valuePath(motion: string, source: PropertySource) {
+  return `${scopePath(motion, source)}${source.property.keyframes ? '/frame/1/value' : '/value'}`
 }
 
 export function trackProvenance(
@@ -84,56 +60,46 @@ export function trackProvenance(
   property: string,
 ): TrackProvenance {
   const { definition, fields } = inspection
-  const before = valueDeclarations(definition, from, target, property)
-  const after = valueDeclarations(definition, to, target, property)
-  const owner = after.at(-1)
-  const fromSource = before.at(-1)
-  let timingSource: DeclarationSource | undefined
-
-  for (const layer of activeLayers(definition, to)) {
-    const path = `${definition.name}/layer/${layer.name}`
-    const state = layer.states?.find((item) => item.name === to.states[layer.name])
-
-    if (
-      !propertyAt(layer.targets, target, property) &&
-      !propertyAt(state?.targets ?? [], target, property)
+  const sources = (composition: Composition) =>
+    resolveLayerCascade(
+      compositionLayerSelection(definition, composition),
+      (source) => source,
+      (source) => source,
     )
-      continue
-
-    for (const scope of [path, ...(state ? [`${path}/state/${state.name}`] : [])]) {
-      for (const candidate of [
-        scope,
-        `${scope}/target/${target}`,
-        `${scope}/target/${target}/property/${property}`,
-      ]) {
-        timingSource = field(fields, `${candidate}/timing`) ?? timingSource
-      }
-    }
-  }
-
-  const effectiveTransition =
-    selected && owner?.layer.name === selected.layer
-      ? owner.layer.transitions?.[selected.index]
-      : undefined
+      .find((item) => item.name === target)
+      ?.properties.find((item) => item.name === property)
+  const before = sources(from)
+  const after = sources(to)
+  const owner = after?.source
+  const fromSource = before?.source
+  const transitions = compositionTransitions(definition, to, from, selected ? [selected] : [])
+  const effectiveTransition = owner ? transitions.get(owner.layer.name)?.transition : undefined
   const transitionPath =
     selected && effectiveTransition
       ? `${definition.name}/layer/${selected.layer}/transition/${selected.index}`
       : undefined
+  let timingSource = after?.timing
+    ? field(fields, `${scopePath(definition.name, after.timing)}/timing`)
+    : undefined
 
   if (transitionPath) {
-    for (const candidate of [
-      transitionPath,
-      `${transitionPath}/target/${target}`,
-      `${transitionPath}/target/${target}/property/${property}`,
-    ]) {
-      timingSource = field(fields, `${candidate}/timing`) ?? timingSource
+    const transitionSources = transitionPropertySources(effectiveTransition, target, property)
+
+    if (transitionSources.timing) {
+      const suffix =
+        transitionSources.timing === transitionSources.property
+          ? `/target/${target}/property/${property}`
+          : transitionSources.timing === transitionSources.target
+            ? `/target/${target}`
+            : ''
+      timingSource = field(fields, `${transitionPath}${suffix}/timing`)
     }
   }
 
   const mapped = (path: string | undefined) =>
     fields.some((item) => item.path === path && item.kind === 'block')
   const availableTransition = mapped(transitionPath) ? transitionPath : undefined
-  const declaredStylePath = owner?.path.replace(/\/frame\/1\/value$|\/value$/, '')
+  const declaredStylePath = owner ? scopePath(definition.name, owner) : undefined
   const stylePath = mapped(declaredStylePath) ? declaredStylePath : undefined
   const timingDestination = availableTransition
     ? `${availableTransition}/target/${target}/property/${property}`
@@ -152,12 +118,15 @@ export function trackProvenance(
       : stylePath
 
   return {
-    from: fromSource ? field(fields, fromSource.path) : undefined,
-    to: owner ? field(fields, owner.path) : undefined,
-    sharedValue: !!fromSource && fromSource.path === owner?.path,
+    from: fromSource ? field(fields, valuePath(definition.name, fromSource)) : undefined,
+    to: owner ? field(fields, valuePath(definition.name, owner)) : undefined,
+    sharedValue:
+      !!fromSource &&
+      !!owner &&
+      valuePath(definition.name, fromSource) === valuePath(definition.name, owner),
     owner: owner?.layer.name ?? 'External CSS',
-    overridden: after.slice(0, -1).flatMap((item) => {
-      const source = field(fields, item.path)
+    overridden: (after?.declarations.slice(0, -1) ?? []).flatMap((item) => {
+      const source = field(fields, valuePath(definition.name, item))
       return source ? [source] : []
     }),
     timingSource,

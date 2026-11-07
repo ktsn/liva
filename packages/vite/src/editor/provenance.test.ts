@@ -1,3 +1,4 @@
+import { resolveComposition, resolveLayerTracks } from '@liva/runtime'
 import { describe, expect, it } from 'vite-plus/test'
 import { compile } from '../compiler.ts'
 import { trackProvenance, typedEasingText, typedTimingText } from './provenance.ts'
@@ -36,6 +37,90 @@ const from = { layers: { base: true, hover: false }, states: { machine: 'idle' }
 const to = { layers: { base: true, hover: true }, states: { machine: 'active' } }
 
 describe('composition source provenance', () => {
+  const timingScopes = [
+    ['transitionProperty', 'transition/0/target/body/property/opacity'],
+    ['transitionTarget', 'transition/0/target/body'],
+    ['transition', 'transition/0'],
+    ['stateProperty', 'state/active/target/body/property/opacity'],
+    ['stateTarget', 'state/active/target/body'],
+    ['state', 'state/active'],
+    ['commonProperty', 'target/body/property/opacity'],
+    ['commonTarget', 'target/body'],
+    ['layer', ''],
+  ] as const
+
+  it.each(timingScopes)(
+    'uses the same %s timing source for playback and editing',
+    (winningScope, expectedScope) => {
+      const first = timingScopes.findIndex(([scope]) => scope === winningScope)
+      const decorators = Object.fromEntries(
+        timingScopes.map(([scope], index) => [
+          scope,
+          index >= first ? `@tween(duration: ${100 + index})` : '',
+        ]),
+      )
+      const info = inspection(`motion sample {
+        layer machine ${decorators.layer} {
+          body ${decorators.commonTarget} { opacity: 1 ${decorators.commonProperty} }
+          state idle initial {}
+          state active ${decorators.state} {
+            body ${decorators.stateTarget} { opacity: 0.5 ${decorators.stateProperty} }
+          }
+          transition idle -> active ${decorators.transition} when false {
+            body ${decorators.transitionTarget} { opacity ${decorators.transitionProperty} {} }
+          }
+        }
+      }`)
+      const beforeSelection = { layers: {}, states: { machine: 'idle' } }
+      const afterSelection = { layers: {}, states: { machine: 'active' } }
+      const selected = { layer: 'machine', index: 0 }
+      const before = resolveComposition(info.definition, {}, beforeSelection)
+      const after = resolveComposition(info.definition, {}, afterSelection, beforeSelection, [
+        selected,
+      ])
+
+      const tracks = resolveLayerTracks(
+        before,
+        after,
+        {},
+        () => '1',
+        () => {},
+      )
+      const provenance = trackProvenance(
+        info,
+        beforeSelection,
+        afterSelection,
+        selected,
+        'body',
+        'opacity',
+      )
+
+      expect(tracks[0].timing).toEqual({ kind: 'tween', durationMs: 100 + first, easing: 'ease' })
+      expect(provenance.timingSource?.path).toBe(
+        `sample/layer/machine${expectedScope ? `/${expectedScope}` : ''}/timing`,
+      )
+    },
+  )
+
+  it('rejects an unknown state instead of choosing a misleading source destination', () => {
+    const selection = { ...from, states: { machine: 'missing' } }
+
+    expect(() =>
+      trackProvenance(inspection(layeredSource), from, selection, undefined, 'body', 'opacity'),
+    ).toThrow('Unknown current state in layer machine: missing')
+  })
+
+  it('resolves source locations without evaluating dynamic timing expressions', () => {
+    const info = inspection(`motion sample(duration: number) {
+      layer base @tween(duration: duration) { body { opacity: 1 } }
+    }`)
+    const composition = { layers: { base: true }, states: {} }
+
+    const result = trackProvenance(info, composition, composition, undefined, 'body', 'opacity')
+
+    expect(result.timingSource?.text).toBe('tween(duration: duration)')
+  })
+
   it('has no source destinations when the property comes entirely from external CSS', () => {
     const info = inspection('motion empty { state idle {} }')
     const composition = { layers: {}, states: {} }
