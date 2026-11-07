@@ -8,12 +8,12 @@ CSS through WAAPI.
 
 Every top-level definition starts with `motion`:
 
-```css
+```liva
 motion card {
   let movement = drag(target: body)
 
   layer interaction {
-    body { translate: 0 0; scale @tween(duration: 200, easing: easeOut) { 100%: 1 } }
+    body { translate: 0 0; @tween(duration: 200, easing: easeOut) scale { 100%: 1 } }
 
     state idle initial {}
     state dragging {
@@ -23,8 +23,8 @@ motion card {
     transition idle -> dragging when movement.active
     transition dragging -> idle when !movement.active {
       body {
-        translate @spring(stiffness: 300, damping: 20) {}
-        scale @tween(duration: 180, easing: easeOut) {}
+        @spring(stiffness: 300, damping: 20) translate {}
+        @tween(duration: 180, easing: easeOut) scale {}
       }
     }
   }
@@ -68,7 +68,7 @@ valid values; invalid initial inputs reject instance creation.
 
 A `let` declaration binds the value of an expression:
 
-```css
+```liva
 let movement = drag(target: body)
 let doubled = progress * 2
 let horizontal = movement.offset.x + doubled
@@ -132,7 +132,7 @@ computed member accesses, objects, arrays, or implicit unit conversions.
 
 CSS values remain opaque text except for `${expression}` templates:
 
-```css
+```liva
 translate: ${movement.offset.x}px ${movement.offset.y}px
 ```
 
@@ -143,8 +143,8 @@ layers or external CSS. There is no requirement for a complete fallback state.
 
 ## Inline keyframes
 
-```css
-scale @tween(duration: 350, easing: easeInOut) {
+```liva
+@tween(duration: 350, easing: easeInOut) scale {
   40%: 1.3 1 @easeIn
   70%: 0.95 1 @cubicBezier(x1: 0.2, y1: 0.8, x2: 0.2, y2: 1)
   100%: 1
@@ -169,16 +169,16 @@ is animated only when explicitly bound as a named target. Lifecycle timing is
 independent of ordinary layer timing. Lifecycle property timing overrides target
 timing, which overrides the lifecycle shared decorator. All are captured at start.
 
-```css
+```liva
 motion panel(open: boolean) {
   layer base { content { opacity: 1; scale: 0.9 } }
   layer opened when open { content { scale: 1 } }
 
   enter {
-    content @tween(duration: 250, easing: easeOut) { opacity: 0; scale: 0.8 }
+    @tween(duration: 250, easing: easeOut) content { opacity: 0; scale: 0.8 }
   }
   leave {
-    content @tween(duration: 200, easing: easeIn) { opacity: 0; scale: 0.9 }
+    @tween(duration: 200, easing: easeIn) content { opacity: 0; scale: 0.9 }
   }
 }
 ```
@@ -209,7 +209,7 @@ take over the properties owned by that session.
 
 A conditional event is independent of state selection and animation completion:
 
-```css
+```liva
 event dismiss when movement.released
   && movement.offset.x > 120
 ```
@@ -293,9 +293,9 @@ structure are authored in source.
 
 ## Toggle example
 
-```css
+```liva
 motion toggle(checked: boolean) {
-  layer toggle @tween(duration: 350, easing: easeOut) {
+  @tween(duration: 350, easing: easeOut) layer toggle {
     track { background-color: #888 @tween(duration: 200, easing: easeInOut) }
     thumb { translate: 0 0 @spring(stiffness: 300, damping: 20); scale: 1 }
 
@@ -310,7 +310,7 @@ motion toggle(checked: boolean) {
     }
     transition on -> off when !(checked) {
       thumb {
-        translate @spring(duration: 350, bounce: 0.2) {}
+        @spring(duration: 350, bounce: 0.2) translate {}
         scale { 40%: 1.3 1 @easeIn; 70%: 0.95 1 @easeOut }
       }
     }
@@ -324,7 +324,7 @@ An unconditional layer is always active; conditional layers are independently ac
 when their Boolean expressions are true. Declaration order is preserved in Definition
 IR for property-level cascade resolution. Layers do not imply additive composition.
 
-```css
+```liva
 motion button(hovered: boolean, pressed: boolean) {
   layer base { body { scale: 1 } }
   layer hover when hovered { body { scale: 1.05 } }
@@ -342,7 +342,7 @@ Use reactive layers for independent Boolean visual conditions. Use a stateful la
 when an interaction must retain one of several exclusive states. Each stateful layer
 owns its state names and requires exactly one `initial` state:
 
-```css
+```liva
 layer submission {
   button {
     opacity: 1;
@@ -379,7 +379,7 @@ Inactive layers contribute nothing. If a property has no remaining contribution,
 the runtime restores the element's original inline style. Interpolated values are
 re-evaluated with each input update.
 
-```css
+```liva
 layer submission {
   state idle initial { spinner { opacity: 0 } }
   state loading { spinner { opacity: 1 } }
@@ -408,7 +408,7 @@ Animation settings are immutable expression values: `tween` and `spring` return
 `timing`; easing constants, `cubicBezier`, and `steps` return `easing`. They describe an
 animation without starting one. Bind and reuse them through `let`:
 
-```css
+```liva
 let curve = cubicBezier(x1: 0.2, y1: 0, x2: 0, y2: 1)
 let quick = tween(duration: 150, easing: curve)
 let bounce = spring(stiffness: 400, damping: 20)
@@ -443,14 +443,14 @@ Use `@expression` to apply a timing value to a layer, state, transition, lifecyc
 target, single declaration, or entire property track. Motion, let, and event
 declarations cannot have timing decorators. A keyframe segment accepts an easing value:
 
-```css
+```liva
 motion button {
   let quick = tween(duration: 150, easing: easeOut)
   layer base {
-    body @quick {
+    @quick body {
       opacity: 1
       scale: 1 @spring(stiffness: 300, damping: 20)
-      translate @tween(duration: 400) {
+      @tween(duration: 400) translate {
         0%: 0 20px
         50%: 0 5px @easeOut
         100%: 0 0
@@ -460,17 +460,29 @@ motion button {
 }
 ```
 
+Timing decorators precede layers, states, directional transitions, motion-level
+enter/leave, targets, and property keyframe blocks. They attach to the next
+structural declaration, whether on the same line or a preceding line. Comments
+between the expression and declaration are preserved. `motion`, `let`, and
+`event` do not accept decorators.
+
+Value declarations retain suffix decorators: `opacity: 1 @quick` supplies timing,
+and `0%: 0 @easeOut` supplies easing for the outgoing interval to the next frame.
+An easing decorator on 100% has no outgoing interval and produces a warning.
+Omitted transition/lifecycle endpoints are completed at runtime, so an easing on
+an earlier last explicit frame still controls the interval to the implicit 100%.
+Timing and easing expressions use the ordinary expression grammar and type checks.
+Source edits emit same-line structural prefixes and keep value decorators as suffixes;
+there is no standalone formatter, and unrelated source formatting is preserved.
+
 The target timing is a default; a property's decorator replaces that whole value.
-Track timing goes before the opening brace. CSS values remain CSS, with `${...}`
+Structural timing decorators precede the entire declaration. CSS values remain CSS, with `${...}`
 for scalar interpolation. Style tracks require an explicit 100% destination;
 transition tracks can omit endpoints for completion from their source/destination.
 Only the selected transition or lifecycle evaluates its timing and frame expressions.
 
-To migrate legacy `@tween: 150ms ease-out`, use `@tween(duration: 150, easing: easeOut)`
-on the target or property track. Replace legacy frame suffix `@ ease-out` with
-`@easeOut`, or reference a bound easing value. Removed animation declarations and
-CSS easing suffixes produce actionable compiler errors. The lossless CST retains
-invalid input for diagnostics and decorators separately from CSS value text.
+The lossless CST retains invalid input for diagnostics and decorators separately
+from CSS value text.
 
 ### Layer animation selection
 
@@ -486,14 +498,20 @@ State defaults also cover properties inherited from the layer's common style.
 Shared transition timing can animate resolved properties without declaring tracks.
 Headers can span lines, and a guarded transition can omit its body:
 
-```css
-layer interaction @tween(duration: 200) {
-  body { opacity: 1 }
-  state idle initial {}
-  state active @spring(duration: 400) { body { opacity: 0.5 } }
-  transition idle -> active
-    @tween(duration: 300, easing: steps(count: 4))
-    when enabled
+```liva
+@tween (duration: 200) layer interaction {
+  body {
+    opacity: 1;
+  }
+  state idle initial {
+  }
+  @spring (duration: 400) state active {
+    body {
+      opacity: 0.5;
+    }
+  }
+  @tween (duration: 300, easing: steps(count: 4))
+  transition idle -> active when enabled;
 }
 ```
 
@@ -514,14 +532,3 @@ Spring timing on layer tracks applies the sampled spring curve to the complete t
 including intermediate waypoints. Initial state guards resolve before target binding;
 DOM entry animation is controlled by the motion's lifecycle declaration rather than
 replaying an initial machine transition during binding.
-
-## Migration from motion-level states
-
-Move independent visual conditions into ordinary layers. Move exclusive states into
-a stateful layer with one `initial` state and explicit guarded transitions. Replace
-motion-level general timing with shared layer or target decorators and directional
-transitions with local guarded transitions. Pass a parameter object to `v-liva` and
-`LivaInstance`; string state bindings and `setState` are unsupported. Use
-`updateParameters` for application inputs and `composition` for resolved selections.
-The runtime rejects Definition IR containing motion-level `states`,
-`generalTransition`, or `directionalTransitions` instead of executing a compatibility path.

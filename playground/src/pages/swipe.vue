@@ -59,7 +59,7 @@ motion swipeItem {
   event dismiss when movement.released && movement.offset.x > 120
 
   layer base {
-    body @spring(stiffness: 300, damping: 20) {
+    @spring(stiffness: 300, damping: 20) body {
       translate: 0 0
       opacity: 1
     }
@@ -72,14 +72,14 @@ motion swipeItem {
   }
 
   enter {
-    body @tween(duration: 350, easing: easeOut) {
+    @tween(duration: 350, easing: easeOut) body {
       opacity: 0
       translate: 0 -20px
     }
   }
 
   leave {
-    body @tween(duration: 250, easing: easeOut) {
+    @tween(duration: 250, easing: easeOut) body {
       translate: 500px 0
       opacity: 0
     }

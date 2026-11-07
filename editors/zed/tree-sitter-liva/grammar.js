@@ -4,6 +4,7 @@ module.exports = grammar({
   name: 'liva',
   extras: ($) => [/\s/, $.comment],
   word: ($) => $.identifier,
+  conflicts: ($) => [[$._header_item, $.decorator]],
   rules: {
     source_file: ($) => repeat($._item),
     _item: ($) =>
@@ -29,28 +30,28 @@ module.exports = grammar({
     motion: ($) => seq('motion', field('name', $.identifier), optional($.parenthesized), $.block),
     state: ($) =>
       seq(
+        optional($.decorator),
         'state',
         field('name', $.identifier),
         optional('initial'),
-        optional($.decorator),
         $.block,
       ),
     layer: ($) =>
       seq(
+        optional($.decorator),
         'layer',
         field('name', $.identifier),
-        optional($.decorator),
         optional(seq('when', repeat1($._header_item))),
         $.block,
       ),
     transition: ($) =>
       prec.right(
         seq(
+          optional($.decorator),
           'transition',
           $.identifier,
           '->',
           $.identifier,
-          optional($.decorator),
           'when',
           repeat1($._header_item),
           optional($.block),
@@ -59,7 +60,7 @@ module.exports = grammar({
     selector_block: ($) =>
       prec(
         1,
-        seq(field('name', choice($.identifier, $.css_token)), optional($.decorator), $.block),
+        seq(optional($.decorator), field('name', choice($.identifier, $.css_token)), $.block),
       ),
     call: ($) => prec(1, seq(field('function', $.identifier), $.parenthesized)),
     block: ($) => seq('{', repeat($._item), '}'),

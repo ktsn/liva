@@ -194,7 +194,7 @@ fn layer_style_targets_reject_animation_metadata_and_frame_offsets() {
 fn animation_target_names_do_not_enter_style_context() {
     for target in ["state", "layer"] {
         valid(&format!(
-            "motion button {{ layer base {{ state idle initial {{ {target} {{ opacity: 1 }} }} transition idle -> idle @tween(duration: 100) when true {{ {target} {{ opacity {{ 0%: 0 }} }} }} }} }}"
+            "motion button {{ layer base {{ state idle initial {{ {target} {{ opacity: 1 }} }} @tween(duration: 100) transition idle -> idle when true {{ {target} {{ opacity {{ 0%: 0 }} }} }} }} }}"
         ));
     }
 }
@@ -239,7 +239,7 @@ fn guarded_transitions_validate_guards_and_state_references() {
 #[test]
 fn directional_tracks_support_decorators_interpolation_and_implicit_destinations() {
     let result = valid(
-        "motion panel(opened: boolean, size: number) { layer visibility { state closed initial { body { opacity: 0; scale: .9 } } state open { body { opacity: 1; scale: 1 } } transition closed -> open when opened { body @spring(stiffness: 400, damping: 25) { scale { 0%: ${size}; 70%: 1.08 } } } transition open -> closed when !opened { body { opacity: 0 @tween(duration: 150, easing: easeIn) } } } }",
+        "motion panel(opened: boolean, size: number) { layer visibility { state closed initial { body { opacity: 0; scale: .9 } } state open { body { opacity: 1; scale: 1 } } transition closed -> open when opened { @spring(stiffness: 400, damping: 25) body { scale { 0%: ${size}; 70%: 1.08 } } } transition open -> closed when !opened { body { opacity: 0 @tween(duration: 150, easing: easeIn) } } } }",
     );
     let transitions = &result.definitions[0].layers[0].transitions;
 

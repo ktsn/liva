@@ -7,7 +7,7 @@ use liva_syntax::{
 fn lifecycle_keywords_are_scoped_to_motion_animation_blocks() {
     for phase in ["enter", "leave"] {
         let source = format!(
-            "motion panel {{ state idle {{ {phase} {{ opacity: 1 }} }} {phase} {{ {phase} {{ opacity {{ @tween: 1ms; 0%: 0 }} }} }} }}"
+            "motion panel {{ state idle {{ {phase} {{ opacity: 1 }} }} {phase} {{ {phase} {{ @tween(duration: 1) opacity {{ 0%: 0 }} }} }} }}"
         );
         let parsed = parse(&source);
         assert!(

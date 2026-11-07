@@ -15,8 +15,7 @@ fn structural_views_expose_parameters_bindings_states_and_transition_tracks() {
   state active when progress > 0 { body { opacity: 1 } }
   transition idle -> active {
     body {
-      opacity {
-        @tween: 100ms
+      @tween(duration: 100) opacity {
         0%: 0 @ linear
         100%: 1
       }
@@ -96,7 +95,7 @@ fn structural_views_expose_parameters_bindings_states_and_transition_tracks() {
             .properties()
             .map(|property| property.header().unwrap())
             .collect::<Vec<_>>(),
-        ["@tween", "0%", "100%"]
+        ["0%", "100%"]
     );
 
     assert_range(source, &motion);
@@ -151,9 +150,9 @@ fn motion_accessors_expose_lifecycle_tracks_and_event_expressions() {
 motion panel(enabled: boolean) {
   event shown when enabled
   state idle { body { opacity: 1 } }
-  enter { body { opacity { @tween: 100ms; 0%: 0 } } }
-  transition { @tween: 200ms }
-  leave { body { opacity { @tween: 150ms; 100%: 0 } } }
+  enter { body { @tween(duration: 100) opacity { 0%: 0 } } }
+  @tween(duration: 200) transition {}
+  leave { body { @tween(duration: 150) opacity { 100%: 0 } } }
   event hidden when !enabled
 }
 motion other { state idle {} }

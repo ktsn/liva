@@ -276,8 +276,8 @@ it('does not overwrite an external edit made while the temporary save is being w
 })
 
 it.each([
-  'motion toggle { layer idle { body @tween(duration: 100) { opacity: 1 } } }',
-  'motion toggle { layer idle { body { opacity: 1 } } enter { body { opacity @tween(duration: 100) { 0%: 0 @easeIn } } } }',
+  'motion toggle { layer idle { @tween(duration: 100) body { opacity: 1 } } }',
+  'motion toggle { layer idle { body { opacity: 1 } } enter { body { @tween(duration: 100) opacity { 0%: 0 @easeIn } } } }',
 ])('rejects unknown edit paths for typed layer and lifecycle sources: %s', async (motion) => {
   const content = `<template><div /></template><liva>${motion}</liva>`
   await writeFile(join(root, 'Toggle.vue'), content)
@@ -303,7 +303,7 @@ it.each([
 
 it('rejects a typed preview with a missing edits array as malformed', async () => {
   const content =
-    '<template><div /></template><liva>motion toggle { layer idle { body @tween(duration: 100) { opacity: 1 } } }</liva>'
+    '<template><div /></template><liva>motion toggle { layer idle { @tween(duration: 100) body { opacity: 1 } } }</liva>'
   await writeFile(join(root, 'Toggle.vue'), content)
   const inspection = await service.request({ action: 'inspect', sourceId, definition: 'toggle' })
 
@@ -371,7 +371,7 @@ describe('unchanged composition preview transactions', () => {
 describe('typed layer source transactions', () => {
   it('previews and saves typed value, timing and frame edits with fresh ranges and backups', async () => {
     const block =
-      '// 日本語😀\r\nmotion toggle(amount: number) { layer base @tween(duration: 200) { body { opacity: ${amount}; scale: 1 } } }'
+      '// 日本語😀\r\nmotion toggle(amount: number) { @tween(duration: 200) layer base { body { opacity: ${amount}; scale: 1 } } }'
     const content = `<template><div /></template><liva>${block}</liva>`
     await writeFile(join(root, 'Toggle.vue'), content)
     const inspection = await service.request({ action: 'inspect', sourceId, definition: 'toggle' })

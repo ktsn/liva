@@ -462,7 +462,7 @@ test('missing parameters reject creation, updates and incompatible replacements 
   expect(result.failures).toEqual([
     'Error: Missing motion parameter: checked',
     'Error: Missing motion parameter: checked',
-    'Error: Motion inputs must be a parameter object; string-state bindings were removed',
+    'Error: Motion inputs must be a parameter object',
     'Error: Missing motion parameter: added',
     'Error: Motion parameter checked requires number',
   ])

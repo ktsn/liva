@@ -418,8 +418,8 @@ or directive is needed, and component/application data remains Vue-owned.
 Toggle and async-submit demonstrate local machines and directional tracks;
 interactive-button demonstrates overlapping reactive layers; drag/swipe combine
 reactive input with motion-level presence. Every executable motion uses layers and
-typed animation expressions. The compiler rejects removed motion-level state and
-transition syntax with migration diagnostics; runtime validation rejects its old IR.
+typed animation expressions. States and guarded transitions are scoped to their
+declaring layer.
 
 The editor uses composition selectors, shared timeline/playback controls, and typed
 source operations. The lossless parser and language-server expression hovers cover

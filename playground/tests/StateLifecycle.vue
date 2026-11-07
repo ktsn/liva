@@ -58,25 +58,25 @@ motion panel(open: boolean, distance: number) {
   }
 
   enter {
-    content @tween(duration: 2000, easing: linear) {
+    @tween(duration: 2000, easing: linear) content {
       opacity: 0
       scale: 0.8
       translate: ${distance}px 0
     }
 
-    badge @tween(duration: 2000, easing: linear) {
+    @tween(duration: 2000, easing: linear) badge {
       opacity: 0
     }
   }
 
   leave {
-    content @tween(duration: 1000, easing: linear) {
+    @tween(duration: 1000, easing: linear) content {
       opacity: 0
       scale: 1.2
       translate: ${distance}px 0
     }
 
-    badge @tween(duration: 1000, easing: linear) {
+    @tween(duration: 1000, easing: linear) badge {
       opacity: 0
     }
   }

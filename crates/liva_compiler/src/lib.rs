@@ -139,6 +139,21 @@ impl Compiler {
             );
         }
 
+        if expected == expression::Type::Easing
+            && liva_syntax::ast::Keyframe::cast(node.syntax().clone())
+                .and_then(|frame| frame.header())
+                .and_then(|header| header.trim_end_matches('%').parse::<f64>().ok())
+                == Some(100.0)
+        {
+            let mut diagnostic = Diagnostic::error(
+                "semantic.final-frame-easing",
+                "The final 100% keyframe has no outgoing interval; remove its easing decorator",
+                decorator.range(),
+            );
+            diagnostic.severity = "warning".into();
+            self.diagnostics.push(diagnostic);
+        }
+
         let text = decorator.expression_text();
         let source = text.as_str();
 

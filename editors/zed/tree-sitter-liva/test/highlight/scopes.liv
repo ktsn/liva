@@ -10,9 +10,9 @@
 //      ^ property
 //                 ^ punctuation.special
 //                                    ^ punctuation.special
-        scale @tween(duration: 300) {
-//      ^ property
-//            ^ attribute
+        @tween(duration: 300) scale {
+//                            ^ property
+//      ^ attribute
           40%: 1.3 @cubicBezier(x1: 0.2, y1: 0.8, x2: 0.2, y2: 1);
 //                 ^ attribute
           100%: 1
@@ -25,9 +25,9 @@ motion button {
   layer hover when true {
 //^^^^^ keyword
 //            ^^^^ keyword
-    body @tween(duration: 200) {
-//  ^ selector.class
-//       ^ attribute
+    @tween(duration: 200) body {
+//                        ^ selector.class
+//  ^ attribute
       opacity: 1
     }
   }
@@ -46,9 +46,9 @@ motion animation(curve: easing, duration: timing) {
 //                      ^ type
 //                                        ^ type
   layer base {
-    body @tween(duration: 200, easing: easeOut) {
-//              ^ property
-//                             ^ property
+    @tween(duration: 200, easing: easeOut) body {
+//         ^ property
+//                        ^ property
       opacity: 1
     }
   }

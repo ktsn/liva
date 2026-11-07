@@ -5,8 +5,8 @@ import { planPresence, PresenceError } from './presence.ts'
 const block = `<liva>
 motion panel {
   layer idle { body { opacity: 1 } other { opacity: 1 } }
-  enter @tween(duration: 100) { body { opacity { 0%: 0 } } }
-  leave @tween(duration: 200) { body { opacity { 100%: 0 } } other { opacity { 100%: 0 } } }
+  @tween(duration: 100) enter { body { opacity { 0%: 0 } } }
+  @tween(duration: 200) leave { body { opacity { 100%: 0 } } other { opacity { 100%: 0 } } }
 }
 </liva>`
 
@@ -128,7 +128,7 @@ it('preserves modifiers and escapes expressions in generated bindings', () => {
 
 it('plans targets declared only by motion-level lifecycles', () => {
   const source = `<template><div v-liva:panel><span v-if="visible" v-liva-target:body /></div></template>
-  <liva>motion panel { layer idle { body { opacity: 1 } } enter @tween(duration: 10) { body { opacity: 0 } } leave @tween(duration: 10) { body { opacity: 0 } } }</liva>`
+  <liva>motion panel { layer idle { body { opacity: 1 } } @tween(duration: 10) enter { body { opacity: 0 } } @tween(duration: 10) leave { body { opacity: 0 } } }</liva>`
   const result = planPresence(
     source,
     'Panel.vue',

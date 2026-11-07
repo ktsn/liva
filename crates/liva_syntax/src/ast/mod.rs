@@ -65,15 +65,20 @@ pub trait AstNode: Sized {
     }
 
     fn decorators(&self) -> impl Iterator<Item = Decorator> {
-        self.syntax()
-            .children()
-            .filter(|child| matches!(child.kind(), Kind::Header | Kind::Value))
-            .flat_map(|child| {
-                child
-                    .children()
-                    .filter_map(Decorator::cast)
-                    .collect::<Vec<_>>()
-            })
+        self.syntax().children().flat_map(|child| {
+            if let Some(decorator) = Decorator::cast(child.clone()) {
+                return vec![decorator];
+            }
+
+            if !matches!(child.kind(), Kind::Header | Kind::Value) {
+                return vec![];
+            }
+
+            child
+                .children()
+                .filter_map(Decorator::cast)
+                .collect::<Vec<_>>()
+        })
     }
 }
 

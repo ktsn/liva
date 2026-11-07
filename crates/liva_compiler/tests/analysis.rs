@@ -101,7 +101,7 @@ fn hyphenated_names_have_whole_identifier_hover_ranges() {
 
 #[test]
 fn lifecycle_templates_expose_typed_hovers_in_both_property_forms() {
-    let source = "// 日本語\r\nmotion panel(distance: number) { layer idle { body { translate: 0px 0 } } enter @tween(duration: 1) { body { translate: ${distance}px 0 } } leave @tween(duration: 1) { body { translate { 100%: ${distance}px 0 } } } }";
+    let source = "// 日本語\r\nmotion panel(distance: number) { layer idle { body { translate: 0px 0 } } @tween(duration: 1) enter { body { translate: ${distance}px 0 } } @tween(duration: 1) leave { body { translate { 100%: ${distance}px 0 } } } }";
     let found = hovers(source);
     let expected: Vec<_> = source
         .match_indices("${distance}")
@@ -121,7 +121,7 @@ fn lifecycle_templates_expose_typed_hovers_in_both_property_forms() {
 fn layer_guards_and_decorators_expose_expression_types_at_source_offsets() {
     let source = r#"motion card(active: boolean, duration: number) {
       let curve = easeOut
-      layer base { body @tween(duration: duration, easing: curve) { opacity: 1 } }
+      layer base { @tween(duration: duration, easing: curve) body { opacity: 1 } }
       layer hover when active { body { opacity: .5 } }
       layer workflow {
         layer idle initial {}

@@ -437,6 +437,70 @@ for (const [easing, expected] of [
   })
 }
 
+test('keyframe easing applies to the outgoing interval only', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const definition: Runtime.Definition = {
+      name: 'outgoing',
+      parameters: [{ name: 'mode', type: 'string' }],
+      layers: [
+        {
+          name: 'base',
+          targets: [{ name: 'track', properties: [{ name: 'opacity', value: '0' }] }],
+        },
+        {
+          name: 'active',
+          when: {
+            kind: 'binary',
+            operator: '==',
+            left: { kind: 'reference', path: ['mode'] },
+            right: { kind: 'string', value: 'on' },
+          },
+          timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
+          targets: [
+            {
+              name: 'track',
+              properties: [
+                {
+                  name: 'opacity',
+                  value: '1',
+                  keyframes: [
+                    { offset: 0, value: '0', easing: 'step-start' },
+                    { offset: 0.5, value: '0.5' },
+                    { offset: 1, value: '1' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }
+
+    window.instance.replaceDefinition(definition)
+    window.instance.updateParameters({ mode: 'on' })
+
+    await Promise.all(window.instance.animations.map((animation) => animation.ready))
+
+    const animation = window.instance.animations[0]
+
+    animation.pause()
+    animation.currentTime = 250
+
+    const firstInterval = Number(getComputedStyle(window.track).opacity)
+
+    animation.currentTime = 750
+
+    const secondInterval = Number(getComputedStyle(window.track).opacity)
+
+    window.instance.dispose()
+
+    return { firstInterval, secondInterval }
+  })
+
+  expect(result.firstInterval).toBeCloseTo(0.5, 2)
+  expect(result.secondInterval).toBeCloseTo(0.75, 2)
+})
+
 test('definition replacement preserves duplicate suspension and disposal respects external styles', async ({
   page,
 }) => {

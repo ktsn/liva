@@ -83,8 +83,8 @@ fn comments_separate_headers_and_leave_following_declarations() {
 }
 
 #[test]
-fn css_and_animation_values_remain_opaque() {
-    let source = "motion a { state on { target { timing: var(--x, 1); content: \\); --x: \\, } } transition { @tween /* note */: 1ms steps(2, end) } }";
+fn css_values_remain_opaque() {
+    let source = "motion a { state on { target { timing: var(--x, 1); content: \\); --x: \\, } } }";
     let parsed = parse(source);
     assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
     let motion = parsed.root.motions().next().unwrap();
@@ -99,14 +99,6 @@ fn css_and_animation_values_remain_opaque() {
         .next()
         .unwrap();
     assert_eq!(css.value_text().as_deref(), Some("var(--x, 1)"));
-    let timing = motion
-        .transitions()
-        .next()
-        .unwrap()
-        .properties()
-        .next()
-        .unwrap();
-    assert_eq!(timing.value_text().as_deref(), Some("1ms steps(2, end)"));
 }
 
 #[test]

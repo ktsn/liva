@@ -4,7 +4,7 @@ use support::valid;
 
 fn fixture(timing: &str, extra: &str) -> String {
     format!(
-        "motion a(active: boolean) {{ layer main {{ state off initial {{ t {{ translate: 0px; scale: 1 }} }} state on {{ t {{ translate: 24px; scale: 1 }} }} transition off -> on {timing} when active {{ {extra} }} }} }}"
+        "motion a(active: boolean) {{ layer main {{ state off initial {{ t {{ translate: 0px; scale: 1 }} }} state on {{ t {{ translate: 24px; scale: 1 }} }} {timing} transition off -> on when active {{ {extra} }} }} }}"
     )
 }
 
@@ -106,13 +106,13 @@ fn raw_easing_suffixes_are_rejected_in_every_track_kind() {
                 &format!("t {{ scale {{ 50%: 2 {easing} }} }}"),
             ),
             format!(
-                "motion a {{ layer base {{ t {{ opacity @tween(duration: 100) {{ 50%: 0.5 {easing}; 100%: 1 }} }} }} }}"
+                "motion a {{ layer base {{ t {{ @tween(duration: 100) opacity {{ 50%: 0.5 {easing}; 100%: 1 }} }} }} }}"
             ),
             format!(
-                "motion a {{ layer base {{ t {{ opacity: 1 }} }} enter @tween(duration: 100) {{ t {{ opacity {{ 50%: 0.5 {easing} }} }} }} }}"
+                "motion a {{ layer base {{ t {{ opacity: 1 }} }} @tween(duration: 100) enter {{ t {{ opacity {{ 50%: 0.5 {easing} }} }} }} }}"
             ),
             format!(
-                "motion a {{ layer base {{ t {{ opacity: 1 }} }} leave @tween(duration: 100) {{ t {{ opacity {{ 50%: 0.5 {easing} }} }} }} }}"
+                "motion a {{ layer base {{ t {{ opacity: 1 }} }} @tween(duration: 100) leave {{ t {{ opacity {{ 50%: 0.5 {easing} }} }} }} }}"
             ),
         ];
 
@@ -176,5 +176,27 @@ fn quoted_and_nested_at_characters_remain_css_values() {
 
         assert_eq!(frames[0].value, value);
         assert!(frames[0].easing_expression.is_none());
+    }
+}
+
+#[test]
+fn malformed_structural_headers_are_rejected() {
+    for header in [
+        "layer base @quick {}",
+        "layer base { state off initial @quick {} state on {} transition off -> on @quick when true }",
+        "enter @quick {}",
+        "leave { body @quick { opacity @quick {} } }",
+    ] {
+        let source = format!("motion sample {{ {header}\nlayer next {{}} }}");
+        let result = compile(&source, true);
+
+        assert!(result.definitions.is_empty(), "{source}");
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.severity == "error"),
+            "{source}"
+        );
     }
 }

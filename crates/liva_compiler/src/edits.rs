@@ -327,21 +327,18 @@ fn edit_typed_timing(
         }
         (None, Some(value)) => {
             preserve_comments(value)?;
-            let boundary = if let Some(property) = liva_syntax::ast::Property::cast(node.clone()) {
-                property
+            if let Some(property) = liva_syntax::ast::Property::cast(node.clone()) {
+                let boundary = property
                     .value_node()
                     .ok_or("Missing property value")?
-                    .range()
+                    .range();
+                let end = boundary.end
+                    - (prepared[boundary.start..boundary.end].len()
+                        - prepared[boundary.start..boundary.end].trim_end().len());
+                result.insert_str(end, &format!(" @{}", value.trim()));
             } else {
-                liva_syntax::ast::Block::cast(node)
-                    .and_then(|block| block.header_node())
-                    .ok_or("Missing property header")?
-                    .range()
-            };
-            let end = boundary.end
-                - (prepared[boundary.start..boundary.end].len()
-                    - prepared[boundary.start..boundary.end].trim_end().len());
-            result.insert_str(end, &format!(" @{}", value.trim()));
+                result.insert_str(field.range.start, &format!("@{} ", value.trim()));
+            }
         }
         (None, None) => return Err("This property has no local timing override".into()),
     }
@@ -385,10 +382,10 @@ fn prepare_typed_track(source: &str, compiled: &Compilation, path: &str) -> Resu
     let timing = property
         .decorators()
         .next()
-        .map(|decorator| format!(" @{}", decorator.expression_text().trim()))
+        .map(|decorator| format!("@{} ", decorator.expression_text().trim()))
         .unwrap_or_default();
     let endpoint = if path.contains("/enter/") { 0 } else { 100 };
-    let body = format!("{name}{timing} {{ {endpoint}%: {value} }}");
+    let body = format!("{timing}{name} {{ {endpoint}%: {value} }}");
     let mut result = prepared;
     result.replace_range(field.range.start..field.range.end, &body);
     Ok(result)

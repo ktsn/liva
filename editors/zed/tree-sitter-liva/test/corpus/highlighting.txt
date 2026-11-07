@@ -7,7 +7,7 @@ motion card(progress: number) {
   layer on when movement.active {
     body { translate: ${movement.offset.x}px 0; color: #fff }
   }
-  enter @tween(duration: 100, easing: easeOut) { body { opacity: 0 } }
+  @tween(duration: 100, easing: easeOut) enter { body { opacity: 0 } }
 }
 ---
 
@@ -52,37 +52,39 @@ motion card(progress: number) {
               (property
                 (identifier))
               (css_token)))))
-      (keyword)
-      (animation)
-      (parenthesized
-        (property
-          (identifier))
-        (number)
-        (punctuation)
-        (property
-          (identifier))
-        (identifier))
-      (block
-        (selector_block
-          (identifier)
-          (block
+      (selector_block
+        (decorator
+          (animation)
+          (parenthesized
             (property
               (identifier))
-            (number)))))))
+            (number)
+            (punctuation)
+            (property
+              (identifier))
+            (identifier)))
+        (identifier)
+        (block
+          (selector_block
+            (identifier)
+            (block
+              (property
+                (identifier))
+              (number))))))))
 
 ==================
 Layers and typed decorators
 ==================
 motion card(active: boolean) {
-  layer base { body @tween(duration: 200) { opacity: 1 } }
+  layer base { @tween(duration: 200) body { opacity: 1 } }
   layer hover when active { body { scale: 1.1 @spring(stiffness: 300) } }
   layer machine {
     state idle initial {}
     state busy {}
     transition idle -> busy when active
-    transition busy -> idle when !active { body { scale @tween(duration: 150) { 50%: 1.2 @easeOut } } }
+    transition busy -> idle when !active { body { @tween(duration: 150) scale { 50%: 1.2 @easeOut } } }
   }
-  enter { body @tween(duration: 200) { opacity: 0 } }
+  enter { @tween(duration: 200) body { opacity: 0 } }
 }
 ---
 
@@ -98,13 +100,13 @@ motion card(active: boolean) {
         (identifier)
         (block
           (selector_block
-            (identifier)
             (decorator
               (animation)
               (parenthesized
                 (property
                   (identifier))
                 (number)))
+            (identifier)
             (block
               (property
                 (identifier))
@@ -147,13 +149,13 @@ motion card(active: boolean) {
                 (identifier)
                 (block
                   (selector_block
-                    (identifier)
                     (decorator
                       (animation)
                       (parenthesized
                         (property
                           (identifier))
                         (number)))
+                    (identifier)
                     (block
                       (number)
                       (punctuation)
@@ -162,13 +164,13 @@ motion card(active: boolean) {
       (keyword)
       (block
         (selector_block
-          (identifier)
           (decorator
             (animation)
             (parenthesized
               (property
                 (identifier))
               (number)))
+          (identifier)
           (block
             (property
               (identifier))
@@ -178,15 +180,15 @@ motion card(active: boolean) {
 Shared timing headers
 ==================
 motion sample(enabled: boolean) {
-  layer base @tween(duration: 200) { body { opacity: 1 } }
-  layer machine @spring(duration: 400) {
-    state idle initial @tween() {}
-    state active @tween(easing: steps(count: 4)) {}
+  @tween(duration: 200) layer base { body { opacity: 1 } }
+  @spring(duration: 400) layer machine {
+    @tween() state idle initial {}
+    @tween(easing: steps(count: 4)) state active {}
+    @spring(duration: 300, bounce: 0.2)
     transition idle -> active
-      @spring(duration: 300, bounce: 0.2)
       when enabled
   }
-  enter @tween(duration: 100) { body { opacity: 0 } }
+  @tween(duration: 100) enter { body { opacity: 0 } }
 }
 ---
 
@@ -199,13 +201,13 @@ motion sample(enabled: boolean) {
       (type))
     (block
       (layer
-        (identifier)
         (decorator
           (animation)
           (parenthesized
             (property
               (identifier))
             (number)))
+        (identifier)
         (block
           (selector_block
             (identifier)
@@ -214,22 +216,21 @@ motion sample(enabled: boolean) {
                 (identifier))
               (number)))))
       (layer
-        (identifier)
         (decorator
           (animation)
           (parenthesized
             (property
               (identifier))
             (number)))
+        (identifier)
         (block
           (state
-            (identifier)
             (decorator
               (animation)
               (parenthesized))
+            (identifier)
             (block))
           (state
-            (identifier)
             (decorator
               (animation)
               (parenthesized
@@ -241,10 +242,9 @@ motion sample(enabled: boolean) {
                     (property
                       (identifier))
                     (number)))))
+            (identifier)
             (block))
           (transition
-            (identifier)
-            (identifier)
             (decorator
               (animation)
               (parenthesized
@@ -255,17 +255,21 @@ motion sample(enabled: boolean) {
                 (property
                   (identifier))
                 (number)))
+            (identifier)
+            (identifier)
             (identifier))))
-      (keyword)
-      (animation)
-      (parenthesized
-        (property
-          (identifier))
-        (number))
-      (block
-        (selector_block
-          (identifier)
-          (block
+      (selector_block
+        (decorator
+          (animation)
+          (parenthesized
             (property
               (identifier))
-            (number)))))))
+            (number)))
+        (identifier)
+        (block
+          (selector_block
+            (identifier)
+            (block
+              (property
+                (identifier))
+              (number))))))))

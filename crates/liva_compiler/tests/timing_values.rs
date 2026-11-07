@@ -136,7 +136,7 @@ fn step_easing_accepts_constants_calls_bindings_and_dynamic_arguments() {
         "steps(count: 3, position: 'jump-none')",
     ] {
         let source = format!(
-            "motion sample(n: number, position: string) {{ let curve = {easing}\nlayer base {{ body {{ opacity @tween(duration: 100, easing: curve) {{ 0%: 0 @curve\n100%: 1 }} }} }} }}"
+            "motion sample(n: number, position: string) {{ let curve = {easing}\nlayer base {{ body {{ @tween(duration: 100, easing: curve) opacity {{ 0%: 0 @curve\n100%: 1 }} }} }} }}"
         );
         valid(&source);
     }

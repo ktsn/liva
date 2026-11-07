@@ -29,13 +29,13 @@ function inspection(source: string): Inspection {
 }
 
 const layeredSource = `motion sample {
- layer base @tween(duration: 200) { body { opacity: 1 } }
+ @tween(duration: 200) layer base { body { opacity: 1 } }
  layer hover when false { body { opacity: 0.5 } }
  layer machine { body { scale: 1 }
   state idle initial {}
-  state active @spring(duration: 300) { body { opacity: 0.8 } }
-  transition idle -> active @tween(duration: 100) when false
-  transition idle -> active @tween(duration: 150) when false
+  @spring(duration: 300) state active { body { opacity: 0.8 } }
+  @tween(duration: 100) transition idle -> active when false
+  @tween(duration: 150) transition idle -> active when false
  }
 }`
 const from = { layers: { base: true, hover: false }, states: { machine: 'idle' } }
@@ -65,14 +65,14 @@ describe('composition source provenance', () => {
         ]),
       )
       const info = inspection(`motion sample {
-        layer machine ${decorators.layer} {
-          body ${decorators.commonTarget} { opacity: 1 ${decorators.commonProperty} }
+        ${decorators.layer} layer machine {
+          ${decorators.commonTarget} body { opacity: 1 ${decorators.commonProperty} }
           state idle initial {}
-          state active ${decorators.state} {
-            body ${decorators.stateTarget} { opacity: 0.5 ${decorators.stateProperty} }
+          ${decorators.state} state active {
+            ${decorators.stateTarget} body { opacity: 0.5 ${decorators.stateProperty} }
           }
-          transition idle -> active ${decorators.transition} when false {
-            body ${decorators.transitionTarget} { opacity ${decorators.transitionProperty} {} }
+          ${decorators.transition} transition idle -> active when false {
+            ${decorators.transitionTarget} body { ${decorators.transitionProperty} opacity {} }
           }
         }
       }`)
@@ -117,7 +117,7 @@ describe('composition source provenance', () => {
 
   it('resolves source locations without evaluating dynamic timing expressions', () => {
     const info = inspection(`motion sample(duration: number) {
-      layer base @tween(duration: duration) { body { opacity: 1 } }
+      @tween(duration: duration) layer base { body { opacity: 1 } }
     }`)
     const composition = { layers: { base: true }, states: {} }
 
@@ -242,7 +242,7 @@ describe('composition source provenance', () => {
 
   it('maps a style track destination to its original 100% expression', () => {
     const info = inspection(
-      'motion sample(amount: number) { layer base @tween() { body { opacity { 0%: 0; 100%: ${amount} } } } }',
+      'motion sample(amount: number) { @tween() layer base { body { opacity { 0%: 0; 100%: ${amount} } } } }',
     )
     const selection = { layers: { base: true }, states: {} }
     const result = trackProvenance(info, selection, selection, undefined, 'body', 'opacity')
@@ -291,7 +291,7 @@ describe('lifecycle source provenance', () => {
     'separates inherited timing from the lifecycle write destination: %s %s %s',
     (shared, target, property, origin) => {
       const info = inspection(
-        `motion sample { layer base { body { opacity: 1 } } enter ${shared} { body ${target} { opacity ${property} { 0%: 0 } } } }`,
+        `motion sample { layer base { body { opacity: 1 } } ${shared} enter { ${target} body { ${property} opacity { 0%: 0 } } } }`,
       )
       const result = lifecycleProvenance(
         info,

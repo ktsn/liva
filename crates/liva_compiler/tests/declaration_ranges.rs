@@ -145,12 +145,12 @@ fn identifiers_and_duplicate_declarations_use_names_and_related_names() {
             "Duplicate declaration",
         ),
         (
-            "motion a { layer idle { t { x: 0 } } enter @tween() { ‹t› {} «t» {} } }",
+            "motion a { layer idle { t { x: 0 } } @tween() enter { ‹t› {} «t» {} } }",
             "semantic.duplicate",
             "Duplicate declaration",
         ),
         (
-            "motion a { layer idle { t { x: 0 } } enter @tween() { t { ‹x› {} «x» {} } } }",
+            "motion a { layer idle { t { x: 0 } } @tween() enter { t { ‹x› {} «x» {} } } }",
             "semantic.duplicate",
             "Duplicate declaration",
         ),
@@ -223,7 +223,7 @@ fn misplaced_declarations_have_local_ranges() {
             "Expected layer",
         ),
         (
-            "motion a { layer base { t { x: 0 } } enter @tween() { t { x { «unexpected» {} } } } }",
+            "motion a { layer base { t { x: 0 } } @tween() enter { t { x { «unexpected» {} } } } }",
             "semantic.structure",
             "Property tracks",
         ),
@@ -234,17 +234,7 @@ fn misplaced_declarations_have_local_ranges() {
 
 #[test]
 fn unexpected_animation_declarations_point_to_the_field_name() {
-    for field in [
-        "@tween",
-        "@spring",
-        "@tween-duration",
-        "@tween-easing",
-        "@spring-duration",
-        "@spring-bounce",
-        "@spring-stiffness",
-        "@spring-damping",
-        "@spring-mass",
-    ] {
+    for field in ["duration", "easing", "stiffness"] {
         for body in [
             format!("enter {{ «{field}»: 1; }}"),
             format!("enter {{ t {{ x {{ «{field}»: 1; 0%: 0 }} }} }}"),
@@ -287,7 +277,7 @@ fn keyframe_errors_point_to_offsets_and_missing_values() {
     ] {
         assert_diagnostic(
             &format!(
-                "motion a {{ layer base {{ t {{ x: 1 }} }} enter @tween() {{ t {{ x {{ {frames}\n }} }} }} }}"
+                "motion a {{ layer base {{ t {{ x: 1 }} }} @tween() enter {{ t {{ x {{ {frames}\n }} }} }} }}"
             ),
             code,
             message,
