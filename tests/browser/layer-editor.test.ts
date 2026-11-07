@@ -26,7 +26,7 @@ async function save(page: Page) {
 test('the inspector follows the selected endpoint declaration', async ({ page }) => {
   await page.goto(`${base}/interactive-button`)
   await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
-  await page.getByLabel('TO hover enabled', { exact: true }).check()
+  await page.getByLabel('To hover enabled', { exact: true }).check()
   await page.getByRole('button', { name: 'Toggle body tracks', exact: true }).click()
 
   const inspector = page.getByLabel('Selection inspector', { exact: true })
@@ -44,8 +44,8 @@ test('the inspector follows the selected endpoint declaration', async ({ page })
     )
     await expect(inspector.getByLabel('Source value', { exact: true })).toHaveValue(value)
     await expect(inspector.getByLabel('Source value', { exact: true })).toHaveCount(1)
-    await expect(inspector).not.toContainText('FROM')
-    await expect(inspector).not.toContainText('TO')
+    await expect(inspector).not.toContainText('From')
+    await expect(inspector).not.toContainText('To')
   }
 })
 

@@ -929,8 +929,8 @@ it('initializes independent composition selectors and swaps complete selections'
   await setupEditor(undefined, compositionDefinition)
   await click('Motion editor')
 
-  const fromHover = host!.querySelector<HTMLInputElement>('[aria-label="FROM hover enabled"]')!
-  const toHover = host!.querySelector<HTMLInputElement>('[aria-label="TO hover enabled"]')!
+  const fromHover = host!.querySelector<HTMLInputElement>('[aria-label="From hover enabled"]')!
+  const toHover = host!.querySelector<HTMLInputElement>('[aria-label="To hover enabled"]')!
   expect(fromHover.checked).toBe(false)
   expect(toHover.checked).toBe(false)
 
@@ -942,13 +942,13 @@ it('initializes independent composition selectors and swaps complete selections'
   expect(fromHover.checked).toBe(false)
   expect(host!.querySelectorAll('.different')).toHaveLength(2)
 
-  await input('TO machine state', 'active')
+  await input('To machine state', 'active')
   await click('Swap')
 
   expect(fromHover.checked).toBe(true)
   expect(toHover.checked).toBe(false)
-  expect(selectValue('FROM machine state')).toBe('active')
-  expect(selectValue('TO machine state')).toBe('idle')
+  expect(selectValue('From machine state')).toBe('active')
+  expect(selectValue('To machine state')).toBe('idle')
   expect(runtime!.composition).toEqual({
     layers: { base: true, hover: false },
     states: { machine: 'idle' },
@@ -958,7 +958,7 @@ it('initializes independent composition selectors and swaps complete selections'
 it('selects duplicate transitions without changing other layers and clears incompatible selections', async () => {
   await setupEditor(undefined, compositionDefinition)
   await click('Motion editor')
-  const toHover = host!.querySelector<HTMLInputElement>('[aria-label="TO hover enabled"]')!
+  const toHover = host!.querySelector<HTMLInputElement>('[aria-label="To hover enabled"]')!
   toHover.click()
   await tick()
   const identity = JSON.stringify({ layer: 'machine', index: 1 })
@@ -976,20 +976,20 @@ it('selects duplicate transitions without changing other layers and clears incom
   expect(effect.getKeyframes()).toContainEqual(
     expect.objectContaining({ offset: 0.5, scale: '1.7' }),
   )
-  expect(selectValue('FROM machine state')).toBe('idle')
-  expect(selectValue('TO machine state')).toBe('active')
+  expect(selectValue('From machine state')).toBe('idle')
+  expect(selectValue('To machine state')).toBe('active')
 
   await click('Swap')
 
   expect(selectValue('Existing transition')).toBe('')
 
   await input('Existing transition', identity)
-  await input('TO machine state', 'idle')
+  await input('To machine state', 'idle')
 
   expect(selectValue('Existing transition')).toBe('')
 })
 
-it('shows all TO properties and permits playback for equal compositions without edits', async () => {
+it('shows all To properties and permits playback for equal compositions without edits', async () => {
   const { controller } = await setupEditor(undefined, compositionDefinition)
   await click('Motion editor')
   await click('▸ body')
@@ -1031,14 +1031,14 @@ it('keeps source unchanged for pointer gestures on composition rows', async () =
   expect(host!.querySelector('[aria-label="Resize body.scale"]')).toBeNull()
 })
 
-it('allows clearing a transition shortcut and changing FROM independently', async () => {
+it('allows clearing a transition shortcut and changing From independently', async () => {
   await setupEditor(undefined, compositionDefinition)
   await click('Motion editor')
   await input('Existing transition', JSON.stringify({ layer: 'machine', index: 0 }))
   await input('Existing transition', '')
-  await input('FROM machine state', 'active')
+  await input('From machine state', 'active')
 
-  expect(selectValue('TO machine state')).toBe('active')
+  expect(selectValue('To machine state')).toBe('active')
   expect(button('Play').disabled).toBe(false)
 })
 
@@ -1070,7 +1070,7 @@ it('reports invalid selected timing and recovers when the invalid layer is disab
     ],
   })
   await click('Motion editor')
-  const checkbox = host!.querySelector<HTMLInputElement>('[aria-label="TO invalid enabled"]')!
+  const checkbox = host!.querySelector<HTMLInputElement>('[aria-label="To invalid enabled"]')!
 
   checkbox.click()
   await tick()
@@ -1152,7 +1152,7 @@ it('ignores invalid transition instructions hidden by the effective owner', asyn
   expect(runtime!.animations).toHaveLength(1)
   expect(diagnostics.filter((item) => item.code === 'runtime.inspection')).toEqual([])
 
-  host!.querySelector<HTMLInputElement>('[aria-label="TO cover enabled"]')!.click()
+  host!.querySelector<HTMLInputElement>('[aria-label="To cover enabled"]')!.click()
   await tick()
 
   expect(host!.querySelector('[role="alert"]')?.textContent).toContain('non-negative')
@@ -1213,11 +1213,11 @@ it('inspects the replacement instance and reinitializes its current composition 
   expect(host!.querySelector('[aria-label="Playback time"]')!.textContent).toContain('400 ms')
 })
 
-it('identifies an external FROM endpoint on a property without timing', async () => {
+it('identifies an external From endpoint on a property without timing', async () => {
   await setupEditor(undefined, compositionDefinition)
   await click('Motion editor')
 
-  host!.querySelector<HTMLInputElement>('[aria-label="FROM base enabled"]')!.click()
+  host!.querySelector<HTMLInputElement>('[aria-label="From base enabled"]')!.click()
   await tick()
   await click('▸ body')
 

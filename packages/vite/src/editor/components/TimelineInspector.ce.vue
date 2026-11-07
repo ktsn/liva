@@ -70,8 +70,8 @@ function applyFrame() {
     <template v-if="track.readonly">
       <p>{{ track.timingOrigin }}</p>
       <dl>
-        <dt>FROM</dt><dd>{{ track.fromValue || 'External CSS' }}</dd>
-        <dt>TO</dt><dd>{{ track.toValue || 'External CSS' }}</dd>
+        <dt>From</dt><dd>{{ track.fromValue || 'External CSS' }}</dd>
+        <dt>To</dt><dd>{{ track.toValue || 'External CSS' }}</dd>
         <dt>Duration</dt><dd>{{ Math.round(track.duration) }} ms</dd>
         <dt>Timing</dt><dd>{{ track.timing ? timingText(track.timing) : 'None' }}</dd>
       </dl>
