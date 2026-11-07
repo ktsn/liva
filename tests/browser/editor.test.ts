@@ -261,6 +261,7 @@ test('selection, discard, close and application updates invalidate pending previ
     }, action)
 
     // Allow an in-flight server reply to arrive after cancellation.
+    await page.waitForTimeout(300)
     expect(await page.evaluate(() => window.__LIVA_EDITOR__.previewActive)).toBe(false)
     if (action === 'close')
       await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
