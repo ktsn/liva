@@ -30,6 +30,7 @@ function point(event: PointerEvent | MouseEvent) {
 }
 
 function begin(event: PointerEvent, kind: 'frame' | 'duration', offset = 0) {
+  if (props.track.readonly) return
   if (event.button !== 0) return
   event.preventDefault()
   emit('select', kind === 'frame' ? offset : undefined)
@@ -57,6 +58,7 @@ function finish(event: PointerEvent) {
 }
 
 function add(event: MouseEvent) {
+  if (props.track.readonly) return
   const time = point(event)
   if (
     time > props.track.duration ||
@@ -93,7 +95,7 @@ function add(event: MouseEvent) {
         @dblclick="add"
       >
         <button
-          v-if="track.timing && track.timing.kind !== 'spring-physics'"
+          v-if="!track.readonly && track.timing && track.timing.kind !== 'spring-physics'"
           class="resize"
           :aria-label="`Resize ${track.target}.${track.property}`"
           @pointerdown.stop="begin($event, 'duration')"

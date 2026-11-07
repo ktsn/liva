@@ -393,14 +393,13 @@ interactive-button demonstrates overlapping reactive layers; drag/swipe combine
 reactive input with motion-level presence. Legacy states remain supported for
 existing motions, but cannot be mixed with layers in one motion.
 
-The timeline's legacy state-pair model cannot represent layer ownership or preserve
-typed decorators through track replacement. Such definitions are inspectable but
-read-only: the client hides editing/preview controls and the server rejects previews
-with edits and all commit requests. Unchanged-source previews are available through
-the composition API. Edit source and exercise application
-controls to preview these motions. The lossless parser and language-server
-expression hovers cover layer guards and decorators. There is no standalone Liva
-formatter; tools must preserve the custom block text and decorator nodes.
+Layer motions use composition selectors and the shared timeline/playback controls.
+Their source editing remains disabled until declaration destinations are available.
+The legacy state-pair editor cannot preserve typed decorators through track
+replacement, so typed legacy motions remain read-only. The server rejects unsupported
+edits and commits while permitting unchanged-source previews. The lossless parser
+and language-server expression hovers cover layer guards and decorators. There is
+no standalone Liva formatter; tools must preserve custom block text and decorator nodes.
 
 ## Composition inspection and manual resolution
 

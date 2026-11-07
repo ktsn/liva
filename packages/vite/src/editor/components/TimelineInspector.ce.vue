@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { Frame, Timing } from '@liva/runtime'
-import type { TimelineTrack } from '../timeline.ts'
+import { timingText, type TimelineTrack } from '../timeline.ts'
 
 const props = defineProps<{
   track: TimelineTrack
@@ -98,7 +98,22 @@ function applyTiming() {
   <aside aria-label="Selection inspector" class="inspector">
     <h3>{{ track.target }} / {{ track.property }}</h3>
     <p v-if="track.diagnostic" role="alert">{{ track.diagnostic }}</p>
-    <template v-if="offset !== undefined">
+    <template v-if="track.readonly">
+      <p>{{ track.timingOrigin }}</p>
+      <dl>
+        <dt>FROM</dt><dd>{{ track.fromValue || 'External CSS' }}</dd>
+        <dt>TO</dt><dd>{{ track.toValue || 'External CSS' }}</dd>
+        <dt>Duration</dt><dd>{{ Math.round(track.duration) }} ms</dd>
+        <dt>Timing</dt><dd>{{ track.timing ? timingText(track.timing) : 'None' }}</dd>
+      </dl>
+      <dl v-if="selectedFrame" aria-label="Selected keyframe">
+        <dt>Position</dt><dd>{{ selectedFrame.offset * 100 }}%</dd>
+        <dt>Value</dt><dd>{{ selectedFrame.value || 'External CSS' }}</dd>
+        <dt>Easing</dt><dd>{{ selectedFrame.easing || 'Track timing' }}</dd>
+      </dl>
+      <p>This preview is read-only.</p>
+    </template>
+    <template v-else-if="offset !== undefined">
       <p v-if="implicit">
         {{
           track.lifecycle
@@ -190,7 +205,7 @@ function applyTiming() {
         New keyframe at playhead
       </button>
     </template>
-    <div v-if="!general" class="inheritance">
+    <div v-if="!track.readonly && !general" class="inheritance">
       <button :disabled="!track.local?.timing" @click="emit('resetTiming')">
         {{ track.lifecycle ? 'Use default timing' : 'Use common timing' }}
       </button>

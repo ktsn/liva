@@ -88,17 +88,28 @@ test('async submit advances its local machine while Vue owns completion', async 
   await expect(button).toBeDisabled()
 })
 
-test('layer timeline shows its editing limitation without replacing application presentation', async ({
+test('composition selectors preview independently and restore application presentation', async ({
   page,
 }) => {
   await page.goto(`${base}/toggle`)
+  const button = page.getByRole('switch', { name: 'Notifications', exact: true })
   await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
 
-  await expect(page.getByRole('status')).toContainText('read-only')
-  await expect(page.getByLabel('Playhead')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Save to source' })).toHaveCount(0)
+  await expect(page.getByLabel('FROM selection state')).toHaveValue('off')
+  await expect(page.getByLabel('TO selection state')).toHaveValue('off')
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Save to source' })).toBeDisabled()
 
-  const button = page.getByRole('switch', { name: 'Notifications', exact: true })
+  await page.getByLabel('TO selection state').selectOption('on')
+  await page.getByRole('button', { name: 'Play', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
+
+  await expect(button).toHaveAttribute('aria-checked', 'false')
+  await expect(button).toHaveCSS('background-color', 'rgb(52, 178, 123)')
+
+  await page.getByRole('button', { name: 'Close', exact: true }).click()
+
+  await expect(button).toHaveCSS('background-color', 'rgb(136, 136, 136)')
 
   await button.click()
 

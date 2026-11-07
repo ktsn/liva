@@ -26,6 +26,7 @@ function binding(label: string) {
     state: 'off',
     animations: [],
     composition: undefined,
+    inspectComposition: vi.fn<InstanceBinding['runtime']['inspectComposition']>(),
     previewComposition: vi.fn<InstanceBinding['runtime']['previewComposition']>(),
     endCompositionPreview: vi.fn<InstanceBinding['runtime']['endCompositionPreview']>(),
     replaceDefinition: vi.fn<InstanceBinding['runtime']['replaceDefinition']>(function (

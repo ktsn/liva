@@ -104,10 +104,10 @@ CSS-value edit, not a visual expression editor.
 
 ## Enter and leave editing
 
-The timeline edits legacy state-based motions. Layer motions and motions using
-typed decorators display a read-only notice. Preview and saving are rejected on
-both client and server so a legacy track edit cannot discard new syntax. Edit the
-Liva source and exercise the application's controls to preview these motions.
+Layer motions use the composition preview controls described below. Their lifecycle
+source editing is not yet available. Legacy motions using typed decorators remain
+read-only in the legacy editor. The server rejects unsupported edits and saves so
+legacy track replacement cannot discard typed syntax.
 
 For a legacy motion, choose **Enter · default** or **Leave · default** in **Editing**.
 **State** selects the endpoint presentation used by the preview. State-specific
@@ -123,3 +123,24 @@ not simulate removal during an interrupted application animation. The final leav
 pose remains visible until preview ends. End preview, closing the dock, application
 updates, and source invalidation restore the committed definition and application
 state. Missing targets are not mounted by the editor.
+
+## Layer composition previews
+
+Layer motions open with FROM set to the selected instance's current composition
+and TO as an independent copy. Each side lists every layer. Checkboxes control
+ordinary layers, including unconditional layers; stateful layers always select one
+state. Disabled layers are dimmed, and differing selections are marked on both
+sides. Swap exchanges the entire selections. These controls never edit guards.
+
+The existing-transition shortcut changes only that layer's endpoint states.
+Declaration numbers distinguish transitions with the same state pair. Manual
+changes or Swap clear an incompatible shortcut; no transition is inferred from a
+state pair. Identical compositions are supported, including intermediate motion.
+
+The timeline includes every resolved TO property, grouped by target, even when
+its value is unchanged or it has no timing. It displays the effective owner's
+frames and independently cascaded timing. Select a property to inspect endpoints;
+Play, the playhead, zoom, and snapping use the existing timeline controls.
+Composition source editing remains unavailable until a supported declaration
+write destination can be identified. Closing or ending a preview restores the
+application composition without changing its state-machine history.
