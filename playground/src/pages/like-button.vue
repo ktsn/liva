@@ -85,29 +85,27 @@ motion like(liked: boolean) {
     transition unliked -> liked when liked {
       heart {
         scale ~> {
-          0%: 1
           35%: 1.3
           65%: 0.92
-          100%: 1
         }
       }
 
       sparkLeft {
-        opacity ~> { 0%: 0; 15%: 1; 75%: 0; 100%: 0 }
-        translate ~> { 0%: 0 0; 85%: -22px -22px; 100%: 0 0 }
-        scale ~> { 0%: 0.4; 50%: 1.2; 100%: 0.4 }
+        opacity ~> { 15%: 1; 75%: 0 }
+        translate ~> { 85%: -22px -22px }
+        scale ~> { 50%: 1.2 }
       }
 
       sparkTop {
-        opacity ~> { 0%: 0; 15%: 1; 75%: 0; 100%: 0 }
-        translate ~> { 0%: 0 0; 85%: 0 -28px; 100%: 0 0 }
-        scale ~> { 0%: 0.4; 50%: 1.2; 100%: 0.4 }
+        opacity ~> { 15%: 1; 75%: 0 }
+        translate ~> { 85%: 0 -28px }
+        scale ~> { 50%: 1.2 }
       }
 
       sparkRight {
-        opacity ~> { 0%: 0; 15%: 1; 75%: 0; 100%: 0 }
-        translate ~> { 0%: 0 0; 85%: 22px -22px; 100%: 0 0 }
-        scale ~> { 0%: 0.4; 50%: 1.2; 100%: 0.4 }
+        opacity ~> { 15%: 1; 75%: 0 }
+        translate ~> { 85%: 22px -22px }
+        scale ~> { 50%: 1.2 }
       }
     }
 
