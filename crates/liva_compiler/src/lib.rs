@@ -142,16 +142,6 @@ impl Compiler {
         let text = decorator.expression_text();
         let source = text.as_str();
 
-        if expected == expression::Type::Easing
-            && decorator
-                .text()
-                .strip_prefix('@')
-                .is_some_and(|text| text.starts_with(char::is_whitespace))
-        {
-            self.error("semantic.easing-decorator", "Frame easing requires a typed decorator such as @easeIn or @cubicBezier(x1: 0.2, y1: 0, x2: 0.8, y2: 1)", &decorator);
-            return None;
-        }
-
         let result = expression::parse_with_diagnostics(source).and_then(|parsed| {
             if parsed.check(scope)? != expected {
                 return Err(parsed.error(format!("Decorator requires {:?}", expected)));
@@ -262,7 +252,11 @@ impl Compiler {
             if name.ends_with('%') && path.contains("/property/") {
                 continue;
             }
-            self.error("semantic.timing-decorator", "Animation declarations require a typed timing decorator such as @tween(duration: 200, easing: easeIn)", &declaration);
+            self.error(
+                "semantic.declaration",
+                format!("Unexpected declaration: {name}"),
+                &declaration,
+            );
         }
     }
 
@@ -370,11 +364,6 @@ impl Compiler {
             let name = declaration.header().unwrap_or_default();
             self.unique(&mut seen, &name, &declaration);
 
-            if name.starts_with('@') {
-                self.error("semantic.timing-decorator", "Timing declarations require a typed timing decorator such as @tween(duration: 200, easing: easeIn)", &declaration);
-                continue;
-            }
-
             if allowed.is_some_and(|a| !a.contains(&name.as_str())) {
                 self.error(
                     "semantic.declaration",
@@ -438,10 +427,6 @@ impl Compiler {
                         self.unique(&mut property_names, &name, &property);
                         let property_path = format!("{target_path}/property/{name}");
                         self.mapping(&property_path, &property, "block");
-                        if name.starts_with('@') {
-                            self.error("semantic.timing-decorator", "Timing declarations require a typed timing decorator such as @tween(duration: 200, easing: easeIn)", &property);
-                            continue;
-                        }
                         if !liva_syntax::is_property(&name) {
                             self.error(
                                 "semantic.declaration",
@@ -579,11 +564,6 @@ impl Compiler {
             match item {
                 syn::AnimationProperty::Shorthand(property) => {
                     let name = property.header().unwrap_or_default();
-
-                    if name.starts_with('@') {
-                        self.error("semantic.timing-decorator", "Timing declarations require a typed timing decorator such as @tween(duration: 200, easing: easeIn)", &property);
-                        continue;
-                    }
 
                     if !liva_syntax::is_property(&name) {
                         self.error("semantic.declaration", "Expected a CSS property", &property);

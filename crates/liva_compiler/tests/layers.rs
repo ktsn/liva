@@ -184,7 +184,7 @@ fn layer_style_targets_reject_animation_metadata_and_frame_offsets() {
 
             assert!(result.diagnostics.iter().any(|diagnostic| matches!(
                 diagnostic.code.as_str(),
-                "syntax.expected" | "semantic.declaration" | "semantic.timing-decorator"
+                "syntax.expected" | "semantic.declaration"
             )));
         }
     }

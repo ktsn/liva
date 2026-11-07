@@ -233,7 +233,7 @@ fn misplaced_declarations_have_local_ranges() {
 }
 
 #[test]
-fn removed_timing_declarations_point_to_the_field_name() {
+fn unexpected_animation_declarations_point_to_the_field_name() {
     for field in [
         "@tween",
         "@spring",
@@ -251,8 +251,8 @@ fn removed_timing_declarations_point_to_the_field_name() {
         ] {
             assert_diagnostic(
                 &format!("motion a {{ layer base {{ t {{ x: 1 }} }} {body} }}"),
-                "semantic.timing-decorator",
-                "typed timing decorator",
+                "semantic.declaration",
+                "Unexpected declaration",
             );
         }
     }

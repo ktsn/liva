@@ -39,10 +39,10 @@ fn property_style_timing_is_rejected_at_every_scope() {
 
             assert!(result.definitions.is_empty(), "{source}");
             assert!(
-                result.diagnostics.iter().any(|diagnostic| {
-                    diagnostic.code == "semantic.timing-decorator"
-                        && diagnostic.message.contains("typed timing decorator")
-                }),
+                result
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| { diagnostic.code == "semantic.declaration" }),
                 "{source}: {:?}",
                 result.diagnostics
             );
