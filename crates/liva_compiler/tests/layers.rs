@@ -92,7 +92,7 @@ fn layers_do_not_enable_removed_motion_states() {
             result
                 .diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.code == "semantic.state-migration")
+                .any(|diagnostic| diagnostic.code == "semantic.state-scope")
         );
     }
 }
@@ -184,7 +184,7 @@ fn layer_style_targets_reject_animation_metadata_and_frame_offsets() {
 
             assert!(result.diagnostics.iter().any(|diagnostic| matches!(
                 diagnostic.code.as_str(),
-                "syntax.expected" | "semantic.declaration" | "semantic.timing-migration"
+                "syntax.expected" | "semantic.declaration" | "semantic.timing-decorator"
             )));
         }
     }

@@ -138,20 +138,16 @@ fn definition_names_are_unique_independently_of_parameters() {
 #[test]
 fn motion_states_and_non_lifecycle_transitions_have_actionable_diagnostics() {
     for (declaration, code, replacement) in [
-        ("state first {}", "semantic.state-migration", "layer"),
-        (
-            "state first when true {}",
-            "semantic.state-migration",
-            "layer",
-        ),
+        ("state first {}", "semantic.state-scope", "layer"),
+        ("state first when true {}", "semantic.state-scope", "layer"),
         (
             "transition {}",
-            "semantic.transition-migration",
+            "semantic.transition-scope",
             "stateful layer",
         ),
         (
             "transition first -> second {}",
-            "semantic.transition-migration",
+            "semantic.transition-scope",
             "stateful layer",
         ),
     ] {

@@ -148,7 +148,7 @@ impl Compiler {
                 .strip_prefix('@')
                 .is_some_and(|text| text.starts_with(char::is_whitespace))
         {
-            self.error("semantic.easing-migration", "Frame easing requires a typed decorator such as @easeIn or @cubicBezier(x1: 0.2, y1: 0, x2: 0.8, y2: 1)", &decorator);
+            self.error("semantic.easing-decorator", "Frame easing requires a typed decorator such as @easeIn or @cubicBezier(x1: 0.2, y1: 0, x2: 0.8, y2: 1)", &decorator);
             return None;
         }
 
@@ -262,7 +262,7 @@ impl Compiler {
             if name.ends_with('%') && path.contains("/property/") {
                 continue;
             }
-            self.error("semantic.timing-migration", "Animation declarations require a typed timing decorator such as @tween(duration: 200, easing: easeIn)", &declaration);
+            self.error("semantic.timing-decorator", "Animation declarations require a typed timing decorator such as @tween(duration: 200, easing: easeIn)", &declaration);
         }
     }
 
@@ -371,7 +371,7 @@ impl Compiler {
             self.unique(&mut seen, &name, &declaration);
 
             if name.starts_with('@') {
-                self.error("semantic.timing-migration", "Timing declarations require a typed timing decorator such as @tween(duration: 200, easing: easeIn)", &declaration);
+                self.error("semantic.timing-decorator", "Timing declarations require a typed timing decorator such as @tween(duration: 200, easing: easeIn)", &declaration);
                 continue;
             }
 
@@ -439,7 +439,7 @@ impl Compiler {
                         let property_path = format!("{target_path}/property/{name}");
                         self.mapping(&property_path, &property, "block");
                         if name.starts_with('@') {
-                            self.error("semantic.timing-migration", "Timing declarations require a typed timing decorator such as @tween(duration: 200, easing: easeIn)", &property);
+                            self.error("semantic.timing-decorator", "Timing declarations require a typed timing decorator such as @tween(duration: 200, easing: easeIn)", &property);
                             continue;
                         }
                         if !liva_syntax::is_property(&name) {
@@ -581,7 +581,7 @@ impl Compiler {
                     let name = property.header().unwrap_or_default();
 
                     if name.starts_with('@') {
-                        self.error("semantic.timing-migration", "Timing declarations require a typed timing decorator such as @tween(duration: 200, easing: easeIn)", &property);
+                        self.error("semantic.timing-decorator", "Timing declarations require a typed timing decorator such as @tween(duration: 200, easing: easeIn)", &property);
                         continue;
                     }
 
@@ -1069,7 +1069,7 @@ impl Compiler {
                     });
                 }
                 syn::MotionItem::State(state) => {
-                    self.error("semantic.state-migration", "Declare states inside a stateful layer, or use an ordinary layer for unconditional styles", &state);
+                    self.error("semantic.state-scope", "Declare states inside a stateful layer, or use an ordinary layer for unconditional styles", &state);
                 }
                 syn::MotionItem::Transition(transition) => match transition.selector() {
                     Some(
@@ -1093,7 +1093,7 @@ impl Compiler {
                         }
                     }
                     Some(syn::TransitionSelector::General | syn::TransitionSelector::Directional { .. }) => {
-                        self.error("semantic.transition-migration", "Declare guarded transitions inside a stateful layer", &transition);
+                        self.error("semantic.transition-scope", "Declare guarded transitions inside a stateful layer", &transition);
                     }
                     None => self.error(
                         "semantic.structure",

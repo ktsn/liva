@@ -251,7 +251,7 @@ fn removed_timing_declarations_point_to_the_field_name() {
         ] {
             assert_diagnostic(
                 &format!("motion a {{ layer base {{ t {{ x: 1 }} }} {body} }}"),
-                "semantic.timing-migration",
+                "semantic.timing-decorator",
                 "typed timing decorator",
             );
         }
@@ -301,17 +301,17 @@ fn layer_requirements_and_removed_declarations_have_actionable_ranges() {
         ("«motion a» {}", "semantic.layers", "at least one layer"),
         (
             "motion a { layer base {} state «idle» {} }",
-            "semantic.state-migration",
+            "semantic.state-scope",
             "states inside a stateful layer",
         ),
         (
             "motion a { layer base {} «transition» {} }",
-            "semantic.transition-migration",
+            "semantic.transition-scope",
             "guarded transitions",
         ),
         (
             "motion a { layer base {} «transition idle -> active» {} }",
-            "semantic.transition-migration",
+            "semantic.transition-scope",
             "guarded transitions",
         ),
     ] {
