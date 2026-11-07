@@ -141,7 +141,7 @@ it('opens composition playback, scrubs and restores on close', async () => {
   expect(runtime!.composition.states.toggle).toBe('off')
 })
 
-it('changes speed and loop while playing, retains preferences, and pauses on seek', async () => {
+it('changes speed and loop while playing without editing source', async () => {
   const { controller } = await setupEditor()
 
   await click('Motion editor')
@@ -160,17 +160,31 @@ it('changes speed and loop while playing, retains preferences, and pauses on see
   expect(controller.previewActive).toBe(true)
   expect(button('Play')).toBeDefined()
   expect(controller.draft).toEqual([])
+})
+
+it('retains playback preferences when the editor form remounts', async () => {
+  await setupEditor()
+  await click('Motion editor')
+  await input('Speed', '0.25')
+  await click('↻ Loop')
 
   await click('Close')
   await click('Motion editor')
 
   expect(selectValue('Speed')).toBe('0.25')
   expect(button('↻ Loop').getAttribute('aria-pressed')).toBe('true')
+})
 
+it('scrubbing pauses looping playback without clearing its preference', async () => {
+  await setupEditor()
+  await click('Motion editor')
+  await click('↻ Loop')
   await click('Play')
+
   await input('Playhead', '50')
 
   expect(button('Play')).toBeDefined()
+  expect(button('↻ Loop').getAttribute('aria-pressed')).toBe('true')
 })
 
 it('does not repeat zero-duration previews with loop enabled', async () => {

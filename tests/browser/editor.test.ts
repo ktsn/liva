@@ -218,8 +218,11 @@ test('loop carries elapsed time, preserves speed, and stops after the current pa
   await page.clock.runFor(duration * 2)
   await expect(page.getByLabel('Playback time')).toHaveText(`${duration} / ${duration} ms`)
   await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
+})
 
-  await loop.click({ force: true })
+test('ending loop playback cancels future frames and releases effects', async ({ page }) => {
+  await controlledPlayback(page)
+  await page.getByRole('button', { name: '↻ Loop', exact: true }).click({ force: true })
   await page.getByRole('button', { name: 'Play', exact: true }).click({ force: true })
   await page.getByRole('button', { name: 'End preview', exact: true }).click({ force: true })
   const ended = await playhead(page)
