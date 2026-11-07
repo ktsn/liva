@@ -9,6 +9,11 @@ test.describe.configure({ mode: 'serial' })
 async function openProperty(page: Page) {
   await page.goto(`${base}/toggle`)
   await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
+  const instances = page.getByLabel('Preview instance', { exact: true })
+
+  await instances.selectOption({ label: 'Notifications · toggle' })
+  await expect(instances.locator('option:checked')).toHaveText('Notifications · toggle')
+
   await page.getByRole('button', { name: 'Toggle track tracks' }).click()
   await page.getByLabel('Select track.background-color', { exact: true }).click()
 }
