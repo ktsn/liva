@@ -133,14 +133,36 @@ state. Disabled layers are dimmed, and differing selections are marked on both
 sides. Swap exchanges the entire selections. These controls never edit guards.
 
 The existing-transition shortcut changes only that layer's endpoint states.
-Declaration numbers distinguish transitions with the same state pair. Manual
-changes or Swap clear an incompatible shortcut; no transition is inferred from a
+Transition labels show the layer and state pair. Manual changes or Swap clear an
+incompatible shortcut; no transition is inferred from a
 state pair. Identical compositions are supported, including intermediate motion.
 
 The timeline includes every resolved TO property, grouped by target, even when
 its value is unchanged or it has no timing. It displays the effective owner's
 frames and independently cascaded timing. Select a property to inspect endpoints;
 Play, the playhead, zoom, and snapping use the existing timeline controls.
-Composition source editing remains unavailable until a supported declaration
-write destination can be identified. Closing or ending a preview restores the
+The inspector shows the layer and, when applicable, state or transition of the selected
+value. Selecting an endpoint shows that endpoint's source value; selecting an explicit
+keyframe shows its editing controls. Only the selected declaration is editable in the
+value form. Timing controls identify the layer, state or transition where edits are written.
+External CSS has no source field. Editing a shared declaration affects every composition
+using that declaration.
+
+Value edits preserve source expressions until explicitly replaced. Timing edits write
+`@expression` on the selected transition property, or on the ordinary/style property
+when no effective transition is selected. Removing a local override reveals its
+inherited default. Timing parameters are shown directly; Apply timing replaces the
+expression with those parameters. Unrelated edits retain existing expressions.
+
+Keyframe editing uses the explicitly selected existing transition in the final value
+owner, or an ordinary layer style track. It never chooses a state style track or creates
+a transition implicitly. Converting an ordinary value to a track retains its value as
+the required 100% destination. Offset collisions and invalid destination removal are
+rejected by the compiler. Frame easing uses typed expressions; spring tracks do not
+expose editable per-frame easing.
+
+Edits compile into an isolated candidate for the selected instance. Save checks the
+source hash, writes a backup, and lets HMR update application instances. Source ranges
+are UTF-8 byte offsets relative to the embedded Liva block and belong to the inspected
+hash; a fresh compilation supplies ranges after each edit. Closing or ending a preview restores the
 application composition without changing its state-machine history.

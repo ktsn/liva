@@ -138,6 +138,8 @@ export class EditorController {
     if (!selected || !inspection || !this.active(selected))
       throw new Error('Select a mounted instance')
     if (timelineReadOnly(inspection.definition)) throw new Error(readOnlyMessage)
+    if (inspection.definition.layers?.length)
+      throw new Error('Layer motions use composition previews')
 
     const sequence = ++this.sequence
     const reply = await this.send({
@@ -192,7 +194,7 @@ export class EditorController {
     from: Composition,
     to: Composition,
     transitions: readonly CompositionTransition[] = [],
-  ): Promise<void> {
+  ): Promise<EditorReply | undefined> {
     const selected = this.selected
     const inspection = this.inspection
 
@@ -218,13 +220,15 @@ export class EditorController {
       reply.sequence !== sequence ||
       this.stale
     )
-      return
+      return undefined
 
     this.previewActive = false
     selected.binding.runtime.previewComposition(from, to, transitions, reply.definition)
     this.previewActive = true
     this.message = 'Previewing this instance only. Source is unchanged.'
     this.notify()
+
+    return reply
   }
 
   endPreview() {
@@ -361,6 +365,7 @@ export class EditorController {
   }
 
   report(error: unknown) {
+    console.error('[Liva editor]', error)
     this.message = String(error)
     this.notify()
   }

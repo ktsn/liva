@@ -78,6 +78,7 @@ node!(TypeReference, |n: &SyntaxNode| n.kind()
 node!(Header, |n: &SyntaxNode| n.kind() == Kind::Header);
 node!(Value, |n: &SyntaxNode| n.kind() == Kind::Value);
 node!(Condition, |n: &SyntaxNode| n.kind() == Kind::Condition);
+node!(Decorator, |n: &SyntaxNode| n.kind() == Kind::Decorator);
 node!(Interpolation, |n: &SyntaxNode| n.kind()
     == Kind::Interpolation);
 
@@ -284,6 +285,18 @@ impl Value {
 impl Condition {
     pub fn expression(&self) -> Option<expression::Expr> {
         self.child()
+    }
+}
+
+impl Decorator {
+    pub fn expression_text(&self) -> String {
+        self.text().strip_prefix('@').unwrap_or_default().to_owned()
+    }
+
+    pub fn expression_range(&self) -> crate::Range {
+        let mut range = self.range();
+        range.start += 1;
+        range
     }
 }
 

@@ -15,6 +15,10 @@ describe('editor message validation', () => {
     },
     { op: 'addFrame', path: 'track', offset: 0.5, value: '2', easing: 'linear' },
     { op: 'removeFrame', path: 'frame' },
+    { op: 'timing', path: 'property', value: 'spring(duration: 400)' },
+    { op: 'timing', path: 'property' },
+    { op: 'easing', path: 'frame', value: 'stepStart' },
+    { op: 'easing', path: 'frame' },
     {
       op: 'override',
       definition: 'toggle',
@@ -55,6 +59,8 @@ describe('editor optional fields', () => {
     { op: 'set', value: '1' },
     { op: 'unknown', path: 'field' },
     { op: 'track', path: 'field', timing: 1 },
+    { op: 'timing', path: 'property', value: 1 },
+    { op: 'easing', path: 'frame', value: false },
   ])('rejects invalid edits %j', (edit) => {
     expect(isEditorRequest({ ...request, edits: [edit] })).toBe(false)
   })
@@ -85,5 +91,30 @@ describe('editor optional fields', () => {
       }),
     ).toBe(true)
     expect(isEditorReply({ ...reply, sequence: '1' })).toBe(false)
+  })
+})
+
+describe('inspection source ranges', () => {
+  it('accepts byte ranges associated with the inspection hash', () => {
+    expect(
+      isEditorReply({
+        ...reply,
+        fields: [{ path: 'field', kind: 'value', value: '日本語', range: { start: 3, end: 12 } }],
+      }),
+    ).toBe(true)
+  })
+
+  it.each([
+    null,
+    { start: '0', end: 1 },
+    { start: 0, end: '1' },
+    { start: 0.5, end: 1 },
+    { start: 0, end: Infinity },
+    { start: -1, end: 1 },
+    { start: 2, end: 1 },
+  ])('rejects malformed byte ranges: %j', (range) => {
+    expect(
+      isEditorReply({ ...reply, fields: [{ path: 'field', kind: 'value', value: '1', range }] }),
+    ).toBe(false)
   })
 })

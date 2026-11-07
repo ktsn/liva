@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import type { Frame, Timing } from '@liva/runtime'
 import { timingText, type TimelineTrack } from '../timeline.ts'
+import TimingControls from './TimingControls.ce.vue'
 
 const props = defineProps<{
   track: TimelineTrack
@@ -33,13 +34,6 @@ const implicit = computed(
 const value = ref('')
 const percent = ref(0)
 const easing = ref('')
-const kind = ref<Timing['kind']>('tween')
-const duration = ref(350)
-const bounce = ref(0.25)
-const stiffness = ref(300)
-const damping = ref(20)
-const mass = ref(1)
-const defaultEasing = ref('linear')
 
 watch(
   () => [props.track, props.offset, props.pending],
@@ -47,16 +41,6 @@ watch(
     value.value = selectedFrame.value?.value ?? ''
     percent.value = (props.offset ?? 0.5) * 100
     easing.value = selectedFrame.value?.easing ?? ''
-    const timing = props.track.timing
-    kind.value = timing?.kind ?? 'tween'
-    duration.value = timing && timing.kind !== 'spring-physics' ? timing.durationMs : 350
-    if (timing?.kind === 'tween') defaultEasing.value = timing.easing
-    if (timing?.kind === 'spring-duration') bounce.value = timing.bounce
-    if (timing?.kind === 'spring-physics') {
-      stiffness.value = timing.stiffness
-      damping.value = timing.damping
-      mass.value = timing.mass
-    }
   },
   { immediate: true },
 )
@@ -77,21 +61,6 @@ function applyFrame() {
     ...(easing.value ? { easing: easing.value } : {}),
   })
 }
-
-function applyTiming() {
-  const timing: Timing =
-    kind.value === 'tween'
-      ? { kind: 'tween', durationMs: duration.value, easing: defaultEasing.value }
-      : kind.value === 'spring-duration'
-        ? { kind: 'spring-duration', durationMs: duration.value, bounce: bounce.value }
-        : {
-            kind: 'spring-physics',
-            stiffness: stiffness.value,
-            damping: damping.value,
-            mass: mass.value,
-          }
-  emit('timing', timing)
-}
 </script>
 
 <template>
@@ -101,8 +70,8 @@ function applyTiming() {
     <template v-if="track.readonly">
       <p>{{ track.timingOrigin }}</p>
       <dl>
-        <dt>FROM</dt><dd>{{ track.fromValue || 'External CSS' }}</dd>
-        <dt>TO</dt><dd>{{ track.toValue || 'External CSS' }}</dd>
+        <dt>From</dt><dd>{{ track.fromValue || 'External CSS' }}</dd>
+        <dt>To</dt><dd>{{ track.toValue || 'External CSS' }}</dd>
         <dt>Duration</dt><dd>{{ Math.round(track.duration) }} ms</dd>
         <dt>Timing</dt><dd>{{ track.timing ? timingText(track.timing) : 'None' }}</dd>
       </dl>
@@ -169,35 +138,7 @@ function applyTiming() {
     </template>
     <template v-else>
       <p>{{ track.timingOrigin }} · {{ Math.round(track.duration) }} ms</p>
-      <label>Timing<select v-model="kind" aria-label="Timing mode">
-          <option value="tween">Tween</option>
-          <option value="spring-duration">Duration spring</option>
-          <option value="spring-physics">Physics spring</option>
-        </select></label>
-      <label v-if="kind !== 'spring-physics'">Duration (ms)<input
-          v-model.number="duration"
-          aria-label="Track duration"
-          min="0"
-          type="number"
-        /></label>
-      <label v-if="kind === 'tween'">Default easing<input
-          v-model="defaultEasing"
-          aria-label="Track easing"
-        /></label>
-      <label v-if="kind === 'spring-duration'">Bounce<input
-          v-model.number="bounce"
-          max="0.99"
-          min="0"
-          step="0.01"
-          type="number"
-        /></label>
-      <template v-if="kind === 'spring-physics'">
-        <label>Stiffness<input v-model.number="stiffness" min="0.01" step="1" type="number" /></label>
-        <label>Damping<input v-model.number="damping" min="0.01" step="1" type="number" /></label>
-        <label>Mass<input v-model.number="mass" min="0.01" step="0.1" type="number" /></label>
-        <p>Duration is calculated from the spring parameters.</p>
-      </template>
-      <button @click="applyTiming">Apply timing</button>
+      <TimingControls :timing="track.timing" @apply="emit('timing', $event)" />
       <button
         :disabled="track.timing?.kind !== 'tween' || track.duration === 0"
         @click="emit('add')"

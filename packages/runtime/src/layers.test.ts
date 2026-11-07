@@ -306,7 +306,7 @@ describe('layer animation ownership', () => {
     expect(track.keyframes.map((frame) => frame.value)).toEqual(['.8', '1'])
   })
 
-  it('uses ordinary timing for properties absent from a selected directional track', () => {
+  it('applies selected transition shared timing to properties without directional tracks', () => {
     const source = definition([
       base,
       {
@@ -343,7 +343,7 @@ describe('layer animation ownership', () => {
       durationMs: 50,
     })
     expect(tracks.find((track) => track.property === 'opacity')?.timing).toMatchObject({
-      durationMs: 200,
+      durationMs: 50,
     })
   })
 })
@@ -484,4 +484,107 @@ describe('composition animation ownership', () => {
       expect(next.presentation.targets[0].properties[0].timing).toEqual(timing)
     },
   )
+})
+
+function hierarchicalDefinition(enabled: readonly number[]): Definition {
+  const timingExpression = (index: number): Expression | undefined =>
+    enabled.includes(index)
+      ? {
+          kind: 'call',
+          function: 'tween',
+          arguments: [{ name: 'duration', value: { kind: 'number', value: (index + 1) * 100 } }],
+        }
+      : undefined
+
+  return definition([
+    {
+      name: 'machine',
+      initialState: 'idle',
+      timingExpression: timingExpression(8),
+      targets: [
+        {
+          name: 'body',
+          timingExpression: timingExpression(7),
+          properties: [{ name: 'scale', value: '1', timingExpression: timingExpression(6) }],
+        },
+      ],
+      states: [
+        { name: 'idle', targets: [] },
+        {
+          name: 'active',
+          timingExpression: timingExpression(5),
+          targets: [
+            {
+              name: 'body',
+              timingExpression: timingExpression(4),
+              properties: [{ name: 'scale', value: '2', timingExpression: timingExpression(3) }],
+            },
+          ],
+        },
+      ],
+      transitions: [
+        {
+          from: 'idle',
+          to: 'active',
+          when: { kind: 'boolean', value: true },
+          transition: {
+            timingExpression: timingExpression(2),
+            targets: [
+              {
+                name: 'body',
+                timingExpression: timingExpression(1),
+                properties: [{ name: 'scale', timingExpression: timingExpression(0) }],
+              },
+            ],
+          },
+        },
+      ],
+    },
+  ])
+}
+
+function hierarchicalTracks(source: Definition) {
+  const from = { layers: {}, states: { machine: 'idle' } }
+  const to = { layers: {}, states: { machine: 'active' } }
+  const before = resolveComposition(source, {}, from)
+  const after = resolveComposition(source, {}, to, from, [{ layer: 'machine', index: 0 }])
+
+  return resolveLayerTracks(
+    before,
+    after,
+    {},
+    () => '1',
+    () => {},
+  )
+}
+
+describe('hierarchical timing integration', () => {
+  it.each([
+    ['property', 0, 3],
+    ['target', 1, 5],
+    ['shared', 2, 6],
+  ] as const)('applies transition %s timing over resolved layer timing', (_, higher, lower) => {
+    const [track] = hierarchicalTracks(hierarchicalDefinition([higher, lower]))
+
+    expect(track.timing).toMatchObject({ kind: 'tween', durationMs: (higher + 1) * 100 })
+  })
+
+  it('applies shared timing from a transition without a body', () => {
+    const source = hierarchicalDefinition([2, 3])
+    const changed = {
+      ...source,
+      layers: source.layers?.map((layer) => ({
+        ...layer,
+        transitions: layer.transitions?.map((transition) => ({
+          ...transition,
+          transition: { ...transition.transition, targets: [] },
+        })),
+      })),
+    }
+
+    const [track] = hierarchicalTracks(changed)
+
+    expect(track.timing).toMatchObject({ durationMs: 300 })
+    expect(track.directionalOwner).toBe('machine')
+  })
 })

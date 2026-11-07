@@ -79,10 +79,18 @@ Lifecycle track paths are `<motion>/enter/target/<target>/property/<property>`
 and corresponding `leave` paths. State-specific lifecycle paths are rejected by
 compiler validation. Atomic track edits retain comment-preservation guarantees.
 
-The legacy timeline is read-only for definitions containing layers or typed
-animation expressions. Inspection remains available. Client preview/commit guards
-and server-side guards reject unsupported mutations before source edits or writes.
-The UI shows this restriction instead of rendering an empty, misleading timeline.
+Layer composition editing uses source-mapped value, typed timing, and frame operations.
+The inspector separates effective declaration provenance from the local write destination.
+Runtime playback and editor provenance share `resolveLayerCascade` in
+`packages/runtime/src/layer-cascade.ts` for value ownership and independent timing
+precedence. Playback evaluates each contribution; inspection retains declaration
+references without evaluating expressions. `compositionTransitions` validates
+explicit transition selections, and `transitionPropertySources` resolves their
+timing precedence. The editor converts these resolved sources into mapping paths
+and applies editing restrictions; it does not implement a separate cascade.
+Candidates recompile before preview; failed candidates leave the previous draft intact.
+The legacy timeline remains read-only for typed animation expressions, preventing
+legacy track replacement from discarding typed syntax.
 
 `LivaInstance.previewLifecycle` captures the selected lifecycle with current
 expression values and resolves every mounted target, including repeated targets.

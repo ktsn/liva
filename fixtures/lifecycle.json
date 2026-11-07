@@ -4,51 +4,69 @@
     {
       "name": "panel",
       "parameters": [
-        { "name": "open", "type": "boolean" },
-        { "name": "distance", "type": "number" }
+        {
+          "name": "open",
+          "type": "boolean"
+        },
+        {
+          "name": "distance",
+          "type": "number"
+        }
       ],
       "enter": {
         "targets": [
           {
+            "timingExpression": {
+              "kind": "call",
+              "function": "tween",
+              "arguments": [
+                {
+                  "name": "duration",
+                  "value": {
+                    "kind": "number",
+                    "value": 2000.0
+                  }
+                },
+                {
+                  "name": "easing",
+                  "value": {
+                    "kind": "reference",
+                    "path": ["linear"]
+                  }
+                }
+              ]
+            },
             "name": "content",
             "properties": [
               {
-                "timingExpression": {
-                  "kind": "call",
-                  "function": "tween",
-                  "arguments": [
-                    { "name": "duration", "value": { "kind": "number", "value": 2000.0 } },
-                    { "name": "easing", "value": { "kind": "reference", "path": ["linear"] } }
-                  ]
-                },
                 "name": "opacity",
-                "keyframes": [{ "offset": 0.0, "value": "0" }]
+                "keyframes": [
+                  {
+                    "offset": 0.0,
+                    "value": "0"
+                  }
+                ]
               },
               {
-                "timingExpression": {
-                  "kind": "call",
-                  "function": "tween",
-                  "arguments": [
-                    { "name": "duration", "value": { "kind": "number", "value": 2000.0 } },
-                    { "name": "easing", "value": { "kind": "reference", "path": ["linear"] } }
-                  ]
-                },
                 "name": "scale",
-                "keyframes": [{ "offset": 0.0, "value": "0.8" }]
+                "keyframes": [
+                  {
+                    "offset": 0.0,
+                    "value": "0.8"
+                  }
+                ]
               },
               {
-                "timingExpression": {
-                  "kind": "call",
-                  "function": "tween",
-                  "arguments": [
-                    { "name": "duration", "value": { "kind": "number", "value": 2000.0 } },
-                    { "name": "easing", "value": { "kind": "reference", "path": ["linear"] } }
-                  ]
-                },
                 "name": "translate",
                 "keyframes": [
                   {
-                    "template": [{ "kind": "reference", "path": ["distance"] }, "px 0"],
+                    "template": [
+                      {
+                        "kind": "reference",
+                        "path": ["distance"]
+                      },
+                      "px 0"
+                    ],
                     "offset": 0.0,
                     "value": "${distance}px 0"
                   }
@@ -57,19 +75,36 @@
             ]
           },
           {
+            "timingExpression": {
+              "kind": "call",
+              "function": "tween",
+              "arguments": [
+                {
+                  "name": "duration",
+                  "value": {
+                    "kind": "number",
+                    "value": 2000.0
+                  }
+                },
+                {
+                  "name": "easing",
+                  "value": {
+                    "kind": "reference",
+                    "path": ["linear"]
+                  }
+                }
+              ]
+            },
             "name": "badge",
             "properties": [
               {
-                "timingExpression": {
-                  "kind": "call",
-                  "function": "tween",
-                  "arguments": [
-                    { "name": "duration", "value": { "kind": "number", "value": 2000.0 } },
-                    { "name": "easing", "value": { "kind": "reference", "path": ["linear"] } }
-                  ]
-                },
                 "name": "opacity",
-                "keyframes": [{ "offset": 0.0, "value": "0" }]
+                "keyframes": [
+                  {
+                    "offset": 0.0,
+                    "value": "0"
+                  }
+                ]
               }
             ]
           }
@@ -78,45 +113,57 @@
       "leave": {
         "targets": [
           {
+            "timingExpression": {
+              "kind": "call",
+              "function": "tween",
+              "arguments": [
+                {
+                  "name": "duration",
+                  "value": {
+                    "kind": "number",
+                    "value": 1000.0
+                  }
+                },
+                {
+                  "name": "easing",
+                  "value": {
+                    "kind": "reference",
+                    "path": ["linear"]
+                  }
+                }
+              ]
+            },
             "name": "content",
             "properties": [
               {
-                "timingExpression": {
-                  "kind": "call",
-                  "function": "tween",
-                  "arguments": [
-                    { "name": "duration", "value": { "kind": "number", "value": 1000.0 } },
-                    { "name": "easing", "value": { "kind": "reference", "path": ["linear"] } }
-                  ]
-                },
                 "name": "opacity",
-                "keyframes": [{ "offset": 1.0, "value": "0" }]
+                "keyframes": [
+                  {
+                    "offset": 1.0,
+                    "value": "0"
+                  }
+                ]
               },
               {
-                "timingExpression": {
-                  "kind": "call",
-                  "function": "tween",
-                  "arguments": [
-                    { "name": "duration", "value": { "kind": "number", "value": 1000.0 } },
-                    { "name": "easing", "value": { "kind": "reference", "path": ["linear"] } }
-                  ]
-                },
                 "name": "scale",
-                "keyframes": [{ "offset": 1.0, "value": "1.2" }]
+                "keyframes": [
+                  {
+                    "offset": 1.0,
+                    "value": "1.2"
+                  }
+                ]
               },
               {
-                "timingExpression": {
-                  "kind": "call",
-                  "function": "tween",
-                  "arguments": [
-                    { "name": "duration", "value": { "kind": "number", "value": 1000.0 } },
-                    { "name": "easing", "value": { "kind": "reference", "path": ["linear"] } }
-                  ]
-                },
                 "name": "translate",
                 "keyframes": [
                   {
-                    "template": [{ "kind": "reference", "path": ["distance"] }, "px 0"],
+                    "template": [
+                      {
+                        "kind": "reference",
+                        "path": ["distance"]
+                      },
+                      "px 0"
+                    ],
                     "offset": 1.0,
                     "value": "${distance}px 0"
                   }
@@ -125,19 +172,36 @@
             ]
           },
           {
+            "timingExpression": {
+              "kind": "call",
+              "function": "tween",
+              "arguments": [
+                {
+                  "name": "duration",
+                  "value": {
+                    "kind": "number",
+                    "value": 1000.0
+                  }
+                },
+                {
+                  "name": "easing",
+                  "value": {
+                    "kind": "reference",
+                    "path": ["linear"]
+                  }
+                }
+              ]
+            },
             "name": "badge",
             "properties": [
               {
-                "timingExpression": {
-                  "kind": "call",
-                  "function": "tween",
-                  "arguments": [
-                    { "name": "duration", "value": { "kind": "number", "value": 1000.0 } },
-                    { "name": "easing", "value": { "kind": "reference", "path": ["linear"] } }
-                  ]
-                },
                 "name": "opacity",
-                "keyframes": [{ "offset": 1.0, "value": "0" }]
+                "keyframes": [
+                  {
+                    "offset": 1.0,
+                    "value": "0"
+                  }
+                ]
               }
             ]
           }
@@ -150,24 +214,53 @@
             {
               "name": "content",
               "properties": [
-                { "name": "opacity", "value": "1" },
-                { "name": "scale", "value": "0.9" },
-                { "name": "translate", "value": "0px 0" },
-                { "name": "border-radius", "value": "0px" }
+                {
+                  "name": "opacity",
+                  "value": "1"
+                },
+                {
+                  "name": "scale",
+                  "value": "0.9"
+                },
+                {
+                  "name": "translate",
+                  "value": "0px 0"
+                },
+                {
+                  "name": "border-radius",
+                  "value": "0px"
+                }
               ]
             },
-            { "name": "badge", "properties": [{ "name": "opacity", "value": "1" }] }
+            {
+              "name": "badge",
+              "properties": [
+                {
+                  "name": "opacity",
+                  "value": "1"
+                }
+              ]
+            }
           ]
         },
         {
           "name": "opened",
-          "when": { "kind": "reference", "path": ["open"] },
+          "when": {
+            "kind": "reference",
+            "path": ["open"]
+          },
           "targets": [
             {
               "name": "content",
               "properties": [
-                { "name": "scale", "value": "1" },
-                { "name": "border-radius", "value": "20px" }
+                {
+                  "name": "scale",
+                  "value": "1"
+                },
+                {
+                  "name": "border-radius",
+                  "value": "20px"
+                }
               ]
             }
           ]

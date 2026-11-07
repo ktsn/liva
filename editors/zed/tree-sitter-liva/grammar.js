@@ -32,6 +32,7 @@ module.exports = grammar({
         'state',
         field('name', $.identifier),
         optional('initial'),
+        optional($.decorator),
         optional(seq('when', repeat1($._header_item))),
         $.block,
       ),
@@ -39,6 +40,7 @@ module.exports = grammar({
       seq(
         'layer',
         field('name', $.identifier),
+        optional($.decorator),
         optional(seq('when', repeat1($._header_item))),
         $.block,
       ),
@@ -47,6 +49,7 @@ module.exports = grammar({
         seq(
           'transition',
           optional(seq($.identifier, '->', $.identifier)),
+          optional($.decorator),
           optional(seq('when', repeat1($._header_item))),
           optional($.block),
         ),
@@ -61,7 +64,7 @@ module.exports = grammar({
     parenthesized: ($) => seq('(', repeat($._item), ')'),
     bracketed: ($) => seq('[', repeat($._item), ']'),
     interpolation: ($) => seq('${', repeat($._item), '}'),
-    decorator: ($) => seq($.animation, optional($.parenthesized)),
+    decorator: ($) => prec.right(seq($.animation, optional($.parenthesized))),
     keyword: () => choice('let', 'event', 'when', 'enter', 'leave'),
     type: () => choice('number', 'boolean', 'string', 'timing', 'easing'),
     boolean: () => choice('true', 'false'),

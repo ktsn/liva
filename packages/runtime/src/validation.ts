@@ -66,6 +66,7 @@ function isTransitionTarget(value: unknown): value is Target<PropertyTransition>
   return (
     isRecord(value) &&
     typeof value.name === 'string' &&
+    (value.timingExpression === undefined || isExpression(value.timingExpression)) &&
     isArrayOf(value.properties, isPropertyTransition)
   )
 }
@@ -73,6 +74,7 @@ function isTransitionTarget(value: unknown): value is Target<PropertyTransition>
 function isTransition(value: unknown): value is Transition {
   return (
     isRecord(value) &&
+    (value.timingExpression === undefined || isExpression(value.timingExpression)) &&
     (value.timing === undefined || isTiming(value.timing)) &&
     isArrayOf(value.targets, isTransitionTarget)
   )
@@ -147,12 +149,14 @@ function isState(value: unknown): value is State {
   return (
     isRecord(value) &&
     typeof value.name === 'string' &&
+    (value.timingExpression === undefined || isExpression(value.timingExpression)) &&
     (value.when === undefined || isExpression(value.when)) &&
     Array.isArray(value.targets) &&
     value.targets.every(
       (target: unknown) =>
         isRecord(target) &&
         typeof target.name === 'string' &&
+        (target.timingExpression === undefined || isExpression(target.timingExpression)) &&
         Array.isArray(target.properties) &&
         target.properties.every(
           (property: unknown) =>

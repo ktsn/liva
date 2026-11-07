@@ -1,3 +1,9 @@
+import {
+  compositionLayerSelection,
+  resolveLayerCascade,
+  transitionPropertySources,
+  type LayerSelection,
+} from './layer-cascade.ts'
 import { timingValue } from './timing-values.ts'
 import { normalizeFrames, type ResolvedTrack } from './resolve.ts'
 import type { Definition, GuardedTransition, Property, State, Target } from './definition.ts'
@@ -58,67 +64,67 @@ function resolveLayerSelection(
   const activeLayers: Record<string, boolean> = Object.create(null)
   const states = new Map<string, string>()
   const transitions = new Map<string, GuardedTransition>()
-  const targets = new Map<string, Map<string, LayerProperty>>()
-  const timings = new Map<string, Map<string, NonNullable<Property['timing']>>>()
 
-  const contribute = (layerName: string, contribution: readonly Target<Property>[]) => {
-    for (const target of contribution) {
-      let properties = targets.get(target.name)
+  function* selectLayers(): Generator<LayerSelection> {
+    if (selection) {
+      Object.assign(activeLayers, selection.layers)
 
-      if (!properties) {
-        properties = new Map()
-        targets.set(target.name, properties)
-        timings.set(target.name, new Map())
+      for (const selected of compositionLayerSelection(definition, selection)) {
+        if (selected.state) states.set(selected.layer.name, selected.state.name)
+
+        yield selected
       }
 
-      for (const property of target.properties) {
-        const timing = property.timingExpression
-          ? timingValue(evaluate(property.timingExpression, values))
-          : property.timing
+      return
+    }
 
-        // Timing and property maps are initialized together for each target.
-        if (timing) timings.get(target.name)!.set(property.name, timing)
+    for (const layer of definition.layers ?? []) {
+      const active = !layer.when || evaluate(layer.when, values) === true
 
-        properties.set(property.name, {
-          ...property,
-          owner: layerName,
-          value: renderValue(property, values),
-          keyframes: property.keyframes?.map((frame) => renderFrame(frame, values)),
-        })
+      if (!layer.states?.length) activeLayers[layer.name] = active
+
+      if (!active) continue
+
+      if (!layer.states?.length) {
+        yield { layer }
+
+        continue
       }
+
+      const current = previous.get(layer.name) ?? layer.initialState
+      const selected = advance
+        ? layer.transitions?.findLast(
+            (transition) =>
+              transition.from === current && evaluate(transition.when, values) === true,
+          )
+        : undefined
+      const next = selected?.to ?? current
+      const state = layer.states.find((candidate) => candidate.name === next)
+
+      if (!state) throw new Error(`Unknown current state in layer ${layer.name}: ${next}`)
+
+      states.set(layer.name, state.name)
+
+      if (selected) transitions.set(layer.name, selected)
+
+      yield { layer, state }
     }
   }
 
-  for (const layer of definition.layers ?? []) {
-    const active = selection
-      ? Boolean(layer.states?.length) || selection.layers[layer.name]
-      : !layer.when || evaluate(layer.when, values) === true
-
-    if (!layer.states?.length) activeLayers[layer.name] = active
-
-    if (!active) continue
-
-    contribute(layer.name, layer.targets)
-
-    if (!layer.states?.length) continue
-
-    const current = previous.get(layer.name) ?? layer.initialState
-    const selected = advance
-      ? layer.transitions?.findLast(
-          (transition) => transition.from === current && evaluate(transition.when, values) === true,
-        )
-      : undefined
-    const next = selected?.to ?? current
-    const state = layer.states.find((candidate) => candidate.name === next)
-
-    if (!state) throw new Error(`Unknown current state in layer ${layer.name}: ${next}`)
-
-    states.set(layer.name, state.name)
-
-    if (selected) transitions.set(layer.name, selected)
-
-    contribute(layer.name, state.targets)
-  }
+  const targets = resolveLayerCascade(
+    selectLayers(),
+    ({ layer, property }) => ({
+      ...property,
+      owner: layer.name,
+      value: renderValue(property, values),
+      keyframes: property.keyframes?.map((frame) => renderFrame(frame, values)),
+    }),
+    // The cascade invokes mapTiming only for a declaration with a timing expression or value.
+    ({ declaration }) =>
+      declaration.timingExpression
+        ? timingValue(evaluate(declaration.timingExpression, values))
+        : declaration.timing!,
+  )
 
   return {
     composition: { layers: activeLayers, states: Object.fromEntries(states) },
@@ -126,11 +132,11 @@ function resolveLayerSelection(
     transitions,
     presentation: {
       name: '@layers',
-      targets: [...targets].map(([name, properties]) => ({
-        name,
-        properties: [...properties.values()].map((property) => ({
-          ...property,
-          timing: timings.get(name)?.get(property.name),
+      targets: targets.map((target) => ({
+        name: target.name,
+        properties: target.properties.map((property) => ({
+          ...property.value,
+          timing: property.timing,
         })),
       })),
     },
@@ -155,6 +161,16 @@ export function resolveComposition(
     false,
     composition,
   )
+
+  return { ...result, transitions: compositionTransitions(definition, composition, from, selected) }
+}
+
+export function compositionTransitions(
+  definition: Definition,
+  composition: Composition,
+  from: Composition | undefined,
+  selected: readonly CompositionTransition[],
+): ReadonlyMap<string, GuardedTransition> {
   const transitions = new Map<string, GuardedTransition>()
 
   for (const identity of selected) {
@@ -176,7 +192,7 @@ export function resolveComposition(
     transitions.set(identity.layer, transition)
   }
 
-  return { ...result, transitions }
+  return transitions
 }
 
 function validateComposition(definition: Definition, composition: Composition): void {
@@ -233,22 +249,41 @@ export function resolveLayerTracks(
     for (const property of target.properties) {
       const owner = property.owner
       const transition = next.transitions.get(owner)?.transition
-      const instruction = transition?.targets
-        .find((item) => item.name === target.name)
-        ?.properties.find((item) => item.name === property.name)
+      const { target: transitionTarget, property: instruction } = transitionPropertySources(
+        transition,
+        target.name,
+        property.name,
+      )
       if (
         !layerPropertyChanged(previous, target.name, property) &&
         !instruction &&
+        !transition?.timingExpression &&
+        !transition?.timing &&
+        !transitionTarget?.timingExpression &&
+        !transitionTarget?.timing &&
         !retarget(target.name, property.name)
       )
         continue
 
-      const override = instruction
-        ? renderTransition({ targets: [{ name: target.name, properties: [instruction] }] }, values)
-            .targets[0].properties[0]
+      const rendered = transition
+        ? renderTransition(
+            {
+              ...transition,
+              targets: [
+                {
+                  ...transitionTarget,
+                  name: target.name,
+                  properties: [instruction ?? { name: property.name }],
+                },
+              ],
+            },
+            values,
+          )
         : undefined
+      const override = rendered?.targets[0].properties[0]
       const timing =
-        override?.timing ?? (instruction ? transition?.timing : undefined) ?? property.timing
+        transitionPropertySources(rendered, target.name, property.name).timing?.timing ??
+        property.timing
 
       if (!timing) continue
 
@@ -267,7 +302,8 @@ export function resolveLayerTracks(
         timing,
         destinationValue: property.value,
         implicitStart: !explicit?.some((frame) => frame.offset === 0),
-        directionalOwner: instruction ? owner : undefined,
+        directionalOwner:
+          instruction || rendered?.timing || rendered?.targets[0].timing ? owner : undefined,
         ownerState: next.states.get(owner),
         keyframes: normalizeFrames(
           displayed(target.name, property.name),

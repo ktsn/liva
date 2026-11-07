@@ -152,11 +152,30 @@ impl Parser<'_> {
 
             while !self.at().is_empty()
                 && !matches!(self.at(), "{" | "}" | ";")
-                && !(nesting_depth == 0 && matches!(self.at(), ":" | "\n" | "\r"))
+                && !(nesting_depth == 0 && self.at() == ":")
             {
-                if depth >= 2 && header_words > 0 && nesting_depth == 0 && self.at() == "@" {
-                    self.decorator();
+                if nesting_depth == 0 && matches!(self.at(), "\n" | "\r") {
+                    let continuation = self.tokens[self.index..].iter().find(|token| !token.trivia);
+
+                    if depth >= 1
+                        && matches!(
+                            self.tokens[begin].text,
+                            "layer" | "state" | "transition" | "enter" | "leave"
+                        )
+                        && continuation.is_some_and(|token| {
+                            matches!(token.text, "@" | "when" | "initial" | "{")
+                        })
+                    {
+                        self.gap();
+                        continue;
+                    }
+
                     break;
+                }
+
+                if header_words > 0 && nesting_depth == 0 && self.at() == "@" {
+                    self.decorator(true);
+                    continue;
                 }
 
                 if depth == 2
@@ -317,7 +336,7 @@ impl Parser<'_> {
         self.end();
     }
 
-    fn decorator(&mut self) {
+    fn decorator(&mut self, header: bool) {
         self.start(Kind::Decorator);
         self.bump();
         let mut depth = 0usize;
@@ -325,6 +344,7 @@ impl Parser<'_> {
         while !self.at().is_empty() {
             if matches!(self.at(), "{" | "}")
                 || (depth == 0 && matches!(self.at(), ";" | "\n" | "\r"))
+                || (header && depth == 0 && matches!(self.at(), "when" | "initial" | "@"))
             {
                 break;
             }
@@ -346,7 +366,7 @@ impl Parser<'_> {
 
         while !self.at().is_empty() {
             if stack.is_empty() && self.at() == "@" {
-                self.decorator();
+                self.decorator(false);
                 break;
             }
 

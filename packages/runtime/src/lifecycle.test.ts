@@ -185,3 +185,43 @@ it('uses an empty presentation fallback and validates missing lifecycle timing',
   expect(resolved[0].keyframes[0].value).toBe(state.targets[0].properties[0].value)
   expect(resolveLifecycleTracks('enter', undefined, state, () => '')).toEqual([])
 })
+
+const duration = (name: string): import('./definition.ts').Expression => ({
+  kind: 'call',
+  function: 'tween',
+  arguments: [{ name: 'duration', value: { kind: 'reference', path: [name] } }],
+})
+
+it.each(['enter', 'leave'] as const)(
+  'snapshots shared, target, and property timing for %s',
+  (phase) => {
+    const transition: Transition = {
+      timingExpression: duration('shared'),
+      targets: [
+        { name: 'shared', properties: [{ name: 'opacity' }] },
+        {
+          name: 'local',
+          timingExpression: duration('target'),
+          properties: [
+            { name: 'opacity' },
+            { name: 'scale', timingExpression: duration('property') },
+          ],
+        },
+      ],
+    }
+    const values = { shared: 100, target: 200, property: 300 }
+    const source = { ...definition, [phase]: transition }
+    const captured = captureLifecycleDefinition(source, phase, values)
+
+    values.shared = 400
+    values.target = 500
+    values.property = 600
+    const tracks = resolveLifecycleTracks(phase, captured, state, () => '1')
+
+    expect(tracks.map((track) => track.timing)).toEqual([
+      { kind: 'tween', durationMs: 100, easing: 'ease' },
+      { kind: 'tween', durationMs: 200, easing: 'ease' },
+      { kind: 'tween', durationMs: 300, easing: 'ease' },
+    ])
+  },
+)

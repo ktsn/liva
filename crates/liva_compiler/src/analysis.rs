@@ -92,10 +92,9 @@ pub fn hovers(source: &str) -> Vec<Hover> {
         for decorator in motion
             .syntax()
             .descendants()
-            .filter(|node| node.kind() == liva_syntax::Kind::Decorator)
+            .filter_map(liva_syntax::ast::Decorator::cast)
         {
-            let text = decorator.text().to_string();
-            let value = liva_syntax::parse_expression(&text[1..]);
+            let value = liva_syntax::parse_expression(&decorator.expression_text());
             let mut local = vec![];
 
             expression_hovers(&value.root, &scope, &mut local);
@@ -218,17 +217,29 @@ fn expression_hovers(node: &impl AstNode, scope: &expression::Scope, result: &mu
                 };
                 result.push(Hover {
                     range: name.range(),
-                    label: format!(
-                        "{}({}): {}",
-                        function.name,
-                        function
-                            .parameters
-                            .iter()
-                            .map(|p| format!("{}: {}", p.name, type_name(p.value_type)))
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        type_name(function.return_type)
-                    ),
+                    label: function
+                        .signatures
+                        .iter()
+                        .map(|signature| {
+                            format!(
+                                "{}({}): {}",
+                                function.name,
+                                signature
+                                    .parameters
+                                    .iter()
+                                    .map(|p| format!(
+                                        "{}{}: {}",
+                                        p.name,
+                                        if p.optional { "?" } else { "" },
+                                        type_name(p.value_type)
+                                    ))
+                                    .collect::<Vec<_>>()
+                                    .join(", "),
+                                type_name(signature.return_type)
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"),
                 });
             }
             _ => {}

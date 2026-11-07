@@ -95,12 +95,12 @@ test('composition selectors preview independently and restore application presen
   const button = page.getByRole('switch', { name: 'Notifications', exact: true })
   await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
 
-  await expect(page.getByLabel('FROM selection state')).toHaveValue('off')
-  await expect(page.getByLabel('TO selection state')).toHaveValue('off')
+  await expect(page.getByLabel('From selection state')).toHaveValue('off')
+  await expect(page.getByLabel('To selection state')).toHaveValue('off')
   await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeEnabled()
   await expect(page.getByRole('button', { name: 'Save to source' })).toBeDisabled()
 
-  await page.getByLabel('TO selection state').selectOption('on')
+  await page.getByLabel('To selection state').selectOption('on')
   await page.getByRole('button', { name: 'Play', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
 

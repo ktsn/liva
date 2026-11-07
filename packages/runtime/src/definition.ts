@@ -58,11 +58,15 @@ export interface Property {
 }
 
 export interface Target<T> {
+  readonly timingExpression?: Expression
+  readonly timing?: Timing
   readonly name: string
   readonly properties: readonly T[]
 }
 
 export interface State {
+  readonly timingExpression?: Expression
+  readonly timing?: Timing
   readonly when?: Expression
   readonly name: string
   readonly targets: readonly Target<Property>[]
@@ -76,6 +80,8 @@ export interface GuardedTransition {
 }
 
 export interface Layer {
+  readonly timingExpression?: Expression
+  readonly timing?: Timing
   readonly name: string
   readonly when?: Expression
   readonly targets: readonly Target<Property>[]
@@ -92,6 +98,7 @@ export interface PropertyTransition {
 }
 
 export interface Transition {
+  readonly timingExpression?: Expression
   readonly timing?: Timing
   readonly targets: readonly Target<PropertyTransition>[]
 }

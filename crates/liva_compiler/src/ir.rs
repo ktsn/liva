@@ -32,6 +32,8 @@ pub struct Event {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Layer {
+    #[serde(rename = "timingExpression", skip_serializing_if = "Option::is_none")]
+    pub timing_expression: Option<Expression>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transitions: Vec<GuardedTransition>,
     pub name: String,
@@ -54,6 +56,8 @@ pub struct GuardedTransition {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct State {
+    #[serde(rename = "timingExpression", skip_serializing_if = "Option::is_none")]
+    pub timing_expression: Option<Expression>,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub when: Option<Expression>,
@@ -62,6 +66,8 @@ pub struct State {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Target<T> {
+    #[serde(rename = "timingExpression", skip_serializing_if = "Option::is_none")]
+    pub timing_expression: Option<Expression>,
     pub name: String,
     pub properties: Vec<T>,
 }
@@ -80,6 +86,8 @@ pub struct Property {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Transition {
+    #[serde(rename = "timingExpression", skip_serializing_if = "Option::is_none")]
+    pub timing_expression: Option<Expression>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timing: Option<Timing>,
     pub targets: Vec<Target<PropertyTransition>>,

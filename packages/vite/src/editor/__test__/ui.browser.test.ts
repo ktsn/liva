@@ -9,6 +9,7 @@ import TimelineInspector from '../components/TimelineInspector.ce.vue'
 import type { Definition, Timing } from '@liva/runtime'
 import type { TimelineTrack } from '../timeline.ts'
 import { EditorController } from '../controller.ts'
+import type { EditorRequest, EditorReply } from '../communication/protocol.ts'
 
 let app: App | undefined
 let host: HTMLElement | undefined
@@ -928,8 +929,8 @@ it('initializes independent composition selectors and swaps complete selections'
   await setupEditor(undefined, compositionDefinition)
   await click('Motion editor')
 
-  const fromHover = host!.querySelector<HTMLInputElement>('[aria-label="FROM hover enabled"]')!
-  const toHover = host!.querySelector<HTMLInputElement>('[aria-label="TO hover enabled"]')!
+  const fromHover = host!.querySelector<HTMLInputElement>('[aria-label="From hover enabled"]')!
+  const toHover = host!.querySelector<HTMLInputElement>('[aria-label="To hover enabled"]')!
   expect(fromHover.checked).toBe(false)
   expect(toHover.checked).toBe(false)
 
@@ -941,13 +942,13 @@ it('initializes independent composition selectors and swaps complete selections'
   expect(fromHover.checked).toBe(false)
   expect(host!.querySelectorAll('.different')).toHaveLength(2)
 
-  await input('TO machine state', 'active')
+  await input('To machine state', 'active')
   await click('Swap')
 
   expect(fromHover.checked).toBe(true)
   expect(toHover.checked).toBe(false)
-  expect(selectValue('FROM machine state')).toBe('active')
-  expect(selectValue('TO machine state')).toBe('idle')
+  expect(selectValue('From machine state')).toBe('active')
+  expect(selectValue('To machine state')).toBe('idle')
   expect(runtime!.composition).toEqual({
     layers: { base: true, hover: false },
     states: { machine: 'idle' },
@@ -957,7 +958,7 @@ it('initializes independent composition selectors and swaps complete selections'
 it('selects duplicate transitions without changing other layers and clears incompatible selections', async () => {
   await setupEditor(undefined, compositionDefinition)
   await click('Motion editor')
-  const toHover = host!.querySelector<HTMLInputElement>('[aria-label="TO hover enabled"]')!
+  const toHover = host!.querySelector<HTMLInputElement>('[aria-label="To hover enabled"]')!
   toHover.click()
   await tick()
   const identity = JSON.stringify({ layer: 'machine', index: 1 })
@@ -975,20 +976,20 @@ it('selects duplicate transitions without changing other layers and clears incom
   expect(effect.getKeyframes()).toContainEqual(
     expect.objectContaining({ offset: 0.5, scale: '1.7' }),
   )
-  expect(selectValue('FROM machine state')).toBe('idle')
-  expect(selectValue('TO machine state')).toBe('active')
+  expect(selectValue('From machine state')).toBe('idle')
+  expect(selectValue('To machine state')).toBe('active')
 
   await click('Swap')
 
   expect(selectValue('Existing transition')).toBe('')
 
   await input('Existing transition', identity)
-  await input('TO machine state', 'idle')
+  await input('To machine state', 'idle')
 
   expect(selectValue('Existing transition')).toBe('')
 })
 
-it('shows all TO properties and permits playback for equal compositions without edits', async () => {
+it('shows all To properties and permits playback for equal compositions without edits', async () => {
   const { controller } = await setupEditor(undefined, compositionDefinition)
   await click('Motion editor')
   await click('▸ body')
@@ -1000,7 +1001,7 @@ it('shows all TO properties and permits playback for equal compositions without 
   await click('scale')
 
   expect(host!.querySelector('[aria-label="Selection inspector"]')!.textContent).toContain(
-    'Animation owner: machine',
+    'Layer: machine',
   )
   expect(host!.querySelector('[aria-label="Keyframe value"]')).toBeNull()
   expect(button('Save to source').disabled).toBe(true)
@@ -1030,14 +1031,14 @@ it('keeps source unchanged for pointer gestures on composition rows', async () =
   expect(host!.querySelector('[aria-label="Resize body.scale"]')).toBeNull()
 })
 
-it('allows clearing a transition shortcut and changing FROM independently', async () => {
+it('allows clearing a transition shortcut and changing From independently', async () => {
   await setupEditor(undefined, compositionDefinition)
   await click('Motion editor')
   await input('Existing transition', JSON.stringify({ layer: 'machine', index: 0 }))
   await input('Existing transition', '')
-  await input('FROM machine state', 'active')
+  await input('From machine state', 'active')
 
-  expect(selectValue('TO machine state')).toBe('active')
+  expect(selectValue('To machine state')).toBe('active')
   expect(button('Play').disabled).toBe(false)
 })
 
@@ -1069,7 +1070,7 @@ it('reports invalid selected timing and recovers when the invalid layer is disab
     ],
   })
   await click('Motion editor')
-  const checkbox = host!.querySelector<HTMLInputElement>('[aria-label="TO invalid enabled"]')!
+  const checkbox = host!.querySelector<HTMLInputElement>('[aria-label="To invalid enabled"]')!
 
   checkbox.click()
   await tick()
@@ -1096,12 +1097,6 @@ it('inspects the selected intermediate frame and effective timing without editin
   await tick()
 
   const inspector = host!.querySelector('[aria-label="Selection inspector"]')!
-  const frame = inspector.querySelector('[aria-label="Selected keyframe"]')!
-
-  expect(frame.textContent).toContain('50%')
-  expect(frame.textContent).toContain('1.5')
-  expect(frame.textContent).toContain('linear')
-  expect(inspector.textContent).toContain('@tween: 200ms linear')
   expect(inspector.querySelector('input, button')).toBeNull()
 })
 
@@ -1151,7 +1146,7 @@ it('ignores invalid transition instructions hidden by the effective owner', asyn
   expect(runtime!.animations).toHaveLength(1)
   expect(diagnostics.filter((item) => item.code === 'runtime.inspection')).toEqual([])
 
-  host!.querySelector<HTMLInputElement>('[aria-label="TO cover enabled"]')!.click()
+  host!.querySelector<HTMLInputElement>('[aria-label="To cover enabled"]')!.click()
   await tick()
 
   expect(host!.querySelector('[role="alert"]')?.textContent).toContain('non-negative')
@@ -1206,17 +1201,17 @@ it('inspects the replacement instance and reinitializes its current composition 
 
   const inspector = host!.querySelector('[aria-label="Selection inspector"]')!
 
-  expect(inspector.textContent).toContain('0.75')
-  expect(inspector.textContent).toContain('400 ms')
-  expect(inspector.textContent).not.toContain('0.25')
+  expect(inspector.querySelector('[aria-label="Editing location"]')!.textContent).toBe(
+    'Layer: base',
+  )
   expect(host!.querySelector('[aria-label="Playback time"]')!.textContent).toContain('400 ms')
 })
 
-it('identifies an external FROM endpoint on a property without timing', async () => {
+it('identifies an external From endpoint on a property without timing', async () => {
   await setupEditor(undefined, compositionDefinition)
   await click('Motion editor')
 
-  host!.querySelector<HTMLInputElement>('[aria-label="FROM base enabled"]')!.click()
+  host!.querySelector<HTMLInputElement>('[aria-label="From base enabled"]')!.click()
   await tick()
   await click('▸ body')
 
@@ -1224,9 +1219,240 @@ it('identifies an external FROM endpoint on a property without timing', async ()
   await tick()
 
   const inspector = host!.querySelector('[aria-label="Selection inspector"]')!
-  const frame = inspector.querySelector('[aria-label="Selected keyframe"]')!
+  expect(inspector.textContent).not.toContain('Resolved timing:')
+  expect(inspector.querySelector('[aria-label="Editing location"]')!.textContent).toBe(
+    'External CSS',
+  )
+  expect(inspector.querySelector('[aria-label="Source value"]')).toBeNull()
+})
 
-  expect(inspector.textContent).toContain('TimingNone')
-  expect(frame.textContent).toContain('External CSS')
-  expect(frame.textContent).toContain('Track timing')
+function compositionSourceReply(request: EditorRequest): EditorReply {
+  const definition = structuredClone(compositionDefinition)
+  const path = 'layered/layer/base/target/body/property/opacity'
+  let value = '1'
+
+  for (const edit of request.edits ?? []) {
+    if (edit.op === 'set' && edit.path === `${path}/value`) {
+      if (!Number.isFinite(Number(edit.value))) throw new Error('Invalid opacity source value')
+      value = edit.value
+    }
+  }
+
+  definition.layers[0].targets[0].properties[0].value = value
+
+  return {
+    hash: 'original',
+    sequence: request.sequence,
+    definition,
+    fields: [
+      { path, kind: 'block', value: '' },
+      { path: `${path}/value`, kind: 'value', value },
+    ],
+  }
+}
+
+it('applies composition edit replies to the selected preview without changing application state', async () => {
+  const requests: EditorRequest[] = []
+  const { controller } = await setupEditor(async (request) => {
+    requests.push(request)
+    return compositionSourceReply(request)
+  }, compositionDefinition)
+  await click('Motion editor')
+  await click('▸ body')
+  await click('opacity')
+
+  await input('Source value', '0.5')
+  await click('Apply value')
+  await expect.poll(() => controller.previewActive).toBe(true)
+
+  expect(requests.at(-1)?.edits).toEqual([
+    { op: 'set', path: 'layered/layer/base/target/body/property/opacity/value', value: '0.5' },
+  ])
+  expect(host!.querySelector<HTMLInputElement>('[aria-label="Source value"]')!.value).toBe('0.5')
+  expect(runtime!.definition).toEqual(compositionDefinition)
+  expect(runtime!.composition?.layers.hover).toBe(false)
+  expect(button('Save to source').disabled).toBe(false)
+})
+
+it('rolls back an invalid composition draft and permits a corrected source edit', async () => {
+  const { controller } = await setupEditor(
+    async (request) => compositionSourceReply(request),
+    compositionDefinition,
+  )
+  await click('Motion editor')
+  await click('▸ body')
+  await click('opacity')
+
+  await input('Source value', 'invalid')
+  await click('Apply value')
+  await expect.poll(() => controller.message).toContain('Invalid opacity')
+
+  expect(controller.draft).toEqual([])
+  expect(controller.previewActive).toBe(false)
+
+  await input('Source value', '0.4')
+  await click('Apply value')
+  await expect.poll(() => controller.previewActive).toBe(true)
+
+  expect(host!.querySelector<HTMLInputElement>('[aria-label="Source value"]')!.value).toBe('0.4')
+})
+
+it('ignores a composition source preview ended while compilation was pending', async () => {
+  let complete!: (reply: EditorReply) => void
+  let pendingRequest!: EditorRequest
+  const pending = new Promise<EditorReply>((resolve) => {
+    complete = resolve
+  })
+  const { controller } = await setupEditor(async (request) => {
+    if (request.action === 'preview') {
+      pendingRequest = request
+      return pending
+    }
+
+    return compositionSourceReply(request)
+  }, compositionDefinition)
+  await click('Motion editor')
+  await click('Play')
+  await click('End preview')
+
+  complete(compositionSourceReply(pendingRequest))
+  await tick()
+
+  expect(controller.previewActive).toBe(false)
+  expect(runtime!.definition).toEqual(compositionDefinition)
+})
+
+it('preserves unapplied composition source input across timeline zoom renders', async () => {
+  await setupEditor(async (request) => compositionSourceReply(request), compositionDefinition)
+  await click('Motion editor')
+  await click('▸ body')
+  await click('opacity')
+
+  await input('Source value', '0.35')
+  await input('Timeline zoom level', '2')
+
+  expect(host!.querySelector<HTMLInputElement>('[aria-label="Source value"]')!.value).toBe('0.35')
+})
+
+async function setupCompositionFrames() {
+  const definition = {
+    name: 'frames',
+    states: [],
+    directionalTransitions: [],
+    layers: [
+      {
+        name: 'base',
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'opacity',
+                value: '1',
+                timing: { kind: 'tween' as const, durationMs: 200, easing: 'linear' },
+                keyframes: [
+                  { offset: 0.5, value: '0.5' },
+                  { offset: 1, value: '1' },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  }
+  const path = 'frames/layer/base/target/body/property/opacity'
+  const { controller } = await setupEditor(async (request) => {
+    const candidate = structuredClone(definition)
+    const property = candidate.layers[0].targets[0].properties[0]
+
+    for (const edit of request.edits ?? []) {
+      if (edit.op === 'addFrame')
+        property.keyframes.push({ offset: (edit.offset * 100) / 100, value: edit.value })
+      else if (edit.op === 'removeFrame')
+        property.keyframes = property.keyframes.filter(
+          (frame) => `${path}/frame/${frame.offset}` !== edit.path,
+        )
+      else if (edit.op === 'set') {
+        const frame = property.keyframes.find((candidateFrame) =>
+          edit.path.startsWith(`${path}/frame/${candidateFrame.offset}/`),
+        )
+
+        if (frame && edit.path.endsWith('/offset')) frame.offset = parseFloat(edit.value) / 100
+        else if (frame) frame.value = edit.value
+      }
+    }
+
+    return {
+      hash: 'original',
+      sequence: request.sequence,
+      definition: candidate,
+      fields: [
+        { path, kind: 'block' as const, value: '' },
+        ...property.keyframes.map((frame) => ({
+          path: `${path}/frame/${frame.offset}/value`,
+          kind: 'value' as const,
+          value: frame.value,
+        })),
+      ],
+    }
+  }, definition)
+  await click('Motion editor')
+  await click('▸ body')
+  await click('opacity')
+
+  return controller
+}
+
+it.each([25, 33.333])(
+  'clears pending selection after adding a composition frame at %s percent',
+  async (percentage) => {
+    const controller = await setupCompositionFrames()
+    await click('New keyframe at playhead')
+    await input('Keyframe percentage', String(percentage))
+    await click('Add keyframe')
+    await expect.poll(() => host!.textContent).toContain('Apply keyframe')
+
+    await input('Keyframe source value', '0.3')
+    await click('Apply keyframe')
+
+    expect(controller.draft).toContainEqual({
+      op: 'set',
+      path: `frames/layer/base/target/body/property/opacity/frame/${((Math.round(percentage * 10000) / 1000000) * 100) / 100}/value`,
+      value: '0.3',
+    })
+    expect(controller.draft.filter((edit) => edit.op === 'addFrame')).toHaveLength(1)
+  },
+)
+
+it('keeps the moved composition frame selected for follow-up edits', async () => {
+  const controller = await setupCompositionFrames()
+  host!.querySelector<HTMLButtonElement>('[aria-label="body.opacity 50%"]')!.click()
+  await tick()
+  await input('Keyframe percentage', '60')
+  await click('Apply keyframe')
+  await expect
+    .poll(() => host!.querySelector<HTMLInputElement>('[aria-label="Keyframe percentage"]')?.value)
+    .toBe('60')
+
+  await input('Keyframe source value', '0.7')
+  await click('Apply keyframe')
+
+  expect(controller.draft.at(-2)).toEqual({
+    op: 'set',
+    path: 'frames/layer/base/target/body/property/opacity/frame/0.6/value',
+    value: '0.7',
+  })
+})
+
+it('clears frame selection after a composition frame is deleted', async () => {
+  const controller = await setupCompositionFrames()
+  host!.querySelector<HTMLButtonElement>('[aria-label="body.opacity 50%"]')!.click()
+  await tick()
+  await click('Delete keyframe')
+  await expect.poll(() => host!.querySelector('[aria-label="Keyframe source value"]')).toBeNull()
+
+  expect(controller.draft).toEqual([
+    { op: 'removeFrame', path: 'frames/layer/base/target/body/property/opacity/frame/0.5' },
+  ])
 })

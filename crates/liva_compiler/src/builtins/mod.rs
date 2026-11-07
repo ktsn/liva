@@ -17,6 +17,10 @@ pub struct Parameter {
 
 pub struct Function {
     pub name: &'static str,
+    pub signatures: &'static [Signature],
+}
+
+pub struct Signature {
     pub parameters: &'static [Parameter],
     pub return_type: Type,
 }
@@ -27,6 +31,7 @@ pub fn lookup(name: &str) -> Result<&'static Function, String> {
         &timing::TWEEN,
         &timing::SPRING,
         &timing::CUBIC_BEZIER,
+        &timing::STEPS,
     ]
     .into_iter()
     .find(|function| function.name == name)
@@ -34,5 +39,9 @@ pub fn lookup(name: &str) -> Result<&'static Function, String> {
 }
 
 pub fn constant_type(name: &str) -> Option<Type> {
-    matches!(name, "linear" | "ease" | "easeIn" | "easeOut" | "easeInOut").then_some(Type::Easing)
+    matches!(
+        name,
+        "linear" | "ease" | "easeIn" | "easeOut" | "easeInOut" | "stepStart" | "stepEnd"
+    )
+    .then_some(Type::Easing)
 }

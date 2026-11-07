@@ -8,6 +8,8 @@ import {
 } from '@liva/runtime'
 
 export type Edit =
+  | { op: 'easing'; path: string; value?: string }
+  | { op: 'timing'; path: string; value?: string }
   | { op: 'track'; path: string; timing?: string; frames?: readonly Frame[] }
   | { op: 'set'; path: string; value: string }
   | { op: 'removeFrame'; path: string }
@@ -36,7 +38,12 @@ export interface EditorRequest {
 export interface Inspection {
   hash: string
   definition: Definition
-  fields: { path: string; kind: 'value' | 'block'; value: string }[]
+  fields: {
+    path: string
+    kind: 'value' | 'block'
+    value: string
+    range?: { start: number; end: number }
+  }[]
 }
 
 export interface EditorReply extends Inspection {
@@ -59,6 +66,9 @@ function isEdit(value: unknown): value is Edit {
   if (typeof value.path !== 'string') return false
 
   switch (value.op) {
+    case 'easing':
+    case 'timing':
+      return value.value === undefined || typeof value.value === 'string'
     case 'set':
       return typeof value.value === 'string'
     case 'removeFrame':
@@ -94,7 +104,15 @@ function isField(value: unknown): value is Inspection['fields'][number] {
     isRecord(value) &&
     typeof value.path === 'string' &&
     (value.kind === 'value' || value.kind === 'block') &&
-    typeof value.value === 'string'
+    typeof value.value === 'string' &&
+    (value.range === undefined ||
+      (isRecord(value.range) &&
+        typeof value.range.start === 'number' &&
+        typeof value.range.end === 'number' &&
+        Number.isSafeInteger(value.range.start) &&
+        Number.isSafeInteger(value.range.end) &&
+        value.range.start >= 0 &&
+        value.range.end >= value.range.start))
   )
 }
 

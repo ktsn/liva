@@ -129,14 +129,19 @@ impl Compiler {
         scope: &expression::Scope,
         expected: expression::Type,
     ) -> Option<expression::Expression> {
-        let decorator = node
-            .syntax()
-            .children()
-            .filter(|child| matches!(child.kind(), Kind::Header | Kind::Value))
-            .flat_map(|child| child.children().collect::<Vec<_>>())
-            .find(|child| child.kind() == Kind::Decorator)?;
-        let text = decorator.text().to_string();
-        let source = &text[1..];
+        let mut decorators = node.decorators();
+        let decorator = decorators.next()?;
+
+        for duplicate in decorators {
+            self.error(
+                "semantic.decorator",
+                "A declaration accepts one timing or easing decorator",
+                &duplicate,
+            );
+        }
+
+        let text = decorator.expression_text();
+        let source = text.as_str();
 
         if expected == expression::Type::Easing
             && (matches!(
@@ -148,9 +153,10 @@ impl Compiler {
                     | "ease-in-out"
                     | "step-start"
                     | "step-end"
-            ) || ["cubic-bezier(", "steps(", "linear("]
-                .iter()
-                .any(|prefix| source.trim().starts_with(prefix)))
+            ) || (source.trim().starts_with("steps(") && !source.contains(':'))
+                || ["cubic-bezier(", "linear("]
+                    .iter()
+                    .any(|prefix| source.trim().starts_with(prefix)))
         {
             return None;
         }
@@ -411,13 +417,39 @@ impl Compiler {
 
     fn mapping(&mut self, path: &str, node: &impl AstNode, kind: &str) {
         self.sources.insert(path.into(), node.syntax().clone());
+        let mut range = node.range();
+
+        if kind == "value"
+            && let Some(decorator) = node.children::<syn::Decorator>().next()
+        {
+            range.end = decorator.range().start;
+        }
+
         self.mappings.insert(
             path.into(),
             Mapping {
-                range: node.range(),
+                range,
                 kind: kind.into(),
             },
         );
+
+        if kind == "block"
+            && let Some(decorator) = node.decorators().next()
+        {
+            let field = if syn::Keyframe::cast(node.syntax().clone()).is_some() {
+                "easing"
+            } else {
+                "timing"
+            };
+            self.mapping(&format!("{path}/{field}/decorator"), &decorator, "block");
+            self.mappings.insert(
+                format!("{path}/{field}"),
+                Mapping {
+                    range: decorator.expression_range(),
+                    kind: "value".into(),
+                },
+            );
+        }
     }
 
     fn unique(&mut self, seen: &mut BTreeMap<String, Range>, name: &str, node: &impl AstNode) {
@@ -622,6 +654,7 @@ impl Compiler {
         };
         self.mapping(path, node, "block");
         let timing = self.animation_declarations(node, path);
+        let timing_expression = self.decorator_expression(node, scope, expression::Type::Timing);
         let mut targets = vec![];
         let mut seen = BTreeMap::new();
 
@@ -671,9 +704,11 @@ impl Compiler {
                         self.mapping(&frame_path, &property, "block");
                         self.mapping(&format!("{frame_path}/value"), &value_node, "value");
                         properties.push(PropertyTransition {
-                            timing_expression: self
-                                .decorator_expression(&property, scope, expression::Type::Timing)
-                                .or_else(|| target_timing.clone()),
+                            timing_expression: self.decorator_expression(
+                                &property,
+                                scope,
+                                expression::Type::Timing,
+                            ),
                             name,
                             timing: None,
                             keyframes: Some(vec![Frame {
@@ -692,9 +727,8 @@ impl Compiler {
                 let property_path = format!("{target_path}/property/{name}");
                 self.mapping(&property_path, &property, "block");
                 let timing = self.animation_declarations(&property, &property_path);
-                let timing_expression = self
-                    .decorator_expression(&property, scope, expression::Type::Timing)
-                    .or_else(|| timing.is_none().then(|| target_timing.clone()).flatten());
+                let timing_expression =
+                    self.decorator_expression(&property, scope, expression::Type::Timing);
                 let mut frames = vec![];
                 let mut offsets = BTreeMap::new();
 
@@ -812,6 +846,18 @@ impl Compiler {
                     let easing_expression =
                         self.decorator_expression(&frame, scope, expression::Type::Easing);
 
+                    if let Some(decorator) = frame.decorators().next()
+                        && easing_expression.is_some()
+                    {
+                        self.mappings.insert(
+                            format!("{frame_path}/easing"),
+                            Mapping {
+                                range: decorator.expression_range(),
+                                kind: "value".into(),
+                            },
+                        );
+                    }
+
                     frames.push(Frame {
                         easing_expression: easing_expression.clone(),
                         template,
@@ -838,10 +884,18 @@ impl Compiler {
                 });
             }
 
-            targets.push(Target { name, properties });
+            targets.push(Target {
+                name,
+                properties,
+                timing_expression: target_timing,
+            });
         }
 
-        Transition { timing, targets }
+        Transition {
+            timing,
+            targets,
+            timing_expression,
+        }
     }
 
     fn style_properties(
@@ -850,7 +904,6 @@ impl Compiler {
         path: &str,
         scope: &expression::Scope,
     ) -> Vec<Property> {
-        let default_timing = self.decorator_expression(target, scope, expression::Type::Timing);
         let mut properties = vec![];
         let mut seen = target
             .properties()
@@ -867,24 +920,36 @@ impl Compiler {
                         continue;
                     }
 
+                    let property_path = format!("{path}/property/{name}");
+                    self.mapping(&property_path, &property, "block");
+                    if let Some(value) = property.value_node() {
+                        self.mapping(&format!("{property_path}/value"), &value, "value");
+                    }
+
                     properties.push(Property {
                         name,
                         value: property.value_text().unwrap_or_default(),
                         template: self.css_template(&property, scope),
-                        timing_expression: self
-                            .decorator_expression(&property, scope, expression::Type::Timing)
-                            .or_else(|| default_timing.clone()),
+                        timing_expression: self.decorator_expression(
+                            &property,
+                            scope,
+                            expression::Type::Timing,
+                        ),
                         keyframes: None,
                     });
                 }
                 syn::AnimationProperty::Keyframes(track) => {
                     let name = track.header().unwrap_or_default();
                     self.unique(&mut seen, &name, &track);
-                    let timing_expression = self
-                        .decorator_expression(&track, scope, expression::Type::Timing)
-                        .or_else(|| default_timing.clone());
+                    let timing_expression =
+                        self.decorator_expression(&track, scope, expression::Type::Timing);
+                    let inherited_timing = target
+                        .syntax()
+                        .ancestors()
+                        .any(|ancestor| ancestor.decorators().next().is_some());
 
-                    if timing_expression.is_none() {
+                    if timing_expression.is_none() && !inherited_timing && !path.contains("/layer/")
+                    {
                         self.error(
                             "semantic.structure",
                             "State targets contain declarations only",
@@ -945,6 +1010,16 @@ impl Compiler {
                         self.unique(&mut offsets, &offset.to_string(), &frame);
                         let frame_path = format!("{track_path}/frame/{offset}");
                         self.mapping(&frame_path, &frame, "block");
+                        self.mapping(
+                            &format!("{frame_path}/offset"),
+                            &frame.header_node().unwrap(),
+                            "value",
+                        );
+                        self.mapping(
+                            &format!("{frame_path}/value"),
+                            &frame.value_node().unwrap(),
+                            "value",
+                        );
                         let value = frame.value_text().unwrap_or_default();
 
                         if value.is_empty() {
@@ -1119,6 +1194,11 @@ impl Compiler {
             let properties = self.style_properties(&target, &target_path, scope);
 
             targets.push(Target {
+                timing_expression: self.decorator_expression(
+                    &target,
+                    scope,
+                    expression::Type::Timing,
+                ),
                 name: target_name,
                 properties,
             });
@@ -1242,6 +1322,7 @@ impl Compiler {
                         }
 
                         layer_states.push(State {
+                            timing_expression: self.decorator_expression(&state, &scope, expression::Type::Timing),
                             name: state_name,
                             when: None,
                             targets: self.style_targets(&state, &state_path, &scope),
@@ -1352,6 +1433,7 @@ impl Compiler {
                     }
 
                     definition.layers.push(Layer {
+                        timing_expression: self.decorator_expression(&layer, &scope, expression::Type::Timing),
                         transitions: guarded,
                         states: layer_states,
                         initial_state: initial_states.into_iter().next(),
@@ -1390,6 +1472,7 @@ impl Compiler {
                         }
                     });
                     definition.states.push(State {
+                        timing_expression: self.decorator_expression(&state, &scope, expression::Type::Timing),
                         when,
                         name: state_name,
                         targets,
@@ -1580,7 +1663,11 @@ impl Compiler {
                     for property in &target.properties {
                         let property_path = format!("{target_path}/property/{}", property.name);
                         let timing = property.timing.as_ref().or(animation.timing.as_ref());
-                        if timing.is_none() && property.timing_expression.is_none() {
+                        if timing.is_none()
+                            && property.timing_expression.is_none()
+                            && target.timing_expression.is_none()
+                            && animation.timing_expression.is_none()
+                        {
                             self.error_range(
                                 "semantic.timing-missing",
                                 "Lifecycle property requires timing",

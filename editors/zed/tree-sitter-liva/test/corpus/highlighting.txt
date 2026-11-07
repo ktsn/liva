@@ -162,3 +162,99 @@ motion card(active: boolean) {
             (property
               (identifier))
             (number)))))))
+
+==================
+Shared timing headers
+==================
+motion sample(enabled: boolean) {
+  layer base @tween(duration: 200) { body { opacity: 1 } }
+  layer machine @spring(duration: 400) {
+    state idle initial @tween() {}
+    state active @tween(easing: steps(count: 4)) {}
+    transition idle -> active
+      @spring(duration: 300, bounce: 0.2)
+      when enabled
+  }
+  enter @tween(duration: 100) { body { opacity: 0 } }
+}
+---
+
+(source_file
+  (motion
+    (identifier)
+    (parenthesized
+      (property
+        (identifier))
+      (type))
+    (block
+      (layer
+        (identifier)
+        (decorator
+          (animation)
+          (parenthesized
+            (property
+              (identifier))
+            (number)))
+        (block
+          (selector_block
+            (identifier)
+            (block
+              (property
+                (identifier))
+              (number)))))
+      (layer
+        (identifier)
+        (decorator
+          (animation)
+          (parenthesized
+            (property
+              (identifier))
+            (number)))
+        (block
+          (state
+            (identifier)
+            (decorator
+              (animation)
+              (parenthesized))
+            (block))
+          (state
+            (identifier)
+            (decorator
+              (animation)
+              (parenthesized
+                (property
+                  (identifier))
+                (call
+                  (identifier)
+                  (parenthesized
+                    (property
+                      (identifier))
+                    (number)))))
+            (block))
+          (transition
+            (identifier)
+            (identifier)
+            (decorator
+              (animation)
+              (parenthesized
+                (property
+                  (identifier))
+                (number)
+                (punctuation)
+                (property
+                  (identifier))
+                (number)))
+            (identifier))))
+      (keyword)
+      (animation)
+      (parenthesized
+        (property
+          (identifier))
+        (number))
+      (block
+        (selector_block
+          (identifier)
+          (block
+            (property
+              (identifier))
+            (number)))))))

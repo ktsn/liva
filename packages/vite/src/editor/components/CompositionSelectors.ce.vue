@@ -14,10 +14,11 @@ const emit = defineEmits<{
 }>()
 
 const sides = ['from', 'to'] as const
+const sideLabels = { from: 'From', to: 'To' }
 const transitions = props.layers.flatMap((layer) =>
   (layer.transitions ?? []).map((transition, index) => ({
     identity: { layer: layer.name, index },
-    label: `${layer.name}: ${transition.from} → ${transition.to} (declaration ${index + 1})`,
+    label: `${layer.name}: ${transition.from} → ${transition.to}`,
     value: JSON.stringify({ layer: layer.name, index }),
   })),
 )
@@ -61,7 +62,7 @@ function choose(value: string) {
     </div>
     <div class="composition-pair">
       <fieldset v-for="side in sides" :key="side" class="composition-side">
-        <legend>{{ side.toUpperCase() }}</legend>
+        <legend>{{ sideLabels[side] }}</legend>
         <div
           v-for="layer in layers"
           :key="layer.name"
@@ -77,7 +78,7 @@ function choose(value: string) {
             {{ layer.name }}
             <select
               class="composition-state"
-              :aria-label="`${side.toUpperCase()} ${layer.name} state`"
+              :aria-label="`${sideLabels[side]} ${layer.name} state`"
               :value="props[side].states[layer.name]"
               @change="state(side, layer.name, ($event.target as HTMLSelectElement).value)"
             >
@@ -90,7 +91,7 @@ function choose(value: string) {
             <input
               class="composition-checkbox"
               type="checkbox"
-              :aria-label="`${side.toUpperCase()} ${layer.name} enabled`"
+              :aria-label="`${sideLabels[side]} ${layer.name} enabled`"
               :checked="props[side].layers[layer.name]"
               @change="active(side, layer.name, ($event.target as HTMLInputElement).checked)"
             />

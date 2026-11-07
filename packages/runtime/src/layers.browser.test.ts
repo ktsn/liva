@@ -68,7 +68,10 @@ function timedDefinition(duration = 300): Definition {
 
 const cleanup: (() => void)[] = []
 
-function setup(source = definition, inputs = { hover: false, press: false, size: 1.1 }) {
+function setup(
+  source = definition,
+  inputs: ConstructorParameters<typeof LivaInstance>[1] = { hover: false, press: false, size: 1.1 },
+) {
   const errors: RuntimeDiagnostic[] = []
   const element = document.createElement('div')
   element.style.color = 'red'
@@ -1368,5 +1371,146 @@ describe('composition preview sessions', () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+})
+
+describe('typed timing playback', () => {
+  it.each([
+    { position: 'start', initial: 0.5, middle: 1 },
+    { position: 'end', initial: 0, middle: 0.5 },
+    { position: 'jump-start', initial: 0.5, middle: 1 },
+    { position: 'jump-end', initial: 0, middle: 0.5 },
+    { position: 'jump-none', initial: 0, middle: 1 },
+    { position: 'jump-both', initial: 1 / 3, middle: 2 / 3 },
+  ])(
+    'preserves browser step discontinuities for $position',
+    async ({ position, initial, middle }) => {
+      const source: Definition = {
+        name: 'steps',
+        parameters: [
+          { name: 'amount', type: 'number' },
+          { name: 'count', type: 'number' },
+        ],
+        states: [],
+        directionalTransitions: [],
+        layers: [
+          {
+            name: 'base',
+            targets: [
+              {
+                name: 'body',
+                properties: [
+                  {
+                    name: 'opacity',
+                    value: '',
+                    template: [ref('amount')],
+                    timingExpression: {
+                      kind: 'call',
+                      function: 'tween',
+                      arguments: [
+                        { name: 'duration', value: { kind: 'number', value: 1000 } },
+                        {
+                          name: 'easing',
+                          value: {
+                            kind: 'call',
+                            function: 'steps',
+                            arguments: [
+                              { name: 'count', value: ref('count') },
+                              { name: 'position', value: { kind: 'string', value: position } },
+                            ],
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }
+      const { instance, element } = setup(source, { amount: 0, count: 2 })
+
+      instance.updateParameters({ amount: 1, count: 2 })
+      const animation = instance.animations[0]
+      await animation.ready
+      animation.pause()
+      animation.currentTime = 0
+
+      expect(Number(getComputedStyle(element).opacity)).toBeCloseTo(initial)
+
+      animation.currentTime = 499
+      expect(Number(getComputedStyle(element).opacity)).toBeCloseTo(initial)
+
+      animation.currentTime = 500
+      expect(Number(getComputedStyle(element).opacity)).toBeCloseTo(middle)
+    },
+  )
+
+  it('scrubs a typed duration spring from a shared transition default', async () => {
+    const source: Definition = {
+      name: 'duration',
+      parameters: [
+        { name: 'duration', type: 'number' },
+        { name: 'bounce', type: 'number' },
+      ],
+      states: [],
+      directionalTransitions: [],
+      layers: [
+        {
+          name: 'machine',
+          targets: [],
+          initialState: 'idle',
+          states: [
+            {
+              name: 'idle',
+              targets: [{ name: 'body', properties: [{ name: 'opacity', value: '0' }] }],
+            },
+            {
+              name: 'active',
+              targets: [{ name: 'body', properties: [{ name: 'opacity', value: '1' }] }],
+            },
+          ],
+          transitions: [
+            {
+              from: 'idle',
+              to: 'active',
+              when: { kind: 'boolean', value: false },
+              transition: {
+                targets: [],
+                timingExpression: {
+                  kind: 'call',
+                  function: 'spring',
+                  arguments: [
+                    { name: 'duration', value: ref('duration') },
+                    { name: 'bounce', value: ref('bounce') },
+                  ],
+                },
+              },
+            },
+          ],
+        },
+      ],
+    }
+    const { instance, element } = setup(source, { duration: 400, bounce: 0.25 })
+
+    instance.previewComposition(
+      { layers: {}, states: { machine: 'idle' } },
+      { layers: {}, states: { machine: 'active' } },
+      [{ layer: 'machine', index: 0 }],
+    )
+    const animation = instance.animations[0]
+    await animation.ready
+
+    expect(animation.effect?.getTiming().duration).toBe(400)
+
+    animation.currentTime = 0
+    expect(Number(getComputedStyle(element).opacity)).toBeCloseTo(0)
+
+    animation.currentTime = 400
+    expect(Number(getComputedStyle(element).opacity)).toBeCloseTo(1)
+
+    instance.endCompositionPreview()
+    expect(element.style.opacity).toBe('0')
   })
 })

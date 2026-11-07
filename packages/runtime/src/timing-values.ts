@@ -7,6 +7,8 @@ const easingNames: Readonly<Record<string, string>> = {
   easeIn: 'ease-in',
   easeOut: 'ease-out',
   easeInOut: 'ease-in-out',
+  stepStart: 'step-start',
+  stepEnd: 'step-end',
 }
 
 export function easingConstant(name: string): RuntimeValue | undefined {
@@ -16,7 +18,7 @@ export function easingConstant(name: string): RuntimeValue | undefined {
 }
 
 export function isTimingFunction(name: string): boolean {
-  return ['tween', 'spring', 'cubicBezier'].includes(name)
+  return ['tween', 'spring', 'cubicBezier', 'steps'].includes(name)
 }
 
 function numeric(
@@ -45,6 +47,16 @@ export function timingValue(value: RuntimeValue): Timing {
   if (typeof value !== 'object') throw new Error('Expected timing value')
 
   if (
+    value.kind === 'spring-duration' &&
+    typeof value.durationMs === 'number' &&
+    typeof value.bounce === 'number'
+  ) {
+    validateDurationSpring(value.durationMs, value.bounce)
+
+    return { kind: 'spring-duration', durationMs: value.durationMs, bounce: value.bounce }
+  }
+
+  if (
     value.kind === 'tween' &&
     typeof value.durationMs === 'number' &&
     typeof value.easing === 'string'
@@ -69,6 +81,16 @@ export function timingValue(value: RuntimeValue): Timing {
   throw new Error('Expected timing value')
 }
 
+function validateDurationSpring(durationMs: number, bounce: number): void {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) {
+    throw new Error('Spring duration must be finite positive milliseconds')
+  }
+
+  if (!Number.isFinite(bounce) || bounce < 0 || bounce >= 1) {
+    throw new Error('Spring bounce must be finite and between 0 (inclusive) and 1 (exclusive)')
+  }
+}
+
 export function callTiming(
   name: string,
   args: Readonly<Record<string, RuntimeValue>>,
@@ -86,6 +108,19 @@ export function callTiming(
       })
     }
     case 'spring': {
+      if (Object.hasOwn(args, 'duration') || Object.hasOwn(args, 'bounce')) {
+        if (['stiffness', 'damping', 'mass'].some((parameter) => Object.hasOwn(args, parameter))) {
+          throw new Error('Spring duration/bounce and physics arguments must be separate')
+        }
+
+        const durationMs = numeric(args, 'duration')
+        const bounce = numeric(args, 'bounce', 0)
+
+        validateDurationSpring(durationMs, bounce)
+
+        return Object.freeze({ kind: 'spring-duration', durationMs, bounce })
+      }
+
       const stiffness = numeric(args, 'stiffness', 100)
       const damping = numeric(args, 'damping', 10)
       const mass = numeric(args, 'mass', 1)
@@ -95,6 +130,29 @@ export function callTiming(
       }
 
       return Object.freeze({ kind: 'spring-physics', stiffness, damping, mass })
+    }
+    case 'steps': {
+      const count = numeric(args, 'count')
+      const position = args.position ?? 'end'
+
+      if (!Number.isInteger(count) || count <= 0) {
+        throw new Error('Step count must be a positive integer')
+      }
+
+      if (
+        typeof position !== 'string' ||
+        !['start', 'end', 'jump-start', 'jump-end', 'jump-none', 'jump-both'].includes(position)
+      ) {
+        throw new Error(
+          'Unsupported step position: use start, end, jump-start, jump-end, jump-none, or jump-both',
+        )
+      }
+
+      if (position === 'jump-none' && count < 2) {
+        throw new Error('Step count must be at least 2 for jump-none')
+      }
+
+      return Object.freeze({ kind: 'easing', css: `steps(${count}, ${position})` })
     }
     case 'cubicBezier': {
       const x1 = numeric(args, 'x1')
