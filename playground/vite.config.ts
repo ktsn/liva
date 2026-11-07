@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { globSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Plugin } from 'vite-plus'
+import { normalizePath } from 'vite-plus'
 
 const editorWatch: Plugin = {
   name: 'playground-editor-watch',
@@ -19,7 +20,9 @@ const editorWatch: Plugin = {
     ])
   },
   hotUpdate({ file, timestamp }) {
-    const root = fileURLToPath(new URL('../packages/vite/src/editor/', import.meta.url))
+    const root = normalizePath(
+      fileURLToPath(new URL('../packages/vite/src/editor/', import.meta.url)),
+    )
 
     if (!file.startsWith(root)) return
 
