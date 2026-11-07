@@ -222,6 +222,51 @@ test('Instant timing saves, previews immediately, and removes back to inherited 
   }
 })
 
+test('Instant edits remain immediate when a motion shadows instant', async ({
+  page,
+  browserName,
+}) => {
+  test.skip(browserName !== 'chromium', 'Shared source writes run once')
+  const original = await readFile(file, 'utf8')
+
+  try {
+    await page.goto(`${base}/tests/editor.html`)
+    await writeFile(
+      file,
+      original.replace(
+        'motion motion(checked: boolean) {',
+        'motion motion(checked: boolean) {\n  let instant = tween(duration: 200)',
+      ),
+    )
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          [...window.__LIVA_EDITOR__.entries.values()].some((entry) =>
+            entry.binding.definition.letBindings?.some((binding) => binding.name === 'instant'),
+          ),
+        ),
+      )
+      .toBe(true)
+    await open(page, true)
+    await track(page, 'box', 'background-color')
+    await page.getByLabel('Timing mode').selectOption('instant')
+    await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
+    await expectMessage(page, 'Previewing')
+
+    await seek(page, 0)
+    await expect(page.getByRole('button', { name: 'First', exact: true })).toHaveCSS(
+      'background-color',
+      'rgb(0, 0, 255)',
+    )
+
+    await save(page)
+
+    expect(await readFile(file, 'utf8')).toContain('@tween(duration: 0)')
+  } finally {
+    await writeFile(file, original)
+  }
+})
+
 test('editor rejects invalid sessions, origins, hosts and oversized requests', async ({ page }) => {
   await page.goto(base)
   const module = await (await page.request.get(`${base}/@id/__x00__liva:vue-plugin`)).text()

@@ -86,7 +86,7 @@ watch(
 
 function replaceTiming(value: Timing) {
   try {
-    const expression = typedTimingText(value)
+    const expression = typedTimingText(value, props.provenance.timingBindings)
 
     // Timing controls are rendered only for an editable destination.
     emit('edit', [{ op: 'timing', path: props.provenance.timingDestination!, value: expression }])

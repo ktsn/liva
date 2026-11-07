@@ -16,6 +16,7 @@ afterEach(() => {
 
 const path = 'sample/layer/base/target/body/property/opacity'
 const provenance: TrackProvenance = {
+  timingBindings: [],
   from: { path: `${path}/value`, text: '${amount}', label: 'base opacity' },
   to: { path: `${path}/value`, text: '${amount}', label: 'base opacity' },
   sharedValue: true,
@@ -222,6 +223,28 @@ describe('composition source inspector', () => {
     await click('Apply timing')
 
     expect(edits).toEqual([[{ op: 'timing', path, value: 'spring(duration: 400, bounce: 0.25)' }]])
+  })
+
+  it('uses a safe zero tween when Instant is shadowed', async () => {
+    const { edits } = setup({ provenance: { ...provenance, timingBindings: ['instant'] } })
+
+    await input('Timing mode', 'instant')
+    await click('Apply timing')
+
+    expect(edits).toEqual([[{ op: 'timing', path, value: 'tween(duration: 0)' }]])
+  })
+
+  it('reports fully shadowed Instant without changing edits', async () => {
+    const { edits, errors } = setup({
+      provenance: { ...provenance, timingBindings: ['instant', 'tween'] },
+    })
+
+    await input('Timing mode', 'instant')
+    await click('Apply timing')
+
+    expect(edits).toEqual([])
+    expect(errors).toHaveLength(1)
+    expect(String(errors[0])).toContain('both shadowed')
   })
 
   it('removes only the local timing override', async () => {
