@@ -105,7 +105,7 @@ fn shadows_are_local_to_the_motion_that_declares_them() {
 }
 
 #[test]
-fn invalid_declarations_still_reserve_their_names() {
+fn invalid_self_declarations_are_still_rejected() {
     for source in [
         "motion example(self: unknown) { layer base {} }",
         "motion example { let self = ; layer base {} }",
@@ -122,7 +122,10 @@ fn invalid_declarations_still_reserve_their_names() {
             result.diagnostics
         );
     }
+}
 
+#[test]
+fn an_invalid_let_initializer_does_not_allow_redeclaration() {
     let result = compile(
         "motion example { let tween = ; let tween = 2; layer base {} }",
         true,
