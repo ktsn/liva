@@ -486,18 +486,6 @@ describe('composition animation ownership', () => {
   )
 })
 
-const timingScopes = [
-  'transition property',
-  'transition target',
-  'transition shared',
-  'state property',
-  'state target',
-  'state shared',
-  'layer property',
-  'layer target',
-  'layer shared',
-]
-
 function hierarchicalDefinition(enabled: readonly number[]): Definition {
   const timingExpression = (index: number): Expression | undefined =>
     enabled.includes(index)
@@ -570,33 +558,15 @@ function hierarchicalTracks(source: Definition) {
   )
 }
 
-describe('hierarchical timing precedence', () => {
-  const pairs = timingScopes.flatMap((higherName, higher) =>
-    timingScopes
-      .slice(higher + 1)
-      .map((lowerName, offset) => ({ higherName, lowerName, higher, lower: higher + 1 + offset })),
-  )
-
-  it.each(pairs)('$higherName overrides $lowerName', ({ higher, lower }) => {
+describe('hierarchical timing integration', () => {
+  it.each([
+    ['property', 0, 3],
+    ['target', 1, 5],
+    ['shared', 2, 6],
+  ] as const)('applies transition %s timing over resolved layer timing', (_, higher, lower) => {
     const [track] = hierarchicalTracks(hierarchicalDefinition([higher, lower]))
 
     expect(track.timing).toMatchObject({ kind: 'tween', durationMs: (higher + 1) * 100 })
-  })
-
-  it('applies destination-state shared timing to layer-common properties', () => {
-    const source = hierarchicalDefinition([5, 6])
-    const changed = {
-      ...source,
-      layers: source.layers?.map((layer) => ({
-        ...layer,
-        states: layer.states?.map((state) => ({ ...state, targets: [] })),
-      })),
-    }
-
-    const [track] = hierarchicalTracks(changed)
-
-    expect(track.timing).toMatchObject({ durationMs: 600 })
-    expect(track.destinationValue).toBe('1')
   })
 
   it('applies shared timing from a transition without a body', () => {

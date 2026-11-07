@@ -50,6 +50,7 @@ export function timingProvider<T extends TimingDeclaration>(...candidates: (T | 
  * are not advanced. Pass the result to {@link resolveLayerCascade} to resolve
  * ownership and timing precedence.
  *
+ * @yields Each enabled ordinary layer or stateful layer with its selected state.
  * @throws If a stateful layer's selected state is missing or unknown.
  */
 export function* compositionLayerSelection(

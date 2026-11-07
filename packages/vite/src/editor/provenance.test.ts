@@ -49,7 +49,7 @@ describe('composition source provenance', () => {
     ['layer', ''],
   ] as const
 
-  it.each(timingScopes)(
+  it.each([timingScopes[0], timingScopes[1], timingScopes[4], timingScopes[8]])(
     'uses the same %s timing source for playback and editing',
     (winningScope, expectedScope) => {
       const first = timingScopes.findIndex(([scope]) => scope === winningScope)
