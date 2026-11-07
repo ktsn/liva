@@ -184,6 +184,44 @@ test('timeline saves timing, new frames and endpoint state values with shared HM
   }
 })
 
+test('Instant timing saves, previews immediately, and removes back to inherited timing', async ({
+  page,
+  browserName,
+}) => {
+  test.skip(browserName !== 'chromium', 'Shared source writes run once')
+  const original = await readFile(file, 'utf8')
+
+  try {
+    await open(page, true)
+    await track(page, 'box', 'background-color')
+    await page.getByLabel('Timing mode').selectOption('instant')
+    await expect(page.getByLabel('Track duration')).toHaveCount(0)
+    await expect(page.getByLabel('Track easing')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
+    await expectMessage(page, 'Previewing')
+
+    await seek(page, 0)
+    const first = page.getByRole('button', { name: 'First', exact: true })
+    await expect(first).toHaveCSS('background-color', 'rgb(0, 0, 255)')
+
+    await save(page)
+
+    expect(await readFile(file, 'utf8')).toContain('@instant')
+
+    await page
+      .getByLabel('Existing transition')
+      .selectOption(JSON.stringify({ layer: 'selection', index: 0 }))
+    await track(page, 'box', 'background-color')
+    await expect(page.getByLabel('Timing mode')).toHaveValue('instant')
+    await page.getByRole('button', { name: 'Remove timing override', exact: true }).click()
+    await expectMessage(page, 'Previewing')
+    await expect(page.getByLabel('Timing mode')).toHaveValue('tween')
+    await expect(page.getByLabel('Track duration')).toHaveValue('50')
+  } finally {
+    await writeFile(file, original)
+  }
+})
+
 test('editor rejects invalid sessions, origins, hosts and oversized requests', async ({ page }) => {
   await page.goto(base)
   const module = await (await page.request.get(`${base}/@id/__x00__liva:vue-plugin`)).text()

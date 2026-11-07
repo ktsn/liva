@@ -264,6 +264,7 @@ describe('typed timing serialization', () => {
   })
 
   it('serializes both spring signatures without legacy shorthand', () => {
+    expect(typedTimingText({ kind: 'tween', durationMs: 0, easing: 'linear' })).toBe('instant')
     expect(typedTimingText({ kind: 'spring-duration', durationMs: 400, bounce: 0.25 })).toBe(
       'spring(duration: 400, bounce: 0.25)',
     )

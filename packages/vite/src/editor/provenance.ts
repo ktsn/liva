@@ -227,6 +227,7 @@ export function typedEasingText(css: string): string {
 }
 
 export function typedTimingText(timing: import('@liva/runtime').Timing): string {
+  if (timing.kind === 'tween' && timing.durationMs === 0) return 'instant'
   if (timing.kind === 'tween')
     return `tween(duration: ${timing.durationMs}, easing: ${typedEasingText(timing.easing)})`
   if (timing.kind === 'spring-duration')

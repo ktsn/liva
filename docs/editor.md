@@ -51,7 +51,11 @@ using that declaration.
 Value edits preserve source expressions until explicitly replaced. Timing edits write
 `@expression` on the selected transition property, or on the ordinary/style property
 when no effective transition is selected. Removing a local override reveals its
-inherited default. Timing parameters are shown directly; Apply timing replaces the
+inherited default. **Instant** is available as a timing choice and has no duration or easing fields.
+It applies the resolved destination immediately in playback and scrubbing, including
+tracks with intermediate authored frames. Removing its override reveals inherited
+timing. Zero-duration tweens are displayed as Instant because they have identical
+execution semantics. Timing parameters are shown directly; Apply timing replaces the
 expression with those parameters. Unrelated edits retain existing expressions.
 
 Keyframe editing uses the explicitly selected existing transition in the final value

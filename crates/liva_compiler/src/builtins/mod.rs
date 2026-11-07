@@ -57,5 +57,10 @@ pub fn symbols() -> impl Iterator<Item = (&'static str, SymbolKind, bool)> {
             .into_iter()
             .map(|name| (name, SymbolKind::Value(Type::Easing), false)),
         )
+        .chain(std::iter::once((
+            "instant",
+            SymbolKind::Value(Type::Timing),
+            false,
+        )))
         .chain(functions().map(|function| (function.name, SymbolKind::Function(function), false)))
 }
