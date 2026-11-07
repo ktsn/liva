@@ -202,7 +202,10 @@ it('does not repeat zero-duration previews with loop enabled', async () => {
   await tick()
 
   expect(button('Play')).toBeDefined()
-  expect(host!.querySelector('[aria-label="Playback time"]')!.textContent).toBe('0 / 0 ms')
+  const timer = host!.querySelector('[aria-label="Playback time"]')
+
+  expect(timer).not.toBeNull()
+  expect(timer!.textContent).toBe('0 / 0 ms')
 })
 
 it('edits duration and physics spring parameters through shared controls', async () => {
