@@ -61,6 +61,8 @@ test('layer value previews remain isolated until save propagates through HMR', a
     const first = page.getByRole('switch', { name: 'Notifications', exact: true })
     const second = page.getByRole('switch', { name: 'Product updates', exact: true })
 
+    await second.click()
+
     await expect(page.getByLabel('Source value', { exact: true })).toHaveValue('#888')
     await page.getByLabel('Source value', { exact: true }).fill('#553399')
     await page.getByRole('button', { name: 'Apply value', exact: true }).click()
@@ -71,6 +73,11 @@ test('layer value previews remain isolated until save propagates through HMR', a
     expect(await readFile(file, 'utf8')).toBe(original)
 
     await save(page)
+
+    // SFC HMR remounts with its initial ON value; the base edit applies when switched OFF.
+    await expect(second).toHaveAttribute('aria-checked', 'true')
+    await expect(second).toHaveCSS('background-color', 'rgb(52, 178, 123)')
+    await second.click()
 
     await expect(second).toHaveCSS('background-color', 'rgb(85, 51, 153)')
     expect(await readFile(file, 'utf8')).toBe(

@@ -37,6 +37,42 @@ test.describe('toggle demo', () => {
     await expect(page.locator('.demo-content')).toHaveText('')
   })
 
+  test('animates both directions and retargets an interrupted thumb movement', async ({ page }) => {
+    await page.goto(base)
+
+    const first = page.getByRole('switch', { name: 'Notifications' })
+    const thumb = first.locator('.thumb')
+    await first.click()
+
+    const intermediate = await thumb.evaluate(async (element) => {
+      await new Promise(requestAnimationFrame)
+      await new Promise(requestAnimationFrame)
+
+      return {
+        value: parseFloat(getComputedStyle(element).translate),
+        animations: element.getAnimations().length,
+      }
+    })
+    expect(intermediate.animations).toBeGreaterThan(0)
+    expect(intermediate.value).toBeGreaterThan(0)
+
+    await first.click()
+
+    await expect
+      .poll(() => first.evaluate((element) => element.getAnimations({ subtree: true }).length))
+      .toBe(0)
+    await expect(thumb).toHaveCSS('translate', '0px')
+    await expect(first).toHaveCSS('background-color', 'rgb(136, 136, 136)')
+
+    await first.click()
+
+    await expect
+      .poll(() => first.evaluate((element) => element.getAnimations({ subtree: true }).length))
+      .toBe(0)
+    await expect(thumb).toHaveCSS('translate', '24px')
+    await expect(first).toHaveCSS('background-color', 'rgb(52, 178, 123)')
+  })
+
   test('keeps switches independent through keyboard activation and rapid reversals', async ({
     page,
   }) => {
