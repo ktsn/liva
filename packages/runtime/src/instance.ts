@@ -4,6 +4,7 @@ import {
   resolveLayers,
   resolveLayerTracks,
   type LayerResolution,
+  type Composition,
 } from './layers.ts'
 import { waapiProperty } from './animation.ts'
 export { waapiProperty } from './animation.ts'
@@ -179,6 +180,14 @@ export class LivaInstance {
 
   get reactiveState(): string {
     return this.layerResolution ? this.state : selectState(this.definition, this.values)
+  }
+
+  get composition(): Composition | undefined {
+    const composition = this.layerResolution?.composition
+
+    return composition
+      ? { layers: { ...composition.layers }, states: { ...composition.states } }
+      : undefined
   }
 
   get animations(): readonly Animation[] {

@@ -400,3 +400,25 @@ and commit requests before applying edits. Edit source and exercise application
 controls to preview these motions. The lossless parser and language-server
 expression hovers cover layer guards and decorators. There is no standalone Liva
 formatter; tools must preserve the custom block text and decorator nodes.
+
+## Composition inspection and manual resolution
+
+`LivaInstance.composition` returns an isolated snapshot of ordinary layer activation
+(`layers`, including disabled layers) and current stateful layer states (`states`).
+It reads retained state-machine history without reevaluating guards. Legacy motions
+without layers return `undefined`.
+
+`resolveComposition(definition, values, composition, from?, transitions?)` resolves
+an explicit complete selection using the normal property and independent timing
+cascades. Ordinary layers, including unconditional ones, can be disabled for
+preview. Stateful layers always select one declared state. Guards are not evaluated;
+CSS and timing expressions still use the supplied values. Invalid or incomplete
+compositions throw without modifying application state.
+
+Transitions are opt-in `{ layer, index }` identities, with a zero-based index into
+that layer's transition declarations in the current definition. Both endpoint
+compositions must match the declaration. No transition is inferred from a state
+pair, and identities must be refreshed after a definition replacement. Multiple
+transitions with the same endpoints remain distinct. Only the final value owner's
+transition contributes animation instructions, including intermediate motion when
+the endpoints are equal.
