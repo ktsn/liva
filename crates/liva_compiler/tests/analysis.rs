@@ -150,3 +150,52 @@ fn layer_guards_and_decorators_expose_expression_types_at_source_offsets() {
     assert!(found.iter().any(|hover| hover.label.starts_with("tween(")
         && hover.range.start == source.find("tween(").unwrap()));
 }
+
+#[test]
+fn interaction_function_and_members_expose_inferred_types() {
+    let source = "motion a { let ui = interaction(target: body)\n layer hover when ui.hover && ui.active && ui.focus && ui.focusVisible && ui.focusWithin { body { opacity: 1 } } }";
+    let labels: Vec<_> = hovers(source)
+        .into_iter()
+        .map(|hover| hover.label)
+        .collect();
+
+    for member in ["hover", "active", "focus", "focusVisible", "focusWithin"] {
+        assert!(
+            labels
+                .iter()
+                .any(|label| label == &format!("ui.{member}: boolean")),
+            "{member}: {labels:?}"
+        );
+    }
+
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.starts_with("interaction(target: target): { hover: boolean"))
+    );
+}
+
+#[test]
+fn completes_registered_interaction_function_and_inferred_record_members() {
+    use liva_compiler::analysis::completions;
+
+    let source = "motion button { let ui = interaction(target: body)\n layer base { body { opacity: 1 } }\n layer hover when ui.fo {} }";
+    let point = source.find("ui.fo").unwrap() + "ui.fo".len();
+    let found = completions(source, point);
+
+    assert_eq!(
+        found
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["focus", "focusVisible", "focusWithin"]
+    );
+    assert!(found.iter().all(|item| item.detail == "boolean"));
+
+    let source = "motion button { let ui = inter }";
+    let found = completions(source, source.find("inter").unwrap() + 5);
+
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].label, "interaction");
+    assert!(found[0].detail.contains("target: target"));
+}

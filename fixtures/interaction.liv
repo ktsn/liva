@@ -1,0 +1,9 @@
+motion button {
+  let ui = interaction(target: body)
+  layer base { body { opacity: 1 } }
+  layer hover when ui.hover { body { opacity: .9 } }
+  layer active when ui.active { body { scale: .9 } }
+  layer focus when ui.focus { body { outline-width: 1px } }
+  layer visible when ui.focusVisible { body { outline-width: 2px } }
+  layer within when ui.focusWithin { body { outline-style: solid } }
+}

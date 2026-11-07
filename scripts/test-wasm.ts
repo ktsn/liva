@@ -4,7 +4,15 @@ import { compile } from '../packages/vite/wasm/liva_wasm.js'
 import type { Compilation } from '../packages/vite/src/compiler.ts'
 import { decodeBundle } from '../packages/runtime/src/definition.ts'
 
-for (const name of ['toggle', 'reactive-toggle', 'card', 'derived', 'presence', 'lifecycle']) {
+for (const name of [
+  'toggle',
+  'reactive-toggle',
+  'card',
+  'derived',
+  'presence',
+  'lifecycle',
+  'interaction',
+]) {
   const source = readFileSync(new URL(`../fixtures/${name}.liv`, import.meta.url), 'utf8')
   const expected = JSON.parse(
     readFileSync(new URL(`../fixtures/${name}.json`, import.meta.url), 'utf8'),

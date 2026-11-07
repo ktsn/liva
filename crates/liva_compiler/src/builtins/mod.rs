@@ -1,4 +1,5 @@
 mod drag;
+mod interaction;
 mod timing;
 
 use crate::expression::Type;
@@ -25,17 +26,22 @@ pub struct Signature {
     pub return_type: Type,
 }
 
-pub fn lookup(name: &str) -> Result<&'static Function, String> {
+pub fn functions() -> impl Iterator<Item = &'static Function> {
     [
         &drag::DRAG,
+        &interaction::INTERACTION,
         &timing::TWEEN,
         &timing::SPRING,
         &timing::CUBIC_BEZIER,
         &timing::STEPS,
     ]
     .into_iter()
-    .find(|function| function.name == name)
-    .ok_or_else(|| format!("Unknown function: {name}"))
+}
+
+pub fn lookup(name: &str) -> Result<&'static Function, String> {
+    functions()
+        .find(|function| function.name == name)
+        .ok_or_else(|| format!("Unknown function: {name}"))
 }
 
 pub fn constant_type(name: &str) -> Option<Type> {

@@ -88,7 +88,7 @@ references, not dependencies on their full language tooling stacks.
 ## Built-in functions
 
 `crates/liva_compiler/src/builtins/` registers function signatures. Each function
-has its own module; `drag.rs` declares its target argument and return fields.
+has its own module; `drag.rs` and `interaction.rs` declare target arguments and typed return fields.
 The compiler builds one typed variable scope from parameters, inferred let expression types,
 and the targets declared across layers and local states. The generic call checker evaluates argument
 types through the expression checker and selects a matching overload. Required
@@ -98,7 +98,8 @@ follows the variable's inferred type. The syntax parser
 uses ordinary call/argument nodes without knowing any built-in function names.
 
 `packages/runtime/src/builtins/` registers the implementations. `drag.ts` defines
-`drag`, its per-instance value, and Pointer Events handling. A built-in subscription
+`drag`, its per-instance value, and Pointer Events handling. `interaction.ts` reads browser
+pseudo-class snapshots and coalesces event-triggered rechecks. A built-in subscription
 returns a value and a binding function whose cleanup releases browser resources.
 `LivaInstance` creates, binds, and cleans up these handles without built-in-specific
 branches. The let binding graph reevaluates expressions in dependency order before

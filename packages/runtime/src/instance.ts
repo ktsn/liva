@@ -846,6 +846,16 @@ export class LivaInstance {
     this.letBindingCleanups.push(
       ...this.letBindings.bind(this.targets, () => this.applyVariableValues(this.values)),
     )
+
+    // Inputs can initialize from the bound DOM, before the initial presentation settles.
+    this.values = this.letBindings.evaluate(this.values)
+    this.evaluateEvents(false)
+    this.layerResolution = resolveLayers(
+      this.definition,
+      this.values,
+      this.layerResolution.states,
+      false,
+    )
   }
 
   dispose() {

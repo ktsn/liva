@@ -113,6 +113,50 @@ gesture with `released: false` and never trigger release events. Target
 replacement and disposal remove listeners and release capture. Set `touch-action:
 none` on draggable targets; the adapter does not change application CSS.
 
+### Browser interaction input
+
+`interaction(target: body)` returns a reactive record with five Boolean fields:
+
+| Member         | Browser pseudo-class |
+| -------------- | -------------------- |
+| `hover`        | `:hover`             |
+| `active`       | `:active`            |
+| `focus`        | `:focus`             |
+| `focusVisible` | `:focus-visible`     |
+| `focusWithin`  | `:focus-within`      |
+
+```liva
+motion button(disabled: boolean) {
+  let ui = interaction(target: body)
+
+  layer base { body { scale: 1 } }
+  layer hover when ui.hover && !disabled { body { scale: 1.05 } }
+  layer press when ui.active && !disabled { body { scale: .95 } }
+  layer focus when ui.focusVisible { body { outline-width: 2px } }
+}
+```
+
+Each field reads the target element's `matches()` result, including descendant focus
+for `focusWithin`. The initial snapshot is taken when the target binds, before its
+initial presentation settles. Each instance has independent subscriptions; replacement
+and disposal remove listeners and cancel pending rechecks. `interaction()` and
+`drag()` can observe the same target without changing native input behavior.
+
+Pointer, mouse, focus, keyboard, click, capture, visibility, and window focus events
+trigger a synchronous check and one coalesced check on the next animation frame.
+The deferred check observes browser default actions and pseudo-class changes that
+occur after dispatch. Unchanged snapshots do not notify subscribers. This is
+event-driven observation, not continuous selector polling: changes caused solely by
+DOM/style changes, scrolling under a stationary pointer, browser UI, or modality
+changes without any observed event are picked up on the next supported trigger.
+Keyboard, touch, and pen activation follow the browser's CSS behavior; `active` does
+not synthesize a keyboard-pressed or pointer-down state.
+
+This input supplies browser-managed transient state, not raw events or pointer details.
+Keep selected, checked, disabled, and other application states in the application and
+pass them as motion parameters. Guard hover/press layers explicitly when disabled;
+a disabled element may still match `:hover`.
+
 Every motion requires at least one layer. Ordinary layers independently activate
 from Boolean conditions. Stateful layers retain one local state and advance through
 guarded transitions. Initial presentation settles without animation. Updates start

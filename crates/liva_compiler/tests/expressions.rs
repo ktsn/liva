@@ -244,3 +244,64 @@ fn let_expressions_infer_types_and_resolve_dependencies() {
         );
     }
 }
+
+#[test]
+fn interaction_members_are_boolean_reactive_layer_inputs() {
+    let source = r#"motion button(disabled: boolean) {
+      let ui = interaction(target: body)
+      let hovering = ui.hover && !disabled
+      layer base { body { opacity: 1 } }
+      layer hover when hovering { body { opacity: .9 } }
+      layer active when ui.active { body { scale: .9 } }
+      layer focus when ui.focus { body { outline-width: 1px } }
+      layer visible when ui.focusVisible { body { outline-width: 2px } }
+      layer within when ui.focusWithin { body { outline-width: 3px } }
+    }"#;
+    let result = valid(source);
+
+    assert_eq!(result.definitions[0].let_bindings.len(), 2);
+}
+
+#[test]
+fn interaction_rejects_invalid_target_arguments() {
+    for (expression, diagnostic) in [
+        ("interaction(target: 1)", "target"),
+        ("interaction(target: 'body')", "target"),
+        ("interaction()", "target"),
+        ("interaction(target: missing)", "missing"),
+        ("interaction(target: body, other: true)", "other"),
+    ] {
+        let result = compile(
+            &format!(
+                "motion button {{ let ui = {expression}; layer base {{ body {{ opacity: 1 }} }} }}"
+            ),
+            false,
+        );
+
+        assert!(result.definitions.is_empty(), "{expression}");
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|item| item.message.contains(diagnostic)),
+            "{expression}: {:?}",
+            result.diagnostics
+        );
+    }
+}
+
+#[test]
+fn interaction_rejects_unknown_members() {
+    let result = compile(
+        "motion button { let ui = interaction(target: body); layer hover when ui.pressed { body { opacity: 1 } } }",
+        false,
+    );
+
+    assert!(result.definitions.is_empty());
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|item| item.message.contains("pressed"))
+    );
+}

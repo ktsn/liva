@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "definitions": [
+    {
+      "name": "button",
+      "letBindings": [
+        {
+          "name": "ui",
+          "initializer": {
+            "kind": "call",
+            "function": "interaction",
+            "arguments": [
+              {
+                "name": "target",
+                "value": {
+                  "kind": "reference",
+                  "path": ["body"]
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "layers": [
+        {
+          "name": "base",
+          "targets": [
+            {
+              "name": "body",
+              "properties": [
+                {
+                  "name": "opacity",
+                  "value": "1"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "hover",
+          "when": {
+            "kind": "reference",
+            "path": ["ui", "hover"]
+          },
+          "targets": [
+            {
+              "name": "body",
+              "properties": [
+                {
+                  "name": "opacity",
+                  "value": ".9"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "active",
+          "when": {
+            "kind": "reference",
+            "path": ["ui", "active"]
+          },
+          "targets": [
+            {
+              "name": "body",
+              "properties": [
+                {
+                  "name": "scale",
+                  "value": ".9"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "focus",
+          "when": {
+            "kind": "reference",
+            "path": ["ui", "focus"]
+          },
+          "targets": [
+            {
+              "name": "body",
+              "properties": [
+                {
+                  "name": "outline-width",
+                  "value": "1px"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "visible",
+          "when": {
+            "kind": "reference",
+            "path": ["ui", "focusVisible"]
+          },
+          "targets": [
+            {
+              "name": "body",
+              "properties": [
+                {
+                  "name": "outline-width",
+                  "value": "2px"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "within",
+          "when": {
+            "kind": "reference",
+            "path": ["ui", "focusWithin"]
+          },
+          "targets": [
+            {
+              "name": "body",
+              "properties": [
+                {
+                  "name": "outline-style",
+                  "value": "solid"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "diagnostics": []
+}

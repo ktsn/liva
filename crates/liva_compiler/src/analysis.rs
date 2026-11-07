@@ -32,6 +32,106 @@ pub fn type_name(value: expression::Type) -> String {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Completion {
+    pub label: String,
+    pub detail: String,
+}
+
+/// Complete expression variables, record fields, and registered built-in functions.
+pub fn completions(source: &str, offset: usize) -> Vec<Completion> {
+    let Some(prefix) = source.get(..offset) else {
+        return vec![];
+    };
+    let typed = prefix
+        .rsplit(|c: char| !c.is_ascii_alphanumeric() && !matches!(c, '_' | '-' | '.'))
+        .next()
+        .unwrap_or_default();
+    let parsed = parse(source);
+    let mut compiler = Compiler {
+        diagnostics: vec![],
+        mappings: BTreeMap::new(),
+        sources: BTreeMap::new(),
+    };
+    let Some(motion) = parsed.root.motions().find(|motion| {
+        let range = motion.range();
+        range.start <= offset && offset <= range.end
+    }) else {
+        return vec![];
+    };
+    let parameters = compiler.parameters(&motion);
+    let bindings = compiler.let_bindings(&motion);
+    let scope = compiler.motion_scope(&motion, &parameters, &bindings);
+
+    if let Some((parent, partial)) = typed.rsplit_once('.') {
+        let mut path = parent.split('.');
+        let Some(mut value_type) = path.next().and_then(|name| scope.get(name)).copied() else {
+            return vec![];
+        };
+
+        for name in path {
+            let expression::Type::Record(fields) = value_type else {
+                return vec![];
+            };
+            let Some(field) = fields.iter().find(|field| field.name == name) else {
+                return vec![];
+            };
+            value_type = field.value_type;
+        }
+
+        return match value_type {
+            expression::Type::Record(fields) => fields
+                .iter()
+                .filter(|field| field.name.starts_with(partial))
+                .map(|field| Completion {
+                    label: field.name.into(),
+                    detail: type_name(field.value_type),
+                })
+                .collect(),
+            _ => vec![],
+        };
+    }
+
+    let mut result: Vec<_> = scope
+        .iter()
+        .filter(|(name, _)| name.starts_with(typed))
+        .map(|(name, value_type)| Completion {
+            label: name.clone(),
+            detail: type_name(*value_type),
+        })
+        .collect();
+    result.extend(
+        crate::builtins::functions()
+            .filter(|function| function.name.starts_with(typed))
+            .map(|function| Completion {
+                label: function.name.into(),
+                detail: function
+                    .signatures
+                    .iter()
+                    .map(|signature| {
+                        format!(
+                            "{}({}): {}",
+                            function.name,
+                            signature
+                                .parameters
+                                .iter()
+                                .map(|parameter| format!(
+                                    "{}: {}",
+                                    parameter.name,
+                                    type_name(parameter.value_type)
+                                ))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            type_name(signature.return_type)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            }),
+    );
+    result
+}
+
 pub fn hovers(source: &str) -> Vec<Hover> {
     let parsed = parse(source);
     let mut compiler = Compiler {
