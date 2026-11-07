@@ -94,18 +94,83 @@ async function click(label: string) {
 }
 
 describe('composition source inspector', () => {
-  it.each(['FROM', 'TO'])(
-    'edits %s at its source declaration without replacing other expressions',
-    async (side) => {
-      const { edits } = setup()
+  it.each([
+    { offset: 0, sourcePath: `${path}/value`, location: 'Layer: base' },
+    {
+      offset: 1,
+      sourcePath: 'sample/layer/machine/state/active/target/body/property/opacity/value',
+      location: 'Layer: machine · State: active',
+    },
+    {
+      offset: undefined,
+      sourcePath: 'sample/layer/machine/state/active/target/body/property/opacity/value',
+      location: 'Layer: machine · State: active',
+    },
+  ])(
+    'edits only the selected declaration at offset $offset',
+    async ({ offset, sourcePath, location }) => {
+      const { edits } = setup({
+        offset,
+        provenance: {
+          ...provenance,
+          to: {
+            path: 'sample/layer/machine/state/active/target/body/property/opacity/value',
+            text: '0.8',
+            label: 'active opacity',
+          },
+          sharedValue: false,
+        },
+      })
 
-      await input(`${side} source value`, '${amount * 2}')
-      await click(`Apply ${side} value`)
+      expect(host!.querySelector('[aria-label="Editing location"]')!.textContent).toBe(location)
+      expect(host!.querySelectorAll('[aria-label="Source value"]')).toHaveLength(1)
+      expect(host!.querySelector('[aria-label="Keyframe source value"]')).toBeNull()
+      expect(host!.textContent).not.toMatch(/FROM|TO/)
 
-      expect(edits).toEqual([[{ op: 'set', path: `${path}/value`, value: '${amount * 2}' }]])
-      expect(host!.textContent).toContain('FROM and TO share this declaration')
+      await input('Source value', '${amount * 2}')
+      await click('Apply value')
+
+      expect(edits).toEqual([[{ op: 'set', path: sourcePath, value: '${amount * 2}' }]])
     },
   )
+
+  it('explains shared declarations without exposing composition endpoints', () => {
+    setup()
+
+    expect(host!.textContent).toContain(
+      'This declaration is shared. Changes affect all uses of this source.',
+    )
+  })
+
+  it('keeps an external starting value uneditable instead of editing the ending declaration', () => {
+    setup({ offset: 0, provenance: { ...provenance, from: undefined } })
+
+    expect(host!.querySelector('[aria-label="Editing location"]')!.textContent).toBe('External CSS')
+    expect(host!.querySelector('[aria-label="Source value"]')).toBeNull()
+    expect(host!.textContent).toContain('External CSS has no editable source declaration.')
+  })
+
+  it('shows and edits the selected transition keyframe without another value form', async () => {
+    const destination = 'sample/layer/machine/transition/1/target/body/property/opacity'
+    const { edits } = setup({
+      offset: 0.5,
+      provenance: {
+        ...provenance,
+        frameDestination: destination,
+        fields: [{ path: `${destination}/frame/0.5/value`, kind: 'value', value: '0.4' }],
+      },
+    })
+
+    expect(host!.querySelector('[aria-label="Editing location"]')!.textContent).toBe(
+      'Layer: machine · Transition: 2',
+    )
+    expect(host!.querySelector('[aria-label="Source value"]')).toBeNull()
+
+    await input('Keyframe source value', '0.6')
+    await click('Apply keyframe')
+
+    expect(edits[0][0]).toEqual({ op: 'set', path: `${destination}/frame/0.5/value`, value: '0.6' })
+  })
 
   it('preserves the timing expression until the user applies a replacement', async () => {
     const { edits } = setup()
@@ -174,17 +239,14 @@ describe('composition source inspector', () => {
     ])
   })
 
-  it.each([true, false])(
-    'adds a source keyframe at an implicit endpoint (pending=%s)',
-    async (pending) => {
-      const { edits } = setup({ offset: 0, pending })
+  it('adds a pending source keyframe at an implicit endpoint', async () => {
+    const { edits } = setup({ offset: 0, pending: true })
 
-      await input('Keyframe source value', '0')
-      await click('Add keyframe')
+    await input('Keyframe source value', '0')
+    await click('Add keyframe')
 
-      expect(edits).toEqual([[{ op: 'addFrame', path, offset: 0, value: '0', easing: undefined }]])
-    },
-  )
+    expect(edits).toEqual([[{ op: 'addFrame', path, offset: 0, value: '0', easing: undefined }]])
+  })
 
   it('deletes the selected source frame', async () => {
     const { edits } = setup({ offset: 0.5 })

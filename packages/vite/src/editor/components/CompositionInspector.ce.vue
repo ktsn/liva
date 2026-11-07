@@ -13,8 +13,7 @@ const props = defineProps<{
   pending?: boolean
 }>()
 const emit = defineEmits<{ edit: [edits: Edit[]]; add: []; error: [error: unknown] }>()
-const fromValue = ref('')
-const toValue = ref('')
+const sourceValue = ref('')
 const timing = ref('')
 const frameValue = ref('')
 const frameEasing = ref('')
@@ -34,13 +33,45 @@ const canChangeFrame = computed(
   () => !!props.provenance.frameDestination && props.track.timing?.kind === 'tween',
 )
 
+const editingFrame = computed(
+  () =>
+    !!props.pending ||
+    !!frameSource.value ||
+    (props.offset !== undefined && props.offset !== 0 && props.offset !== 1),
+)
+const valueSource = computed(() =>
+  props.offset === 0 ? props.provenance.from : props.provenance.to,
+)
+const editingPath = computed(() =>
+  editingFrame.value
+    ? (props.provenance.frameDeclarationPath ?? props.provenance.frameDestination)
+    : (valueSource.value?.path ??
+      (props.offset === 0
+        ? props.provenance.fromDeclarationPath
+        : props.provenance.toDeclarationPath)),
+)
+const resolvedValue = computed(() =>
+  props.offset === 0 ? props.track.fromValue : props.track.toValue,
+)
+
+function locationLabel(path?: string) {
+  if (!path) return 'External CSS'
+
+  const [, , layer, scope, name] = path.split('/')
+  const label = `Layer: ${layer}`
+
+  if (scope === 'state') return `${label} · State: ${name}`
+  if (scope === 'transition') return `${label} · Transition: ${Number(name) + 1}`
+
+  return label
+}
+
 watch(
   () => [props.track, props.provenance, props.offset, props.pending],
   () => {
-    fromValue.value = props.provenance.from?.text ?? ''
-    toValue.value = props.provenance.to?.text ?? ''
+    sourceValue.value = valueSource.value?.text ?? ''
     timing.value = props.provenance.localTiming?.text ?? props.provenance.timingSource?.text ?? ''
-    frameValue.value = frameSource.value?.value ?? props.provenance.to?.text ?? ''
+    frameValue.value = frameSource.value?.value ?? valueSource.value?.text ?? ''
     frameEasing.value =
       props.provenance.fields.find((field) => field.path === `${framePath.value}/easing`)?.value ??
       ''
@@ -92,54 +123,42 @@ function saveFrame() {
 <template>
   <aside aria-label="Selection inspector" class="inspector">
     <h3>{{ track.target }} / {{ track.property }}</h3>
-    <p>Animation owner: {{ provenance.owner }}</p>
+    <p aria-label="Editing location" class="location">{{ locationLabel(editingPath) }}</p>
     <p v-if="track.diagnostic" role="alert">{{ track.diagnostic }}</p>
-    <p v-if="provenance.sharedValue"
-    >FROM and TO share this declaration. Editing it affects both sides and every instance using this source.</p>
+    <p v-if="provenance.sharedValue && !editingFrame"
+    >This declaration is shared. Changes affect all uses of this source.</p>
     <form
+      v-if="!editingFrame"
       @submit.prevent="
-        provenance.from &&
-        emit('edit', [{ op: 'set', path: provenance.from.path, value: fromValue }])
+        valueSource && emit('edit', [{ op: 'set', path: valueSource.path, value: sourceValue }])
       "
     >
-      <p>FROM resolved: {{ track.fromValue || 'External CSS' }}</p>
-      <p class="source">{{
-        provenance.from?.label || 'External CSS has no editable source declaration.'
+      <p v-if="offset !== undefined">Position: {{ offset * 100 }}%</p>
+      <p>Resolved value: {{ resolvedValue || 'External CSS' }}</p>
+      <template v-if="valueSource">
+        <label>Source value<input v-model="sourceValue" aria-label="Source value" required /></label
+        >
+        <button type="submit">Apply value</button>
+      </template>
+      <p v-else>{{
+        editingPath
+          ? 'Source editing is unavailable for this declaration.'
+          : 'External CSS has no editable source declaration.'
       }}</p>
-      <label v-if="provenance.from">FROM source value<input
-          v-model="fromValue"
-          aria-label="FROM source value"
-          required
-        /></label>
-      <button v-if="provenance.from" type="submit">Apply FROM value</button>
     </form>
-    <form
-      @submit.prevent="
-        provenance.to && emit('edit', [{ op: 'set', path: provenance.to.path, value: toValue }])
+    <h4>Timing</h4>
+    <p
+      v-if="
+        provenance.timingSource &&
+        provenance.timingSource.path !== `${provenance.timingDestination}/timing`
       "
-    >
-      <p>TO resolved: {{ track.toValue || 'External CSS' }}</p>
-      <p class="source">{{
-        provenance.to?.label || 'External CSS has no editable source declaration.'
-      }}</p>
-      <label v-if="provenance.to">TO source value<input
-          v-model="toValue"
-          aria-label="TO source value"
-          required
-        /></label>
-      <button v-if="provenance.to" type="submit">Apply TO value</button>
-    </form>
-    <details v-if="provenance.overridden.length">
-      <summary>Overridden declarations</summary>
-      <p v-for="source in provenance.overridden" :key="source.path" class="source"
-      >{{ source.label }}: {{ source.text }}</p>
-    </details>
-    <p class="source">Effective timing: {{ provenance.timingSource?.label || 'None' }}</p>
+      class="source"
+    >Inherited from {{ locationLabel(provenance.timingSource.path) }}</p>
     <p>{{ Math.round(track.duration) }} ms</p>
     <p>Resolved timing: {{ track.timing ? timingText(track.timing) : 'None' }}</p>
     <p v-if="provenance.timingUnavailable">{{ provenance.timingUnavailable }}</p>
     <template v-if="provenance.timingDestination">
-      <p class="source">Timing override destination: {{ provenance.timingDestination }}</p>
+      <p class="source">Editing: {{ locationLabel(provenance.timingDestination) }}</p>
       <form
         @submit.prevent="
           emit('edit', [{ op: 'timing', path: provenance.timingDestination!, value: timing }])
@@ -162,17 +181,17 @@ function saveFrame() {
         />
       </details>
     </template>
+    <h4 v-if="editingFrame">Keyframe</h4>
     <p v-if="provenance.framesUnavailable">{{ provenance.framesUnavailable }}</p>
-    <p v-if="provenance.frameDestination" class="source"
-    >Keyframe destination: {{ provenance.frameDestination }}</p>
+
     <p v-if="track.explicit.some((frame) => frame.offset === 1 && frame.value !== track.toValue)"
-    >Completion restores the resolved TO value after the explicit endpoint.</p>
-    <dl v-if="selectedFrame" aria-label="Selected keyframe">
+    >Completion restores the property’s resolved value after this keyframe.</p>
+    <dl v-if="selectedFrame && editingFrame" aria-label="Selected keyframe">
       <dt>Position</dt><dd>{{ selectedFrame.offset * 100 }}%</dd>
       <dt>Resolved value</dt><dd>{{ selectedFrame.value || 'External CSS' }}</dd>
       <dt>Easing</dt><dd>{{ selectedFrame.easing || 'Track timing' }}</dd>
     </dl>
-    <form v-if="canChangeFrame && offset !== undefined" @submit.prevent="saveFrame">
+    <form v-if="editingFrame && canChangeFrame && offset !== undefined" @submit.prevent="saveFrame">
       <label>Keyframe source value<input
           v-model="frameValue"
           aria-label="Keyframe source value"
@@ -203,6 +222,8 @@ function saveFrame() {
     </form>
     <button v-if="provenance.frameDestination" :disabled="!canChangeFrame" @click="emit('add')"
     >New keyframe at playhead</button>
+    <p v-if="provenance.frameDestination && !editingFrame" class="source"
+    >New keyframes belong to {{ locationLabel(provenance.frameDestination) }}.</p>
     <p v-if="provenance.frameDestination && !canChangeFrame"
     >Keyframe editing requires tween timing. Springs use their solver curve.</p>
   </aside>
@@ -214,6 +235,10 @@ function saveFrame() {
   overflow: auto;
   border-inline-start: 1px solid var(--liva-border-panel);
   background: var(--liva-surface-inspector);
+}
+.location {
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 .source {
   overflow-wrap: anywhere;

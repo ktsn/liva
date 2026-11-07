@@ -23,6 +23,32 @@ async function save(page: Page) {
   await expectMessage(page, 'Saved')
 }
 
+test('the inspector follows the selected endpoint declaration', async ({ page }) => {
+  await page.goto(`${base}/interactive-button`)
+  await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
+  await page.getByLabel('TO hover enabled', { exact: true }).check()
+  await page.getByRole('button', { name: 'Toggle body tracks', exact: true }).click()
+
+  const inspector = page.getByLabel('Selection inspector', { exact: true })
+
+  for (const { offset, layer, value } of [
+    { offset: 0, layer: 'base', value: '#d9f3e8' },
+    { offset: 100, layer: 'hover', value: '#b5e4d1' },
+  ]) {
+    await page
+      .getByRole('button', { name: `body.background-color ${offset}%`, exact: true })
+      .click()
+
+    await expect(inspector.getByLabel('Editing location', { exact: true })).toHaveText(
+      `Layer: ${layer}`,
+    )
+    await expect(inspector.getByLabel('Source value', { exact: true })).toHaveValue(value)
+    await expect(inspector.getByLabel('Source value', { exact: true })).toHaveCount(1)
+    await expect(inspector).not.toContainText('FROM')
+    await expect(inspector).not.toContainText('TO')
+  }
+})
+
 test('layer value previews remain isolated until save propagates through HMR', async ({
   page,
   browserName,
@@ -35,9 +61,9 @@ test('layer value previews remain isolated until save propagates through HMR', a
     const first = page.getByRole('switch', { name: 'Notifications', exact: true })
     const second = page.getByRole('switch', { name: 'Product updates', exact: true })
 
-    await expect(page.getByLabel('TO source value', { exact: true })).toHaveValue('#888')
-    await page.getByLabel('TO source value', { exact: true }).fill('#553399')
-    await page.getByRole('button', { name: 'Apply TO value', exact: true }).click()
+    await expect(page.getByLabel('Source value', { exact: true })).toHaveValue('#888')
+    await page.getByLabel('Source value', { exact: true }).fill('#553399')
+    await page.getByRole('button', { name: 'Apply value', exact: true }).click()
     await expectMessage(page, 'Previewing')
 
     await expect(first).toHaveCSS('background-color', 'rgb(85, 51, 153)')

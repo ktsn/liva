@@ -1001,7 +1001,7 @@ it('shows all TO properties and permits playback for equal compositions without 
   await click('scale')
 
   expect(host!.querySelector('[aria-label="Selection inspector"]')!.textContent).toContain(
-    'Animation owner: machine',
+    'Layer: machine',
   )
   expect(host!.querySelector('[aria-label="Keyframe value"]')).toBeNull()
   expect(button('Save to source').disabled).toBe(true)
@@ -1225,11 +1225,11 @@ it('identifies an external FROM endpoint on a property without timing', async ()
   await tick()
 
   const inspector = host!.querySelector('[aria-label="Selection inspector"]')!
-  const frame = inspector.querySelector('[aria-label="Selected keyframe"]')!
-
-  expect(inspector.textContent).toContain('Effective timing: None')
-  expect(frame.textContent).toContain('External CSS')
-  expect(frame.textContent).toContain('Track timing')
+  expect(inspector.textContent).toContain('Resolved timing: None')
+  expect(inspector.querySelector('[aria-label="Editing location"]')!.textContent).toBe(
+    'External CSS',
+  )
+  expect(inspector.querySelector('[aria-label="Source value"]')).toBeNull()
 })
 
 function compositionSourceReply(request: EditorRequest): EditorReply {
@@ -1267,15 +1267,15 @@ it('applies composition edit replies to the selected preview without changing ap
   await click('▸ body')
   await click('opacity')
 
-  await input('TO source value', '0.5')
-  await click('Apply TO value')
+  await input('Source value', '0.5')
+  await click('Apply value')
   await expect.poll(() => controller.previewActive).toBe(true)
 
   expect(requests.at(-1)?.edits).toEqual([
     { op: 'set', path: 'layered/layer/base/target/body/property/opacity/value', value: '0.5' },
   ])
   expect(host!.querySelector('[aria-label="Selection inspector"]')!.textContent).toContain(
-    'TO resolved: 0.5',
+    'Resolved value: 0.5',
   )
   expect(runtime!.definition).toEqual(compositionDefinition)
   expect(runtime!.composition?.layers.hover).toBe(false)
@@ -1291,19 +1291,19 @@ it('rolls back an invalid composition draft and permits a corrected source edit'
   await click('▸ body')
   await click('opacity')
 
-  await input('TO source value', 'invalid')
-  await click('Apply TO value')
+  await input('Source value', 'invalid')
+  await click('Apply value')
   await expect.poll(() => controller.message).toContain('Invalid opacity')
 
   expect(controller.draft).toEqual([])
   expect(controller.previewActive).toBe(false)
 
-  await input('TO source value', '0.4')
-  await click('Apply TO value')
+  await input('Source value', '0.4')
+  await click('Apply value')
   await expect.poll(() => controller.previewActive).toBe(true)
 
   expect(host!.querySelector('[aria-label="Selection inspector"]')!.textContent).toContain(
-    'TO resolved: 0.4',
+    'Resolved value: 0.4',
   )
 })
 
@@ -1338,12 +1338,10 @@ it('preserves unapplied composition source input across timeline zoom renders', 
   await click('▸ body')
   await click('opacity')
 
-  await input('TO source value', '0.35')
+  await input('Source value', '0.35')
   await input('Timeline zoom level', '2')
 
-  expect(host!.querySelector<HTMLInputElement>('[aria-label="TO source value"]')!.value).toBe(
-    '0.35',
-  )
+  expect(host!.querySelector<HTMLInputElement>('[aria-label="Source value"]')!.value).toBe('0.35')
 })
 
 async function setupCompositionFrames() {

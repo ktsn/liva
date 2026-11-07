@@ -405,8 +405,18 @@ function choose(track: TimelineTrack, offset?: number) {
 
 function add(track: TimelineTrack, offset: number) {
   if (track.timing?.kind !== 'tween' || track.duration === 0 || offset < 0 || offset > 1) return
+
   choose(track, offset)
-  if (!track.frames.some((frame) => frame.offset === offset)) selected.value!.pending = true
+
+  // choose selects an existing track, so a layered selection has provenance.
+  const existing = layered
+    ? selectionProvenance.value!.fields.some(
+        (field) =>
+          field.path === `${selectionProvenance.value!.frameDestination}/frame/${offset}/value`,
+      )
+    : track.frames.some((frame) => frame.offset === offset)
+
+  if (!existing) selected.value!.pending = true
 }
 
 function changeFrame(track: TimelineTrack, frame: Frame) {

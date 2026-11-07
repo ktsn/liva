@@ -141,10 +141,12 @@ The timeline includes every resolved TO property, grouped by target, even when
 its value is unchanged or it has no timing. It displays the effective owner's
 frames and independently cascaded timing. Select a property to inspect endpoints;
 Play, the playhead, zoom, and snapping use the existing timeline controls.
-The inspector identifies the FROM and TO value declarations, overwritten declarations,
-shared value sources, effective timing origin, and local write destination. External
-CSS has no source field. Editing a shared declaration affects every composition using
-that declaration; the inspector marks this before editing.
+The inspector shows the layer and, when applicable, state or transition of the selected
+value. Selecting an endpoint shows that endpoint's source value; selecting an explicit
+keyframe shows its editing controls. Only the selected declaration is editable in the
+value form. Timing controls identify their source and write destination separately.
+External CSS has no source field. Editing a shared declaration affects every composition
+using that declaration; the inspector marks this before editing.
 
 Value edits preserve source expressions until explicitly replaced. Timing edits write
 `@expression` on the selected transition property, or on the ordinary/style property

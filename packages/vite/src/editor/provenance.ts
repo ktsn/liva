@@ -17,6 +17,9 @@ export interface DeclarationSource {
 }
 
 export interface TrackProvenance {
+  fromDeclarationPath?: string
+  toDeclarationPath?: string
+  frameDeclarationPath?: string
   from?: DeclarationSource
   to?: DeclarationSource
   sharedValue: boolean
@@ -118,6 +121,9 @@ export function trackProvenance(
       : stylePath
 
   return {
+    fromDeclarationPath: fromSource ? valuePath(definition.name, fromSource) : undefined,
+    toDeclarationPath: owner ? valuePath(definition.name, owner) : undefined,
+    frameDeclarationPath: transitionPath ?? declaredStylePath,
     from: fromSource ? field(fields, valuePath(definition.name, fromSource)) : undefined,
     to: owner ? field(fields, valuePath(definition.name, owner)) : undefined,
     sharedValue:
