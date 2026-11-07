@@ -110,7 +110,7 @@ impl Scope {
     }
 
     pub fn resolve(&mut self, name: &str, value_type: Type) {
-        // All let names are declared before dependency/type resolution starts.
+        // Inference only resolves pending symbols declared in this local scope.
         let symbol = self
             .symbols
             .get_mut(name)

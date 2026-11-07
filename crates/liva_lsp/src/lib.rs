@@ -303,6 +303,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reserved_self_diagnostics_survive_references_to_the_builtin() {
+        let source =
+            "motion example { let self = 1; let ui = interaction(target: self); layer base {} }";
+        let document = Document::new(source.into(), 1, "file:///test.liv");
+
+        assert!(
+            document
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic["message"] == "self is a reserved built-in target")
+        );
+        assert!(
+            document
+                .hovers
+                .iter()
+                .any(|hover| hover.label == "self: target")
+        );
+    }
+
+    #[test]
     fn completion_requests_map_vue_blocks_and_exclude_host_code() {
         let uri = "file:///test.vue";
         let text = "<script setup>const ui = 1</script>\n<liva>motion button { let ui = interaction(target: body)\nlayer focus when ui.fo { body { opacity: 1 } } }</liva>";

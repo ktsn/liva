@@ -138,3 +138,34 @@ fn an_invalid_let_initializer_does_not_allow_redeclaration() {
             .any(|diagnostic| diagnostic.message == "Duplicate variable: tween")
     );
 }
+
+#[test]
+fn rejected_self_bindings_do_not_enter_inference_or_hide_the_builtin() {
+    for declaration in [
+        "let self = 1",
+        "let self = self",
+        "let self = interaction(target: self)",
+    ] {
+        for usage in [
+            "let ui = interaction(target: self); layer base {}",
+            "let ui = interaction(target: root); let root = self; layer base {}",
+        ] {
+            let source = format!("motion example {{ {declaration}; {usage} }}");
+            let result = compile(&source, true);
+            let found = liva_compiler::analysis::hovers(&source);
+
+            assert!(result.definitions.is_empty());
+            assert_eq!(result.diagnostics.len(), 1, "{:?}", result.diagnostics);
+            assert_eq!(
+                result.diagnostics[0].message,
+                "self is a reserved built-in target"
+            );
+            assert!(
+                found
+                    .iter()
+                    .any(|hover| hover.range.start == source.rfind("self").unwrap()
+                        && hover.label == "self: target")
+            );
+        }
+    }
+}

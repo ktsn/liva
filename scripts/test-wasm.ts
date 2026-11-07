@@ -62,6 +62,20 @@ assert.deepEqual(
   ['6', '3'],
 )
 
+const rejectedRoot: Compilation = JSON.parse(
+  compile(
+    'motion rejected { let self = 1; let ui = interaction(target: self); layer base {} }',
+    true,
+  ),
+)
+
+assert.deepEqual(rejectedRoot.definitions, [])
+assert(
+  rejectedRoot.diagnostics.some(
+    (diagnostic) => diagnostic.message === 'self is a reserved built-in target',
+  ),
+)
+
 console.log(
   'Node WASM golden contract, immutable TS view, schema rejection, UTF-8 mappings, and lexical shadowing passed',
 )

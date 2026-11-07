@@ -1256,10 +1256,10 @@ fn infer_let_type(
     let result = (|| {
         for (dependency, range) in binding.dependencies() {
             if !bindings.contains_key(&dependency)
-                || scope
-                    .local(&dependency)
-                    .and_then(scope::Symbol::value_type)
-                    .is_some()
+                || !matches!(
+                    scope.local(&dependency).map(|symbol| symbol.kind),
+                    Some(expression::SymbolKind::Pending)
+                )
             {
                 continue;
             }
