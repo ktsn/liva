@@ -140,6 +140,12 @@ test('interaction follows native mouse and keyboard pseudo-classes independently
     await page.keyboard.up(key)
     await expectMatching(page)
   }
+})
+
+test('interaction avoids duplicate notifications for unchanged browser state', async ({ page }) => {
+  await setup(page)
+  await page.locator('#target').focus()
+  await expectMatching(page)
 
   const previous = await page.evaluate(() => window.interactions.updates)
   await page.evaluate(() => {
@@ -151,9 +157,7 @@ test('interaction follows native mouse and keyboard pseudo-classes independently
   expect(await page.evaluate(() => window.interactions.updates)).toBe(previous)
 })
 
-test('interaction tracks descendant focus and releases replaced and disposed targets', async ({
-  page,
-}) => {
+test('interaction tracks descendant focus after replacing the target binding', async ({ page }) => {
   await setup(page)
   await page.evaluate(() => {
     const { instance, subscription, cleanup } = window.interactions
@@ -171,6 +175,12 @@ test('interaction tracks descendant focus and releases replaced and disposed tar
   await expectMatching(page, 'parent')
   await page.locator('#sibling').focus()
   await expectMatching(page, 'parent')
+})
+
+test('interaction releases listeners when instances are disposed', async ({ page }) => {
+  await setup(page)
+  await page.locator('#target').focus()
+  await expectMatching(page)
 
   await page.evaluate(() => {
     window.interactions.cleanup()
