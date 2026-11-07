@@ -47,7 +47,7 @@ function choose(value: string) {
       <label class="composition-transition">Existing transition
         <select
           aria-label="Existing transition"
-          class="composition-shortcut"
+          class="composition-shortcut composition-action-control"
           :value="transition ? JSON.stringify(transition) : ''"
           @change="choose(($event.target as HTMLSelectElement).value)"
         >
@@ -57,7 +57,7 @@ function choose(value: string) {
           }}</option>
         </select>
       </label>
-      <button @click="emit('swap')">Swap</button>
+      <button class="composition-action-control" @click="emit('swap')">Swap</button>
     </div>
     <div class="composition-pair">
       <fieldset v-for="side in sides" :key="side" class="composition-side">
@@ -117,8 +117,11 @@ function choose(value: string) {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  align-items: center;
+  align-items: end;
   margin-block-end: 8px;
+}
+.composition-action-control {
+  block-size: 34px;
 }
 .composition-pair {
   display: grid;
