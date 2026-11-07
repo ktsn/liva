@@ -137,6 +137,138 @@ test('playback pauses and close releases preview effects while retaining draft',
   await expect(page.getByLabel('Track duration', { exact: true })).toHaveValue('3000')
 })
 
+async function controlledPlayback(page: Page) {
+  await open(page)
+  await seek(page, 0)
+  await page.clock.install()
+  await page.clock.pauseAt(new Date())
+}
+
+async function timelineDuration(page: Page) {
+  const readout = await page.getByLabel('Playback time').innerText()
+  return Number(readout.split('/')[1]?.replace('ms', '').trim())
+}
+
+async function expectPlayhead(page: Page, position: number) {
+  // The most recent RAF can lag the clock by one 16 ms frame.
+  expect(Math.abs((await playhead(page)) - position)).toBeLessThanOrEqual(17)
+}
+
+async function expectPreviewEffectsAtPlayhead(page: Page) {
+  const position = await playhead(page)
+  const times = await page.evaluate(() =>
+    document.getAnimations().map((effect) => Number(effect.currentTime)),
+  )
+
+  expect(times.length).toBeGreaterThan(0)
+
+  for (const time of times) {
+    expect(Math.abs(time - position)).toBeLessThanOrEqual(1)
+  }
+}
+
+async function playhead(page: Page) {
+  return Number(await page.getByLabel('Playhead').inputValue())
+}
+
+test('speed scales animation time and changes continuously during playback', async ({ page }) => {
+  await controlledPlayback(page)
+  const duration = await timelineDuration(page)
+  await expect(page.getByRole('combobox', { name: 'Speed', exact: true })).toHaveValue('1')
+  await page.getByRole('combobox', { name: 'Speed', exact: true }).selectOption('0.1')
+  await page.getByRole('button', { name: 'Play', exact: true }).click({ force: true })
+
+  await page.clock.runFor(1000)
+  await expectPlayhead(page, 100)
+  await expectPreviewEffectsAtPlayhead(page)
+
+  await page.getByRole('combobox', { name: 'Speed', exact: true }).selectOption('0.5')
+  await expectPlayhead(page, 100)
+  await expectPreviewEffectsAtPlayhead(page)
+
+  await page.clock.runFor(200)
+  await expectPlayhead(page, 200)
+
+  await page.getByRole('button', { name: 'Pause', exact: true }).click({ force: true })
+  const paused = await playhead(page)
+
+  await page.clock.runFor(1000)
+  expect(await playhead(page)).toBe(paused)
+
+  await page.getByRole('button', { name: 'Play', exact: true }).click({ force: true })
+  await page.clock.runFor(100)
+  await expectPlayhead(page, paused + 50)
+
+  await page.clock.runFor(duration * 2)
+  await expect(page.getByLabel('Playback time')).toHaveText(`${duration} / ${duration} ms`)
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
+  expect(await page.evaluate(() => window.__LIVA_EDITOR__.draft)).toEqual([])
+})
+
+test('loop carries elapsed time, preserves speed, and stops after the current pass', async ({
+  page,
+}) => {
+  await controlledPlayback(page)
+  const duration = await timelineDuration(page)
+  const loop = page.getByRole('button', { name: '↻ Loop', exact: true })
+  await expect(loop).toHaveAttribute('aria-pressed', 'false')
+  await page.getByRole('combobox', { name: 'Speed', exact: true }).selectOption('0.5')
+  await page.getByRole('button', { name: 'Play', exact: true }).click({ force: true })
+  await page.clock.runFor(200)
+
+  await loop.click({ force: true })
+  await expectPlayhead(page, 100)
+  await expectPreviewEffectsAtPlayhead(page)
+
+  await page.clock.runFor(duration * 4)
+  await expectPlayhead(page, 100)
+  await expectPreviewEffectsAtPlayhead(page)
+  await expect(loop).toHaveAttribute('aria-pressed', 'true')
+
+  await page.getByRole('button', { name: 'Pause', exact: true }).click({ force: true })
+  const paused = await playhead(page)
+  await page.clock.runFor(500)
+  expect(await playhead(page)).toBe(paused)
+
+  await page.getByRole('button', { name: 'Play', exact: true }).click({ force: true })
+  await loop.click({ force: true })
+  await page.clock.runFor(duration * 2)
+  await expect(page.getByLabel('Playback time')).toHaveText(`${duration} / ${duration} ms`)
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
+})
+
+test('ending loop playback cancels future frames and releases effects', async ({ page }) => {
+  await controlledPlayback(page)
+  await page.getByRole('button', { name: '↻ Loop', exact: true }).click({ force: true })
+  await page.getByRole('button', { name: 'Play', exact: true }).click({ force: true })
+  await page.getByRole('button', { name: 'End preview', exact: true }).click({ force: true })
+  const ended = await playhead(page)
+  await page.clock.runFor(1000)
+  expect(await playhead(page)).toBe(ended)
+  expect(await page.evaluate(() => document.getAnimations().length)).toBe(0)
+  expect(await page.evaluate(() => window.__LIVA_EDITOR__.draft)).toEqual([])
+})
+
+test('playback preferences survive form remounts and reset on reload', async ({ page }) => {
+  await open(page)
+  await page.getByRole('combobox', { name: 'Speed', exact: true }).selectOption('0.25')
+  const loop = page.getByRole('button', { name: '↻ Loop', exact: true })
+  await loop.focus()
+  await page.keyboard.press('Space')
+  await expect(loop).toBeFocused()
+  await expect(loop).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
+  await expect(page.getByRole('combobox', { name: 'Speed', exact: true })).toHaveValue('0.25')
+  await expect(loop).toHaveAttribute('aria-pressed', 'true')
+
+  await open(page)
+  await expect(page.getByRole('combobox', { name: 'Speed', exact: true })).toHaveValue('1')
+  await expect(loop).toHaveAttribute('aria-pressed', 'false')
+})
+
 test('timeline saves timing, new frames and endpoint state values with shared HMR', async ({
   page,
   browserName,
@@ -375,6 +507,49 @@ test('lifecycle previews capture templates, isolate instances, scrub and restore
   await page.getByRole('button', { name: 'End preview', exact: true }).click()
   await expect(first).toHaveCSS('opacity', '1')
   await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0)
+})
+
+for (const phase of ['enter', 'leave']) {
+  test(`${phase} loops seek existing effects without changing presence`, async ({ page }) => {
+    await openLifecycle(page)
+    await page.getByLabel('Existing transition').selectOption(`${phase}-default`)
+    await seek(page, 0)
+    const duration = await timelineDuration(page)
+    const first = page.getByRole('button', { name: 'First lifecycle', exact: true })
+
+    await page.clock.install()
+    await page.clock.pauseAt(new Date())
+    await page.getByRole('button', { name: '↻ Loop', exact: true }).click({ force: true })
+    await page.getByRole('button', { name: 'Play', exact: true }).click({ force: true })
+    await page.clock.runFor(duration * 3 + 100)
+
+    await expectPlayhead(page, 100)
+    await expectPreviewEffectsAtPlayhead(page)
+    await expect(first).toHaveCount(1)
+    await expect(first).toBeVisible()
+    await expect(first).toHaveAttribute('aria-pressed', 'false')
+
+    await page.getByRole('button', { name: 'End preview', exact: true }).click({ force: true })
+    await expect(first).toHaveCSS('opacity', '1')
+    expect(await page.evaluate(() => document.getAnimations().length)).toBe(0)
+  })
+}
+
+test('loop settles under reduced motion and permits manual scrubbing', async ({ page }) => {
+  await controlledPlayback(page)
+  const duration = await timelineDuration(page)
+  await page.getByRole('button', { name: '↻ Loop', exact: true }).click({ force: true })
+  await page.getByRole('button', { name: 'Play', exact: true }).click({ force: true })
+  await page.clock.runFor(100)
+
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.clock.runFor(100)
+  await expect(page.getByLabel('Playback time')).toHaveText(`${duration} / ${duration} ms`)
+  await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
+
+  await seek(page, 50)
+  await page.clock.runFor(duration * 3)
+  expect(await playhead(page)).toBe(50)
 })
 
 test('motion-level lifecycle edits save with shared HMR', async ({ page, browserName }) => {

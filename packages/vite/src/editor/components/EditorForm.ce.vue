@@ -45,6 +45,10 @@ const expanded = ref<string[]>([])
 const selected = ref<{ target: string; property: string; offset?: number; pending?: boolean }>()
 const time = ref(0)
 const playing = ref(false)
+const speed = ref(props.controller.playbackSpeed)
+const loop = ref(props.controller.playbackLoop)
+let clockTime = 0
+let clockPosition = 0
 const busy = ref(false)
 let frameId = 0
 let generation = 0
@@ -271,26 +275,68 @@ async function play() {
   }
   if (time.value >= duration.value) time.value = 0
   if (!props.controller.previewActive && !(await prepare())) return
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  if (duration.value === 0 || matchMedia('(prefers-reduced-motion: reduce)').matches) {
     await seek(duration.value)
     return
   }
   playing.value = true
-  const start = performance.now() - time.value
+  clockTime = performance.now()
+  clockPosition = time.value
   const tick = (now: number) => {
     /* v8 ignore if -- @preserve: stop and controller notifications cancel scheduled frames synchronously; this only guards an already queued browser callback. */
     if (!playing.value || !props.controller.previewActive) {
       stop()
       return
     }
-    time.value = matchMedia('(prefers-reduced-motion: reduce)').matches
-      ? duration.value
-      : Math.min(duration.value, now - start)
+    advanceClock(now)
     props.controller.seek(time.value)
-    if (time.value < duration.value) frameId = requestAnimationFrame(tick)
+
+    if (
+      !matchMedia('(prefers-reduced-motion: reduce)').matches &&
+      duration.value > 0 &&
+      (loop.value || time.value < duration.value)
+    )
+      frameId = requestAnimationFrame(tick)
     else stop()
   }
   frameId = requestAnimationFrame(tick)
+}
+
+function advanceClock(now: number) {
+  // RAF timestamps can precede a clock anchor created earlier in the same frame.
+  const position = clockPosition + Math.max(0, now - clockTime) * speed.value
+
+  time.value = matchMedia('(prefers-reduced-motion: reduce)').matches
+    ? duration.value
+    : loop.value && duration.value > 0
+      ? position % duration.value
+      : Math.min(duration.value, position)
+}
+
+function changeSpeed(value: number) {
+  if (playing.value) {
+    const now = performance.now()
+    advanceClock(now)
+    props.controller.seek(time.value)
+    clockPosition = time.value
+    clockTime = now
+  }
+
+  speed.value = value
+  props.controller.setPlaybackPreferences(value, loop.value)
+}
+
+function toggleLoop() {
+  if (playing.value) {
+    const now = performance.now()
+    advanceClock(now)
+    props.controller.seek(time.value)
+    clockPosition = time.value
+    clockTime = now
+  }
+
+  loop.value = !loop.value
+  props.controller.setPlaybackPreferences(speed.value, loop.value)
 }
 
 async function editComposition(edits: Edit[]) {
@@ -453,6 +499,17 @@ onScopeDispose(() => {
     >
       {{ playing ? 'Pause' : 'Play' }}
     </button>
+    <label class="speed-control">Speed
+      <select
+        aria-label="Speed"
+        class="speed-select"
+        :value="speed"
+        @change="changeSpeed(Number(($event.target as HTMLSelectElement).value))"
+      >
+        <option v-for="rate in [0.1, 0.25, 0.5, 1]" :key="rate" :value="rate">{{ rate }}×</option>
+      </select>
+    </label>
+    <button class="loop-toggle" :aria-pressed="loop" @click="toggleLoop">↻ Loop</button>
     <button :disabled="stale" @click="seek(0)">To start</button>
     <button @click="endPreview">End preview</button>
     <span aria-label="Playback time" class="readout" role="timer"
@@ -586,15 +643,21 @@ onScopeDispose(() => {
   padding: 8px 14px;
   border-bottom: 1px solid var(--liva-border-panel);
 }
-.toolbar label {
+.speed-control {
   display: flex;
   gap: 5px;
   align-items: center;
   margin: 0;
 }
-.toolbar select {
-  width: auto;
-  max-width: 180px;
+.speed-select {
+  inline-size: auto;
+  max-inline-size: 180px;
+}
+.loop-toggle {
+  &[aria-pressed='true'] {
+    background: var(--liva-surface-target);
+    border-color: var(--liva-accent);
+  }
 }
 .actions {
   margin-left: auto;
