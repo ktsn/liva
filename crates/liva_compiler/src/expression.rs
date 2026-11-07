@@ -233,22 +233,6 @@ impl ExprExt for Expr {
                         )));
                     }
 
-                    if function.text() == "steps"
-                        && name.text() == "position"
-                        && let Ok(position) = value.string_value()
-                        && ![
-                            "start",
-                            "end",
-                            "jump-start",
-                            "jump-end",
-                            "jump-none",
-                            "jump-both",
-                        ]
-                        .contains(&position.as_str())
-                    {
-                        return Err(value.error("Unsupported step position: use start, end, jump-start, jump-end, jump-none, or jump-both"));
-                    }
-
                     candidates.retain(|signature| {
                         signature.parameters.iter().any(|parameter| {
                             parameter.name == name.text() && parameter.value_type == actual

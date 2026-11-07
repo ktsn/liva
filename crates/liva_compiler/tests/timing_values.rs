@@ -103,10 +103,6 @@ fn overloaded_calls_explain_the_invalid_argument() {
         ),
         ("spring(speed: 2)", "Unknown argument for spring: speed"),
         (
-            "steps(count: 4, position: 'middle')",
-            "Unsupported step position",
-        ),
-        (
             "steps(count: true)",
             "Invalid argument type for steps.count",
         ),
@@ -142,6 +138,21 @@ fn step_easing_accepts_constants_calls_bindings_and_dynamic_arguments() {
         let source = format!(
             "motion sample(n: number, position: string) {{ let curve = {easing}\nlayer base {{ body {{ opacity @tween(duration: 100, easing: curve) {{ 0%: 0 @curve\n100%: 1 }} }} }} }}"
         );
+        valid(&source);
+    }
+}
+
+#[test]
+fn step_easing_type_checks_without_validating_argument_values() {
+    for easing in [
+        "steps(count: 4, position: 'middle')",
+        "steps(count: 4, position: position)",
+        "steps(count: 0)",
+    ] {
+        let source = format!(
+            "motion sample {{ let position = 'middle'\nlet curve = {easing}\nlayer base {{ body {{ opacity: 1 @tween(easing: curve) }} }} }}"
+        );
+
         valid(&source);
     }
 }

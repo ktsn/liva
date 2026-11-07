@@ -485,7 +485,7 @@ carry no implicit CSS units. The available signatures are:
 
 A timing value is replaced as a whole. Different calls never merge their parameters.
 Timing and easing values cannot be interpolated into CSS or used as Boolean guards.
-Types are checked by the compiler; numeric domain errors from evaluated expressions
+Types are checked by the compiler; argument value errors from evaluated expressions
 are reported by the runtime. Use typed easing values, rather than CSS strings, as
 `tween` arguments. Legacy CSS-like animation declarations remain supported while
 expression decorators provide the migration path for these values.
