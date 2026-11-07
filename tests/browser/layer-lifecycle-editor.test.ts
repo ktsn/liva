@@ -82,9 +82,9 @@ test('typed lifecycle source expressions save and reach shared instances through
     await open(page)
     await page.getByLabel('Editing scope').selectOption('enter-default')
     await page.getByRole('button', { name: 'Toggle body tracks', exact: true }).click()
-    await page.getByLabel('Select body.opacity', { exact: true }).click()
-    await page.getByLabel('FROM source value', { exact: true }).fill('${start * 2}')
-    await page.getByRole('button', { name: 'Apply FROM value', exact: true }).click()
+    await page.getByRole('button', { name: 'body.opacity 0%', exact: true }).click()
+    await page.getByLabel('Keyframe source value', { exact: true }).fill('${start * 2}')
+    await page.getByRole('button', { name: 'Apply keyframe', exact: true }).click()
 
     await expect.poll(() => page.evaluate(() => window.__LIVA_EDITOR__.previewActive)).toBe(true)
 

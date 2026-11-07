@@ -1478,7 +1478,7 @@ it('uses one composition baseline for lifecycle rows and isolated scrub-ready pl
   await click('Motion editor')
   await input('Editing scope', 'enter-default')
 
-  expect(host!.querySelector('[aria-label="FROM base enabled"]')).toBeNull()
+  expect(host!.querySelector('[aria-label="From base enabled"]')).toBeNull()
   expect(host!.querySelector('[aria-label="Baseline base enabled"]')).not.toBeNull()
 
   await input('Baseline machine state', 'active')
@@ -1513,7 +1513,7 @@ it('uses one composition baseline for lifecycle rows and isolated scrub-ready pl
 })
 
 it.each(['enter', 'leave'] as const)(
-  'shows resolved %s endpoints and the phase-specific completion behavior',
+  'shows the %s editing scope and phase-specific completion behavior',
   async (phase) => {
     const definition: Definition = {
       ...compositionDefinition,
@@ -1544,8 +1544,9 @@ it.each(['enter', 'leave'] as const)(
 
     const inspector = host?.querySelector('[aria-label="Selection inspector"]')
 
-    expect(inspector?.textContent).toContain('FROM resolved: 0.2')
-    expect(inspector?.textContent).toContain(`TO resolved: ${phase === 'enter' ? '1' : '0.6'}`)
+    expect(inspector?.querySelector('[aria-label="Editing location"]')?.textContent).toBe(
+      `Motion ${phase}`,
+    )
     expect(inspector?.textContent?.includes('Completion restores')).toBe(phase === 'enter')
   },
 )

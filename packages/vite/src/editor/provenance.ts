@@ -170,6 +170,9 @@ export function lifecycleProvenance(
     field(fields, `${path}/timing`)
 
   return {
+    fromDeclarationPath: destination,
+    toDeclarationPath: destination,
+    frameDeclarationPath: destination,
     from: field(fields, `${destination}/frame/0/value`),
     to: field(fields, `${destination}/frame/1/value`),
     sharedValue: false,
