@@ -24,11 +24,11 @@ const checked = ref(false)
 <liva lang="liva">
 motion toggle(checked: boolean) {
   layer base {
-    track @tween(duration: 200, easing: easeInOut) {
+    @tween(duration: 200, easing: easeInOut) track {
       background-color: #888
     }
 
-    thumb @spring(stiffness: 300, damping: 20) {
+    @spring(stiffness: 300, damping: 20) thumb {
       translate: 0 0
       scale: 1
     }
@@ -54,7 +54,7 @@ motion toggle(checked: boolean) {
 
     transition off -> on when checked {
       thumb {
-        scale @tween(duration: 350) {
+        @tween(duration: 350) scale {
           40%: 1.3 1 @easeIn
           70%: 0.95 1 @easeOut
         }
@@ -63,7 +63,7 @@ motion toggle(checked: boolean) {
 
     transition on -> off when !checked {
       thumb {
-        translate @spring(stiffness: 350, damping: 22) {
+        @spring(stiffness: 350, damping: 22) translate {
         }
       }
     }

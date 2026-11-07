@@ -21,12 +21,12 @@ fn animation<'a>(definition: &'a Definition, phase: &str) -> &'a Transition {
 fn lifecycle_blocks_normalize_timing_frames_and_property_overrides() {
     for phase in ["enter", "leave"] {
         let source = motion(&format!(
-            "{phase} @tween(duration: 250, easing: easeOut) {{
+            "@tween(duration: 250, easing: easeOut) {phase} {{
               body {{
                 opacity {{ 100%: 0; 40%: 0.5 @easeIn; 0%: 1 }}
-                translate @spring(stiffness: 300, damping: 20) {{ 100%: 300px 0 }}
+                @spring(stiffness: 300, damping: 20) translate {{ 100%: 300px 0 }}
               }}
-              badge {{ opacity @spring(duration: 350, bounce: 0.2) {{ 0%: 0 }} }}
+              badge {{ @spring(duration: 350, bounce: 0.2) opacity {{ 0%: 0 }} }}
             }}"
         ));
         let result = valid(&source);
@@ -77,7 +77,7 @@ fn lifecycle_definitions_keep_missing_endpoints_unresolved() {
             ("0%: 0; 100%: 1", vec![0.0, 1.0]),
         ] {
             let result = valid(&motion(&format!(
-                "{phase} {{ body {{ opacity @tween(duration: 0) {{ {frames} }} }} }}"
+                "{phase} {{ body {{ @tween(duration: 0) opacity {{ {frames} }} }} }}"
             )));
             let property = animation(&result.definitions[0], phase)
                 .property("body", "opacity")
@@ -99,8 +99,8 @@ fn lifecycle_definitions_keep_missing_endpoints_unresolved() {
 #[test]
 fn lifecycle_phases_have_independent_timing() {
     let result = valid(&motion(
-        "enter @tween(duration: 30) { body { opacity: 0 } }
-leave @tween(duration: 40) { body { opacity: 0 } }",
+        "@tween(duration: 30) enter { body { opacity: 0 } }
+@tween(duration: 40) leave { body { opacity: 0 } }",
     ));
     let definition = &result.definitions[0];
 
@@ -131,7 +131,7 @@ fn lifecycle_errors_report_exact_source_ranges_for_both_phases() {
             ("body { opacity { «101%»: 0 } }", "semantic.offset"),
             ("body { opacity { «-1%»: 0 } }", "semantic.offset"),
         ] {
-            assert_error(&format!("{phase} @tween(duration: 1) {{ {body} }}"), code);
+            assert_error(&format!("@tween(duration: 1) {phase} {{ {body} }}"), code);
         }
 
         let duplicate = assert_error(
@@ -152,7 +152,7 @@ fn lifecycle_errors_report_exact_source_ranges_for_both_phases() {
 fn property_tween_can_override_global_spring_for_intermediate_frames() {
     for phase in ["enter", "leave"] {
         let result = valid(&motion(&format!(
-            "{phase} @spring(stiffness: 300, damping: 20) {{ body {{ opacity @tween(duration: 100) {{ 50%: 0.5 @easeIn }} }} }}"
+            "@spring(stiffness: 300, damping: 20) {phase} {{ body {{ @tween(duration: 100) opacity {{ 50%: 0.5 @easeIn }} }} }}"
         )));
         assert!(result.diagnostics.is_empty());
     }
@@ -162,7 +162,7 @@ fn property_tween_can_override_global_spring_for_intermediate_frames() {
 fn lifecycle_mappings_retain_utf8_byte_ranges_in_each_phase() {
     for phase in ["enter", "leave"] {
         let source = motion(&format!(
-            "{phase} @tween(duration: 250, easing: easeOut) {{ body {{ opacity {{ 0%: 0 @easeIn }} }} }}"
+            "@tween(duration: 250, easing: easeOut) {phase} {{ body {{ opacity {{ 0%: 0 @easeIn }} }} }}"
         ));
         let result = valid(&source);
         let mappings = result.mappings.unwrap();
@@ -171,7 +171,7 @@ fn lifecycle_mappings_retain_utf8_byte_ranges_in_each_phase() {
             (
                 "",
                 format!(
-                    "{phase} @tween(duration: 250, easing: easeOut) {{ body {{ opacity {{ 0%: 0 @easeIn }} }} }}"
+                    "@tween(duration: 250, easing: easeOut) {phase} {{ body {{ opacity {{ 0%: 0 @easeIn }} }} }}"
                 ),
             ),
             ("/target/body/property/opacity/frame/0/offset", "0%".into()),
@@ -212,7 +212,7 @@ fn malformed_lifecycle_blocks_do_not_suppress_later_valid_motions() {
             "",
             "invalid {}",
             "idle -> active {}",
-            "{ body { opacity @tween(duration: 1) { 101%: 0 } } }",
+            "{ body { @tween(duration: 1) opacity { 101%: 0 } } }",
         ] {
             assert_recovers(&format!("{phase} {body}"));
         }
@@ -229,15 +229,15 @@ fn shorthand_normalizes_to_endpoint_frames_including_css_templates() {
             "var(--fade, 0)",
         ] {
             let shorthand = valid(&motion(&format!(
-                "{phase} @tween(duration: 20) {{ body {{ opacity: {value} }} }}"
+                "@tween(duration: 20) {phase} {{ body {{ opacity: {value} }} }}"
             )));
             let explicit = valid(&motion(&format!(
-                "{phase} @tween(duration: 20) {{ body {{ opacity {{ {offset}%: {value} }} }} }}"
+                "@tween(duration: 20) {phase} {{ body {{ opacity {{ {offset}%: {value} }} }} }}"
             )));
             assert_eq!(shorthand.definitions, explicit.definitions);
         }
         let result = valid(&motion(&format!(
-            "{phase} @tween(duration: 20) {{ body {{ opacity: 0; translate {{ 50%: 5px 0 @easeOut }} }} }}"
+            "@tween(duration: 20) {phase} {{ body {{ opacity: 0; translate {{ 50%: 5px 0 @easeOut }} }} }}"
         )));
         assert_eq!(
             animation(&result.definitions[0], phase).targets[0]
@@ -257,13 +257,13 @@ fn lifecycle_property_duplicates_are_reported_in_source_order() {
             "opacity { 50%: 0.5 } «opacity»: 0",
         ] {
             let error = assert_error(
-                &format!("{phase} @tween(duration: 1) {{ body {{ {declarations} }} }}"),
+                &format!("@tween(duration: 1) {phase} {{ body {{ {declarations} }} }}"),
                 "semantic.duplicate",
             );
             assert_eq!(error.related.len(), 1);
         }
         assert_error(
-            &format!("{phase} @tween(duration: 1) {{ body {{ translate: ${{«missing»}}px 0 }} }}"),
+            &format!("@tween(duration: 1) {phase} {{ body {{ translate: ${{«missing»}}px 0 }} }}"),
             "semantic.expression",
         );
     }
@@ -273,7 +273,7 @@ fn lifecycle_property_duplicates_are_reported_in_source_order() {
 fn lifecycle_headers_reject_extra_selectors() {
     for phase in ["enter", "leave"] {
         let source = motion(&format!(
-            "{phase} idle @tween(duration: 30) {{ body {{ opacity: 0 }} }}"
+            "@tween(duration: 30) {phase} idle {{ body {{ opacity: 0 }} }}"
         ));
         let result = compile(&source, true);
         let diagnostic = result
@@ -291,7 +291,7 @@ fn lifecycle_headers_reject_extra_selectors() {
 fn lifecycle_shorthand_maps_values_to_their_original_source() {
     for (phase, offset) in [("enter", 0), ("leave", 1)] {
         let source = motion(&format!(
-            "{phase} @tween(duration: 20) {{ body {{ translate: ${{amount}}px 0 }} }}"
+            "@tween(duration: 20) {phase} {{ body {{ translate: ${{amount}}px 0 }} }}"
         ));
         let result = valid(&source);
         let mappings = result.mappings.unwrap();

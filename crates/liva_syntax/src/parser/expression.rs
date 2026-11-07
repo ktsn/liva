@@ -237,6 +237,42 @@ impl Parser<'_, '_, '_> {
     }
 }
 
+/// Parse one expression, leaving the next declaration and its trivia untouched.
+pub(crate) fn emit_prefix(
+    tokens: &[Token<'_>],
+    end: usize,
+    builder: &mut GreenNodeBuilder<'static>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> usize {
+    let boundary = tokens
+        .iter()
+        .position(|token| matches!(token.text, "{" | "}" | ";" | "@"))
+        .unwrap_or(tokens.len());
+    let tokens = &tokens[..boundary];
+    let limit = tokens
+        .iter()
+        .enumerate()
+        .filter(|(_, token)| !token.trivia)
+        .nth(256)
+        .map(|(index, _)| index);
+    let mut parser = Parser {
+        tokens: &tokens[..limit.unwrap_or(tokens.len())],
+        index: 0,
+        last: Range { start: end, end },
+        recovery_suffix: None,
+        builder,
+        diagnostics,
+    };
+
+    parser.expression(0);
+
+    if limit.is_some() && parser.index == parser.tokens.len() {
+        parser.error("Expression is too complex", parser.last.clone());
+    }
+
+    parser.index
+}
+
 pub(crate) fn emit(
     tokens: &[Token<'_>],
     end: usize,

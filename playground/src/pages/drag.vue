@@ -38,7 +38,7 @@ motion card {
   let movement = drag(target: body)
 
   layer base {
-    body @spring(stiffness: 300, damping: 20) {
+    @spring(stiffness: 300, damping: 20) body {
       translate: 0 0
       scale: 1
     }

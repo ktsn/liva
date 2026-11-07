@@ -34,7 +34,7 @@ const focused = ref(false)
 <liva lang="liva">
 motion button(hovered: boolean, pressed: boolean, focused: boolean) {
   layer base {
-    body @tween(duration: 180, easing: easeOut) {
+    @tween(duration: 180, easing: easeOut) body {
       scale: 1
       background-color: #d9f3e8
       box-shadow: 0 0 0 0px #16795b

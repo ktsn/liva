@@ -87,7 +87,7 @@ fn references_duplicates_and_recovery() {
 
 #[test]
 fn raw_css_and_byte_mappings() {
-    let source = "// 😀\r\nmotion a { layer on @tween(duration: 1000) { t { --offset: var(--x, '日本語'); color: /* note */ imaginary !important; timing: var(--x, 1) } } }";
+    let source = "// 😀\r\nmotion a { @tween(duration: 1000) layer on { t { --offset: var(--x, '日本語'); color: /* note */ imaginary !important; timing: var(--x, 1) } } }";
     let result = compile(source, true);
 
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
@@ -98,12 +98,12 @@ fn raw_css_and_byte_mappings() {
 
     let range = &result.mappings.unwrap()["a/layer/on/timing"].range;
 
-    assert_eq!(&source[range.start..range.end], "tween(duration: 1000) ");
+    assert_eq!(&source[range.start..range.end], "tween(duration: 1000)");
 }
 
 #[test]
 fn mapping_paths_do_not_collide_with_user_names() {
-    let source = "motion a { layer timing @tween(duration: 1000) { timing { timing: 0 } state general initial {} state timing { timing { timing: 1 } } transition general -> timing @tween(duration: 2000) when true { timing { timing @tween(duration: 3000) {} } } } }";
+    let source = "motion a { @tween(duration: 1000) layer timing { timing { timing: 0 } state general initial {} state timing { timing { timing: 1 } } @tween(duration: 2000) transition general -> timing when true { timing { @tween(duration: 3000) timing {} } } } }";
     let result = compile(source, true);
 
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);

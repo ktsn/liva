@@ -5,7 +5,7 @@ use support::valid;
 
 #[test]
 fn layer_mapping_ranges_preserve_unicode_crlf_expressions_and_shared_origins() {
-    let source = "// 😀 日本語\r\nmotion sample(amount: number) {\r\n let quick = tween(duration: 200)\r\n layer base @quick {\r\n body @spring(duration: 400) {\r\n color: '日本語';\r\n opacity: ${amount} @tween(duration: 150);\r\n scale @quick { 0%: ${amount} @steps(count: 3); 100%: 1 }\r\n }\r\n }\r\n}";
+    let source = "// 😀 日本語\r\nmotion sample(amount: number) {\r\n let quick = tween(duration: 200)\r\n @quick layer base {\r\n @spring(duration: 400) body {\r\n color: '日本語';\r\n opacity: ${amount} @tween(duration: 150);\r\n @quick scale { 0%: ${amount} @steps(count: 3); 100%: 1 }\r\n }\r\n }\r\n}";
     let result = valid(source);
     let mappings = result.mappings.unwrap();
 
@@ -58,7 +58,7 @@ fn layer_mapping_ranges_preserve_unicode_crlf_expressions_and_shared_origins() {
 
 #[test]
 fn production_omits_layer_source_mappings() {
-    let source = "motion sample { layer base @tween() { body { opacity: 1 } } }";
+    let source = "motion sample { @tween() layer base { body { opacity: 1 } } }";
     let production = compile(source, false);
 
     assert!(production.diagnostics.is_empty());
@@ -67,7 +67,7 @@ fn production_omits_layer_source_mappings() {
 
 #[test]
 fn duplicate_transition_pairs_have_distinct_declaration_and_expression_ranges() {
-    let source = "motion sample { layer machine { state idle initial { body { opacity: 1 } } transition idle -> idle @tween(duration: 100) when false { body { opacity { 50%: 0.4 @stepStart } } } transition idle -> idle @tween(duration: 200) when false { body { opacity { 50%: 0.8 @stepEnd } } } } }";
+    let source = "motion sample { layer machine { state idle initial { body { opacity: 1 } } @tween(duration: 100) transition idle -> idle when false { body { opacity { 50%: 0.4 @stepStart } } } @tween(duration: 200) transition idle -> idle when false { body { opacity { 50%: 0.8 @stepEnd } } } } }";
     let result = valid(source);
     let mappings = result.mappings.unwrap();
 

@@ -1,6 +1,6 @@
 use liva_compiler::edits::{Edit, apply_edits};
 
-const SOURCE: &str = "// 日本語😀\r\nmotion sample(amount: number) {\r\n let quick = tween(duration: 200)\r\n layer base @quick {\r\n body {\r\n // keep this comment\r\n opacity: ${amount};\r\n scale: 1 @spring(duration: 400, bounce: 0.25)\r\n }\r\n }\r\n}";
+const SOURCE: &str = "// 日本語😀\r\nmotion sample(amount: number) {\r\n let quick = tween(duration: 200)\r\n @quick layer base {\r\n body {\r\n // keep this comment\r\n opacity: ${amount};\r\n scale: 1 @spring(duration: 400, bounce: 0.25)\r\n }\r\n }\r\n}";
 const OPACITY: &str = "sample/layer/base/target/body/property/opacity";
 
 #[test]
@@ -26,7 +26,7 @@ fn value_and_timing_edits_preserve_expressions_comments_and_shared_defaults() {
             .contains("opacity: ${amount * 0.5} @tween(duration: 300, easing: steps(count: 4))")
     );
     assert!(result.source.contains("// keep this comment\r\n"));
-    assert!(result.source.contains("layer base @quick"));
+    assert!(result.source.contains("@quick layer base"));
     assert!(
         result
             .source
@@ -56,7 +56,7 @@ fn removing_a_local_override_restores_inheritance_without_rewriting_values() {
 
     assert!(property.timing_expression.is_none());
     assert!(property.template.is_some());
-    assert!(restored.source.contains("layer base @quick"));
+    assert!(restored.source.contains("@quick layer base"));
     assert!(!restored.source.contains("spring(duration: 300)"));
 }
 
@@ -83,7 +83,7 @@ fn adding_a_style_keyframe_preserves_the_original_expression_at_one_hundred_perc
 
 #[test]
 fn existing_bodyless_transition_receives_only_the_requested_property_override() {
-    let source = "motion sample { layer machine { state idle initial { body { opacity: 1; scale: 1 } } transition idle -> idle @tween(duration: 100) when false } }";
+    let source = "motion sample { layer machine { state idle initial { body { opacity: 1; scale: 1 } } @tween(duration: 100) transition idle -> idle when false } }";
     let path = "sample/layer/machine/transition/0/target/body/property/opacity";
     let result = apply_edits(
         source,
@@ -108,7 +108,7 @@ fn existing_bodyless_transition_receives_only_the_requested_property_override() 
 
 #[test]
 fn moving_a_frame_preserves_timing_and_easing() {
-    let source = "motion sample { layer base @tween() { body { opacity { 50%: 0.5 @stepStart; 100%: 1 } } } }";
+    let source = "motion sample { @tween() layer base { body { opacity { 50%: 0.5 @stepStart; 100%: 1 } } } }";
     let moved = apply_edits(
         source,
         &[Edit::Set {
@@ -119,12 +119,12 @@ fn moving_a_frame_preserves_timing_and_easing() {
     .unwrap();
 
     assert!(moved.source.contains("60%: 0.5 @stepStart"));
-    assert!(moved.source.contains("layer base @tween()"));
+    assert!(moved.source.contains("@tween() layer base"));
 }
 
 #[test]
 fn moving_a_frame_rejects_an_offset_collision() {
-    let source = "motion sample { layer base @tween() { body { opacity { 50%: 0.5; 100%: 1 } } } }";
+    let source = "motion sample { @tween() layer base { body { opacity { 50%: 0.5; 100%: 1 } } } }";
 
     assert!(
         apply_edits(
@@ -140,7 +140,7 @@ fn moving_a_frame_rejects_an_offset_collision() {
 
 #[test]
 fn removing_a_style_destination_is_rejected() {
-    let source = "motion sample { layer base @tween() { body { opacity { 50%: 0.5; 100%: 1 } } } }";
+    let source = "motion sample { @tween() layer base { body { opacity { 50%: 0.5; 100%: 1 } } } }";
 
     assert!(
         apply_edits(
@@ -156,7 +156,7 @@ fn removing_a_style_destination_is_rejected() {
 #[test]
 fn source_edits_do_not_synthesize_transitions_or_convert_state_properties() {
     let source =
-        "motion sample { layer machine @tween() { state idle initial { body { opacity: 1 } } } }";
+        "motion sample { @tween() layer machine { state idle initial { body { opacity: 1 } } } }";
 
     for path in [
         "sample/layer/machine/transition/0/target/body/property/opacity",
@@ -179,7 +179,7 @@ fn source_edits_do_not_synthesize_transitions_or_convert_state_properties() {
 
 #[test]
 fn ordinary_track_conversion_retains_cross_layer_timing_inheritance() {
-    let source = "motion sample { layer base @tween(duration: 200) { body { opacity: 0 } } layer top { body { opacity: 1 } } }";
+    let source = "motion sample { @tween(duration: 200) layer base { body { opacity: 0 } } layer top { body { opacity: 1 } } }";
     let result = apply_edits(
         source,
         &[Edit::AddFrame {
@@ -194,7 +194,7 @@ fn ordinary_track_conversion_retains_cross_layer_timing_inheritance() {
 
     assert!(property.timing_expression.is_none());
     assert_eq!(property.keyframes.as_ref().unwrap().len(), 2);
-    assert!(result.source.contains("layer base @tween(duration: 200)"));
+    assert!(result.source.contains("@tween(duration: 200) layer base"));
 }
 
 #[test]
@@ -213,7 +213,7 @@ fn moving_a_transition_shorthand_preserves_its_timing_and_value_expression() {
     assert!(
         result
             .source
-            .contains("opacity @tween(duration: 200) { 80%: ${amount} }")
+            .contains("@tween(duration: 200) opacity { 80%: ${amount} }")
     );
 }
 
@@ -255,5 +255,5 @@ fn typed_lifecycle_timing_creates_a_motion_level_track_for_a_layer_property() {
 
     assert!(result.compilation.definitions[0].enter.is_some());
     assert!(result.source.contains("layer base { body { opacity: 1 } }"));
-    assert!(result.source.contains("opacity @tween(duration: 200)"));
+    assert!(result.source.contains("@tween(duration: 200) opacity"));
 }

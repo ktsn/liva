@@ -82,11 +82,38 @@ impl Parser<'_> {
                 return;
             }
 
+            let checkpoint = self.builder.checkpoint();
+            let legacy_property = self.at() == "@"
+                && self.tokens[self.index + 1..]
+                    .iter()
+                    .filter(|token| !token.trivia)
+                    .nth(1)
+                    .is_some_and(|token| token.text == ":");
+            let has_prefix = self.at() == "@" && !legacy_property;
+
+            while has_prefix && self.at() == "@" {
+                self.start(Kind::Decorator);
+                self.bump();
+                self.index += expression::emit_prefix(
+                    &self.tokens[self.index..],
+                    self.offset(),
+                    &mut self.builder,
+                    &mut self.expression_diagnostics,
+                );
+                self.end();
+                self.gap();
+            }
+
+            if has_prefix && matches!(self.at(), "motion" | "let" | "event") {
+                self.error("Decorators are not allowed on motion, let, or event declarations");
+            }
+
             if self.at() == "event" {
                 if depth != 1 {
                     self.error("Events must be declared directly inside a Motion");
                 }
-                self.start(Kind::Event);
+                self.builder
+                    .start_node_at(checkpoint, Liva::kind_to_raw(Kind::Event));
                 self.bump();
 
                 while self
@@ -117,7 +144,8 @@ impl Parser<'_> {
             }
 
             if self.at() == "let" {
-                self.start(Kind::Let);
+                self.builder
+                    .start_node_at(checkpoint, Liva::kind_to_raw(Kind::Let));
                 self.bump();
                 self.gap();
                 self.start(Kind::Header);
@@ -139,7 +167,6 @@ impl Parser<'_> {
                 continue;
             }
 
-            let checkpoint = self.builder.checkpoint();
             let begin = self.index;
             self.start(Kind::Header);
 
@@ -174,6 +201,7 @@ impl Parser<'_> {
                 }
 
                 if header_words > 0 && nesting_depth == 0 && self.at() == "@" {
+                    self.error("Structural decorators must precede the declaration; move @expression before its header");
                     self.decorator(true);
                     continue;
                 }
@@ -228,6 +256,10 @@ impl Parser<'_> {
             }
 
             if self.at() == ":" {
+                if has_prefix {
+                    self.error("Value decorators must follow the value");
+                }
+
                 self.builder
                     .start_node_at(checkpoint, Liva::kind_to_raw(Kind::Declaration));
                 let name = self.tokens[begin..self.index]

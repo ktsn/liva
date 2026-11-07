@@ -75,8 +75,8 @@ describe('composition lifecycle timeline', () => {
   const source = compile(
     `motion panel {
     layer base { body { opacity: 1 } extra { opacity: 1 } }
-    enter @tween(duration: 200) { body { opacity: 0 } }
-    leave @tween(duration: 300) { body { translate: 10px 0 } extra { opacity: 0 } }
+    @tween(duration: 200) enter { body { opacity: 0 } }
+    @tween(duration: 300) leave { body { translate: 10px 0 } extra { opacity: 0 } }
   }`,
     true,
   ).definitions[0]

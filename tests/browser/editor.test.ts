@@ -402,7 +402,7 @@ test('motion-level lifecycle edits save with shared HMR', async ({ page, browser
     await save(page)
 
     const saved = await readFile(lifecycleFile, 'utf8')
-    expect(saved).toContain('leave @tween(duration: 200, easing: linear)')
+    expect(saved).toContain('@tween(duration: 200, easing: linear) leave')
     expect(saved).toContain('@tween(duration: 500, easing: linear)')
     expect(saved.slice(0, saved.indexOf('<liva'))).toBe(
       original.slice(0, original.indexOf('<liva')),
