@@ -165,6 +165,55 @@ describe('composition source inspector', () => {
     expect(edits[0][0]).toEqual({ op: 'set', path: `${destination}/frame/0.5/value`, value: '0.6' })
   })
 
+  it.each([0, 1])(
+    'edits an inherited explicit endpoint at %s in the selected transition',
+    async (offset) => {
+      const destination = 'sample/layer/machine/transition/0/target/body/property/opacity'
+      const inheritedValue = offset === 0 ? '0.7' : '0.9'
+      const { edits } = setup({
+        offset,
+        track: {
+          ...track,
+          fromValue: '0.2',
+          toValue: '1',
+          explicit: [{ offset, value: inheritedValue }],
+          inheritedFrames: true,
+        },
+        provenance: {
+          ...provenance,
+          from: {
+            path: 'sample/layer/machine/state/idle/target/body/property/opacity/value',
+            text: '0.2',
+            label: 'idle opacity',
+          },
+          to: {
+            path: 'sample/layer/machine/state/active/target/body/property/opacity/frame/1/value',
+            text: '1',
+            label: 'active opacity',
+          },
+          frameDestination: destination,
+          transition: { from: 'idle', to: 'active' },
+          fields: [],
+        },
+      })
+
+      expect(host!.querySelector('[aria-label="Source value"]')).toBeNull()
+      expect(
+        host!.querySelector<HTMLInputElement>('[aria-label="Keyframe source value"]')!.value,
+      ).toBe(inheritedValue)
+      expect(host!.querySelector('[aria-label="Editing location"]')!.textContent).toBe(
+        'Layer: machine · idle → active',
+      )
+
+      await input('Keyframe source value', '0.8')
+      await click('Add keyframe')
+
+      expect(edits).toEqual([
+        [{ op: 'addFrame', path: destination, offset, value: '0.8', easing: undefined }],
+      ])
+    },
+  )
+
   it('preserves the timing expression until the user applies a replacement', async () => {
     const { edits } = setup()
 

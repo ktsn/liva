@@ -25,6 +25,9 @@ const framePath = computed(() =>
 const frameSource = computed(() =>
   props.provenance.fields.find((field) => field.path === `${framePath.value}/value`),
 )
+const explicitFrame = computed(() =>
+  props.track.explicit.find((frame) => frame.offset === props.offset),
+)
 const canChangeFrame = computed(
   () => !!props.provenance.frameDestination && props.track.timing?.kind === 'tween',
 )
@@ -33,6 +36,7 @@ const editingFrame = computed(
   () =>
     !!props.pending ||
     !!frameSource.value ||
+    !!explicitFrame.value ||
     (props.offset !== undefined && props.offset !== 0 && props.offset !== 1),
 )
 const valueSource = computed(() =>
@@ -68,7 +72,8 @@ watch(
   () => [props.track, props.provenance, props.offset, props.pending],
   () => {
     sourceValue.value = valueSource.value?.text ?? ''
-    frameValue.value = frameSource.value?.value ?? valueSource.value?.text ?? ''
+    frameValue.value =
+      frameSource.value?.value ?? explicitFrame.value?.value ?? valueSource.value?.text ?? ''
     frameEasing.value =
       props.provenance.fields.find((field) => field.path === `${framePath.value}/easing`)?.value ??
       ''
