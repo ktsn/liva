@@ -94,9 +94,10 @@ has its own module; `drag.rs` and `interaction.rs` declare target arguments and 
 The compiler places functions, easing constants, and the reserved `self` target in a
 built-in parent scope. A Motion child scope holds parameters, named targets, and let
 bindings; all names are declared before dependency inference. Same-scope duplicates
-are errors, while child declarations shadow ordinary built-ins. `self` cannot be
-shadowed or written as an explicit target block. References, calls, hover, and
-completion use the same symbol lookup. The generic call checker evaluates argument
+are errors, while child declarations shadow ordinary built-ins. Parameters and let
+bindings cannot rebind `self`; an explicit self block configures the existing root
+without introducing a variable. References, calls, hover, and completion use the
+same symbol lookup. The generic call checker evaluates argument
 types through the expression checker and selects a matching overload. Required
 arguments and incompatible overload groups produce diagnostics.
 Let type inference follows dependencies and rejects cycles. Expression member checking
@@ -167,6 +168,7 @@ State {
 Target<T> {
   name: string
   timingExpression?: Expression
+  timingProperties?: string[]
   properties: T[]
 }
 Property {
