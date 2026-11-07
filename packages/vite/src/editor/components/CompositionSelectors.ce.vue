@@ -18,7 +18,7 @@ const sideLabels = { from: 'From', to: 'To' }
 const transitions = props.layers.flatMap((layer) =>
   (layer.transitions ?? []).map((transition, index) => ({
     identity: { layer: layer.name, index },
-    label: `${layer.name}: ${transition.from} → ${transition.to} (declaration ${index + 1})`,
+    label: `${layer.name}: ${transition.from} → ${transition.to}`,
     value: JSON.stringify({ layer: layer.name, index }),
   })),
 )

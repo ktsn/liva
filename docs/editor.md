@@ -133,8 +133,8 @@ state. Disabled layers are dimmed, and differing selections are marked on both
 sides. Swap exchanges the entire selections. These controls never edit guards.
 
 The existing-transition shortcut changes only that layer's endpoint states.
-Declaration numbers distinguish transitions with the same state pair. Manual
-changes or Swap clear an incompatible shortcut; no transition is inferred from a
+Transition labels show the layer and state pair. Manual changes or Swap clear an
+incompatible shortcut; no transition is inferred from a
 state pair. Identical compositions are supported, including intermediate motion.
 
 The timeline includes every resolved TO property, grouped by target, even when
