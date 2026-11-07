@@ -14,6 +14,15 @@ async function openLikeDemo(page: Page) {
   return errors
 }
 
+async function pressAndExpectLiked(page: Page, key: string, liked: boolean) {
+  await page.keyboard.press(key)
+
+  await expect(page.getByRole('button', { name: 'Like', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    String(liked),
+  )
+}
+
 test.describe('like button', () => {
   test('keeps liked presentation after its entry celebration ends', async ({ page }) => {
     const errors = await openLikeDemo(page)
@@ -56,17 +65,13 @@ test.describe('like button', () => {
 
     await button.focus()
 
-    await page.keyboard.press('Space')
-
-    await expect(button).toHaveAttribute('aria-pressed', 'true')
-
-    await page.keyboard.press('Enter')
-
-    await expect(button).toHaveAttribute('aria-pressed', 'false')
-
-    await page.keyboard.press('Space')
-
-    await expect(button).toHaveAttribute('aria-pressed', 'true')
+    for (const [key, liked] of [
+      ['Space', true],
+      ['Enter', false],
+      ['Space', true],
+    ] as const) {
+      await pressAndExpectLiked(page, key, liked)
+    }
 
     await expect
       .poll(() =>
@@ -82,9 +87,8 @@ test.describe('like button', () => {
 
     await expect(button.locator('.heart')).toHaveCSS('color', 'rgb(213, 75, 112)')
 
-    await page.keyboard.press('Space')
+    await pressAndExpectLiked(page, 'Space', false)
 
-    await expect(button).toHaveAttribute('aria-pressed', 'false')
     await expect(button.locator('.heart')).toHaveCSS('color', 'rgb(123, 137, 129)')
 
     await expect
