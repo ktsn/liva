@@ -35,7 +35,7 @@ test('overlapping button layers compose hover, focus, and pointer or keyboard pr
   await expect(button).toHaveCSS('scale', '1')
 })
 
-test('toggle directional animation retargets from its displayed midpoint', async ({ page }) => {
+test('toggle reactive animation retargets from its displayed midpoint', async ({ page }) => {
   await page.goto(`${base}/toggle`)
   const button = page.getByRole('switch', { name: 'Notifications', exact: true })
   const thumb = button.locator('span')
@@ -95,12 +95,12 @@ test('composition selectors preview independently and restore application presen
   const button = page.getByRole('switch', { name: 'Notifications', exact: true })
   await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
 
-  await expect(page.getByLabel('From selection state')).toHaveValue('off')
-  await expect(page.getByLabel('To selection state')).toHaveValue('off')
+  await expect(page.getByLabel('From selection enabled')).not.toBeChecked()
+  await expect(page.getByLabel('To selection enabled')).not.toBeChecked()
   await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeEnabled()
   await expect(page.getByRole('button', { name: 'Save to source' })).toBeDisabled()
 
-  await page.getByLabel('To selection state').selectOption('on')
+  await page.getByLabel('To selection enabled').check()
   await page.getByRole('button', { name: 'Play', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
 

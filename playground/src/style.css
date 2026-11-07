@@ -97,35 +97,14 @@ h1 {
   margin: 0 0 24px;
 }
 
-.demo-card,
 .demo-stage {
   background: #fffefa;
   border: 1px solid #d8ded2;
   border-radius: 18px;
   padding: 24px;
-}
-
-.demo-stage {
   display: grid;
   place-items: center;
   min-block-size: 360px;
-}
-
-.toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 20px 0;
-}
-
-.toggle-row + .toggle-row {
-  border-block-start: 1px solid #e6e9df;
-}
-
-.toggle-row strong {
-  font-size: 14px;
-  font-weight: 500;
 }
 
 .switch {
@@ -144,17 +123,6 @@ h1 {
   border-radius: 50%;
   background: #fffefa;
   box-shadow: 0 2px 4px #173d3630;
-}
-
-.text-button {
-  margin-block-start: 16px;
-  font-size: 12px;
-  border: none;
-  padding: 0;
-  background: transparent;
-  color: #477359;
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 
 .beacon {
@@ -183,7 +151,6 @@ h1 {
     padding: 24px 16px;
   }
 
-  .demo-card,
   .demo-stage {
     padding: 20px;
   }
