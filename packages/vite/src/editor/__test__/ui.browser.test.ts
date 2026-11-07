@@ -162,6 +162,73 @@ it('offers Instant with no interpolation fields and emits immediate timing', asy
   expect(timings).toEqual([{ kind: 'tween', durationMs: 0, easing: 'linear' }])
 })
 
+it('changes speed and loop while playing without editing source', async () => {
+  const { controller } = await setupEditor()
+
+  await click('Motion editor')
+  await input('To toggle state', 'on')
+  await input('Speed', '0.1')
+  await click('↻ Loop')
+  await click('Play')
+  await new Promise(requestAnimationFrame)
+
+  await input('Speed', '0.5')
+  await click('↻ Loop')
+  await click('Pause')
+  await input('Speed', '0.25')
+  await click('↻ Loop')
+
+  expect(controller.previewActive).toBe(true)
+  expect(button('Play')).toBeDefined()
+  expect(controller.draft).toEqual([])
+})
+
+it('retains playback preferences when the editor form remounts', async () => {
+  await setupEditor()
+  await click('Motion editor')
+  await input('Speed', '0.25')
+  await click('↻ Loop')
+
+  await click('Close')
+  await click('Motion editor')
+
+  expect(selectValue('Speed')).toBe('0.25')
+  expect(button('↻ Loop').getAttribute('aria-pressed')).toBe('true')
+})
+
+it('scrubbing pauses looping playback without clearing its preference', async () => {
+  await setupEditor()
+  await click('Motion editor')
+  await click('↻ Loop')
+  await click('Play')
+
+  await input('Playhead', '50')
+
+  expect(button('Play')).toBeDefined()
+  expect(button('↻ Loop').getAttribute('aria-pressed')).toBe('true')
+})
+
+it('does not repeat zero-duration previews with loop enabled', async () => {
+  await setupEditor(undefined, {
+    name: 'instant',
+    layers: [
+      { name: 'base', targets: [{ name: 'body', properties: [{ name: 'opacity', value: '1' }] }] },
+    ],
+  })
+
+  await click('Motion editor')
+  await click('↻ Loop')
+  await click('Play')
+  await new Promise(requestAnimationFrame)
+  await tick()
+
+  expect(button('Play')).toBeDefined()
+  const timer = host!.querySelector('[aria-label="Playback time"]')
+
+  expect(timer).not.toBeNull()
+  expect(timer!.textContent).toBe('0 / 0 ms')
+})
+
 it('edits duration and physics spring parameters through shared controls', async () => {
   const timings: Timing[] = []
 
