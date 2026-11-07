@@ -68,7 +68,7 @@ motion swipeItem {
 
   layer dragging when movement.active {
     body {
-      translate: ${movement.offset.x}px 0 @tween(duration: 0)
+      translate: ${movement.offset.x}px 0 @instant
     }
   }
 

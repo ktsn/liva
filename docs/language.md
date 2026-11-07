@@ -240,6 +240,36 @@ For example, `opacity { opacity: 1 }` names a target called `opacity`, while
 Structural timing decorators precede blocks and tracks; ordinary property timing
 and individual frame easing follow their values.
 
+## Immediate timing
+
+`instant` is a built-in timing value. `@instant` immediately applies the resolved
+destination, cancelling any running tween or spring for that property. It explicitly
+overrides inherited timing; omitting timing continues to inherit. Other properties
+keep their independently resolved timing, and removing the instant contribution
+restores the usual timing cascade.
+
+```liva
+motion draggable {
+  let movement = drag(target: self)
+
+  @spring(stiffness: 300, damping: 20)
+  layer base { translate: 0 0; scale: 1 }
+
+  layer dragging when movement.active {
+    translate: ${movement.offset.x}px ${movement.offset.y}px @instant
+    scale: 1.05
+  }
+}
+```
+
+Translation follows the pointer immediately, then springs back on release. `instant`
+works at every timing-decorator scope (including tracks, targets, layers, states,
+directional transitions, and enter/leave), or in a timing-valued `let` binding.
+An instant track applies its destination without intermediate frames. It is not an
+easing value and cannot be used as keyframe-segment easing. It uses the existing
+zero-duration tween behavior; `@tween(duration: 0)` remains valid. Like other ordinary
+built-ins, `instant` can be shadowed by a motion declaration.
+
 ## Inline keyframes
 
 ```liva

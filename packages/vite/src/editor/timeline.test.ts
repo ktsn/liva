@@ -313,3 +313,7 @@ describe('composition lifecycle resolved endpoints', () => {
     expect(track.toValue).toBe('0.8')
   })
 })
+
+it('labels immediate timing without exposing meaningless easing', () => {
+  expect(timingText({ kind: 'tween', durationMs: 0, easing: 'ease' })).toBe('Instant')
+})

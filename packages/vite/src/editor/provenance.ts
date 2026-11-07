@@ -1,5 +1,6 @@
 import {
   compositionLayerSelection,
+  layerTargets,
   compositionTransitions,
   resolveLayerCascade,
   transitionPropertySources,
@@ -17,6 +18,7 @@ export interface DeclarationSource {
 }
 
 export interface TrackProvenance {
+  timingBindings: readonly string[]
   fromDeclarationPath?: string
   toDeclarationPath?: string
   frameDeclarationPath?: string
@@ -35,6 +37,14 @@ export interface TrackProvenance {
   framesUnavailable?: string
   localTiming?: DeclarationSource
   fields: Inspection['fields']
+}
+
+function timingBindings(definition: Inspection['definition']): string[] {
+  return [
+    ...(definition.parameters ?? []).map((parameter) => parameter.name),
+    ...(definition.letBindings ?? []).map((binding) => binding.name),
+    ...layerTargets(definition).map((target) => target.name),
+  ]
 }
 
 function field(fields: Inspection['fields'], path: string): DeclarationSource | undefined {
@@ -129,6 +139,7 @@ export function trackProvenance(
       : stylePath
 
   return {
+    timingBindings: timingBindings(inspection.definition),
     fromDeclarationPath: fromSource ? valuePath(definition.name, fromSource) : undefined,
     toDeclarationPath: owner ? valuePath(definition.name, owner) : undefined,
     frameDeclarationPath: transitionPath ?? declaredStylePath,
@@ -183,6 +194,7 @@ export function lifecycleProvenance(
     field(fields, `${path}/timing`)
 
   return {
+    timingBindings: timingBindings(inspection.definition),
     fromDeclarationPath: baselineSource.fromDeclarationPath,
     toDeclarationPath: baselineSource.toDeclarationPath,
     frameDeclarationPath: destination,
@@ -226,7 +238,18 @@ export function typedEasingText(css: string): string {
   throw new Error('This easing has no typed representation. Edit the timing expression directly.')
 }
 
-export function typedTimingText(timing: import('@liva/runtime').Timing): string {
+export function typedTimingText(
+  timing: import('@liva/runtime').Timing,
+  bindings: readonly string[] = [],
+): string {
+  if (timing.kind === 'tween' && timing.durationMs === 0) {
+    if (!bindings.includes('instant')) return 'instant'
+    if (!bindings.includes('tween')) return 'tween(duration: 0)'
+
+    throw new Error(
+      'Instant and tween are both shadowed in this motion. Edit the timing expression directly.',
+    )
+  }
   if (timing.kind === 'tween')
     return `tween(duration: ${timing.durationMs}, easing: ${typedEasingText(timing.easing)})`
   if (timing.kind === 'spring-duration')

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'vite-plus/test'
 import { LifecycleSession, resolveLifecycle, type LifecycleWork } from './lifecycle.ts'
+import { evaluate } from './expression.ts'
+import { timingValue } from './timing-values.ts'
 import type { Timing } from './definition.ts'
 
 const elements: HTMLElement[] = []
@@ -45,6 +47,22 @@ afterEach(() => {
 })
 
 describe('lifecycle effects', () => {
+  it.each(['enter', 'leave'] as const)(
+    'Instant %s completes without leaving effects or ownership',
+    async (phase) => {
+      const timing = timingValue(evaluate({ kind: 'reference', path: ['instant'] }, {}))
+      const { element, session } = setup(phase, timing)
+
+      session.initialize()
+      session.play()
+
+      expect(await session.finished).toBe('completed')
+      expect(element.getAnimations()).toEqual([])
+      expect(session.owns(element, 'opacity')).toBe(false)
+      expect(element.style.opacity).toBe(phase === 'enter' ? '1' : '0.7')
+    },
+  )
+
   it.each(['enter', 'leave'] as const)('completes %s and releases effects', async (phase) => {
     const { element, session } = setup(phase)
 

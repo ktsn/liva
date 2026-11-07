@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { readFile, writeFile } from 'node:fs/promises'
+import { compileSfc } from '../../packages/vite/src/compiler.ts'
 import type { EditorController } from '../../packages/vite/src/editor/controller.ts'
 
 declare global {
@@ -18,6 +19,21 @@ async function open(page: Page, fixture = false) {
   await page
     .getByLabel('Existing transition')
     .selectOption(JSON.stringify({ layer: fixture ? 'selection' : 'toggle', index: 0 }))
+}
+
+async function restoreEditorToggle(page: Page, source: string) {
+  await writeFile(file, source)
+
+  const expected = compileSfc(source, file.pathname, false).result.definitions[0]
+
+  // Wait for the restored definition's HMR before another test can open this shared fixture.
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        [...window.__LIVA_EDITOR__.entries.values()].map((entry) => entry.binding.definition),
+      ),
+    )
+    .toContainEqual(expected)
 }
 
 async function expectMessage(page: Page, message: string) {
@@ -312,7 +328,90 @@ test('timeline saves timing, new frames and endpoint state values with shared HM
     await save(page)
     expect(await readFile(file, 'utf8')).toContain('background-color: green')
   } finally {
-    await writeFile(file, original)
+    await restoreEditorToggle(page, original)
+  }
+})
+
+test('Instant timing saves, previews immediately, and removes back to inherited timing', async ({
+  page,
+  browserName,
+}) => {
+  test.skip(browserName !== 'chromium', 'Shared source writes run once')
+  const original = await readFile(file, 'utf8')
+
+  try {
+    await open(page, true)
+    await track(page, 'box', 'background-color')
+    await page.getByLabel('Timing mode').selectOption('instant')
+    await expect(page.getByLabel('Track duration')).toHaveCount(0)
+    await expect(page.getByLabel('Track easing')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
+    await expectMessage(page, 'Previewing')
+
+    await seek(page, 0)
+    const first = page.getByRole('button', { name: 'First', exact: true })
+    await expect(first).toHaveCSS('background-color', 'rgb(0, 0, 255)')
+
+    await save(page)
+
+    expect(await readFile(file, 'utf8')).toContain('@instant')
+
+    await page
+      .getByLabel('Existing transition')
+      .selectOption(JSON.stringify({ layer: 'selection', index: 0 }))
+    await track(page, 'box', 'background-color')
+    await expect(page.getByLabel('Timing mode')).toHaveValue('instant')
+    await page.getByRole('button', { name: 'Remove timing override', exact: true }).click()
+    await expectMessage(page, 'Previewing')
+    await expect(page.getByLabel('Timing mode')).toHaveValue('tween')
+    await expect(page.getByLabel('Track duration')).toHaveValue('50')
+  } finally {
+    await restoreEditorToggle(page, original)
+  }
+})
+
+test('Instant edits remain immediate when a motion shadows instant', async ({
+  page,
+  browserName,
+}) => {
+  test.skip(browserName !== 'chromium', 'Shared source writes run once')
+  const original = await readFile(file, 'utf8')
+
+  try {
+    await page.goto(`${base}/tests/editor.html`)
+    await writeFile(
+      file,
+      original.replace(
+        'motion motion(checked: boolean) {',
+        'motion motion(checked: boolean) {\n  let instant = tween(duration: 200)',
+      ),
+    )
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          [...window.__LIVA_EDITOR__.entries.values()].some((entry) =>
+            entry.binding.definition.letBindings?.some((binding) => binding.name === 'instant'),
+          ),
+        ),
+      )
+      .toBe(true)
+    await open(page, true)
+    await track(page, 'box', 'background-color')
+    await page.getByLabel('Timing mode').selectOption('instant')
+    await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
+    await expectMessage(page, 'Previewing')
+
+    await seek(page, 0)
+    await expect(page.getByRole('button', { name: 'First', exact: true })).toHaveCSS(
+      'background-color',
+      'rgb(0, 0, 255)',
+    )
+
+    await save(page)
+
+    expect(await readFile(file, 'utf8')).toContain('@tween(duration: 0)')
+  } finally {
+    await restoreEditorToggle(page, original)
   }
 })
 

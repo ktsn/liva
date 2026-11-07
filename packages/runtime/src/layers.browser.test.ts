@@ -65,6 +65,36 @@ function timedDefinition(duration = 300): Definition {
   }
 }
 
+function instantTrackDefinition(): Definition {
+  return {
+    ...definition,
+    layers: [
+      { name: 'base', targets: [{ name: 'body', properties: [{ name: 'scale', value: '1' }] }] },
+      {
+        name: 'hover',
+        when: ref('hover'),
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'scale',
+                value: '2',
+                timingExpression: ref('instant'),
+                keyframes: [
+                  { offset: 0, value: '1' },
+                  { offset: 0.5, value: '5' },
+                  { offset: 1, value: '2' },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  }
+}
+
 async function setReducedMotion(reduced: boolean) {
   await cdp().send('Emulation.setEmulatedMedia', {
     features: [{ name: 'prefers-reduced-motion', value: reduced ? 'reduce' : 'no-preference' }],
@@ -103,6 +133,113 @@ afterEach(() => {
 })
 
 describe('reactive layer instances', () => {
+  it.each(['tween', 'spring'] as const)(
+    'Instant interrupts an active %s and restores inherited timing',
+    async (kind) => {
+      const inherited: Expression =
+        kind === 'tween' ? timing(300) : { kind: 'call', function: 'spring', arguments: [] }
+      const source: Definition = {
+        ...definition,
+        layers: [
+          {
+            name: 'base',
+            timingExpression: inherited,
+            targets: [
+              {
+                name: 'body',
+                properties: [
+                  { name: 'scale', value: '1' },
+                  { name: 'opacity', value: '1' },
+                ],
+              },
+            ],
+          },
+          {
+            name: 'hover',
+            when: ref('hover'),
+            targets: [
+              {
+                name: 'body',
+                properties: [
+                  { name: 'scale', value: '1.2' },
+                  { name: 'opacity', value: '.5' },
+                ],
+              },
+            ],
+          },
+          {
+            name: 'press',
+            when: ref('press'),
+            targets: [
+              {
+                name: 'body',
+                properties: [
+                  {
+                    name: 'scale',
+                    value: '',
+                    template: [ref('size')],
+                    timingExpression: ref('instant'),
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }
+      const { instance, element, errors } = setup(source)
+      instance.updateParameters({ hover: true, press: false, size: 1.4 })
+      const obsolete = [...instance.animations]
+
+      expect(obsolete).toHaveLength(2)
+
+      instance.updateParameters({ hover: true, press: true, size: 1.4 })
+
+      expect(getComputedStyle(element).scale).toBe('1.4')
+      expect(instance.animations).toHaveLength(1)
+      expect(instance.animations[0]).toBe(obsolete[1])
+      expect(obsolete[0].playState).toBe('idle')
+
+      await new Promise(requestAnimationFrame)
+
+      expect(getComputedStyle(element).scale).toBe('1.4')
+
+      instance.updateParameters({ hover: true, press: false, size: 1.4 })
+
+      expect(instance.animations).toHaveLength(2)
+      const returning = instance.animations.find((animation) => animation !== obsolete[1])
+
+      expect(returning).toBeDefined()
+      returning!.finish()
+      await returning!.finished
+      await Promise.resolve()
+
+      expect(getComputedStyle(element).scale).toBe('1.2')
+      expect(errors).toEqual([])
+    },
+  )
+
+  it('Instant tracks settle at their destination without intermediate application frames', () => {
+    const { instance, element } = setup(instantTrackDefinition())
+
+    instance.updateParameters({ hover: true, press: false, size: 1 })
+
+    expect(instance.animations).toHaveLength(0)
+    expect(getComputedStyle(element).scale).toBe('2')
+  })
+
+  it('Instant track preview scrubbing stays at the resolved destination', () => {
+    const { instance, element } = setup(instantTrackDefinition())
+    const from = { layers: { base: true, hover: false }, states: {} }
+    const to = { layers: { base: true, hover: true }, states: {} }
+    instance.previewComposition(from, to)
+
+    for (const time of [0, 100, 0]) {
+      for (const animation of instance.animations) animation.currentTime = time
+
+      expect(getComputedStyle(element).scale).toBe('2')
+    }
+  })
+
   it('resolves overlap and interpolation updates while preserving unrelated styles', () => {
     const { instance, element, errors } = setup()
 

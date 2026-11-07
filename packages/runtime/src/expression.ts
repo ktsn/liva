@@ -1,6 +1,6 @@
 import { timingProvider, type TimingDeclaration } from './layer-cascade.ts'
 import {
-  easingConstant,
+  builtinConstant,
   isTimingFunction,
   callTiming,
   timingValue,
@@ -28,7 +28,7 @@ export function evaluate(
       const [name, ...members] = expression.path
       let value: RuntimeValue | undefined = Object.hasOwn(values, name)
         ? values[name]
-        : easingConstant(name)
+        : builtinConstant(name)
 
       for (const member of members) {
         value =

@@ -141,6 +141,27 @@ it('opens composition playback, scrubs and restores on close', async () => {
   expect(runtime!.composition.states.toggle).toBe('off')
 })
 
+it('offers Instant with no interpolation fields and emits immediate timing', async () => {
+  const timings: Timing[] = []
+  host = document.createElement('div')
+  document.body.append(host)
+  app = createApp(TimingControls, {
+    timing: { kind: 'tween', durationMs: 0, easing: 'ease' },
+    onApply: (timing: Timing) => timings.push(timing),
+  })
+  app.mount(host)
+
+  expect(selectValue('Timing mode')).toBe('instant')
+  expect(host.querySelector('[aria-label="Track duration"]')).toBeNull()
+  expect(host.querySelector('[aria-label="Track easing"]')).toBeNull()
+
+  await input('Timing mode', 'tween')
+  await input('Timing mode', 'instant')
+  await click('Apply timing')
+
+  expect(timings).toEqual([{ kind: 'tween', durationMs: 0, easing: 'linear' }])
+})
+
 it('changes speed and loop while playing without editing source', async () => {
   const { controller } = await setupEditor()
 
