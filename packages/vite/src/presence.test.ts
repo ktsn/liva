@@ -5,8 +5,8 @@ import { planPresence, PresenceError } from './presence.ts'
 const block = `<liva>
 motion panel {
   layer idle { body { opacity: 1 } other { opacity: 1 } }
-  @tween(duration: 100) enter { body { opacity { 0%: 0 } } }
-  @tween(duration: 200) leave { body { opacity { 100%: 0 } } other { opacity { 100%: 0 } } }
+  @tween(duration: 100) enter { body { opacity ~> { 0%: 0 } } }
+  @tween(duration: 200) leave { body { opacity ~> { 100%: 0 } } other { opacity ~> { 100%: 0 } } }
 }
 </liva>`
 
@@ -186,3 +186,36 @@ it('finds native lifecycle owners through non-transition component slots', () =>
   expect(result.boundaries).toHaveLength(1)
   expect(result.code).toContain('<LivaPresenceBoundary')
 })
+
+it('plans implicit self lifecycle presence without a target directive', () => {
+  const source =
+    '<template><button v-if="shown" v-liva:button>Button</button></template><liva>motion button { layer base { opacity: 1 } @tween() enter { opacity: 0 } @tween() leave { opacity: 0 } }</liva>'
+  const definitions = compileSfc(source, '/self.vue', false).result.definitions
+  const result = planPresence(source, '/self.vue', definitions)
+
+  expect(result.boundaries[0].targets).toEqual([
+    { motion: 'button', target: 'self', enter: true, leave: true },
+  ])
+  expect(result.code).toContain('v-liva:button.compiled=')
+  expect(result.code).toContain('entries: [livaBoundary0.item(0)]')
+  expect(result.code).not.toContain('v-liva-target')
+})
+
+it.each([false, true])(
+  'plans root self alongside a named root alias (alias lifecycle=%s)',
+  (animateAlias) => {
+    const source = `<template><button v-if="shown" v-liva:button v-liva-target:body>Button</button></template><liva>motion button { layer base { opacity: 1; body { scale: 1 } } ${animateAlias ? '@tween() enter { body { scale: .8 } }' : ''} @tween() leave { opacity: 0 } }</liva>`
+    const result = planPresence(
+      source,
+      '/self.vue',
+      compileSfc(source, '/self.vue', false).result.definitions,
+    )
+
+    expect(result.boundaries[0].targets).toEqual([
+      { motion: 'button', target: 'self', enter: false, leave: true },
+      ...(animateAlias ? [{ motion: 'button', target: 'body', enter: true, leave: false }] : []),
+    ])
+    expect(result.code).toContain('v-liva-target:body.compiled=')
+    expect(result.code).toContain('v-liva:button.compiled=')
+  },
+)

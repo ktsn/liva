@@ -41,6 +41,12 @@ function motionValue(binding: DirectiveBinding): MotionValue {
   return binding.modifiers.compiled ? value?.value : value
 }
 
+function isCompiledBinding(
+  binding: DirectiveBinding,
+): binding is DirectiveBinding<PresenceBinding> {
+  return !!binding.modifiers.compiled
+}
+
 function sameKey(a: readonly unknown[], b: readonly unknown[]) {
   return a.length === b.length && a.every((value, index) => value === b[index])
 }
@@ -58,6 +64,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
         {
           owner: object
           key: readonly unknown[]
+          names: Set<string>
           entries: PresenceEntry[]
           registration: PresenceTarget
         }
@@ -73,7 +80,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
 
       const reconcileNow = () => {
         const bindings = new Map<InstanceBinding, [string, HTMLElement][]>()
-        for (const root of roots.values()) bindings.set(root, [])
+        for (const root of roots.values()) bindings.set(root, [['self', root.root]])
 
         for (const [element, target] of targets) {
           const explicit = lifecycleTargets.get(element)
@@ -85,7 +92,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
             root = parent ? roots.get(parent) : undefined
           }
 
-          if (root && owners.get(root.root) === target.owner) {
+          if (root && owners.get(root.root) === target.owner && target.name !== 'self') {
             bindings.get(root)!.push([target.name, element])
           }
         }
@@ -171,7 +178,10 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
       }
 
       const rootDirective: ObjectDirective<HTMLElement, MotionValue | PresenceBinding> = {
-        created: mount,
+        created(element, binding) {
+          mount(element, binding)
+          registerLifecycleTarget(element, binding, 'self')
+        },
         updated(element, binding) {
           const record = roots.get(element)
 
@@ -186,7 +196,11 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
 
           reconcile()
         },
-        beforeUnmount: unmount,
+        beforeUnmount(element) {
+          snapshotTarget(element)
+          lifecycleTargets.delete(element)
+          unmount(element)
+        },
       }
 
       const bindTarget = (element: HTMLElement, binding: DirectiveBinding) => {
@@ -201,36 +215,51 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
 
       const registerLifecycleTarget = (
         element: HTMLElement,
-        binding: DirectiveBinding<PresenceBinding & { entries: PresenceEntry[] }>,
+        binding: DirectiveBinding<PresenceBinding | MotionValue>,
+        name = binding.arg,
       ) => {
-        if (!binding.modifiers.compiled) return
+        if (!isCompiledBinding(binding)) return
+
+        const value = binding.value
+        const entries = value.entries
+
+        if (!entries) return
+
+        // Presence metadata is generated only for static target arguments; roots pass self.
+        const targetName = name!
+        const existing = lifecycleTargets.get(element)
+
+        if (existing) {
+          // Two aliases on one element share the compiler-planned boundary entries.
+          existing.names.add(targetName)
+
+          return
+        }
 
         const target = {
           owner: binding.instance!,
-          key: binding.value.owner,
-          entries: binding.value.entries,
+          names: new Set([targetName]),
+          key: value.owner,
+          entries,
           registration: {
             release(work: readonly LifecycleWork[]) {
-              const name = targets.get(element)?.name
-              /* v8 ignore else -- @preserve: Compiled lifecycle targets always have a static target argument. */
-              if (name)
-                explicitRoot(target)?.runtime.releaseLifecycle(
-                  [name],
-                  element,
-                  work
-                    .filter((item) => item.element === element && item.track.target === name)
-                    .map((item) => item.track.property),
-                )
+              explicitRoot(target)?.runtime.releaseLifecycle(
+                [...target.names],
+                element,
+                work
+                  .filter((item) => item.element === element && target.names.has(item.track.target))
+                  .map((item) => item.track.property),
+              )
             },
             retainLifecycle(phase: 'enter' | 'leave', session: LifecycleSession) {
               explicitRoot(target)?.runtime.retainLifecycle(phase, session)
             },
             capture(phase: 'enter' | 'leave') {
               reconcileNow()
-              const name = targets.get(element)?.name
-              return name
-                ? (explicitRoot(target)?.runtime.captureLifecycle(phase, [name], element) ?? [])
-                : /* v8 ignore next -- @preserve: Compiled lifecycle targets always have a static target argument. */ []
+              return (
+                explicitRoot(target)?.runtime.captureLifecycle(phase, [...target.names], element) ??
+                []
+              )
             },
           },
         }

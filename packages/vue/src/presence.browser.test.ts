@@ -348,3 +348,132 @@ it('does not erase a newer session when a superseded completion settles', async 
 
   replacement.cancel('owner-teardown')
 })
+
+it.each([false, true])(
+  'animates implicit self and an optional root alias through enter/leave (alias=%s)',
+  async (alias) => {
+    const visible = ref(true)
+    const errors: unknown[] = []
+    const motion: Definition = {
+      name: 'selfFade',
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            { name: 'self', properties: [{ name: 'opacity', value: '1' }] },
+            ...(alias ? [{ name: 'box', properties: [{ name: 'scale', value: '1' }] }] : []),
+          ],
+        },
+      ],
+      enter: {
+        timing: { kind: 'tween', durationMs: 50, easing: 'linear' },
+        targets: [
+          {
+            name: 'self',
+            properties: [{ name: 'opacity', keyframes: [{ offset: 0, value: '0' }] }],
+          },
+          ...(alias
+            ? [
+                {
+                  name: 'box',
+                  properties: [{ name: 'scale', keyframes: [{ offset: 0, value: '.8' }] }],
+                },
+              ]
+            : []),
+        ],
+      },
+      leave: {
+        timing: { kind: 'tween', durationMs: 100, easing: 'linear' },
+        targets: [
+          {
+            name: 'self',
+            properties: [{ name: 'opacity', keyframes: [{ offset: 1, value: '0' }] }],
+          },
+          ...(alias
+            ? [
+                {
+                  name: 'box',
+                  properties: [{ name: 'scale', keyframes: [{ offset: 1, value: '.8' }] }],
+                },
+              ]
+            : []),
+        ],
+      },
+    }
+    const component = defineComponent({
+      livaDefinitions: [motion],
+      setup() {
+        const root = resolveDirective('liva')!
+        const target = resolveDirective('liva-target')!
+        const entryDirective = resolveDirective('liva-entry')!
+
+        return () =>
+          h(
+            LivaPresenceBoundary,
+            {},
+            {
+              default: ({ item }: { item: (key: unknown) => PresenceEntry }) => {
+                const entry = item('root')
+
+                return visible.value
+                  ? withDirectives(
+                      withDirectives(
+                        h('button', { key: 'root', 'data-self': '' }, 'Self'),
+                        alias
+                          ? [
+                              [
+                                target,
+                                { owner: ['self'], entries: [entry] },
+                                'box',
+                                { compiled: true },
+                              ],
+                            ]
+                          : [],
+                      ),
+                      [
+                        [
+                          root,
+                          { value: {}, owner: ['self'], entries: [entry] },
+                          'selfFade',
+                          { compiled: true },
+                        ],
+                        [entryDirective, entry],
+                      ],
+                    )
+                  : null
+              },
+            },
+          )
+      },
+    })
+    host = document.createElement('div')
+    document.body.append(host)
+    app = createApp(component).use(
+      createLivaPlugin({ onDiagnostic: (error) => errors.push(error) }),
+    )
+    app.mount(host)
+
+    await nextTick()
+    await expect.poll(() => host!.querySelector('button')!.getAnimations().length).toBe(0)
+
+    expect(host.querySelector<HTMLElement>('button')!.style.opacity).toBe('1')
+    expect(host.querySelector<HTMLElement>('button')!.style.scale).toBe(alias ? '1' : '')
+
+    visible.value = false
+
+    await nextTick()
+
+    expect(host.querySelector('button')).not.toBeNull()
+
+    await expect.poll(() => host!.querySelector('button')).toBeNull()
+
+    visible.value = true
+
+    await nextTick()
+    await expect.poll(() => host!.querySelector('button')!.getAnimations().length).toBe(0)
+
+    expect(host.querySelector<HTMLElement>('button')!.style.opacity).toBe('1')
+    expect(host.querySelector<HTMLElement>('button')!.style.scale).toBe(alias ? '1' : '')
+    expect(errors).toEqual([])
+  },
+)

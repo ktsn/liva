@@ -52,7 +52,7 @@ export function planPresence(source: string, filename: string, definitions: read
   const chains = new Map<Element, Element[]>()
   const roots = new Map<Element, { id: number; definition: Definition }>()
   const boundaries = new Map<Element, PresenceBoundary>()
-  const associations = new Map<Element, { root: Element; boundaries: Element[] }>()
+  const associations = new Map<Element, { root: Element; boundaries: Element[]; self: boolean }>()
   const fail = (node: Element, message: string): never => {
     throw new PresenceError(message, {
       line: node.loc.start.line,
@@ -103,21 +103,26 @@ export function planPresence(source: string, filename: string, definitions: read
 
   for (const [target, path] of paths) {
     const targetDirective = directive(target, 'liva-target')
-    if (!targetDirective) continue
+    const selfTarget =
+      roots.has(target) &&
+      lifecycleTransitions(roots.get(target)!.definition, 'enter')
+        .concat(lifecycleTransitions(roots.get(target)!.definition, 'leave'))
+        .some((transition) => transition.targets.some((item) => item.name === 'self'))
+    if (!targetDirective && !selfTarget) continue
     const root = path.findLast((node) => directive(node, 'liva'))
     if (!root || !roots.has(root)) continue
     const { definition } = roots.get(root)!
-    const targetName = argument(targetDirective)
-    if (!targetName) {
-      if (hasLifecycle(definition))
-        fail(target, 'Liva presence requires a static target directive argument.')
-      continue
+    const declaredName = argument(targetDirective)
+    if (targetDirective && !declaredName && hasLifecycle(definition)) {
+      fail(target, 'Liva presence requires a static target directive argument.')
     }
+    const targetNames = [...(selfTarget ? ['self'] : []), ...(declaredName ? [declaredName] : [])]
+    if (!targetNames.length) continue
     const enter = lifecycleTransitions(definition, 'enter').some((transition) =>
-      transition.targets.some((item) => item.name === targetName),
+      transition.targets.some((item) => targetNames.includes(item.name)),
     )
     const leave = lifecycleTransitions(definition, 'leave').some((transition) =>
-      transition.targets.some((item) => item.name === targetName),
+      transition.targets.some((item) => targetNames.includes(item.name)),
     )
     if (!enter && !leave) continue
 
@@ -193,16 +198,31 @@ export function planPresence(source: string, filename: string, definitions: read
         }
         boundaries.set(owner, boundary)
       }
-      if (
-        !boundary.targets.some(
-          (item) => item.motion === definition.name && item.target === targetName,
-        )
-      ) {
-        boundary.targets.push({ motion: definition.name, target: targetName, enter, leave })
+      for (const targetName of new Set(targetNames)) {
+        if (
+          !boundary.targets.some(
+            (item) => item.motion === definition.name && item.target === targetName,
+          )
+        ) {
+          const targetEnter = lifecycleTransitions(definition, 'enter').some((transition) =>
+            transition.targets.some((item) => item.name === targetName),
+          )
+          const targetLeave = lifecycleTransitions(definition, 'leave').some((transition) =>
+            transition.targets.some((item) => item.name === targetName),
+          )
+
+          if (targetEnter || targetLeave)
+            boundary.targets.push({
+              motion: definition.name,
+              target: targetName,
+              enter: targetEnter,
+              leave: targetLeave,
+            })
+        }
       }
       associated.push(owner)
     }
-    associations.set(target, { root, boundaries: associated })
+    associations.set(target, { root, boundaries: associated, self: selfTarget })
   }
 
   const ownerExpression = (root: Element) => {
@@ -248,11 +268,21 @@ export function planPresence(source: string, filename: string, definitions: read
 
   for (const [root] of roots) {
     if ([...associations.values()].some((association) => association.root === root)) {
-      withPresence(root, 'liva', `owner: ${ownerExpression(root)}`)
+      const association = associations.get(root)
+      const entries = association?.self
+        ? association.boundaries.map((owner) => entryExpression(owner, root))
+        : undefined
+      withPresence(
+        root,
+        'liva',
+        `owner: ${ownerExpression(root)}${entries ? `, entries: [${entries.join(', ')}]` : ''}`,
+      )
     }
   }
   for (const [target, association] of associations) {
     const entries = association.boundaries.map((owner) => entryExpression(owner, target))
+    if (!directive(target, 'liva-target')) continue
+
     withPresence(
       target,
       'liva-target',
