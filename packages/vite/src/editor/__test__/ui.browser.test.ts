@@ -141,6 +141,56 @@ it('opens composition playback, scrubs and restores on close', async () => {
   expect(runtime!.composition.states.toggle).toBe('off')
 })
 
+it('changes speed and loop while playing, retains preferences, and pauses on seek', async () => {
+  const { controller } = await setupEditor()
+
+  await click('Motion editor')
+  await input('To toggle state', 'on')
+  await input('Speed', '0.1')
+  await click('↻ Loop')
+  await click('Play')
+  await new Promise(requestAnimationFrame)
+
+  await input('Speed', '0.5')
+  await click('↻ Loop')
+  await click('Pause')
+  await input('Speed', '0.25')
+  await click('↻ Loop')
+
+  expect(controller.previewActive).toBe(true)
+  expect(button('Play')).toBeDefined()
+  expect(controller.draft).toEqual([])
+
+  await click('Close')
+  await click('Motion editor')
+
+  expect(selectValue('Speed')).toBe('0.25')
+  expect(button('↻ Loop').getAttribute('aria-pressed')).toBe('true')
+
+  await click('Play')
+  await input('Playhead', '50')
+
+  expect(button('Play')).toBeDefined()
+})
+
+it('does not repeat zero-duration previews with loop enabled', async () => {
+  await setupEditor(undefined, {
+    name: 'instant',
+    layers: [
+      { name: 'base', targets: [{ name: 'body', properties: [{ name: 'opacity', value: '1' }] }] },
+    ],
+  })
+
+  await click('Motion editor')
+  await click('↻ Loop')
+  await click('Play')
+  await new Promise(requestAnimationFrame)
+  await tick()
+
+  expect(button('Play')).toBeDefined()
+  expect(host!.querySelector('[aria-label="Playback time"]')!.textContent).toBe('0 / 0 ms')
+})
+
 it('edits duration and physics spring parameters through shared controls', async () => {
   const timings: Timing[] = []
 

@@ -32,6 +32,8 @@ export class EditorController {
   draft: Edit[] = []
   stale = false
   message = 'Select an instance to inspect its motion.'
+  playbackSpeed = 1
+  playbackLoop = false
   previewActive = false
   private sequence = 0
   private revision = 0
@@ -40,6 +42,11 @@ export class EditorController {
   private listeners = new Set<() => void>()
 
   constructor(private readonly send: (request: EditorRequest) => Promise<EditorReply>) {}
+
+  setPlaybackPreferences(speed: number, loop: boolean) {
+    this.playbackSpeed = speed
+    this.playbackLoop = loop
+  }
 
   subscribe(callback: () => void) {
     this.listeners.add(callback)
