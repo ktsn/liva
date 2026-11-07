@@ -103,7 +103,7 @@ impl Document {
         };
         let Some(block) = blocks
             .into_iter()
-            .find(|block| block.start <= offset && offset < block.end)
+            .find(|block| block.start <= offset && offset <= block.end)
         else {
             return vec![];
         };
@@ -358,6 +358,56 @@ mod tests {
                 )
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn completions_include_eof_and_embedded_content_end_insertion_positions() {
+        let body = "motion example { let ui = interaction(target: self); layer base when ui.fo";
+
+        for (uri, prefix, suffix) in [
+            ("file:///test.liv", "// 日本😀\r\n", ""),
+            (
+                "file:///test.vue",
+                "<template><p>日本😀</p></template>\r\n<liva>",
+                "</liva>",
+            ),
+        ] {
+            let text = format!("{prefix}{body}{suffix}");
+            let point = position(&text, prefix.len() + body.len());
+            let document = Document::new(text, 1, uri);
+            let documents = HashMap::from([(uri.into(), document)]);
+            let request = Request::new(
+                1.into(),
+                "textDocument/completion".into(),
+                json!({ "textDocument": { "uri": uri }, "position": point }),
+            );
+            let response = handle_request(request, &documents).response_result.unwrap();
+
+            assert_eq!(
+                response
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|item| item["label"].as_str().unwrap())
+                    .collect::<Vec<_>>(),
+                vec!["focus", "focusVisible", "focusWithin"],
+                "{uri}"
+            );
+        }
+    }
+
+    #[test]
+    fn completions_still_exclude_closing_tags_and_following_vue_host_code() {
+        let uri = "file:///test.vue";
+        let text = "<liva>motion example { let ui = interaction(target: self); layer base when ui.fo</liva><script>const ui = 1</script>";
+        let end = text.find("</liva>").unwrap();
+        let document = Document::new(text.into(), 1, uri);
+
+        for point in [end + 1, end + "</liva>".len(), text.len()] {
+            let point: Position = serde_json::from_value(position(text, point)).unwrap();
+
+            assert!(document.completions(point, uri).is_empty());
+        }
     }
 
     #[test]
