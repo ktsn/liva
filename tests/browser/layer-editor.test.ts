@@ -91,9 +91,15 @@ for (const expression of [
 
     try {
       await openProperty(page)
-      await page.getByText('Edit timing expression', { exact: true }).click()
-      await page.getByLabel('Timing expression', { exact: true }).fill(expression)
-      await page.getByRole('button', { name: 'Apply timing expression', exact: true }).click()
+      await page
+        .getByLabel('Timing mode')
+        .selectOption(expression.startsWith('spring') ? 'spring-duration' : 'tween')
+      await page.getByLabel('Track duration').fill('400')
+
+      if (expression.startsWith('tween'))
+        await page.getByLabel('Track easing').fill('steps(4, jump-end)')
+
+      await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
       await expectMessage(page, 'Previewing')
       await save(page)
 

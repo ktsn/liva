@@ -144,16 +144,15 @@ Play, the playhead, zoom, and snapping use the existing timeline controls.
 The inspector shows the layer and, when applicable, state or transition of the selected
 value. Selecting an endpoint shows that endpoint's source value; selecting an explicit
 keyframe shows its editing controls. Only the selected declaration is editable in the
-value form. Timing controls identify their source and write destination separately.
+value form. Timing controls identify the layer, state or transition where edits are written.
 External CSS has no source field. Editing a shared declaration affects every composition
-using that declaration; the inspector marks this before editing.
+using that declaration.
 
 Value edits preserve source expressions until explicitly replaced. Timing edits write
 `@expression` on the selected transition property, or on the ordinary/style property
 when no effective transition is selected. Removing a local override reveals its
 inherited default. Timing parameters are shown directly; Apply timing replaces the
-expression with those parameters. Edit timing expression exposes the original expression
-for references and other source edits. Unrelated edits retain existing expressions.
+expression with those parameters. Unrelated edits retain existing expressions.
 
 Keyframe editing uses the explicitly selected existing transition in the final value
 owner, or an ordinary layer style track. It never chooses a state style track or creates

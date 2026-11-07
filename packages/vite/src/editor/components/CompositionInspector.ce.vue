@@ -14,7 +14,6 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ edit: [edits: Edit[]]; add: []; error: [error: unknown] }>()
 const sourceValue = ref('')
-const timing = ref('')
 const frameValue = ref('')
 const frameEasing = ref('')
 const framePercent = ref(50)
@@ -67,7 +66,6 @@ watch(
   () => [props.track, props.provenance, props.offset, props.pending],
   () => {
     sourceValue.value = valueSource.value?.text ?? ''
-    timing.value = props.provenance.localTiming?.text ?? props.provenance.timingSource?.text ?? ''
     frameValue.value = frameSource.value?.value ?? valueSource.value?.text ?? ''
     frameEasing.value =
       props.provenance.fields.find((field) => field.path === `${framePath.value}/easing`)?.value ??
@@ -125,8 +123,6 @@ function saveFrame() {
     <h3>{{ track.target }} / {{ track.property }}</h3>
     <p aria-label="Editing location" class="location">{{ locationLabel(editingPath) }}</p>
     <p v-if="track.diagnostic" role="alert">{{ track.diagnostic }}</p>
-    <p v-if="provenance.sharedValue && !editingFrame"
-    >This declaration is shared. Changes affect all uses of this source.</p>
     <form
       v-if="!editingFrame"
       @submit.prevent="
@@ -145,33 +141,17 @@ function saveFrame() {
       }}</p>
     </form>
     <h4>Timing</h4>
-    <p
-      v-if="
-        provenance.timingSource &&
-        provenance.timingSource.path !== `${provenance.timingDestination}/timing`
-      "
-      class="source"
-    >Inherited from {{ locationLabel(provenance.timingSource.path) }}</p>
     <p v-if="provenance.timingUnavailable">{{ provenance.timingUnavailable }}</p>
     <template v-if="provenance.timingDestination">
-      <p class="source">Editing: {{ locationLabel(provenance.timingDestination) }}</p>
+      <p aria-label="Timing editing location" class="location">{{
+        locationLabel(provenance.timingDestination)
+      }}</p>
       <TimingControls :timing="track.timing" @apply="replaceTiming" />
       <button
         v-if="provenance.localTiming"
         type="button"
         @click="emit('edit', [{ op: 'timing', path: provenance.timingDestination! }])"
       >Remove timing override</button>
-      <details>
-        <summary>Edit timing expression</summary>
-        <form
-          @submit.prevent="
-            emit('edit', [{ op: 'timing', path: provenance.timingDestination!, value: timing }])
-          "
-        >
-          <label>Timing expression<input v-model="timing" aria-label="Timing expression" required /></label>
-          <button type="submit">Apply timing expression</button>
-        </form>
-      </details>
     </template>
     <h4 v-if="editingFrame">Keyframe</h4>
     <p v-if="provenance.framesUnavailable">{{ provenance.framesUnavailable }}</p>
@@ -212,7 +192,11 @@ function saveFrame() {
         @click="emit('edit', [{ op: 'removeFrame', path: framePath! }])"
       >Delete keyframe</button>
     </form>
-    <button v-if="provenance.frameDestination" :disabled="!canChangeFrame" @click="emit('add')"
+    <button
+      v-if="provenance.frameDestination"
+      class="add-keyframe"
+      :disabled="!canChangeFrame"
+      @click="emit('add')"
     >New keyframe at playhead</button>
     <p v-if="provenance.frameDestination && !canChangeFrame"
     >Keyframe editing requires tween timing. Springs use their solver curve.</p>
@@ -230,8 +214,8 @@ function saveFrame() {
   font-weight: 600;
   overflow-wrap: anywhere;
 }
-.source {
-  overflow-wrap: anywhere;
-  color: var(--liva-text-muted);
+.add-keyframe {
+  display: block;
+  margin-block-start: 16px;
 }
 </style>

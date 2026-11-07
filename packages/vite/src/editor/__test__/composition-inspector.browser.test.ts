@@ -134,14 +134,6 @@ describe('composition source inspector', () => {
     },
   )
 
-  it('explains shared declarations without exposing composition endpoints', () => {
-    setup()
-
-    expect(host!.textContent).toContain(
-      'This declaration is shared. Changes affect all uses of this source.',
-    )
-  })
-
   it('keeps an external starting value uneditable instead of editing the ending declaration', () => {
     setup({ offset: 0, provenance: { ...provenance, from: undefined } })
 
@@ -175,12 +167,9 @@ describe('composition source inspector', () => {
   it('preserves the timing expression until the user applies a replacement', async () => {
     const { edits } = setup()
 
-    expect(host!.querySelector<HTMLInputElement>('[aria-label="Timing expression"]')!.value).toBe(
-      'quick',
-    )
-
     await input('Timing mode', 'spring-duration')
     await input('Track duration', '400')
+
     expect(edits).toEqual([])
 
     await click('Apply timing')
@@ -260,8 +249,5 @@ describe('composition source inspector', () => {
     expect(errors[0]).toBeInstanceOf(Error)
     expect(String(errors[0])).toContain('no typed representation')
     expect(edits).toEqual([])
-    expect(host!.querySelector<HTMLInputElement>('[aria-label="Timing expression"]')!.value).toBe(
-      'quick',
-    )
   })
 })
