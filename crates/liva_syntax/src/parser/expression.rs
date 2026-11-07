@@ -248,6 +248,38 @@ pub(crate) fn emit_prefix(
         .iter()
         .position(|token| matches!(token.text, "{" | "}" | ";" | "@"))
         .unwrap_or(tokens.len());
+    // A track's CSS name is a structural suffix, including custom/vendor names
+    // whose leading hyphens would otherwise be consumed as expression operators.
+    let mut nesting = 0usize;
+    let track = tokens[..boundary].iter().position(|token| {
+        match token.text {
+            "(" | "[" => nesting += 1,
+            ")" | "]" => nesting = nesting.saturating_sub(1),
+            "~>" if nesting == 0 => return true,
+            _ => {}
+        }
+
+        false
+    });
+    let boundary = track
+        .and_then(|track| {
+            let end = (0..track).rfind(|&index| !tokens[index].trivia)?;
+            let mut start = end;
+
+            while start > 0
+                && tokens[start - 1].range.end == tokens[start].range.start
+                && !tokens[start - 1].trivia
+            {
+                start -= 1;
+            }
+
+            let name = tokens[start..=end]
+                .iter()
+                .map(|token| token.text)
+                .collect::<String>();
+            crate::is_property(&name).then_some(start)
+        })
+        .unwrap_or(boundary);
     let tokens = &tokens[..boundary];
     let limit = tokens
         .iter()

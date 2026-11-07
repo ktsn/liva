@@ -40,6 +40,10 @@ export function evaluate(
       throw new Error(`Unknown variable reference: ${expression.path.join('.')}`)
     }
     case 'call':
+      if (Object.hasOwn(values, expression.function)) {
+        throw new Error(`Value is not callable: ${expression.function}`)
+      }
+
       if (isTimingFunction(expression.function)) {
         const args = Object.fromEntries(
           expression.arguments.map((argument) => [

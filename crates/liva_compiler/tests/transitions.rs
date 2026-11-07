@@ -25,10 +25,12 @@ fn property_style_timing_is_rejected_at_every_scope() {
             format!("motion a {{ {declaration}; layer base {{ t {{ opacity: 1 }} }} }}"),
             format!("motion a {{ layer base {{ {declaration}; t {{ opacity: 1 }} }} }}"),
             format!("motion a {{ layer base {{ t {{ {declaration}; opacity: 1 }} }} }}"),
-            format!("motion a {{ layer base {{ t {{ opacity {{ {declaration}; 100%: 1 }} }} }} }}"),
+            format!(
+                "motion a {{ layer base {{ t {{ opacity ~> {{ {declaration}; 100%: 1 }} }} }} }}"
+            ),
             fixture("", &format!("{declaration};")),
             fixture("", &format!("t {{ {declaration}; }}")),
-            fixture("", &format!("t {{ scale {{ {declaration}; 50%: 2 }} }}")),
+            fixture("", &format!("t {{ scale ~> {{ {declaration}; 50%: 2 }} }}")),
             format!(
                 "motion a {{ layer base {{ t {{ opacity: 1 }} }} enter {{ {declaration}; }} }}"
             ),
@@ -58,7 +60,7 @@ fn transition_frames_reject_duplicate_and_out_of_range_offsets() {
     ] {
         let source = fixture(
             "@tween(duration: 100)",
-            &format!("t {{ scale {{ {frames} }} }}"),
+            &format!("t {{ scale ~> {{ {frames} }} }}"),
         );
         let result = compile(&source, false);
 
@@ -76,7 +78,7 @@ fn transition_frames_reject_duplicate_and_out_of_range_offsets() {
 fn typed_spring_transition_keeps_sorted_intermediate_frames() {
     let result = valid(&fixture(
         "@spring(duration: 1000, bounce: 0.2)",
-        "t { scale { 70%: 2; 40%: 3 } }",
+        "t { scale ~> { 70%: 2; 40%: 3 } }",
     ));
     let frames = result.definitions[0].layers[0].transitions[0]
         .transition
@@ -103,16 +105,16 @@ fn raw_easing_suffixes_are_rejected_in_every_track_kind() {
         let sources = [
             fixture(
                 "@tween(duration: 100)",
-                &format!("t {{ scale {{ 50%: 2 {easing} }} }}"),
+                &format!("t {{ scale ~> {{ 50%: 2 {easing} }} }}"),
             ),
             format!(
-                "motion a {{ layer base {{ t {{ @tween(duration: 100) opacity {{ 50%: 0.5 {easing}; 100%: 1 }} }} }} }}"
+                "motion a {{ layer base {{ t {{ @tween(duration: 100) opacity ~> {{ 50%: 0.5 {easing}; 100%: 1 }} }} }} }}"
             ),
             format!(
-                "motion a {{ layer base {{ t {{ opacity: 1 }} }} @tween(duration: 100) enter {{ t {{ opacity {{ 50%: 0.5 {easing} }} }} }} }}"
+                "motion a {{ layer base {{ t {{ opacity: 1 }} }} @tween(duration: 100) enter {{ t {{ opacity ~> {{ 50%: 0.5 {easing} }} }} }} }}"
             ),
             format!(
-                "motion a {{ layer base {{ t {{ opacity: 1 }} }} @tween(duration: 100) leave {{ t {{ opacity {{ 50%: 0.5 {easing} }} }} }} }}"
+                "motion a {{ layer base {{ t {{ opacity: 1 }} }} @tween(duration: 100) leave {{ t {{ opacity ~> {{ 50%: 0.5 {easing} }} }} }} }}"
             ),
         ];
 
@@ -135,7 +137,7 @@ fn raw_easing_suffixes_are_rejected_in_every_track_kind() {
 fn typed_easing_is_preserved_as_an_expression() {
     let result = valid(&fixture(
         "@tween(duration: 100)",
-        "t { scale { 70%: 2 @steps(count: 2, position: 'end'); 40%: 3 @easeIn } }",
+        "t { scale ~> { 70%: 2 @steps(count: 2, position: 'end'); 40%: 3 @easeIn } }",
     ));
     let frames = result.definitions[0].layers[0].transitions[0]
         .transition
@@ -164,7 +166,7 @@ fn quoted_and_nested_at_characters_remain_css_values() {
     ] {
         let result = valid(&fixture(
             "@tween(duration: 100)",
-            &format!("t {{ scale {{ 50%: {value} }} }}"),
+            &format!("t {{ scale ~> {{ 50%: {value} }} }}"),
         ));
         let frames = result.definitions[0].layers[0].transitions[0]
             .transition

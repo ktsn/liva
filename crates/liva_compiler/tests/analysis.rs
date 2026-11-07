@@ -101,7 +101,7 @@ fn hyphenated_names_have_whole_identifier_hover_ranges() {
 
 #[test]
 fn lifecycle_templates_expose_typed_hovers_in_both_property_forms() {
-    let source = "// 日本語\r\nmotion panel(distance: number) { layer idle { body { translate: 0px 0 } } @tween(duration: 1) enter { body { translate: ${distance}px 0 } } @tween(duration: 1) leave { body { translate { 100%: ${distance}px 0 } } } }";
+    let source = "// 日本語\r\nmotion panel(distance: number) { layer idle { body { translate: 0px 0 } } @tween(duration: 1) enter { body { translate: ${distance}px 0 } } @tween(duration: 1) leave { body { translate ~> { 100%: ${distance}px 0 } } } }";
     let found = hovers(source);
     let expected: Vec<_> = source
         .match_indices("${distance}")
@@ -149,4 +149,99 @@ fn layer_guards_and_decorators_expose_expression_types_at_source_offsets() {
 
     assert!(found.iter().any(|hover| hover.label.starts_with("tween(")
         && hover.range.start == source.find("tween(").unwrap()));
+}
+
+#[test]
+fn interaction_function_and_members_expose_inferred_types() {
+    let source = "motion a { let ui = interaction(target: body)\n layer hover when ui.hover && ui.active && ui.focus && ui.focusVisible && ui.focusWithin { body { opacity: 1 } } }";
+    let labels: Vec<_> = hovers(source)
+        .into_iter()
+        .map(|hover| hover.label)
+        .collect();
+
+    for member in ["hover", "active", "focus", "focusVisible", "focusWithin"] {
+        assert!(
+            labels
+                .iter()
+                .any(|label| label == &format!("ui.{member}: boolean")),
+            "{member}: {labels:?}"
+        );
+    }
+
+    assert!(
+        labels
+            .iter()
+            .any(|label| label.starts_with("interaction(target: target): { hover: boolean"))
+    );
+}
+
+#[test]
+fn completes_registered_interaction_function_and_inferred_record_members() {
+    use liva_compiler::analysis::completions;
+
+    let source = "motion button { let ui = interaction(target: body)\n layer base { body { opacity: 1 } }\n layer hover when ui.fo {} }";
+    let point = source.find("ui.fo").unwrap() + "ui.fo".len();
+    let found = completions(source, point);
+
+    assert_eq!(
+        found
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["focus", "focusVisible", "focusWithin"]
+    );
+    assert!(found.iter().all(|item| item.detail == "boolean"));
+
+    let source = "motion button { let ui = inter }";
+    let found = completions(source, source.find("inter").unwrap() + 5);
+
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].label, "interaction");
+    assert!(found[0].detail.contains("target: target"));
+}
+
+#[test]
+fn builtin_completions_respect_local_shadows_without_duplicate_candidates() {
+    use liva_compiler::analysis::completions;
+
+    for (declarations, prefix, detail) in [
+        ("", "easeO", "easing"),
+        ("let easeOut = 2;", "easeO", "number"),
+        ("let tween = 2;", "twee", "number"),
+    ] {
+        let source =
+            format!("motion example {{ {declarations} layer base {{ opacity: ${{{prefix}}} }} }}");
+        let found = completions(
+            &source,
+            source.find(&format!("${{{prefix}")).unwrap() + 2 + prefix.len(),
+        );
+
+        assert_eq!(found.len(), 1, "{source}: {found:?}");
+        assert_eq!(found[0].detail, detail);
+    }
+}
+
+#[test]
+fn call_hovers_show_the_shadowing_value_instead_of_a_builtin_signature() {
+    let source = "motion example { let tween = 2; @tween()\nlayer base {} }";
+    let offset = source.find("@tween").unwrap() + 1;
+    let found = hovers(source);
+
+    assert!(
+        found
+            .iter()
+            .any(|hover| hover.range.start == offset && hover.label == "tween: number")
+    );
+    assert!(!found.iter().any(|hover| hover.label.starts_with("tween(")));
+}
+
+#[test]
+fn incomplete_local_declarations_hide_builtin_completions() {
+    use liva_compiler::analysis::completions;
+
+    let source = "motion example { let tween = ; layer base { opacity: ${twee} } }";
+    let offset = source.find("${twee}").unwrap() + "${twee".len();
+    let found = completions(source, offset);
+
+    assert!(found.is_empty(), "{found:?}");
 }

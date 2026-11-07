@@ -111,109 +111,112 @@ motion panel {
     }
   }
 
-  @tween(duration: 100) enter {
+  @tween(duration: 100)
+  enter {
 
     direct {
-      opacity {
+      opacity ~> {
         0%: 0
       }
     }
 
     directVisibility {
-      opacity {
+      opacity ~> {
         0%: 0
       }
     }
 
     content {
-      opacity {
+      opacity ~> {
         0%: 0
       }
     }
 
     secondary {
-      opacity {
+      opacity ~> {
         0%: 0
       }
     }
 
     visibility {
-      opacity {
+      opacity ~> {
         0%: 0
       }
     }
 
     first {
-      opacity {
+      opacity ~> {
         0%: 0
       }
     }
 
     second {
-      opacity {
+      opacity ~> {
         0%: 0
       }
     }
 
     third {
-      opacity {
+      opacity ~> {
         0%: 0
       }
     }
   }
 
-  @tween(duration: 300) leave {
+  @tween(duration: 300)
+  leave {
 
     direct {
-      opacity {
+      opacity ~> {
         100%: 0
       }
     }
 
     directVisibility {
-      opacity {
+      opacity ~> {
         100%: 0
       }
     }
 
     repeated {
-      opacity {
+      opacity ~> {
         100%: 0
       }
     }
 
     content {
-      opacity {
+      opacity ~> {
         100%: 0
       }
     }
 
     secondary {
-      @tween(duration: 500) opacity {
+      @tween(duration: 500)
+      opacity ~> {
         100%: 0
       }
     }
 
     visibility {
-      opacity {
+      opacity ~> {
         100%: 0
       }
     }
 
     first {
-      opacity {
+      opacity ~> {
         100%: 0
       }
     }
 
     second {
-      opacity {
+      opacity ~> {
         100%: 0
       }
     }
 
     third {
-      opacity {
+      opacity ~> {
         100%: 0
       }
     }
@@ -221,7 +224,8 @@ motion panel {
 }
 
 motion nested(dimmed: boolean) {
-  @tween(duration: 1) layer base {
+  @tween(duration: 1)
+  layer base {
     body {
       opacity: 1
     }
@@ -233,10 +237,11 @@ motion nested(dimmed: boolean) {
     }
   }
 
-  @tween(duration: 400) leave {
+  @tween(duration: 400)
+  leave {
 
     body {
-      opacity {
+      opacity ~> {
         100%: 0
       }
     }
@@ -244,7 +249,8 @@ motion nested(dimmed: boolean) {
 }
 
 motion parameters(value: boolean, owner: boolean, entries: boolean) {
-  @tween(duration: 1) layer base {
+  @tween(duration: 1)
+  layer base {
     body {
       opacity: 1
     }
@@ -256,10 +262,11 @@ motion parameters(value: boolean, owner: boolean, entries: boolean) {
     }
   }
 
-  @tween(duration: 100) enter {
+  @tween(duration: 100)
+  enter {
 
     body {
-      opacity {
+      opacity ~> {
         0%: 0
       }
     }

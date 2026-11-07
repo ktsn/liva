@@ -250,7 +250,7 @@ describe('composition timeline rows', () => {
     const source = compile(
       `motion sample { layer base {
     state idle initial { body { opacity: 1 @tween(duration: 100) } }
-    transition idle -> idle when false { body { opacity { 100%: 0 } } }
+    transition idle -> idle when false { body { opacity ~> { 100%: 0 } } }
   } }`,
       true,
     ).definitions[0]

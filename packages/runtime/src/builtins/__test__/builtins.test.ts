@@ -83,3 +83,27 @@ it('rejects drag arguments without a named target and tolerates an absent DOM bi
 
   expect(subscription.value).toEqual({ active: false, released: false, offset: { x: 0, y: 0 } })
 })
+
+it('rejects invalid interaction targets and tolerates an absent DOM binding', () => {
+  for (const target of [1, {}, 'body']) {
+    expect(() => callBuiltin('interaction', { target })).toThrow('requires a target')
+  }
+
+  const subscription = callBuiltin('interaction', { target: { name: 'body' } })
+
+  if (!isReactiveSubscription(subscription)) throw new Error('Expected a subscription')
+
+  const cleanup = subscription.bind(new Map(), () => {
+    throw new Error('An absent target cannot emit updates')
+  })
+
+  expect(subscription.value).toEqual({
+    hover: false,
+    active: false,
+    focus: false,
+    focusVisible: false,
+    focusWithin: false,
+  })
+
+  cleanup()
+})

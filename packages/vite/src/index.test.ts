@@ -196,7 +196,7 @@ describe('Vite compilation hooks', () => {
 it('reports presence ownership conflicts with the source location', async () => {
   const { call } = hooks()
   const conflict =
-    '<template><div v-liva:fade><Transition><div v-if="shown" v-liva-target:box /></Transition></div></template><liva>motion fade { layer idle { box { opacity: 1 } } @tween(duration: 100) enter { box { opacity { 0%: 0 } } } }</liva>'
+    '<template><div v-liva:fade><Transition><div v-if="shown" v-liva-target:box /></Transition></div></template><liva>motion fade { layer idle { box { opacity: 1 } } @tween(duration: 100) enter { box { opacity ~> { 0%: 0 } } } }</liva>'
 
   await writeFile(file, conflict)
 

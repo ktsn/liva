@@ -141,7 +141,7 @@ test('typed lifecycle source expressions save and reach shared instances through
     const saved = await readFile(file, 'utf8')
 
     expect(saved).toContain('0%: ${start * 2}')
-    expect(saved).toContain('@tween(duration: 200, easing: linear) enter')
+    expect(saved).toContain('@tween(duration: 200, easing: linear)\n  enter')
     expect(saved.slice(0, saved.indexOf('<liva'))).toBe(
       original.slice(0, original.indexOf('<liva')),
     )

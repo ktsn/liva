@@ -36,7 +36,9 @@ access to the underlying Rowan node, text, and absolute byte ranges. `Document`
 exposes `Motion` views; motions expose parameters, let bindings, layers, events,
 and animation blocks. `enters()` and `leaves()` select lifecycle declarations;
 `transitions()` traverses all animation blocks, including enter and leave.
-Target `animation_properties()` visits shorthand declarations and explicit tracks in source order.
+`animation_properties()` visits direct shorthand declarations and `property ~>` tracks
+in source order. It also accepts layer, state, and lifecycle scopes, whose direct
+properties lower to `self` without synthetic CST nodes or rewritten source ranges.
 These iterators preserve source order, duplicates, and malformed headers so
 semantic validation can diagnose them. `events()` exposes event declarations,
 with optional name and condition accessors. Targets contain property declarations or property blocks with
@@ -88,9 +90,13 @@ references, not dependencies on their full language tooling stacks.
 ## Built-in functions
 
 `crates/liva_compiler/src/builtins/` registers function signatures. Each function
-has its own module; `drag.rs` declares its target argument and return fields.
-The compiler builds one typed variable scope from parameters, inferred let expression types,
-and the targets declared across layers and local states. The generic call checker evaluates argument
+has its own module; `drag.rs` and `interaction.rs` declare target arguments and typed return fields.
+The compiler places functions, easing constants, and the reserved `self` target in a
+built-in parent scope. A Motion child scope holds parameters, named targets, and let
+bindings; all names are declared before dependency inference. Same-scope duplicates
+are errors, while child declarations shadow ordinary built-ins. `self` cannot be
+shadowed or written as an explicit target block. References, calls, hover, and
+completion use the same symbol lookup. The generic call checker evaluates argument
 types through the expression checker and selects a matching overload. Required
 arguments and incompatible overload groups produce diagnostics.
 Let type inference follows dependencies and rejects cycles. Expression member checking
@@ -98,7 +104,8 @@ follows the variable's inferred type. The syntax parser
 uses ordinary call/argument nodes without knowing any built-in function names.
 
 `packages/runtime/src/builtins/` registers the implementations. `drag.ts` defines
-`drag`, its per-instance value, and Pointer Events handling. A built-in subscription
+`drag`, its per-instance value, and Pointer Events handling. `interaction.ts` reads browser
+pseudo-class snapshots and coalesces event-triggered rechecks. A built-in subscription
 returns a value and a binding function whose cleanup releases browser resources.
 `LivaInstance` creates, binds, and cleans up these handles without built-in-specific
 branches. The let binding graph reevaluates expressions in dependency order before
@@ -347,8 +354,8 @@ is excluded from dependency prebundling to preserve development interception.
 Explicit plugin construction uses `createLivaPlugin` from `@liva/vue/runtime`.
 
 Targets reconcile in a queued pass against the nearest Motion root and their
-declaring component. A root may also be a target; ownership never crosses nested
-Motion roots. Ordinary targets bind one element, while lifecycle targets can bind
+declaring component. Every root is automatically bound as `self`, independently of
+any named alias on the same element; ownership never crosses nested Motion roots. Ordinary targets bind one element, while lifecycle targets can bind
 multiple keyed elements. Each Motion instance owns its parameters and subscriptions.
 Invalid HMR retains the last valid definition; successful HMR can reload Vue state.
 

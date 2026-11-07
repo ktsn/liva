@@ -1,4 +1,5 @@
 import { drag } from './drag.ts'
+import { interaction } from './interaction.ts'
 import type { FunctionResult, RuntimeValue } from '../reactive-value.ts'
 
 export type { FunctionResult, RuntimeValue } from '../reactive-value.ts'
@@ -6,7 +7,10 @@ export type { FunctionResult, RuntimeValue } from '../reactive-value.ts'
 const functions: ReadonlyMap<
   string,
   (args: Readonly<Record<string, RuntimeValue>>) => FunctionResult
-> = new Map([['drag', drag]])
+> = new Map([
+  ['drag', drag],
+  ['interaction', interaction],
+])
 
 export function callBuiltin(
   name: string,

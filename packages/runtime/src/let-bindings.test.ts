@@ -325,7 +325,7 @@ it('rolls back newly bound subscriptions when a later subscription cannot bind',
   }))
 
   const definitions: LetBinding[] = ['first', 'failing'].map((name) => ({
-    name,
+    name: `${name}Value`,
     initializer: {
       kind: 'binary',
       operator: '&&',
@@ -338,7 +338,10 @@ it('rolls back newly bound subscriptions when a later subscription cannot bind',
 
   expect(() => graph.evaluate({ enabled: true })).toThrow('Binding failed')
   expect(active.size).toBe(0)
-  expect(graph.evaluate({ enabled: false })).toMatchObject({ first: false, failing: false })
+  expect(graph.evaluate({ enabled: false })).toMatchObject({
+    firstValue: false,
+    failingValue: false,
+  })
 
   for (const cleanup of cleanups) cleanup()
 })
@@ -355,4 +358,15 @@ it('keeps the current binding active when an older binding is disposed twice', (
 
   currentCleanup()
   currentCleanup()
+})
+
+it('resolves later declarations before invoking a shadowed function name', () => {
+  const invoke = vi.spyOn(functions, 'callBuiltin')
+  const definitions: LetBinding[] = [
+    { name: 'value', initializer: { kind: 'call', function: 'drag', arguments: [] } },
+    { name: 'drag', initializer: { kind: 'number', value: 1 } },
+  ]
+
+  expect(() => new LetBindingGraph(definitions, {})).toThrow('Value is not callable: drag')
+  expect(invoke).not.toHaveBeenCalled()
 })

@@ -23,7 +23,8 @@ const active = ref(false)
 
 <liva lang="liva">
 motion beacon(checked: boolean) {
-  @tween(duration: 450, easing: easeInOut) layer base {
+  @tween(duration: 450, easing: easeInOut)
+  layer base {
     light { opacity: 0.5; scale: 1 }
   }
   layer active when checked { light { opacity: 1; scale: 1.04 } }

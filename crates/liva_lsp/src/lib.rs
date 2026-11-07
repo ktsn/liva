@@ -92,6 +92,28 @@ impl Document {
         }
     }
 
+    fn completions(&self, point: Position, uri: &str) -> Vec<Value> {
+        let Some(offset) = offset(&self.text, point) else {
+            return vec![];
+        };
+        let blocks = if uri.ends_with(".vue") {
+            vue::blocks(&self.text)
+        } else {
+            std::iter::once(0..self.text.len()).collect()
+        };
+        let Some(block) = blocks
+            .into_iter()
+            .find(|block| block.start <= offset && offset <= block.end)
+        else {
+            return vec![];
+        };
+
+        analysis::completions(&self.text[block.clone()], offset - block.start)
+            .into_iter()
+            .map(|item| json!({ "label": item.label, "detail": item.detail }))
+            .collect()
+    }
+
     fn hover(&self, point: Position) -> Option<Value> {
         let offset = offset(&self.text, point)?;
         let hover = self
@@ -157,6 +179,7 @@ pub fn run(connection: Connection) -> Result<(), Box<dyn std::error::Error>> {
         "positionEncoding": "utf-16",
         "textDocumentSync": { "openClose": true, "change": 1 },
         "hoverProvider": true,
+        "completionProvider": { "triggerCharacters": ["."] },
     }))?;
     let mut documents = HashMap::<String, Document>::new();
 
@@ -237,7 +260,10 @@ pub fn run(connection: Connection) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn handle_request(request: Request, documents: &HashMap<String, Document>) -> Response {
-    if request.method != "textDocument/hover" {
+    if !matches!(
+        request.method.as_str(),
+        "textDocument/hover" | "textDocument/completion"
+    ) {
         return Response::new_err(
             request.id,
             -32601,
@@ -255,9 +281,19 @@ fn handle_request(request: Request, documents: &HashMap<String, Document>) -> Re
             );
         }
     };
-    let hover = documents
-        .get(&params.text_document.uri)
-        .and_then(|document| document.hover(params.position.unwrap()));
+    let document = documents.get(&params.text_document.uri);
+
+    if request.method == "textDocument/completion" {
+        let completions = document
+            .map(|document| {
+                document.completions(params.position.unwrap(), &params.text_document.uri)
+            })
+            .unwrap_or_default();
+
+        return Response::new_ok(request.id, completions);
+    }
+
+    let hover = document.and_then(|document| document.hover(params.position.unwrap()));
 
     Response::new_ok(request.id, hover)
 }
@@ -265,6 +301,114 @@ fn handle_request(request: Request, documents: &HashMap<String, Document>) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reserved_self_diagnostics_survive_references_to_the_builtin() {
+        let source =
+            "motion example { let self = 1; let ui = interaction(target: self); layer base {} }";
+        let document = Document::new(source.into(), 1, "file:///test.liv");
+
+        assert!(
+            document
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic["message"] == "self is a reserved built-in target")
+        );
+        assert!(
+            document
+                .hovers
+                .iter()
+                .any(|hover| hover.label == "self: target")
+        );
+    }
+
+    #[test]
+    fn completion_requests_map_vue_blocks_and_exclude_host_code() {
+        let uri = "file:///test.vue";
+        let text = "<script setup>const ui = 1</script>\n<liva>motion button { let ui = interaction(target: body)\nlayer focus when ui.fo { body { opacity: 1 } } }</liva>";
+        let document = Document::new(text.into(), 1, uri);
+        let documents = HashMap::from([(uri.into(), document)]);
+        let request = Request::new(
+            1.into(),
+            "textDocument/completion".into(),
+            json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": 2, "character": 22 },
+            }),
+        );
+        let result = handle_request(request, &documents).response_result.unwrap();
+
+        assert_eq!(
+            result
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item["label"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["focus", "focusVisible", "focusWithin"]
+        );
+        assert!(
+            documents[uri]
+                .completions(
+                    Position {
+                        line: 0,
+                        character: 23
+                    },
+                    uri
+                )
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn completions_include_eof_and_embedded_content_end_insertion_positions() {
+        let body = "motion example { let ui = interaction(target: self); layer base when ui.fo";
+
+        for (uri, prefix, suffix) in [
+            ("file:///test.liv", "// 日本😀\r\n", ""),
+            (
+                "file:///test.vue",
+                "<template><p>日本😀</p></template>\r\n<liva>",
+                "</liva>",
+            ),
+        ] {
+            let text = format!("{prefix}{body}{suffix}");
+            let point = position(&text, prefix.len() + body.len());
+            let document = Document::new(text, 1, uri);
+            let documents = HashMap::from([(uri.into(), document)]);
+            let request = Request::new(
+                1.into(),
+                "textDocument/completion".into(),
+                json!({ "textDocument": { "uri": uri }, "position": point }),
+            );
+            let response = handle_request(request, &documents).response_result.unwrap();
+
+            assert_eq!(
+                response
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|item| item["label"].as_str().unwrap())
+                    .collect::<Vec<_>>(),
+                vec!["focus", "focusVisible", "focusWithin"],
+                "{uri}"
+            );
+        }
+    }
+
+    #[test]
+    fn completions_still_exclude_closing_tags_and_following_vue_host_code() {
+        let uri = "file:///test.vue";
+        let text = "<liva>motion example { let ui = interaction(target: self); layer base when ui.fo</liva><script>const ui = 1</script>";
+        let end = text.find("</liva>").unwrap();
+        let document = Document::new(text.into(), 1, uri);
+
+        for point in [end + 1, end + "</liva>".len(), text.len()] {
+            let point: Position = serde_json::from_value(position(text, point)).unwrap();
+
+            assert!(document.completions(point, uri).is_empty());
+        }
+    }
 
     #[test]
     fn vue_blocks_map_types_and_errors_to_original_document() {

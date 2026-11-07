@@ -159,3 +159,73 @@ it('rejects removed string-state bindings without registering a runtime', async 
   expect(errors).toContainEqual(expect.objectContaining({ code: 'vue.initialization' }))
   expect(records).toEqual([])
 })
+
+describe('built-in self target', () => {
+  it('binds each root independently and restores styles when a root is replaced or disposed', async () => {
+    const shown = ref(true)
+    const key = ref(0)
+    const errors: RuntimeDiagnostic[] = []
+    const component = defineComponent({
+      livaDefinitions: [
+        {
+          name: 'root',
+          layers: [
+            {
+              name: 'base',
+              targets: [{ name: 'self', properties: [{ name: 'opacity', value: '.4' }] }],
+            },
+          ],
+        },
+      ],
+      setup() {
+        const liva = resolveDirective('liva')!
+
+        return () =>
+          shown.value
+            ? [0, 1].map((id) =>
+                withDirectives(
+                  h('div', {
+                    key: `${id}:${key.value}`,
+                    'data-root': id,
+                    style: { opacity: '0.9' },
+                  }),
+                  [[liva, undefined, 'root']],
+                ),
+              )
+            : null
+      },
+    })
+    const host = document.createElement('div')
+    const app = createApp(component).use(
+      createLivaPlugin({ onDiagnostic: (error) => errors.push(error) }),
+    )
+    hosts.push(host)
+    apps.push(app)
+    document.body.append(host)
+    app.mount(host)
+
+    await nextTick()
+    await Promise.resolve()
+
+    const original = host.querySelectorAll<HTMLElement>('[data-root]')
+
+    expect([...original].map((root) => root.style.opacity)).toEqual(['0.4', '0.4'])
+
+    key.value++
+
+    await nextTick()
+    await Promise.resolve()
+
+    expect([...original].map((root) => root.style.opacity)).toEqual(['0.9', '0.9'])
+    expect(
+      [...host.querySelectorAll<HTMLElement>('[data-root]')].map((root) => root.style.opacity),
+    ).toEqual(['0.4', '0.4'])
+
+    shown.value = false
+
+    await nextTick()
+
+    expect(host.querySelector('[data-root]')).toBeNull()
+    expect(errors).toEqual([])
+  })
+})

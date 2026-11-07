@@ -6,6 +6,12 @@ import type { Definition, Expression } from './definition.ts'
 const number = (value: number): Expression => ({ kind: 'number', value })
 
 describe('expression evaluation', () => {
+  it.each(['tween', 'drag'])('rejects a call when %s is shadowed by a motion value', (name) => {
+    const expression: Expression = { kind: 'call', function: name, arguments: [] }
+
+    expect(() => evaluate(expression, { [name]: 1 })).toThrow(`Value is not callable: ${name}`)
+  })
+
   it.each([
     ['==', 3, 3, true],
     ['===', 3, 4, false],

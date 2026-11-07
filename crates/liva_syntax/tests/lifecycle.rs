@@ -7,7 +7,7 @@ use liva_syntax::{
 fn lifecycle_keywords_are_scoped_to_motion_animation_blocks() {
     for phase in ["enter", "leave"] {
         let source = format!(
-            "motion panel {{ state idle {{ {phase} {{ opacity: 1 }} }} {phase} {{ {phase} {{ @tween(duration: 1) opacity {{ 0%: 0 }} }} }} }}"
+            "motion panel {{ state idle {{ {phase} {{ opacity: 1 }} }} {phase} {{ {phase} {{ @tween(duration: 1) opacity ~> {{ 0%: 0 }} }} }} }}"
         );
         let parsed = parse(&source);
         assert!(
@@ -86,7 +86,7 @@ fn lifecycles_and_mixed_properties_keep_lossless_typed_views() {
 
     for phase in ["enter", "leave"] {
         let source = format!(
-            "// 日本語 😀\r\nmotion panel {{ state idle {{}} {phase} /* lifecycle */ {{ body {{\r\nopacity: 0 /* value */\r\ntranslate: ${{distance}}px 0\r\nscale {{ 50%: 1.1 @ ease-out }}\r\n}} }} }}"
+            "// 日本語 😀\r\nmotion panel {{ state idle {{}} {phase} /* lifecycle */ {{ body {{\r\nopacity: 0 /* value */\r\ntranslate: ${{distance}}px 0\r\nscale ~> {{ 50%: 1.1 @ ease-out }}\r\n}} }} }}"
         );
         let parsed = parse(&source);
         assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);

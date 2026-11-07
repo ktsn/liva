@@ -56,19 +56,40 @@ export class EditorController {
     if (event === 'mount') {
       const sourceId = binding.component.livaSource
       if (!sourceId) return
-      const label =
-        binding.root.getAttribute('aria-label') ??
-        `${binding.definition.name} ${/* v8 ignore next -- @preserve: HTMLElement.textContent is a string; null applies to other Node kinds. */ binding.root.textContent?.trim().slice(0, 30) ?? ''}`
-      const entry = { id: crypto.randomUUID(), sourceId, label, binding }
+      const entry = {
+        id: crypto.randomUUID(),
+        sourceId,
+        label: binding.definition.name,
+        binding,
+      }
       this.entries.set(entry.id, entry)
 
-      if (
-        this.selected &&
-        !this.active(this.selected) &&
-        this.selected.sourceId === sourceId &&
-        this.selected.label === label
-      )
-        this.selected = entry
+      // Vue's created directive hook runs before attributes and children are set.
+      // Resolve identity after that synchronous DOM setup, before reconnecting HMR.
+      queueMicrotask(() => {
+        if (!this.active(entry)) return
+
+        entry.label =
+          binding.root.getAttribute('aria-label') ??
+          `${binding.definition.name} ${/* v8 ignore next -- @preserve: HTMLElement.textContent is a string; null applies to other Node kinds. */ binding.root.textContent?.trim().slice(0, 30) ?? ''}`
+
+        if (
+          this.selected &&
+          !this.active(this.selected) &&
+          this.selected.sourceId === sourceId &&
+          this.selected.label === entry.label
+        ) {
+          this.selected = entry
+
+          if (!this.inspection) {
+            void this.select(entry.id).catch((error) => this.report(error))
+          }
+        }
+
+        this.notify()
+      })
+
+      return
     } else {
       const entry = [...this.entries.values()].find((candidate) => candidate.binding === binding)
       if (!entry) return

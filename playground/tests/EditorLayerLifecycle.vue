@@ -17,17 +17,20 @@ const start = ref(0.2)
 
 <liva lang="liva">
 motion panel(active: boolean, start: number) {
-  @tween(duration: 100) layer base {
+  @tween(duration: 100)
+  layer base {
     body { opacity: 1; scale: 1 }
   }
   layer active when active { body { opacity: 0.8 } }
   layer badge when false { badge { opacity: 1 } }
 
-  @tween(duration: 200, easing: linear) enter {
+  @tween(duration: 200, easing: linear)
+  enter {
     body { opacity: ${start} }
     badge { opacity: 0 }
   }
-  @tween(duration: 200, easing: linear) leave {
+  @tween(duration: 200, easing: linear)
+  leave {
     body { opacity: 0 }
     badge { opacity: 0 }
   }

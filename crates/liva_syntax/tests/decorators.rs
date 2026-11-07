@@ -6,7 +6,7 @@ use liva_syntax::{
 
 #[test]
 fn all_decorator_positions_are_lossless_and_separate_from_css() {
-    let source = "motion button { state idle { @quick body { opacity: 1 @tween(duration: 150); @quick translate { 0%: 0 20px @easeOut; 100%: 0 0 } } } }";
+    let source = "motion button { state idle { @quick body { opacity: 1 @tween(duration: 150); @quick translate ~> { 0%: 0 20px @easeOut; 100%: 0 0 } } } }";
     let parsed = parse(source);
 
     assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
@@ -87,7 +87,7 @@ fn malformed_shared_decorators_keep_following_declarations_accessible() {
 fn prefixes_attach_to_the_next_structure_with_expression_boundaries() {
     for separator in [" ", "\n", " /* 日本語 */\r\n"] {
         let source = format!(
-            "motion sample(active: boolean) {{ @tween(duration: 100 + 50){separator}layer base {{\n@quick{separator}state off initial {{}}\nstate on {{}}\n@(quick){separator}transition off -> on when active\n@quick{separator}transition on -> off when !active {{\n@quick{separator}body {{\n@(quick){separator}opacity {{ 0%: 0 @easeOut; 100%: 1 }}\n}}\n}}\n}}\n@quick{separator}enter {{}}\n@quick{separator}leave {{}}\n}}"
+            "motion sample(active: boolean) {{ @tween(duration: 100 + 50){separator}layer base {{\n@quick{separator}state off initial {{}}\nstate on {{}}\n@(quick){separator}transition off -> on when active\n@quick{separator}transition on -> off when !active {{\n@quick{separator}body {{\n@(quick){separator}opacity ~> {{ 0%: 0 @easeOut; 100%: 1 }}\n}}\n}}\n}}\n@quick{separator}enter {{}}\n@quick{separator}leave {{}}\n}}"
         );
         let parsed = parse(&source);
 
@@ -158,7 +158,7 @@ fn prefixes_on_values_and_non_decoratable_declarations_are_rejected() {
         "motion sample { @quick let value = 1\nlayer base {} }",
         "motion sample { @quick event done when true\nlayer base {} }",
         "motion sample { layer base { body { @quick opacity: 1 } } }",
-        "motion sample { layer base { body { opacity { @easeOut 0%: 0; 100%: 1 } } } }",
+        "motion sample { layer base { body { opacity ~> { @easeOut 0%: 0; 100%: 1 } } } }",
     ] {
         let parsed = parse(source);
 

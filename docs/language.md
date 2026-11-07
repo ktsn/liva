@@ -13,7 +13,11 @@ motion card {
   let movement = drag(target: body)
 
   layer interaction {
-    body { translate: 0 0; @tween(duration: 200, easing: easeOut) scale { 100%: 1 } }
+    body {
+      translate: 0 0
+      @tween(duration: 200, easing: easeOut)
+      scale ~> { 100%: 1 }
+    }
 
     state idle initial {}
     state dragging {
@@ -23,8 +27,10 @@ motion card {
     transition idle -> dragging when movement.active
     transition dragging -> idle when !movement.active {
       body {
-        @spring(stiffness: 300, damping: 20) translate {}
-        @tween(duration: 180, easing: easeOut) scale {}
+        @spring(stiffness: 300, damping: 20)
+        translate ~> {}
+        @tween(duration: 180, easing: easeOut)
+        scale ~> {}
       }
     }
   }
@@ -113,6 +119,50 @@ gesture with `released: false` and never trigger release events. Target
 replacement and disposal remove listeners and release capture. Set `touch-action:
 none` on draggable targets; the adapter does not change application CSS.
 
+### Browser interaction input
+
+`interaction(target: body)` returns a reactive record with five Boolean fields:
+
+| Member         | Browser pseudo-class |
+| -------------- | -------------------- |
+| `hover`        | `:hover`             |
+| `active`       | `:active`            |
+| `focus`        | `:focus`             |
+| `focusVisible` | `:focus-visible`     |
+| `focusWithin`  | `:focus-within`      |
+
+```liva
+motion button(disabled: boolean) {
+  let ui = interaction(target: body)
+
+  layer base { body { scale: 1 } }
+  layer hover when ui.hover && !disabled { body { scale: 1.05 } }
+  layer press when ui.active && !disabled { body { scale: .95 } }
+  layer focus when ui.focusVisible { body { outline-width: 2px } }
+}
+```
+
+Each field reads the target element's `matches()` result, including descendant focus
+for `focusWithin`. The initial snapshot is taken when the target binds, before its
+initial presentation settles. Each instance has independent subscriptions; replacement
+and disposal remove listeners and cancel pending rechecks. `interaction()` and
+`drag()` can observe the same target without changing native input behavior.
+
+Pointer, mouse, focus, keyboard, click, capture, visibility, and window focus events
+trigger a synchronous check and one coalesced check on the next animation frame.
+The deferred check observes browser default actions and pseudo-class changes that
+occur after dispatch. Unchanged snapshots do not notify subscribers. This is
+event-driven observation, not continuous selector polling: changes caused solely by
+DOM/style changes, scrolling under a stationary pointer, browser UI, or modality
+changes without any observed event are picked up on the next supported trigger.
+Keyboard, touch, and pen activation follow the browser's CSS behavior; `active` does
+not synthesize a keyboard-pressed or pointer-down state.
+
+This input supplies browser-managed transient state, not raw events or pointer details.
+Keep selected, checked, disabled, and other application states in the application and
+pass them as motion parameters. Guard hover/press layers explicitly when disabled;
+a disabled element may still match `:hover`.
+
 Every motion requires at least one layer. Ordinary layers independently activate
 from Boolean conditions. Stateful layers retain one local state and advance through
 guarded transitions. Initial presentation settles without animation. Updates start
@@ -141,10 +191,60 @@ paths. Non-finite runtime arithmetic reports a diagnostic and retains valid styl
 CSS validity is delegated to the browser. Omitted properties expose lower active
 layers or external CSS. There is no requirement for a complete fallback state.
 
+## Expression names and shadowing
+
+Built-in functions and easing constants belong to a parent scope. Each Motion has
+one child scope shared by parameters, `let` bindings, and named targets. A name
+may be declared only once in that Motion, regardless of declaration order. Reusing
+a named target across layers or states refers to the same target rather than
+redeclaring a variable.
+
+Motion declarations may shadow ordinary built-ins. References and calls resolve
+the closest declaration: with `let tween = 1`, `tween` is a number and `tween()` is
+an error. There is no fallback to the built-in function. Functions cannot be used
+as values. Forward let references follow the same rules and cycles are errors.
+Only `self` is reserved against all declarations.
+
+## The Motion root and implicit declarations
+
+`self` is the built-in target bound to the Motion root (the element carrying `v-liva`).
+It is always available to target-taking functions such as `drag(target: self)`.
+It is reserved: parameters, `let` bindings, and explicit `self { ... }` target blocks
+cannot declare it. Write root styles directly; no `v-liva-target` directive is needed.
+
+CSS declarations and tracks directly inside a reactive layer, stateful layer's common
+styles, state, directional transition, `enter`, or `leave` apply to `self`:
+
+```liva
+motion button {
+  @tween(duration: 180)
+  layer base {
+    scale: 1
+    opacity: 1
+    icon { rotate: 0deg }
+  }
+  @tween(duration: 120)
+  enter { opacity: 0 }
+}
+```
+
+Direct declarations can mix with named target blocks. Declaring the same root
+property twice in one animation scope, including a value plus a track, reports a
+duplicate. Property timing decorators apply only to their property.
+
+The delimiter determines the meaning without consulting CSS property names:
+`property: value` is a value, `property ~> { ... }` is a track, and `target { ... }`
+is a target block. Future CSS properties and custom properties use the same forms.
+For example, `opacity { opacity: 1 }` names a target called `opacity`, while
+`--progress ~> { 0%: 0; 100%: 1 }` animates a custom property on `self`.
+Structural timing decorators precede blocks and tracks; ordinary property timing
+and individual frame easing follow their values.
+
 ## Inline keyframes
 
 ```liva
-@tween(duration: 350, easing: easeInOut) scale {
+@tween(duration: 350, easing: easeInOut)
+scale ~> {
   40%: 1.3 1 @easeIn
   70%: 0.95 1 @cubicBezier(x1: 0.2, y1: 0.8, x2: 0.2, y2: 1)
   100%: 1
@@ -163,9 +263,9 @@ restores the resolved destination even when an explicit transition endpoint diff
 
 ## Enter, leave, and events
 
-A motion may declare one `enter` and one `leave` directly in its body. Targets
-must be declared in its layers (including local states). The root
-is animated only when explicitly bound as a named target. Lifecycle timing is
+A motion may declare one `enter` and one `leave` directly in its body. Named targets
+must be declared in its layers (including local states). The built-in `self` target
+is always bound to the Motion root, including lifecycle-only declarations. Lifecycle timing is
 independent of ordinary layer timing. Lifecycle property timing overrides target
 timing, which overrides the lifecycle shared decorator. All are captured at start.
 
@@ -175,10 +275,12 @@ motion panel(open: boolean) {
   layer opened when open { content { scale: 1 } }
 
   enter {
-    @tween(duration: 250, easing: easeOut) content { opacity: 0; scale: 0.8 }
+    @tween(duration: 250, easing: easeOut)
+    content { opacity: 0; scale: 0.8 }
   }
   leave {
-    @tween(duration: 200, easing: easeIn) content { opacity: 0; scale: 0.9 }
+    @tween(duration: 200, easing: easeIn)
+    content { opacity: 0; scale: 0.9 }
   }
 }
 ```
@@ -295,7 +397,8 @@ structure are authored in source.
 
 ```liva
 motion toggle(checked: boolean) {
-  @tween(duration: 350, easing: easeOut) layer toggle {
+  @tween(duration: 350, easing: easeOut)
+  layer toggle {
     track { background-color: #888 @tween(duration: 200, easing: easeInOut) }
     thumb { translate: 0 0 @spring(stiffness: 300, damping: 20); scale: 1 }
 
@@ -306,12 +409,13 @@ motion toggle(checked: boolean) {
     }
 
     transition off -> on when checked {
-      thumb { scale { 40%: 1.3 1 @easeIn; 70%: 0.95 1 @easeOut } }
+      thumb { scale ~> { 40%: 1.3 1 @easeIn; 70%: 0.95 1 @easeOut } }
     }
     transition on -> off when !(checked) {
       thumb {
-        @spring(duration: 350, bounce: 0.2) translate {}
-        scale { 40%: 1.3 1 @easeIn; 70%: 0.95 1 @easeOut }
+        @spring(duration: 350, bounce: 0.2)
+        translate ~> {}
+        scale ~> { 40%: 1.3 1 @easeIn; 70%: 0.95 1 @easeOut }
       }
     }
   }
@@ -447,10 +551,12 @@ declarations cannot have timing decorators. A keyframe segment accepts an easing
 motion button {
   let quick = tween(duration: 150, easing: easeOut)
   layer base {
-    @quick body {
+    @quick
+    body {
       opacity: 1
       scale: 1 @spring(stiffness: 300, damping: 20)
-      @tween(duration: 400) translate {
+      @tween(duration: 400)
+      translate ~> {
         0%: 0 20px
         50%: 0 5px @easeOut
         100%: 0 0
@@ -462,7 +568,9 @@ motion button {
 
 Timing decorators precede layers, states, directional transitions, motion-level
 enter/leave, targets, and property keyframe blocks. They attach to the next
-structural declaration, whether on the same line or a preceding line. Comments
+structural declaration. Write each structural decorator on its own line, with
+the block starting on the following line at the same indentation. The parser
+also accepts same-line prefixes. Comments
 between the expression and declaration are preserved. `motion`, `let`, and
 `event` do not accept decorators.
 
@@ -472,7 +580,7 @@ An easing decorator on 100% has no outgoing interval and produces a warning.
 Omitted transition/lifecycle endpoints are completed at runtime, so an easing on
 an earlier last explicit frame still controls the interval to the implicit 100%.
 Timing and easing expressions use the ordinary expression grammar and type checks.
-Source edits emit same-line structural prefixes and keep value decorators as suffixes;
+Source edits emit structural prefixes on their own lines and keep value decorators as suffixes;
 there is no standalone formatter, and unrelated source formatting is preserved.
 
 The target timing is a default; a property's decorator replaces that whole value.
@@ -499,13 +607,15 @@ Shared transition timing can animate resolved properties without declaring track
 Headers can span lines, and a guarded transition can omit its body:
 
 ```liva
-@tween (duration: 200) layer interaction {
+@tween (duration: 200)
+layer interaction {
   body {
     opacity: 1;
   }
   state idle initial {
   }
-  @spring (duration: 400) state active {
+  @spring (duration: 400)
+  state active {
     body {
       opacity: 0.5;
     }

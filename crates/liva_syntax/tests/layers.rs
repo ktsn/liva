@@ -75,3 +75,31 @@ fn guarded_transition_statements_preserve_lossless_conditions() {
             .all(|transition| transition.condition().unwrap().expression().is_some())
     );
 }
+
+#[test]
+fn implicit_tracks_retain_source_and_distinguish_property_named_targets() {
+    use liva_syntax::ast::{AnimationProperty, HasHeader, PropertyBlock, animation_properties};
+
+    let source = "// 😀\r\nmotion sample { @tween() layer base { opacity: 1; @tween() --future /* track */ ~> { 0%: 0 @easeOut; 100%: 1 } opacity { scale: 1 } self { translate: 0 0 } } }";
+    let parsed = parse(source);
+
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    assert_eq!(parsed.root.text(), source);
+
+    let motion = parsed.root.motions().next().unwrap();
+    let layer = motion.layers().next().unwrap();
+    let direct: Vec<_> = animation_properties(&layer).collect();
+
+    assert_eq!(direct.len(), 2);
+    assert!(
+        matches!(&direct[1], AnimationProperty::Keyframes(track) if track.header().as_deref() == Some("--future"))
+    );
+    assert_eq!(
+        layer
+            .targets()
+            .map(|target| target.header().unwrap())
+            .collect::<Vec<_>>(),
+        ["opacity", "self"]
+    );
+    assert_eq!(layer.children::<PropertyBlock>().count(), 1);
+}

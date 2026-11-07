@@ -108,7 +108,7 @@ fn existing_bodyless_transition_receives_only_the_requested_property_override() 
 
 #[test]
 fn moving_a_frame_preserves_timing_and_easing() {
-    let source = "motion sample { @tween() layer base { body { opacity { 50%: 0.5 @stepStart; 100%: 1 } } } }";
+    let source = "motion sample { @tween() layer base { body { opacity ~> { 50%: 0.5 @stepStart; 100%: 1 } } } }";
     let moved = apply_edits(
         source,
         &[Edit::Set {
@@ -124,7 +124,8 @@ fn moving_a_frame_preserves_timing_and_easing() {
 
 #[test]
 fn moving_a_frame_rejects_an_offset_collision() {
-    let source = "motion sample { @tween() layer base { body { opacity { 50%: 0.5; 100%: 1 } } } }";
+    let source =
+        "motion sample { @tween() layer base { body { opacity ~> { 50%: 0.5; 100%: 1 } } } }";
 
     assert!(
         apply_edits(
@@ -140,7 +141,8 @@ fn moving_a_frame_rejects_an_offset_collision() {
 
 #[test]
 fn removing_a_style_destination_is_rejected() {
-    let source = "motion sample { @tween() layer base { body { opacity { 50%: 0.5; 100%: 1 } } } }";
+    let source =
+        "motion sample { @tween() layer base { body { opacity ~> { 50%: 0.5; 100%: 1 } } } }";
 
     assert!(
         apply_edits(
@@ -213,7 +215,7 @@ fn moving_a_transition_shorthand_preserves_its_timing_and_value_expression() {
     assert!(
         result
             .source
-            .contains("@tween(duration: 200) opacity { 80%: ${amount} }")
+            .contains("@tween(duration: 200)\nopacity ~> { 80%: ${amount} }")
     );
 }
 
@@ -255,5 +257,75 @@ fn typed_lifecycle_timing_creates_a_motion_level_track_for_a_layer_property() {
 
     assert!(result.compilation.definitions[0].enter.is_some());
     assert!(result.source.contains("layer base { body { opacity: 1 } }"));
-    assert!(result.source.contains("@tween(duration: 200) opacity"));
+    assert!(result.source.contains("@tween(duration: 200)\nopacity"));
+}
+
+#[test]
+fn new_track_timing_starts_the_block_on_the_next_indented_line() {
+    for (newline, indent, compact) in [
+        ("\n", "  ", false),
+        ("\r\n", "\t", false),
+        ("\n", "", true),
+        ("\r\n", "", true),
+    ] {
+        let track_indent = indent.repeat(3);
+        let source = if compact {
+            format!(
+                "// header{newline}motion sample {{ layer base {{ body {{ opacity ~> {{ 100%: 1 }} }} }} }}"
+            )
+        } else {
+            format!(
+                "motion sample {{{newline}{indent}layer base {{{newline}{indent}{indent}body {{{newline}{track_indent}opacity ~> {{ 100%: 1 }}{newline}{indent}{indent}}}{newline}{indent}}}{newline}}}"
+            )
+        };
+
+        let result = apply_edits(
+            &source,
+            &[Edit::Timing {
+                path: OPACITY.into(),
+                value: Some("tween(duration: 200)".into()),
+            }],
+        )
+        .unwrap();
+
+        assert!(result.source.contains(&format!(
+            "{newline}{track_indent}@tween(duration: 200){newline}{track_indent}opacity ~>"
+        )));
+    }
+}
+
+#[test]
+fn track_conversion_moves_value_timing_to_a_separate_indented_prefix() {
+    for (newline, indent, compact) in [
+        ("\n", "  ", false),
+        ("\r\n", "\t", false),
+        ("\n", "", true),
+        ("\r\n", "", true),
+    ] {
+        let track_indent = indent.repeat(3);
+        let source = if compact {
+            format!(
+                "// header{newline}motion sample {{ layer base {{ body {{ opacity: 1 @tween(duration: 200) }} }} }}"
+            )
+        } else {
+            format!(
+                "motion sample {{{newline}{indent}layer base {{{newline}{indent}{indent}body {{{newline}{track_indent}opacity: 1 @tween(duration: 200){newline}{indent}{indent}}}{newline}{indent}}}{newline}}}"
+            )
+        };
+
+        let result = apply_edits(
+            &source,
+            &[Edit::AddFrame {
+                path: OPACITY.into(),
+                offset: 0.5,
+                value: "0.5".into(),
+                easing: None,
+            }],
+        )
+        .unwrap();
+
+        assert!(result.source.contains(&format!(
+            "{newline}{track_indent}@tween(duration: 200){newline}{track_indent}opacity ~>"
+        )));
+    }
 }

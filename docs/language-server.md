@@ -65,7 +65,9 @@ shows the information at the cursor.
 
 For Vue, install Zed's Vue extension and use `<liva lang="liva">` for syntax
 highlighting through its custom-block language injection. Hover and diagnostics
-also work in plain `<liva>` blocks. Configure Vue's server priority so Liva hover
+also work in plain `<liva>` blocks. Expression completion suggests registered built-in
+functions (including `interaction`) and inferred record members such as `ui.focusVisible`;
+a dot triggers member completion. Each suggestion includes its type or function signature. Configure Vue's server priority so Liva hover
 is available alongside the Vue server:
 
 ```json

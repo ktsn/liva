@@ -27,7 +27,8 @@ span {
 
 <liva lang="liva">
 motion a(active: boolean) {
-  @tween(duration: 200) layer base {
+  @tween(duration: 200)
+  layer base {
     track { opacity: 0.5 }
     thumb { translate: 0px }
   }
