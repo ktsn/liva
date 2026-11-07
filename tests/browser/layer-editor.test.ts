@@ -136,8 +136,8 @@ for (const expression of [
       const saved = await readFile(file, 'utf8')
 
       expect(saved).toContain(`background-color: #888 @${expression}`)
-      expect(saved).toContain('@tween(duration: 200, easing: easeInOut) track')
-      expect(saved).toContain('@spring(stiffness: 300, damping: 20) thumb')
+      expect(saved).toContain('@tween(duration: 200, easing: easeInOut)\n    track')
+      expect(saved).toContain('@spring(stiffness: 300, damping: 20)\n    thumb')
     } finally {
       await writeFile(file, original)
     }
@@ -170,7 +170,7 @@ test('ordinary property keyframes preserve the destination and typed easing on s
 
     expect(saved).toContain('50%: purple @stepStart')
     expect(saved).toContain('100%: #888')
-    expect(saved).toContain('@tween(duration: 200, easing: easeInOut) track')
+    expect(saved).toContain('@tween(duration: 200, easing: easeInOut)\n    track')
   } finally {
     await writeFile(file, original)
   }
