@@ -5,7 +5,7 @@ import Toggle from '../Toggle.vue'
 <template>
   <div class="switches">
     <Toggle label="Notifications" />
-    <Toggle label="Product updates" initial-checked />
+    <Toggle initial-checked label="Product updates" />
   </div>
 </template>
 
