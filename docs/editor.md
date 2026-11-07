@@ -151,8 +151,9 @@ using that declaration; the inspector marks this before editing.
 Value edits preserve source expressions until explicitly replaced. Timing edits write
 `@expression` on the selected transition property, or on the ordinary/style property
 when no effective transition is selected. Removing a local override reveals its
-inherited default. Parameter controls replace an expression only through the explicit
-replacement action, retaining references during unrelated edits.
+inherited default. Timing parameters are shown directly; Apply timing replaces the
+expression with those parameters. Edit timing expression exposes the original expression
+for references and other source edits. Unrelated edits retain existing expressions.
 
 Keyframe editing uses the explicitly selected existing transition in the final value
 owner, or an ordinary layer style track. It never chooses a state style track or creates

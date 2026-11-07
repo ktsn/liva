@@ -1102,7 +1102,6 @@ it('inspects the selected intermediate frame and effective timing without editin
   expect(frame.textContent).toContain('50%')
   expect(frame.textContent).toContain('1.5')
   expect(frame.textContent).toContain('linear')
-  expect(inspector.textContent).toContain('@tween: 200ms linear')
   expect(inspector.querySelector('input, button')).toBeNull()
 })
 
@@ -1207,9 +1206,9 @@ it('inspects the replacement instance and reinitializes its current composition 
 
   const inspector = host!.querySelector('[aria-label="Selection inspector"]')!
 
-  expect(inspector.textContent).toContain('0.75')
-  expect(inspector.textContent).toContain('400 ms')
-  expect(inspector.textContent).not.toContain('0.25')
+  expect(inspector.querySelector('[aria-label="Editing location"]')!.textContent).toBe(
+    'Layer: base',
+  )
   expect(host!.querySelector('[aria-label="Playback time"]')!.textContent).toContain('400 ms')
 })
 
@@ -1225,7 +1224,7 @@ it('identifies an external From endpoint on a property without timing', async ()
   await tick()
 
   const inspector = host!.querySelector('[aria-label="Selection inspector"]')!
-  expect(inspector.textContent).toContain('Resolved timing: None')
+  expect(inspector.textContent).not.toContain('Resolved timing:')
   expect(inspector.querySelector('[aria-label="Editing location"]')!.textContent).toBe(
     'External CSS',
   )
@@ -1274,9 +1273,7 @@ it('applies composition edit replies to the selected preview without changing ap
   expect(requests.at(-1)?.edits).toEqual([
     { op: 'set', path: 'layered/layer/base/target/body/property/opacity/value', value: '0.5' },
   ])
-  expect(host!.querySelector('[aria-label="Selection inspector"]')!.textContent).toContain(
-    'Resolved value: 0.5',
-  )
+  expect(host!.querySelector<HTMLInputElement>('[aria-label="Source value"]')!.value).toBe('0.5')
   expect(runtime!.definition).toEqual(compositionDefinition)
   expect(runtime!.composition?.layers.hover).toBe(false)
   expect(button('Save to source').disabled).toBe(false)
@@ -1302,9 +1299,7 @@ it('rolls back an invalid composition draft and permits a corrected source edit'
   await click('Apply value')
   await expect.poll(() => controller.previewActive).toBe(true)
 
-  expect(host!.querySelector('[aria-label="Selection inspector"]')!.textContent).toContain(
-    'Resolved value: 0.4',
-  )
+  expect(host!.querySelector<HTMLInputElement>('[aria-label="Source value"]')!.value).toBe('0.4')
 })
 
 it('ignores a composition source preview ended while compilation was pending', async () => {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { Timing } from '@liva/runtime'
-import { timingText, type TimelineTrack } from '../timeline.ts'
+import { type TimelineTrack } from '../timeline.ts'
 import type { Edit } from '../communication/protocol.ts'
 import { typedTimingText, type TrackProvenance } from '../provenance.ts'
 import TimingControls from './TimingControls.ce.vue'
@@ -50,9 +50,6 @@ const editingPath = computed(() =>
         ? props.provenance.fromDeclarationPath
         : props.provenance.toDeclarationPath)),
 )
-const resolvedValue = computed(() =>
-  props.offset === 0 ? props.track.fromValue : props.track.toValue,
-)
 
 function locationLabel(path?: string) {
   if (!path) return 'External CSS'
@@ -82,7 +79,10 @@ watch(
 
 function replaceTiming(value: Timing) {
   try {
-    timing.value = typedTimingText(value)
+    const expression = typedTimingText(value)
+
+    // Timing controls are rendered only for an editable destination.
+    emit('edit', [{ op: 'timing', path: props.provenance.timingDestination!, value: expression }])
   } catch (error) {
     emit('error', error)
   }
@@ -133,8 +133,6 @@ function saveFrame() {
         valueSource && emit('edit', [{ op: 'set', path: valueSource.path, value: sourceValue }])
       "
     >
-      <p v-if="offset !== undefined">Position: {{ offset * 100 }}%</p>
-      <p>Resolved value: {{ resolvedValue || 'External CSS' }}</p>
       <template v-if="valueSource">
         <label>Source value<input v-model="sourceValue" aria-label="Source value" required /></label
         >
@@ -154,31 +152,25 @@ function saveFrame() {
       "
       class="source"
     >Inherited from {{ locationLabel(provenance.timingSource.path) }}</p>
-    <p>{{ Math.round(track.duration) }} ms</p>
-    <p>Resolved timing: {{ track.timing ? timingText(track.timing) : 'None' }}</p>
     <p v-if="provenance.timingUnavailable">{{ provenance.timingUnavailable }}</p>
     <template v-if="provenance.timingDestination">
       <p class="source">Editing: {{ locationLabel(provenance.timingDestination) }}</p>
-      <form
-        @submit.prevent="
-          emit('edit', [{ op: 'timing', path: provenance.timingDestination!, value: timing }])
-        "
-      >
-        <label>Timing expression<input v-model="timing" aria-label="Timing expression" required /></label>
-        <button type="submit">Apply timing expression</button>
-        <button
-          v-if="provenance.localTiming"
-          type="button"
-          @click="emit('edit', [{ op: 'timing', path: provenance.timingDestination! }])"
-        >Remove timing override</button>
-      </form>
+      <TimingControls :timing="track.timing" @apply="replaceTiming" />
+      <button
+        v-if="provenance.localTiming"
+        type="button"
+        @click="emit('edit', [{ op: 'timing', path: provenance.timingDestination! }])"
+      >Remove timing override</button>
       <details>
-        <summary>Replace timing expression with parameters</summary>
-        <TimingControls
-          :timing="track.timing"
-          action-label="Use timing parameters"
-          @apply="replaceTiming"
-        />
+        <summary>Edit timing expression</summary>
+        <form
+          @submit.prevent="
+            emit('edit', [{ op: 'timing', path: provenance.timingDestination!, value: timing }])
+          "
+        >
+          <label>Timing expression<input v-model="timing" aria-label="Timing expression" required /></label>
+          <button type="submit">Apply timing expression</button>
+        </form>
       </details>
     </template>
     <h4 v-if="editingFrame">Keyframe</h4>
@@ -222,8 +214,6 @@ function saveFrame() {
     </form>
     <button v-if="provenance.frameDestination" :disabled="!canChangeFrame" @click="emit('add')"
     >New keyframe at playhead</button>
-    <p v-if="provenance.frameDestination && !editingFrame" class="source"
-    >New keyframes belong to {{ locationLabel(provenance.frameDestination) }}.</p>
     <p v-if="provenance.frameDestination && !canChangeFrame"
     >Keyframe editing requires tween timing. Springs use their solver curve.</p>
   </aside>

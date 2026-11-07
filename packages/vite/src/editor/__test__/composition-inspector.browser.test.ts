@@ -181,14 +181,9 @@ describe('composition source inspector', () => {
 
     await input('Timing mode', 'spring-duration')
     await input('Track duration', '400')
-    await click('Use timing parameters')
-
     expect(edits).toEqual([])
-    expect(host!.querySelector<HTMLInputElement>('[aria-label="Timing expression"]')!.value).toBe(
-      'spring(duration: 400, bounce: 0.25)',
-    )
 
-    await click('Apply timing expression')
+    await click('Apply timing')
 
     expect(edits).toEqual([[{ op: 'timing', path, value: 'spring(duration: 400, bounce: 0.25)' }]])
   })
@@ -260,7 +255,7 @@ describe('composition source inspector', () => {
     const timing: Timing = { kind: 'tween', durationMs: 200, easing: 'linear(0, 1)' }
     const { edits, errors } = setup({ track: { ...track, timing } })
 
-    await click('Use timing parameters')
+    await click('Apply timing')
 
     expect(errors[0]).toBeInstanceOf(Error)
     expect(String(errors[0])).toContain('no typed representation')

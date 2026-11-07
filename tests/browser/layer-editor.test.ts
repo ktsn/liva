@@ -91,6 +91,7 @@ for (const expression of [
 
     try {
       await openProperty(page)
+      await page.getByText('Edit timing expression', { exact: true }).click()
       await page.getByLabel('Timing expression', { exact: true }).fill(expression)
       await page.getByRole('button', { name: 'Apply timing expression', exact: true }).click()
       await expectMessage(page, 'Previewing')
