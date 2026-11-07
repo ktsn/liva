@@ -11,6 +11,7 @@ import { RouterLink, RouterView } from 'vue-router'
       <nav aria-label="Demos" class="demo-nav">
         <RouterLink class="demo-link" to="/toggle">Toggle</RouterLink>
         <RouterLink class="demo-link" to="/interactive-button">Interactive button</RouterLink>
+        <RouterLink class="demo-link" to="/like-button">Like button</RouterLink>
         <RouterLink class="demo-link" to="/async-submit">Async submit</RouterLink>
         <RouterLink class="demo-link" to="/beacon">Beacon</RouterLink>
         <RouterLink class="demo-link" to="/drag">Drag</RouterLink>
