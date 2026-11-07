@@ -444,7 +444,7 @@ it.each(['enter', 'leave'] as const)(
     const { controller } = await setupEditor(undefined, definition)
 
     await click('Motion editor')
-    await input('Editing scope', `${phase}-default`)
+    await input('Existing transition', `${phase}-default`)
     await click('▸ box')
     await click('opacity')
     await input('Track duration', '200')

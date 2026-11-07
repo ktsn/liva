@@ -355,7 +355,7 @@ test('lifecycle previews capture templates, isolate instances, scrub and restore
   const first = page.getByRole('button', { name: 'First lifecycle', exact: true })
   const second = page.getByRole('button', { name: 'Second lifecycle', exact: true })
 
-  await page.getByLabel('Editing scope').selectOption('enter-default')
+  await page.getByLabel('Existing transition').selectOption('enter-default')
   await page.getByLabel('Baseline active enabled').uncheck()
   await track(page, 'body', 'opacity')
   await seek(page, 100)
@@ -364,7 +364,7 @@ test('lifecycle previews capture templates, isolate instances, scrub and restore
   await expect(second).toHaveCSS('opacity', '1')
   await expect(first).toHaveAttribute('aria-pressed', 'false')
 
-  await page.getByLabel('Editing scope').selectOption('leave-default')
+  await page.getByLabel('Existing transition').selectOption('leave-default')
   await page.getByLabel('Baseline active enabled').uncheck()
   await seek(page, 200)
   await expect(first).toHaveCSS('opacity', '0')
@@ -384,7 +384,7 @@ test('motion-level lifecycle edits save with shared HMR', async ({ page, browser
 
   try {
     await openLifecycle(page)
-    await page.getByLabel('Editing scope').selectOption('enter-default')
+    await page.getByLabel('Existing transition').selectOption('enter-default')
     await page.getByLabel('Baseline active enabled').check()
     await track(page, 'body', 'opacity')
     await page.getByRole('button', { name: 'body.opacity 0%', exact: true }).click()
@@ -394,7 +394,7 @@ test('motion-level lifecycle edits save with shared HMR', async ({ page, browser
 
     expect(await readFile(lifecycleFile, 'utf8')).toContain('0%: ${start * 2}')
 
-    await page.getByLabel('Editing scope').selectOption('leave-default')
+    await page.getByLabel('Existing transition').selectOption('leave-default')
     await page.getByLabel('Baseline active enabled').uncheck()
     await track(page, 'body', 'opacity')
     await page.getByLabel('Track duration', { exact: true }).fill('500')
