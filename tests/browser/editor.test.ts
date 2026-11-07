@@ -411,3 +411,98 @@ test('motion-level lifecycle edits save with shared HMR', async ({ page, browser
     await writeFile(lifecycleFile, original)
   }
 })
+
+test.describe('editor source HMR', () => {
+  const componentRoot = '../../packages/vite/src/editor/components/'
+  const cases = [
+    {
+      name: 'parent template',
+      file: 'EditorPanel.ce.vue',
+      from: '>Close</button>',
+      to: '>Close editor</button>',
+      role: 'button',
+      label: 'Close editor',
+    },
+    {
+      name: 'child template',
+      file: 'EditorForm.ce.vue',
+      from: '>End preview</button>',
+      to: '>Stop preview</button>',
+      role: 'button',
+      label: 'Stop preview',
+    },
+    {
+      name: 'styles',
+      file: 'EditorPanel.ce.vue',
+      from: 'padding: 12px 20px;',
+      to: 'padding: 13px 21px;',
+    },
+    {
+      name: 'script',
+      file: 'EditorPanel.ce.vue',
+      from: 'const inspectionVersion = ref(0)',
+      to: 'const inspectionVersion = ref(1)',
+    },
+  ] as const
+
+  for (const entry of cases) {
+    test(`updates ${entry.name} without a page reload or duplicate hosts`, async ({
+      page,
+      browserName,
+    }) => {
+      test.skip(browserName !== 'chromium', 'A shared source-writing HMR transaction runs once')
+
+      const sourceFile = new URL(componentRoot + entry.file, import.meta.url)
+      const original = await readFile(sourceFile, 'utf8')
+      const errors: string[] = []
+      page.on('pageerror', (error) => errors.push(error.message))
+
+      try {
+        await open(page)
+        await track(page, 'thumb', 'scale')
+        await page.getByLabel('Track duration', { exact: true }).fill('700')
+        await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
+        await expectMessage(page, 'Previewing')
+
+        const selected = await page.getByLabel('Preview instance').inputValue()
+        const draft = await page.evaluate(() => JSON.stringify(window.__LIVA_EDITOR__.draft))
+        await page.evaluate(() => {
+          document.documentElement.dataset.hmrDocument = 'original'
+        })
+
+        await writeFile(sourceFile, original.replace(entry.from, entry.to))
+
+        if ('label' in entry) {
+          await expect(page.getByRole(entry.role, { name: entry.label, exact: true })).toBeVisible()
+          await expect(page.getByLabel('Playhead')).toBeVisible()
+        } else {
+          // Script and custom-element style reloads recreate component-local state.
+          const launcher = page.getByRole('button', { name: 'Motion editor', exact: true })
+          await expect(launcher).toBeVisible()
+
+          if (entry.name === 'styles')
+            await expect(launcher).toHaveCSS('padding-inline-start', '21px')
+
+          await launcher.click()
+          await expect(page.getByLabel('Playhead')).toBeVisible()
+        }
+
+        await expect(page.getByLabel('Preview instance')).toHaveValue(selected)
+        expect(await page.evaluate(() => JSON.stringify(window.__LIVA_EDITOR__.draft))).toBe(draft)
+        await expect(page.locator('[data-liva-editor]')).toHaveCount(1)
+        expect(await page.evaluate(() => document.documentElement.dataset.hmrDocument)).toBe(
+          'original',
+        )
+
+        await page
+          .getByRole('button', { name: 'Close', exact: true })
+          .or(page.getByRole('button', { name: 'Close editor', exact: true }))
+          .click()
+        await expect(page.getByRole('button', { name: 'Motion editor', exact: true })).toBeVisible()
+        expect(errors).toEqual([])
+      } finally {
+        await writeFile(sourceFile, original)
+      }
+    })
+  }
+})
