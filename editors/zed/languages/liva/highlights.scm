@@ -4,6 +4,8 @@
 (boolean) @boolean
 (identifier) @variable
 (property name: (identifier) @property)
+(property_track name: (_) @property)
+"~>" @operator
 (call function: (identifier) @function)
 (selector_block name: (_) @type @selector.class)
 (number) @number
@@ -13,9 +15,6 @@
 (operator) @operator
 (punctuation) @punctuation.delimiter
 (css_token) @string.special
-(selector_block
-  (block
-    (selector_block name: (_) @property)))
 ["{" "}" "(" ")" "[" "]"] @punctuation.bracket
 (interpolation ["${" "}"] @punctuation.special)
 ((punctuation) @attribute

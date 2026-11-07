@@ -72,7 +72,7 @@ describe('composition source provenance', () => {
             ${decorators.stateTarget} body { opacity: 0.5 ${decorators.stateProperty} }
           }
           ${decorators.transition} transition idle -> active when false {
-            ${decorators.transitionTarget} body { ${decorators.transitionProperty} opacity {} }
+            ${decorators.transitionTarget} body { ${decorators.transitionProperty} opacity ~> {} }
           }
         }
       }`)
@@ -242,7 +242,7 @@ describe('composition source provenance', () => {
 
   it('maps a style track destination to its original 100% expression', () => {
     const info = inspection(
-      'motion sample(amount: number) { @tween() layer base { body { opacity { 0%: 0; 100%: ${amount} } } } }',
+      'motion sample(amount: number) { @tween() layer base { body { opacity ~> { 0%: 0; 100%: ${amount} } } } }',
     )
     const selection = { layers: { base: true }, states: {} }
     const result = trackProvenance(info, selection, selection, undefined, 'body', 'opacity')
@@ -291,7 +291,7 @@ describe('lifecycle source provenance', () => {
     'separates inherited timing from the lifecycle write destination: %s %s %s',
     (shared, target, property, origin) => {
       const info = inspection(
-        `motion sample { layer base { body { opacity: 1 } } ${shared} enter { ${target} body { ${property} opacity { 0%: 0 } } } }`,
+        `motion sample { layer base { body { opacity: 1 } } ${shared} enter { ${target} body { ${property} opacity ~> { 0%: 0 } } } }`,
       )
       const result = lifecycleProvenance(
         info,
@@ -342,4 +342,17 @@ describe('lifecycle source provenance', () => {
     expect(result.from?.path).toBe('sample/layer/base/target/body/property/opacity/value')
     expect(result.to?.text).toBe('1')
   })
+})
+
+it('retains shared explicit-self timing provenance when mixed with implicit properties', () => {
+  const source = inspection(
+    'motion sample { layer base { opacity: 1; @tween(duration: 200) self { scale: 1 } } }',
+  )
+  const composition = { layers: { base: true }, states: {} }
+  const scale = trackProvenance(source, composition, composition, undefined, 'self', 'scale')
+  const opacity = trackProvenance(source, composition, composition, undefined, 'self', 'opacity')
+
+  expect(scale.timingSource?.path).toBe('sample/layer/base/target/self/timing')
+  expect(scale.localTiming).toBeUndefined()
+  expect(opacity.timingSource).toBeUndefined()
 })

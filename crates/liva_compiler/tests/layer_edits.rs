@@ -108,7 +108,7 @@ fn existing_bodyless_transition_receives_only_the_requested_property_override() 
 
 #[test]
 fn moving_a_frame_preserves_timing_and_easing() {
-    let source = "motion sample { @tween() layer base { body { opacity { 50%: 0.5 @stepStart; 100%: 1 } } } }";
+    let source = "motion sample { @tween() layer base { body { opacity ~> { 50%: 0.5 @stepStart; 100%: 1 } } } }";
     let moved = apply_edits(
         source,
         &[Edit::Set {
@@ -124,7 +124,8 @@ fn moving_a_frame_preserves_timing_and_easing() {
 
 #[test]
 fn moving_a_frame_rejects_an_offset_collision() {
-    let source = "motion sample { @tween() layer base { body { opacity { 50%: 0.5; 100%: 1 } } } }";
+    let source =
+        "motion sample { @tween() layer base { body { opacity ~> { 50%: 0.5; 100%: 1 } } } }";
 
     assert!(
         apply_edits(
@@ -140,7 +141,8 @@ fn moving_a_frame_rejects_an_offset_collision() {
 
 #[test]
 fn removing_a_style_destination_is_rejected() {
-    let source = "motion sample { @tween() layer base { body { opacity { 50%: 0.5; 100%: 1 } } } }";
+    let source =
+        "motion sample { @tween() layer base { body { opacity ~> { 50%: 0.5; 100%: 1 } } } }";
 
     assert!(
         apply_edits(
@@ -213,7 +215,7 @@ fn moving_a_transition_shorthand_preserves_its_timing_and_value_expression() {
     assert!(
         result
             .source
-            .contains("@tween(duration: 200) opacity { 80%: ${amount} }")
+            .contains("@tween(duration: 200) opacity ~> { 80%: ${amount} }")
     );
 }
 

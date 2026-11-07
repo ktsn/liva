@@ -13,7 +13,7 @@ motion card {
   let movement = drag(target: body)
 
   layer interaction {
-    body { translate: 0 0; @tween(duration: 200, easing: easeOut) scale { 100%: 1 } }
+    body { translate: 0 0; @tween(duration: 200, easing: easeOut) scale ~> { 100%: 1 } }
 
     state idle initial {}
     state dragging {
@@ -23,8 +23,8 @@ motion card {
     transition idle -> dragging when movement.active
     transition dragging -> idle when !movement.active {
       body {
-        @spring(stiffness: 300, damping: 20) translate {}
-        @tween(duration: 180, easing: easeOut) scale {}
+        @spring(stiffness: 300, damping: 20) translate ~> {}
+        @tween(duration: 180, easing: easeOut) scale ~> {}
       }
     }
   }
@@ -185,10 +185,47 @@ paths. Non-finite runtime arithmetic reports a diagnostic and retains valid styl
 CSS validity is delegated to the browser. Omitted properties expose lower active
 layers or external CSS. There is no requirement for a complete fallback state.
 
+## The Motion root and implicit declarations
+
+`self` is the built-in target bound to the Motion root (the element carrying `v-liva`).
+It is always available to target-taking functions such as `drag(target: self)`.
+A parameter or `let` cannot shadow it. `self { ... }` explicitly names this same root;
+no `v-liva-target` directive is needed for it.
+
+CSS declarations and tracks directly inside a reactive layer, stateful layer's common
+styles, state, directional transition, `enter`, or `leave` apply to `self`:
+
+```liva
+motion button {
+  @tween(duration: 180)
+  layer base {
+    scale: 1
+    opacity: 1
+    icon { rotate: 0deg }
+  }
+  @tween(duration: 120)
+  enter { opacity: 0 }
+}
+```
+
+Direct declarations can mix with named target blocks. Explicit and implicit `self`
+declarations share a property namespace: declaring the same property twice in one
+scope, including a value plus a track, reports a duplicate. Disjoint explicit `self`
+properties may coexist with implicit ones; target timing applies to the properties
+inside that explicit block.
+
+The delimiter determines the meaning without consulting CSS property names:
+`property: value` is a value, `property ~> { ... }` is a track, and `target { ... }`
+is a target block. Future CSS properties and custom properties use the same forms.
+For example, `opacity { opacity: 1 }` names a target called `opacity`, while
+`--progress ~> { 0%: 0; 100%: 1 }` animates a custom property on `self`.
+Structural timing decorators precede blocks and tracks; ordinary property timing
+and individual frame easing follow their values.
+
 ## Inline keyframes
 
 ```liva
-@tween(duration: 350, easing: easeInOut) scale {
+@tween(duration: 350, easing: easeInOut) scale ~> {
   40%: 1.3 1 @easeIn
   70%: 0.95 1 @cubicBezier(x1: 0.2, y1: 0.8, x2: 0.2, y2: 1)
   100%: 1
@@ -207,9 +244,9 @@ restores the resolved destination even when an explicit transition endpoint diff
 
 ## Enter, leave, and events
 
-A motion may declare one `enter` and one `leave` directly in its body. Targets
-must be declared in its layers (including local states). The root
-is animated only when explicitly bound as a named target. Lifecycle timing is
+A motion may declare one `enter` and one `leave` directly in its body. Named targets
+must be declared in its layers (including local states). The built-in `self` target
+is always bound to the Motion root, including lifecycle-only declarations. Lifecycle timing is
 independent of ordinary layer timing. Lifecycle property timing overrides target
 timing, which overrides the lifecycle shared decorator. All are captured at start.
 
@@ -350,12 +387,12 @@ motion toggle(checked: boolean) {
     }
 
     transition off -> on when checked {
-      thumb { scale { 40%: 1.3 1 @easeIn; 70%: 0.95 1 @easeOut } }
+      thumb { scale ~> { 40%: 1.3 1 @easeIn; 70%: 0.95 1 @easeOut } }
     }
     transition on -> off when !(checked) {
       thumb {
-        @spring(duration: 350, bounce: 0.2) translate {}
-        scale { 40%: 1.3 1 @easeIn; 70%: 0.95 1 @easeOut }
+        @spring(duration: 350, bounce: 0.2) translate ~> {}
+        scale ~> { 40%: 1.3 1 @easeIn; 70%: 0.95 1 @easeOut }
       }
     }
   }
@@ -494,7 +531,7 @@ motion button {
     @quick body {
       opacity: 1
       scale: 1 @spring(stiffness: 300, damping: 20)
-      @tween(duration: 400) translate {
+      @tween(duration: 400) translate ~> {
         0%: 0 20px
         50%: 0 5px @easeOut
         100%: 0 0

@@ -249,13 +249,17 @@ fn ensure_typed_property(
     let (target_path, property_name) = path
         .rsplit_once("/property/")
         .ok_or("Invalid property path")?;
-    let property = format!("{property_name} {{}}");
+    let property = format!("{property_name} ~> {{}}");
 
     if let Ok(target) = mapping(compiled, target_path, "block") {
         return insert(source, target, &property);
     }
 
-    let target = format!("{target_name} {{ {property} }}");
+    let target = if target_name == "self" {
+        property
+    } else {
+        format!("{target_name} {{ {property} }}")
+    };
 
     if mapping(compiled, &transition_path, "block").is_err() {
         let (name, phase) = transition_path
@@ -385,7 +389,7 @@ fn prepare_typed_track(source: &str, compiled: &Compilation, path: &str) -> Resu
         .map(|decorator| format!("@{} ", decorator.expression_text().trim()))
         .unwrap_or_default();
     let endpoint = if path.contains("/enter/") { 0 } else { 100 };
-    let body = format!("{timing}{name} {{ {endpoint}%: {value} }}");
+    let body = format!("{timing}{name} ~> {{ {endpoint}%: {value} }}");
     let mut result = prepared;
     result.replace_range(field.range.start..field.range.end, &body);
     Ok(result)

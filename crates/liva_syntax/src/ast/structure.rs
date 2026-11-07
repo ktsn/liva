@@ -50,6 +50,7 @@ node!(Transition, |n: &SyntaxNode| (block_depth(n) == 1
         || keyword(n, "enter")
         || keyword(n, "leave")));
 node!(Target, |n: &SyntaxNode| n.kind() == Kind::Block
+    && PropertyBlock::cast(n.clone()).is_none()
     && State::cast(n.clone()).is_none()
     && Transition::cast(n.clone()).is_none()
     && n.parent().is_some_and(|parent| State::cast(
@@ -59,8 +60,9 @@ node!(Target, |n: &SyntaxNode| n.kind() == Kind::Block
         || Layer::cast(parent.clone()).is_some()
         || Transition::cast(parent).is_some()));
 node!(PropertyBlock, |n: &SyntaxNode| n.kind() == Kind::Block
-    && n.parent()
-        .is_some_and(|parent| Target::cast(parent).is_some()));
+    && n.children_with_tokens().any(|element| element
+        .as_token()
+        .is_some_and(|token| token.text() == "~>")));
 node!(Keyframe, |n: &SyntaxNode| n.kind() == Kind::Declaration
     && n.parent()
         .is_some_and(
@@ -239,14 +241,19 @@ pub enum AnimationProperty {
     Keyframes(PropertyBlock),
 }
 
+/// Animation declarations directly contained by a target or implicit-self scope.
+pub fn animation_properties(node: &impl AstNode) -> impl Iterator<Item = AnimationProperty> {
+    node.syntax().children().filter_map(|node| {
+        Property::cast(node.clone())
+            .map(AnimationProperty::Shorthand)
+            .or_else(|| PropertyBlock::cast(node).map(AnimationProperty::Keyframes))
+    })
+}
+
 impl Target {
     /// CSS declarations and explicit tracks in source order, including malformed items.
     pub fn animation_properties(&self) -> impl Iterator<Item = AnimationProperty> {
-        self.syntax().children().filter_map(|node| {
-            Property::cast(node.clone())
-                .map(AnimationProperty::Shorthand)
-                .or_else(|| PropertyBlock::cast(node).map(AnimationProperty::Keyframes))
-        })
+        animation_properties(self)
     }
 
     pub fn property_blocks(&self) -> impl Iterator<Item = PropertyBlock> {

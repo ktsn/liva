@@ -63,7 +63,7 @@ impl Parser<'_> {
         ));
     }
 
-    fn items(&mut self, depth: usize, in_state: bool) {
+    fn items(&mut self, depth: usize, in_track: bool) {
         while self.index < self.tokens.len() {
             self.gap();
             if self.at().is_empty() || self.at() == "}" {
@@ -172,7 +172,7 @@ impl Parser<'_> {
             let mut guarded_transition = false;
 
             while !self.at().is_empty()
-                && !matches!(self.at(), "{" | "}" | ";")
+                && !matches!(self.at(), "{" | "}" | ";" | "~>")
                 && !(nesting_depth == 0 && self.at() == ":")
             {
                 if nesting_depth == 0 && matches!(self.at(), "\n" | "\r") {
@@ -235,6 +235,13 @@ impl Parser<'_> {
             }
             self.end();
 
+            let track = self.at() == "~>";
+
+            if track {
+                self.bump();
+                self.gap();
+            }
+
             if guarded_transition && self.at() != "{" {
                 self.builder
                     .start_node_at(checkpoint, Liva::kind_to_raw(Kind::Block));
@@ -260,7 +267,7 @@ impl Parser<'_> {
                     })
                     .collect::<String>();
                 if !is_property(name.trim())
-                    && ((in_state && depth < 4)
+                    && (!in_track
                         || !name
                             .trim()
                             .strip_suffix('%')
@@ -277,23 +284,7 @@ impl Parser<'_> {
                 self.builder
                     .start_node_at(checkpoint, Liva::kind_to_raw(Kind::Block));
                 self.bump();
-                let header = self.tokens[begin..self.index - 1]
-                    .iter()
-                    .map(|t| {
-                        if t.kind == TokenKind::Comment {
-                            " "
-                        } else {
-                            t.text
-                        }
-                    })
-                    .collect::<String>();
-                self.items(
-                    depth + 1,
-                    (in_state
-                        && !(depth == 2 && header.split_whitespace().next() == Some("transition")))
-                        || (depth == 1
-                            && matches!(header.split_whitespace().next(), Some("state" | "layer"))),
-                );
+                self.items(depth + 1, track);
 
                 if self.at() == "}" {
                     self.bump();
@@ -652,10 +643,16 @@ fn validate_headers(node: &impl AstNode, depth: usize, diagnostics: &mut Vec<Dia
                 }
                 _ => false,
             }
-        } else if Target::cast(block.syntax().clone()).is_some() {
-            is_name(&header)
         } else if PropertyBlock::cast(block.syntax().clone()).is_some() {
             is_property(&header)
+                && block.syntax().parent().is_some_and(|parent| {
+                    Target::cast(parent.clone()).is_some()
+                        || Layer::cast(parent.clone()).is_some()
+                        || State::cast(parent.clone()).is_some()
+                        || Transition::cast(parent).is_some()
+                })
+        } else if Target::cast(block.syntax().clone()).is_some() {
+            is_name(&header)
         } else {
             depth == 4
                 && header.strip_suffix('%').is_some_and(|n| {
@@ -668,7 +665,15 @@ fn validate_headers(node: &impl AstNode, depth: usize, diagnostics: &mut Vec<Dia
         if !valid {
             diagnostics.push(Diagnostic::error(
                 "syntax.name",
-                "Invalid block header or identifier",
+                if block
+                    .syntax()
+                    .parent()
+                    .is_some_and(|parent| Target::cast(parent).is_some())
+                {
+                    "Expected a property track: property ~> { ... }"
+                } else {
+                    "Invalid block header or identifier"
+                },
                 block.header_node().unwrap().range(),
             ));
         }

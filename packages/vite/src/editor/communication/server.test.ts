@@ -277,7 +277,7 @@ it('does not overwrite an external edit made while the temporary save is being w
 
 it.each([
   'motion toggle { layer idle { @tween(duration: 100) body { opacity: 1 } } }',
-  'motion toggle { layer idle { body { opacity: 1 } } enter { body { @tween(duration: 100) opacity { 0%: 0 @easeIn } } } }',
+  'motion toggle { layer idle { body { opacity: 1 } } enter { body { @tween(duration: 100) opacity ~> { 0%: 0 @easeIn } } } }',
 ])('rejects unknown edit paths for typed layer and lifecycle sources: %s', async (motion) => {
   const content = `<template><div /></template><liva>${motion}</liva>`
   await writeFile(join(root, 'Toggle.vue'), content)

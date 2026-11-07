@@ -43,6 +43,15 @@ function field(fields: Inspection['fields'], path: string): DeclarationSource | 
   return found ? { path, text: found.value, label: path } : undefined
 }
 
+function timingField(fields: Inspection['fields'], path: string): DeclarationSource | undefined {
+  return (
+    field(fields, `${path}/timing`) ??
+    (path.includes('/target/self/property/')
+      ? field(fields, `${path.split('/property/')[0]}/timing`)
+      : undefined)
+  )
+}
+
 function scopePath(motion: string, source: TimingSource | PropertySource) {
   let path = `${motion}/layer/${source.layer.name}`
 
@@ -86,7 +95,7 @@ export function trackProvenance(
       ? `${definition.name}/layer/${selected.layer}/transition/${selected.index}`
       : undefined
   let timingSource = after?.timing
-    ? field(fields, `${scopePath(definition.name, after.timing)}/timing`)
+    ? timingField(fields, scopePath(definition.name, after.timing))
     : undefined
 
   if (transitionPath) {
@@ -99,7 +108,7 @@ export function trackProvenance(
           : transitionSources.timing === transitionSources.target
             ? `/target/${target}`
             : ''
-      timingSource = field(fields, `${transitionPath}${suffix}/timing`)
+      timingSource = timingField(fields, `${transitionPath}${suffix}`)
     }
   }
 

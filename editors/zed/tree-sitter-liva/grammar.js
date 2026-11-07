@@ -8,7 +8,16 @@ module.exports = grammar({
   rules: {
     source_file: ($) => repeat($._item),
     _item: ($) =>
-      choice($.motion, $.layer, $.state, $.transition, $.selector_block, $.block, $._header_item),
+      choice(
+        $.motion,
+        $.layer,
+        $.state,
+        $.transition,
+        $.property_track,
+        $.selector_block,
+        $.block,
+        $._header_item,
+      ),
     _header_item: ($) =>
       choice(
         $.call,
@@ -57,6 +66,11 @@ module.exports = grammar({
           optional($.block),
         ),
       ),
+    property_track: ($) =>
+      prec(
+        2,
+        seq(optional($.decorator), field('name', choice($.identifier, $.css_token)), '~>', $.block),
+      ),
     selector_block: ($) =>
       prec(
         1,
@@ -80,6 +94,7 @@ module.exports = grammar({
     operator: () =>
       choice(
         '->',
+        '~>',
         '===',
         '!==',
         '==',

@@ -82,7 +82,7 @@ motion card(active: boolean) {
     state idle initial {}
     state busy {}
     transition idle -> busy when active
-    transition busy -> idle when !active { body { @tween(duration: 150) scale { 50%: 1.2 @easeOut } } }
+    transition busy -> idle when !active { body { @tween(duration: 150) scale ~> { 50%: 1.2 @easeOut } } }
   }
   enter { @tween(duration: 200) body { opacity: 0 } }
 }
@@ -148,7 +148,7 @@ motion card(active: boolean) {
               (selector_block
                 (identifier)
                 (block
-                  (selector_block
+                  (property_track
                     (decorator
                       (animation)
                       (parenthesized

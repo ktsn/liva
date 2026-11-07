@@ -63,7 +63,7 @@ motion submit(busy: boolean, completed: boolean) {
 
     transition pending -> success when completed {
       body {
-        @tween(duration: 300) scale {
+        @tween(duration: 300) scale ~> {
           50%: 1.15
         }
       }

@@ -13,7 +13,7 @@ fn shared_timing_preserves_all_scopes_and_bodyless_transition_expressions() {
         @spring(stiffness: 500) state on { body { opacity: 0.5 } }
         @spring(duration: 400)
         transition idle -> on
-          when active { @quick body { @tween(duration: 500) opacity { 50%: 0.8 @stepStart } } }
+          when active { @quick body { @tween(duration: 500) opacity ~> { 50%: 0.8 @stepStart } } }
         @quick
         transition on -> idle
           when !active
@@ -62,8 +62,8 @@ fn shared_timing_preserves_all_scopes_and_bodyless_transition_expressions() {
 #[test]
 fn style_tracks_accept_shared_timing_without_flattening_its_origin() {
     for source in [
-        "motion sample { @tween() layer base { body { opacity { 50%: 0.5; 100%: 1 } } } }",
-        "motion sample { layer base { @tween() state idle initial { body { opacity { 50%: 0.5; 100%: 1 } } } } }",
+        "motion sample { @tween() layer base { body { opacity ~> { 50%: 0.5; 100%: 1 } } } }",
+        "motion sample { layer base { @tween() state idle initial { body { opacity ~> { 50%: 0.5; 100%: 1 } } } } }",
     ] {
         valid(source);
     }

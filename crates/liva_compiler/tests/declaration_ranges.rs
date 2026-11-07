@@ -150,7 +150,7 @@ fn identifiers_and_duplicate_declarations_use_names_and_related_names() {
             "Duplicate declaration",
         ),
         (
-            "motion a { layer idle { t { x: 0 } } @tween() enter { t { ‹x› {} «x» {} } } }",
+            "motion a { layer idle { t { x: 0 } } @tween() enter { t { ‹x› ~> {} «x» ~> {} } } }",
             "semantic.duplicate",
             "Duplicate declaration",
         ),
@@ -188,11 +188,6 @@ fn misplaced_declarations_have_local_ranges() {
             "Unknown declaration",
         ),
         (
-            "motion a { layer base { «unknown»: 1 } }",
-            "semantic.declaration",
-            "Unknown declaration",
-        ),
-        (
             "motion a { layer base { t { x:«» } } }",
             "semantic.value",
             "Value must not be empty",
@@ -223,7 +218,7 @@ fn misplaced_declarations_have_local_ranges() {
             "Expected layer",
         ),
         (
-            "motion a { layer base { t { x: 0 } } @tween() enter { t { x { «unexpected» {} } } } }",
+            "motion a { layer base { t { x: 0 } } @tween() enter { t { x ~> { «unexpected» {} } } } }",
             "semantic.structure",
             "Property tracks",
         ),
@@ -235,16 +230,13 @@ fn misplaced_declarations_have_local_ranges() {
 #[test]
 fn unexpected_animation_declarations_point_to_the_field_name() {
     for field in ["duration", "easing", "stiffness"] {
-        for body in [
-            format!("enter {{ «{field}»: 1; }}"),
-            format!("enter {{ t {{ x {{ «{field}»: 1; 0%: 0 }} }} }}"),
-        ] {
-            assert_diagnostic(
-                &format!("motion a {{ layer base {{ t {{ x: 1 }} }} {body} }}"),
-                "semantic.declaration",
-                "Unexpected declaration",
-            );
-        }
+        let body = format!("enter {{ t {{ x ~> {{ «{field}»: 1; 0%: 0 }} }} }}");
+
+        assert_diagnostic(
+            &format!("motion a {{ layer base {{ t {{ x: 1 }} }} {body} }}"),
+            "semantic.declaration",
+            "Unexpected declaration",
+        );
     }
 }
 
@@ -277,7 +269,7 @@ fn keyframe_errors_point_to_offsets_and_missing_values() {
     ] {
         assert_diagnostic(
             &format!(
-                "motion a {{ layer base {{ t {{ x: 1 }} }} @tween() enter {{ t {{ x {{ {frames}\n }} }} }} }}"
+                "motion a {{ layer base {{ t {{ x: 1 }} }} @tween() enter {{ t {{ x ~> {{ {frames}\n }} }} }} }}"
             ),
             code,
             message,
@@ -314,8 +306,8 @@ fn incomplete_declarations_keep_all_diagnostic_ranges_within_source() {
     for source in [
         include_str!("../../../fixtures/toggle.liv"),
         include_str!("../../../fixtures/derived.liv"),
-        "// 😀\r\nmotion a(value: number) { let value = 1; state idle { t { x: 0 } } state active when true { t { x: 1 } } transition idle -> absent { @spring: 1s /* 日本 */ 1; t { x { 40%: ${value}; 100%: 2 @ linear } } } }",
-        "motion a { state idle { t { x: 0 } } transition { @tween-duration: /* missing */; @spring: 1s 1; t { x { 101%: 1; 0%: @ linear } } } }",
+        "// 😀\r\nmotion a(value: number) { let value = 1; state idle { t { x: 0 } } state active when true { t { x: 1 } } transition idle -> absent { @spring: 1s /* 日本 */ 1; t { x ~> { 40%: ${value}; 100%: 2 @ linear } } } }",
+        "motion a { state idle { t { x: 0 } } transition { @tween-duration: /* missing */; @spring: 1s 1; t { x ~> { 101%: 1; 0%: @ linear } } } }",
     ] {
         for end in (0..=source.len()).filter(|end| source.is_char_boundary(*end)) {
             let source = &source[..end];

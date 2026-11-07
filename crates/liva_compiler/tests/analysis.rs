@@ -101,7 +101,7 @@ fn hyphenated_names_have_whole_identifier_hover_ranges() {
 
 #[test]
 fn lifecycle_templates_expose_typed_hovers_in_both_property_forms() {
-    let source = "// 日本語\r\nmotion panel(distance: number) { layer idle { body { translate: 0px 0 } } @tween(duration: 1) enter { body { translate: ${distance}px 0 } } @tween(duration: 1) leave { body { translate { 100%: ${distance}px 0 } } } }";
+    let source = "// 日本語\r\nmotion panel(distance: number) { layer idle { body { translate: 0px 0 } } @tween(duration: 1) enter { body { translate: ${distance}px 0 } } @tween(duration: 1) leave { body { translate ~> { 100%: ${distance}px 0 } } } }";
     let found = hovers(source);
     let expected: Vec<_> = source
         .match_indices("${distance}")

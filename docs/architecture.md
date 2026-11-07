@@ -36,7 +36,9 @@ access to the underlying Rowan node, text, and absolute byte ranges. `Document`
 exposes `Motion` views; motions expose parameters, let bindings, layers, events,
 and animation blocks. `enters()` and `leaves()` select lifecycle declarations;
 `transitions()` traverses all animation blocks, including enter and leave.
-Target `animation_properties()` visits shorthand declarations and explicit tracks in source order.
+`animation_properties()` visits direct shorthand declarations and `property ~>` tracks
+in source order. It also accepts layer, state, and lifecycle scopes, whose direct
+properties lower to `self` without synthetic CST nodes or rewritten source ranges.
 These iterators preserve source order, duplicates, and malformed headers so
 semantic validation can diagnose them. `events()` exposes event declarations,
 with optional name and condition accessors. Targets contain property declarations or property blocks with
@@ -90,7 +92,7 @@ references, not dependencies on their full language tooling stacks.
 `crates/liva_compiler/src/builtins/` registers function signatures. Each function
 has its own module; `drag.rs` and `interaction.rs` declare target arguments and typed return fields.
 The compiler builds one typed variable scope from parameters, inferred let expression types,
-and the targets declared across layers and local states. The generic call checker evaluates argument
+the built-in `self` target, and the targets declared across layers and local states. The generic call checker evaluates argument
 types through the expression checker and selects a matching overload. Required
 arguments and incompatible overload groups produce diagnostics.
 Let type inference follows dependencies and rejects cycles. Expression member checking
@@ -348,8 +350,8 @@ is excluded from dependency prebundling to preserve development interception.
 Explicit plugin construction uses `createLivaPlugin` from `@liva/vue/runtime`.
 
 Targets reconcile in a queued pass against the nearest Motion root and their
-declaring component. A root may also be a target; ownership never crosses nested
-Motion roots. Ordinary targets bind one element, while lifecycle targets can bind
+declaring component. Every root is automatically bound as `self`, independently of
+any named alias on the same element; ownership never crosses nested Motion roots. Ordinary targets bind one element, while lifecycle targets can bind
 multiple keyed elements. Each Motion instance owns its parameters and subscriptions.
 Invalid HMR retains the last valid definition; successful HMR can reload Vue state.
 

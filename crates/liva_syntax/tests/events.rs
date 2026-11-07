@@ -44,7 +44,7 @@ motion panel { state idle {} }",
  } } }",
         "motion panel { state idle {} enter { event done when true
  } }",
-        "motion panel { state idle {} leave { body { opacity { event done when true
+        "motion panel { state idle {} leave { body { opacity ~> { event done when true
  } } } }",
     ] {
         let parsed = parse(source);

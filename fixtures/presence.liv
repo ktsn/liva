@@ -14,22 +14,22 @@ motion swipe {
 
     transition idle -> dragging when movement.active
     transition dragging -> idle when !movement.active {
-      body { @spring(stiffness: 300, damping: 20) translate {} }
+      body { @spring(stiffness: 300, damping: 20) translate ~> {} }
     }
   }
 
   @tween(duration: 250, easing: easeOut) enter {
     body {
-      opacity { 0%: 0 }
-      translate { 0%: 0 -20px }
+      opacity ~> { 0%: 0 }
+      translate ~> { 0%: 0 -20px }
     }
-    badge { @spring(duration: 350, bounce: 0.2) opacity { 0%: 0 } }
+    badge { @spring(duration: 350, bounce: 0.2) opacity ~> { 0%: 0 } }
   }
   @tween(duration: 200, easing: easeIn) leave {
     body {
-      opacity { 100%: 0 }
-      translate { 100%: 500px 0 }
+      opacity ~> { 100%: 0 }
+      translate ~> { 100%: 500px 0 }
     }
-    badge { @tween(duration: 100) opacity { 100%: 0 } }
+    badge { @tween(duration: 100) opacity ~> { 100%: 0 } }
   }
 }

@@ -125,7 +125,7 @@ fn moving_a_frame_rejects_offset_collisions() {
 
 #[test]
 fn compact_frame_insertions_preserve_crlf() {
-    let source = "// header\r\nmotion a { layer base { t { x: 0 } state off initial {} state on {} @tween(duration: 1) transition off -> on when true {\r\nt { x {} } } } }\r\n";
+    let source = "// header\r\nmotion a { layer base { t { x: 0 } state off initial {} state on {} @tween(duration: 1) transition off -> on when true {\r\nt { x ~> {} } } } }\r\n";
     let result = apply_edits(
         source,
         &[Edit::AddFrame {
@@ -144,7 +144,7 @@ fn compact_frame_insertions_preserve_crlf() {
     assert!(
         result
             .source
-            .starts_with(source.split("x {}").next().unwrap())
+            .starts_with(source.split("x ~> {}").next().unwrap())
     );
 }
 

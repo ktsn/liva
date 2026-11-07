@@ -107,7 +107,7 @@ fn raw_css_and_byte_mappings() {
 
 #[test]
 fn mapping_paths_do_not_collide_with_user_names() {
-    let source = "motion a { @tween(duration: 1000) layer timing { timing { timing: 0 } state general initial {} state timing { timing { timing: 1 } } @tween(duration: 2000) transition general -> timing when true { timing { @tween(duration: 3000) timing {} } } } }";
+    let source = "motion a { @tween(duration: 1000) layer timing { timing { timing: 0 } state general initial {} state timing { timing { timing: 1 } } @tween(duration: 2000) transition general -> timing when true { timing { @tween(duration: 3000) timing ~> {} } } } }";
     let result = compile(source, true);
 
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
