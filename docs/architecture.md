@@ -469,3 +469,13 @@ restore application presentation, report a diagnostic, and throw with the origin
 cause. The editor rejects stale or out-of-order replies and ends previews on close,
 discard, or selection changes. Source conflict checks still apply to previews with
 no edits; source mutation remains subject to the editor's supported-edit checks.
+
+### Shared timing in explicit root blocks
+
+The compiler merges shorthand root declarations and an explicit self block into one
+`self` target. Optional `timingProperties` on Target IR limits that block's shared
+timing to the properties declared inside it. Omitted metadata preserves ordinary
+target-wide timing. Runtime cascade and transition rendering consult this property
+set, so target timing cannot leak into root shorthand outside the block. Source
+mappings retain each property's original location and the explicit block's shared
+decorator; editor provenance uses the same timing selection.

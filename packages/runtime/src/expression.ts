@@ -1,4 +1,4 @@
-import { timingProvider, type TimingDeclaration } from './layer-cascade.ts'
+import { targetTiming, timingProvider, type TimingDeclaration } from './layer-cascade.ts'
 import {
   easingConstant,
   isTimingFunction,
@@ -154,7 +154,10 @@ export function renderTransition(transition: Transition, values: VariableValues)
         ? timingValue(evaluate(target.timingExpression, values))
         : target.timing,
       properties: target.properties.map((property) => {
-        const provider = timingProvider<TimingDeclaration>(property, target)
+        const provider = timingProvider<TimingDeclaration>(
+          property,
+          targetTiming(target, property.name),
+        )
 
         return {
           ...property,

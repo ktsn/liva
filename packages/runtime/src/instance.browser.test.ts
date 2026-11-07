@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vite-plus/test'
 import { cdp, userEvent } from 'vite-plus/test/browser'
 import type { CDPSession } from '@vitest/browser-playwright'
+import selfFixture from '../../../fixtures/self-target.json'
 import fixture from '../../../fixtures/toggle.json'
 import reactiveFixture from '../../../fixtures/reactive-toggle.json'
 import cardFixture from '../../../fixtures/card.json'
@@ -52,6 +53,53 @@ afterEach(() => {
 })
 
 describe('browser animation execution', () => {
+  it('plays compiled explicit self properties on the root with their shared timing', async () => {
+    const source = decodeBundle(JSON.stringify(selfFixture)).definitions[0]
+    const { instance, targets, errors } = setup(source, { active: false })
+    const root = targets.get('self')
+
+    expect(root).toBeDefined()
+
+    instance.updateParameters({ active: true })
+    const animation = instance.animations[0]
+
+    expect(instance.animations).toHaveLength(1)
+    expect(animation.effect?.getTiming().duration).toBe(150)
+
+    animation.pause()
+    animation.currentTime = 75
+
+    expect(Number(getComputedStyle(root!).scale)).toBeGreaterThan(1)
+    expect(getComputedStyle(root!).opacity).toBe('1')
+    expect(errors).toEqual([])
+  })
+
+  it('scrubs compiled self lifecycle timing without leaking to shorthand endpoints', () => {
+    const source = decodeBundle(JSON.stringify(selfFixture)).definitions[0]
+    const { instance, targets } = setup(source, { active: false })
+    const root = targets.get('self')
+
+    expect(root).toBeDefined()
+
+    instance.previewLifecycle('enter', { layers: { base: true, interaction: false }, states: {} })
+
+    for (const animation of instance.animations) animation.currentTime = 100
+
+    // Default tween easing is ease, so use actual effect timings rather than assume linear interpolation.
+    expect(
+      instance.animations
+        .map((animation) => Number(animation.effect?.getTiming().duration))
+        .toSorted((a, b) => a - b),
+    ).toEqual([200, 400])
+    expect(Number(getComputedStyle(root!).opacity)).toBeGreaterThan(0)
+    expect(Number(getComputedStyle(root!).scale)).toBeGreaterThan(0.8)
+
+    instance.endCompositionPreview()
+
+    expect(getComputedStyle(root!).opacity).toBe('1')
+    expect(getComputedStyle(root!).scale).toBe('1')
+  })
+
   it('keeps missing bindings suspended across definition replacement and empty input updates', () => {
     const source = {
       name: 'static',

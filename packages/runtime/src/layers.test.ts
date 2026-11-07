@@ -1,3 +1,5 @@
+import selfFixture from '../../../fixtures/self-target.json'
+import { decodeBundle } from './definition.ts'
 import { describe, expect, it } from 'vite-plus/test'
 import type { Definition, Expression, Layer } from './definition.ts'
 import {
@@ -48,6 +50,34 @@ const machine: Layer = {
 }
 
 describe('layer cascade', () => {
+  it('keeps explicit self shared timing local while property overrides and layer cascade remain independent', () => {
+    const source = decodeBundle(JSON.stringify(selfFixture)).definitions[0]
+    const before = resolveLayers(source, { active: false })
+    const root = before.presentation.targets.find((target) => target.name === 'self')
+    const icon = before.presentation.targets.find((target) => target.name === 'icon')
+
+    expect(
+      root?.properties.find((property) => property.name === 'translate')?.timing,
+    ).toMatchObject({ kind: 'spring-duration', durationMs: 300 })
+    expect(root?.properties.find((property) => property.name === 'scale')?.timing).toMatchObject({
+      kind: 'tween',
+      durationMs: 200,
+    })
+    expect(root?.properties.find((property) => property.name === 'opacity')?.timing).toMatchObject({
+      kind: 'tween',
+      durationMs: 100,
+    })
+    expect(icon?.properties[0].timing).toMatchObject({ kind: 'tween', durationMs: 100 })
+
+    const after = resolveLayers(source, { active: true })
+
+    expect(
+      after.presentation.targets
+        .find((target) => target.name === 'self')
+        ?.properties.find((property) => property.name === 'scale')?.timing,
+    ).toMatchObject({ kind: 'tween', durationMs: 150 })
+  })
+
   it('contributes no styles when the definition has no layers', () => {
     const result = resolveLayers({ name: 'empty', layers: [] }, {})
 

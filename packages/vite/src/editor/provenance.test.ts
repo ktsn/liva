@@ -42,6 +42,26 @@ const from = { layers: { base: true, hover: false }, states: { machine: 'idle' }
 const to = { layers: { base: true, hover: true }, states: { machine: 'active' } }
 
 describe('composition source provenance', () => {
+  it('reports self block timing only for the properties inside that block', () => {
+    const info = inspection(
+      'motion sample { @tween(duration: 100) layer base { opacity: 1; @spring() self { scale: 1 } } @tween(duration: 400) enter { opacity: 0; @tween(duration: 200) self { scale: .8 } } }',
+    )
+    const selection = { layers: { base: true }, states: {} }
+
+    expect(
+      trackProvenance(info, selection, selection, undefined, 'self', 'opacity').timingSource?.path,
+    ).toBe('sample/layer/base/timing')
+    expect(
+      trackProvenance(info, selection, selection, undefined, 'self', 'scale').timingSource?.path,
+    ).toBe('sample/layer/base/target/self/timing')
+    expect(
+      lifecycleProvenance(info, 'enter', selection, 'self', 'opacity').timingSource?.path,
+    ).toBe('sample/enter/timing')
+    expect(lifecycleProvenance(info, 'enter', selection, 'self', 'scale').timingSource?.path).toBe(
+      'sample/enter/target/self/timing',
+    )
+  })
+
   const timingScopes = [
     ['transitionProperty', 'transition/0/target/body/property/opacity'],
     ['transitionTarget', 'transition/0/target/body'],

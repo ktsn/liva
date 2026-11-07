@@ -1,5 +1,6 @@
 import {
   compositionLayerSelection,
+  targetTiming,
   compositionTransitions,
   resolveLayerCascade,
   transitionPropertySources,
@@ -177,9 +178,12 @@ export function lifecycleProvenance(
   const path = `${inspection.definition.name}/${phase}`
   const destination = `${path}/target/${target}/property/${property}`
   const localTiming = field(fields, `${destination}/timing`)
+  const lifecycleTarget = inspection.definition[phase]?.targets.find((item) => item.name === target)
   const timingSource =
     localTiming ??
-    field(fields, `${path}/target/${target}/timing`) ??
+    (targetTiming(lifecycleTarget, property)
+      ? field(fields, `${path}/target/${target}/timing`)
+      : undefined) ??
     field(fields, `${path}/timing`)
 
   return {

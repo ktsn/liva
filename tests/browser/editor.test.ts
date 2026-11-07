@@ -184,6 +184,110 @@ test('timeline saves timing, new frames and endpoint state values with shared HM
   }
 })
 
+async function openSelf(page: Page) {
+  await page.goto(`${base}/tests/editor-self.html`)
+  await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
+  await expect(page.getByLabel('Playhead')).toBeVisible()
+}
+
+test('explicit self application transitions apply block and enclosing timing independently', async ({
+  page,
+}) => {
+  await page.goto(`${base}/tests/editor-self.html`)
+  const root = page.getByRole('button', { name: 'Self fixture', exact: true })
+  await expect(root).toHaveCSS('opacity', '1')
+
+  await root.click()
+  await page.evaluate(() => {
+    for (const animation of document.getAnimations()) {
+      animation.pause()
+      animation.currentTime = 100
+    }
+  })
+
+  await expect(root).toHaveCSS('opacity', '0.875')
+  await expect(root).toHaveCSS('scale', '1.25')
+  await expect(root).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('explicit self transition previews keep timing local to the authored block', async ({
+  page,
+}) => {
+  await openSelf(page)
+  await page
+    .getByLabel('Existing transition')
+    .selectOption(JSON.stringify({ layer: 'selection', index: 0 }))
+  await track(page, 'self', 'opacity')
+  await expect(page.getByLabel('Track duration')).toHaveValue('400')
+
+  await track(page, 'self', 'scale')
+  await expect(page.getByLabel('Track duration')).toHaveValue('200')
+  await seek(page, 100)
+
+  const root = page.getByRole('button', { name: 'Self fixture', exact: true })
+  await expect(root).toHaveCSS('opacity', '0.875')
+  await expect(root).toHaveCSS('scale', '1.25')
+  await expect(root).toHaveAttribute('aria-pressed', 'false')
+})
+
+for (const phase of ['enter', 'leave']) {
+  test(`explicit self ${phase} previews distinguish block and enclosing timing`, async ({
+    page,
+  }) => {
+    await openSelf(page)
+    await page.getByLabel('Existing transition').selectOption(`${phase}-default`)
+    await track(page, 'self', 'opacity')
+    await expect(page.getByLabel('Track duration')).toHaveValue('400')
+
+    await track(page, 'self', 'scale')
+    await expect(page.getByLabel('Track duration')).toHaveValue('200')
+    await seek(page, 100)
+
+    const root = page.getByRole('button', { name: 'Self fixture', exact: true })
+    await expect(root).toHaveCSS('opacity', phase === 'enter' ? '0.25' : '0.75')
+    await expect(root).toHaveCSS('scale', '0.9')
+  })
+}
+
+test('explicit self timing overrides save locally and remove back to block timing', async ({
+  page,
+  browserName,
+}) => {
+  test.skip(browserName !== 'chromium', 'Shared source writes run once')
+  const source = new URL('../../playground/tests/EditorSelf.vue', import.meta.url)
+  const original = await readFile(source, 'utf8')
+
+  try {
+    await openSelf(page)
+    await page
+      .getByLabel('Existing transition')
+      .selectOption(JSON.stringify({ layer: 'selection', index: 0 }))
+    await track(page, 'self', 'scale')
+    await page.getByLabel('Track duration').fill('300')
+    await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
+    await expectMessage(page, 'Previewing')
+    await expect(page.getByLabel('Track duration')).toHaveValue('300')
+
+    await save(page)
+
+    const saved = await readFile(source, 'utf8')
+    expect(saved).toContain('self {')
+    expect(saved).toContain('opacity ~> {}')
+    expect(saved).toContain('@tween(duration: 200, easing: linear)')
+    expect(saved).toContain('@tween(duration: 300, easing: linear)')
+
+    await page
+      .getByLabel('Existing transition')
+      .selectOption(JSON.stringify({ layer: 'selection', index: 0 }))
+    await track(page, 'self', 'scale')
+    await page.getByRole('button', { name: 'Remove timing override', exact: true }).click()
+    await expectMessage(page, 'Previewing')
+    await expect(page.getByLabel('Track duration')).toHaveValue('200')
+  } finally {
+    await writeFile(source, original)
+  }
+})
+
 test('editor rejects invalid sessions, origins, hosts and oversized requests', async ({ page }) => {
   await page.goto(base)
   const module = await (await page.request.get(`${base}/@id/__x00__liva:vue-plugin`)).text()

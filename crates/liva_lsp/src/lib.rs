@@ -92,6 +92,43 @@ impl Document {
         }
     }
 
+    fn semantic_tokens(&self) -> Value {
+        let mut tokens: Vec<_> = self
+            .hovers
+            .iter()
+            .filter(|hover| hover.builtin_target)
+            .collect();
+        tokens.sort_by_key(|hover| hover.range.start);
+        tokens.dedup_by_key(|hover| hover.range.start);
+        let mut data = vec![];
+        let mut previous_line = 0;
+        let mut previous_character = 0;
+
+        for token in tokens {
+            let start = position(&self.text, token.range.start);
+            let line = start["line"].as_u64().unwrap();
+            let character = start["character"].as_u64().unwrap();
+            let length = self.text[token.range.start..token.range.end]
+                .encode_utf16()
+                .count() as u64;
+            data.extend([
+                line - previous_line,
+                if line == previous_line {
+                    character - previous_character
+                } else {
+                    character
+                },
+                length,
+                0, // variable
+                3, // readonly | defaultLibrary
+            ]);
+            previous_line = line;
+            previous_character = character;
+        }
+
+        json!({ "data": data })
+    }
+
     fn completions(&self, point: Position, uri: &str) -> Vec<Value> {
         let Some(offset) = offset(&self.text, point) else {
             return vec![];
@@ -179,6 +216,10 @@ pub fn run(connection: Connection) -> Result<(), Box<dyn std::error::Error>> {
         "positionEncoding": "utf-16",
         "textDocumentSync": { "openClose": true, "change": 1 },
         "hoverProvider": true,
+        "semanticTokensProvider": {
+            "legend": { "tokenTypes": ["variable"], "tokenModifiers": ["readonly", "defaultLibrary"] },
+            "full": true,
+        },
         "completionProvider": { "triggerCharacters": ["."] },
     }))?;
     let mut documents = HashMap::<String, Document>::new();
@@ -262,7 +303,7 @@ pub fn run(connection: Connection) -> Result<(), Box<dyn std::error::Error>> {
 fn handle_request(request: Request, documents: &HashMap<String, Document>) -> Response {
     if !matches!(
         request.method.as_str(),
-        "textDocument/hover" | "textDocument/completion"
+        "textDocument/hover" | "textDocument/completion" | "textDocument/semanticTokens/full"
     ) {
         return Response::new_err(
             request.id,
@@ -272,7 +313,12 @@ fn handle_request(request: Request, documents: &HashMap<String, Document>) -> Re
     }
 
     let params = match serde_json::from_value::<DocumentParams>(request.params) {
-        Ok(params) if params.position.is_some() => params,
+        Ok(params)
+            if params.position.is_some()
+                || request.method == "textDocument/semanticTokens/full" =>
+        {
+            params
+        }
         _ => {
             return Response::new_err(
                 request.id,
@@ -282,6 +328,14 @@ fn handle_request(request: Request, documents: &HashMap<String, Document>) -> Re
         }
     };
     let document = documents.get(&params.text_document.uri);
+
+    if request.method == "textDocument/semanticTokens/full" {
+        let result = document
+            .map(Document::semantic_tokens)
+            .unwrap_or_else(|| json!({ "data": [] }));
+
+        return Response::new_ok(request.id, result);
+    }
 
     if request.method == "textDocument/completion" {
         let completions = document
@@ -301,6 +355,51 @@ fn handle_request(request: Request, documents: &HashMap<String, Document>) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semantic_tokens_identify_builtin_root_blocks_and_references_in_utf16() {
+        let source = "// 日本😀\r\nmotion example { let label = \"日本😀\"; let movement = drag(target: self); layer base { self { opacity: 1 } icon { opacity: 1 } } }";
+        let document = Document::new(source.into(), 1, "file:///test.liv");
+        let tokens = document.semantic_tokens();
+
+        assert_eq!(tokens["data"], json!([1, 65, 4, 0, 3, 0, 20, 4, 0, 3]));
+        assert!(document.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn semantic_token_requests_map_vue_blocks_and_exclude_host_identifiers() {
+        let uri = "file:///test.vue";
+        let text = "<script>const self = 1</script>\n<liva>motion a { let move = drag(target: self); layer base { self { opacity: 1 } } }</liva>\n<liva>motion b { layer base { self { scale: 1 } } }</liva>";
+        let document = Document::new(text.into(), 1, uri);
+        let documents = HashMap::from([(uri.into(), document)]);
+        let request = Request::new(
+            1.into(),
+            "textDocument/semanticTokens/full".into(),
+            json!({ "textDocument": { "uri": uri } }),
+        );
+        let result = handle_request(request, &documents).response_result.unwrap();
+        let data = result["data"].as_array().unwrap();
+
+        assert_eq!(data.len(), 15);
+        assert_eq!(data[0], 1);
+        assert_eq!(data[10], 1);
+    }
+
+    #[test]
+    fn semantic_tokens_for_missing_documents_are_empty() {
+        let request = Request::new(
+            1.into(),
+            "textDocument/semanticTokens/full".into(),
+            json!({ "textDocument": { "uri": "file:///missing.liv" } }),
+        );
+
+        assert_eq!(
+            handle_request(request, &HashMap::new())
+                .response_result
+                .unwrap(),
+            json!({ "data": [] })
+        );
+    }
 
     #[test]
     fn reserved_self_diagnostics_survive_references_to_the_builtin() {

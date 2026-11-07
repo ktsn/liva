@@ -1,0 +1,192 @@
+{
+  "schemaVersion": 1,
+  "definitions": [
+    {
+      "name": "rooted",
+      "letBindings": [
+        {
+          "name": "movement",
+          "initializer": {
+            "kind": "call",
+            "function": "drag",
+            "arguments": [
+              {
+                "name": "target",
+                "value": {
+                  "kind": "reference",
+                  "path": ["self"]
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "active",
+          "type": "boolean"
+        }
+      ],
+      "enter": {
+        "timingExpression": {
+          "kind": "call",
+          "function": "tween",
+          "arguments": [
+            {
+              "name": "duration",
+              "value": {
+                "kind": "number",
+                "value": 400.0
+              }
+            }
+          ]
+        },
+        "targets": [
+          {
+            "timingProperties": ["scale"],
+            "timingExpression": {
+              "kind": "call",
+              "function": "tween",
+              "arguments": [
+                {
+                  "name": "duration",
+                  "value": {
+                    "kind": "number",
+                    "value": 200.0
+                  }
+                }
+              ]
+            },
+            "name": "self",
+            "properties": [
+              {
+                "name": "opacity",
+                "keyframes": [
+                  {
+                    "offset": 0.0,
+                    "value": "0"
+                  }
+                ]
+              },
+              {
+                "name": "scale",
+                "keyframes": [
+                  {
+                    "offset": 0.0,
+                    "value": ".8"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "layers": [
+        {
+          "timingExpression": {
+            "kind": "call",
+            "function": "tween",
+            "arguments": [
+              {
+                "name": "duration",
+                "value": {
+                  "kind": "number",
+                  "value": 100.0
+                }
+              }
+            ]
+          },
+          "name": "base",
+          "targets": [
+            {
+              "timingProperties": ["translate", "scale"],
+              "timingExpression": {
+                "kind": "call",
+                "function": "spring",
+                "arguments": [
+                  {
+                    "name": "duration",
+                    "value": {
+                      "kind": "number",
+                      "value": 300.0
+                    }
+                  }
+                ]
+              },
+              "name": "self",
+              "properties": [
+                {
+                  "name": "opacity",
+                  "value": "1"
+                },
+                {
+                  "name": "translate",
+                  "value": "0 0"
+                },
+                {
+                  "timingExpression": {
+                    "kind": "call",
+                    "function": "tween",
+                    "arguments": [
+                      {
+                        "name": "duration",
+                        "value": {
+                          "kind": "number",
+                          "value": 200.0
+                        }
+                      }
+                    ]
+                  },
+                  "name": "scale",
+                  "value": "1"
+                }
+              ]
+            },
+            {
+              "name": "icon",
+              "properties": [
+                {
+                  "name": "rotate",
+                  "value": "0deg"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "interaction",
+          "when": {
+            "kind": "reference",
+            "path": ["active"]
+          },
+          "targets": [
+            {
+              "timingProperties": ["scale"],
+              "timingExpression": {
+                "kind": "call",
+                "function": "tween",
+                "arguments": [
+                  {
+                    "name": "duration",
+                    "value": {
+                      "kind": "number",
+                      "value": 150.0
+                    }
+                  }
+                ]
+              },
+              "name": "self",
+              "properties": [
+                {
+                  "name": "scale",
+                  "value": "1.2"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "diagnostics": []
+}

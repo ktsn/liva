@@ -62,10 +62,19 @@ function isPropertyTransition(value: unknown): value is PropertyTransition {
   )
 }
 
+function hasTimingProperties(value: Record<string, unknown>): boolean {
+  return (
+    value.timingProperties === undefined ||
+    (Array.isArray(value.timingProperties) &&
+      value.timingProperties.every((name: unknown) => typeof name === 'string'))
+  )
+}
+
 function isTransitionTarget(value: unknown): value is Target<PropertyTransition> {
   return (
     isRecord(value) &&
     typeof value.name === 'string' &&
+    hasTimingProperties(value) &&
     (value.timingExpression === undefined || isExpression(value.timingExpression)) &&
     isArrayOf(value.properties, isPropertyTransition)
   )
@@ -155,6 +164,7 @@ function isStyleScope(value: unknown): value is State {
       (target: unknown) =>
         isRecord(target) &&
         typeof target.name === 'string' &&
+        hasTimingProperties(target) &&
         (target.timingExpression === undefined || isExpression(target.timingExpression)) &&
         Array.isArray(target.properties) &&
         target.properties.every(

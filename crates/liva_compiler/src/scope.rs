@@ -18,6 +18,10 @@ pub struct Symbol {
 }
 
 impl Symbol {
+    pub fn is_builtin_target(&self) -> bool {
+        self.reserved && self.value_type() == Some(Type::Target)
+    }
+
     pub fn value_type(&self) -> Option<Type> {
         match self.kind {
             SymbolKind::Value(value_type) => Some(value_type),

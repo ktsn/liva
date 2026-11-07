@@ -103,3 +103,27 @@ fn implicit_tracks_retain_source_and_distinguish_property_named_targets() {
     );
     assert_eq!(layer.children::<PropertyBlock>().count(), 1);
 }
+
+#[test]
+fn explicit_self_decorators_and_properties_keep_typed_accessors_and_ranges() {
+    use liva_syntax::ast::{HasHeader, HasItems};
+
+    let source =
+        "// 日本😀\r\nmotion sample { layer base { opacity: 1; @spring() self { scale: 1 } } }";
+    let parsed = parse(source);
+    let motion = parsed.root.motions().next().unwrap();
+    let layer = motion.layers().next().unwrap();
+    let target = layer.targets().next().unwrap();
+
+    assert!(parsed.diagnostics.is_empty());
+    assert_eq!(parsed.root.text(), source);
+    assert_eq!(target.header().as_deref(), Some("self"));
+    assert_eq!(
+        target.properties().next().unwrap().header().as_deref(),
+        Some("scale")
+    );
+    assert_eq!(
+        &source[target.range().start..target.range().end],
+        "@spring() self { scale: 1 }"
+    );
+}

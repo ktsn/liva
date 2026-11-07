@@ -36,24 +36,80 @@ fn every_animation_scope_lowers_direct_declarations_to_the_implicit_root() {
 }
 
 #[test]
-fn explicit_self_blocks_are_rejected_in_every_animation_scope() {
+fn explicit_self_blocks_are_accepted_in_every_animation_scope() {
     for scope in ANIMATION_SCOPES {
-        let result = compile(
-            &format!(
-                "motion example {{ {} }}",
-                scope.replace("BODY", "self { opacity: .5 }")
-            ),
-            true,
-        );
-        let error = result
-            .diagnostics
+        let result = valid(&format!(
+            "motion example {{ {} }}",
+            scope.replace("BODY", "@spring() self { opacity: .5 }")
+        ));
+        let mappings = result.mappings.unwrap();
+        let root = mappings
             .iter()
-            .find(|diagnostic| diagnostic.message.contains("implicit target"));
+            .find(|(path, _)| path.ends_with("/target/self/timing"))
+            .unwrap();
 
-        assert!(result.definitions.is_empty(), "{scope}");
-        let error = error.unwrap();
-        assert_eq!(error.code, "semantic.variable");
-        assert_eq!(error.range.end - error.range.start, "self".len());
+        assert_eq!(&root.1.kind, "value");
+        assert_eq!(result.definitions.len(), 1, "{scope}");
+    }
+}
+
+#[test]
+fn mixed_self_forms_merge_properties_and_limit_shared_timing() {
+    for scope in ANIMATION_SCOPES {
+        let result = valid(&format!(
+            "motion example {{ {} }}",
+            scope.replace(
+                "BODY",
+                "opacity: 1; @spring() self { scale: 1 @tween(duration: 200) }"
+            )
+        ));
+        let mappings = result.mappings.unwrap();
+        let root_path = mappings
+            .keys()
+            .find(|path| path.ends_with("/target/self/timing"))
+            .unwrap();
+        let target_path = root_path.strip_suffix("/timing").unwrap();
+
+        assert!(
+            mappings.contains_key(&format!("{target_path}/property/opacity")),
+            "{scope}"
+        );
+        assert!(
+            mappings.contains_key(&format!("{target_path}/property/scale/timing")),
+            "{scope}"
+        );
+        let serialized = serde_json::to_string(&result.definitions).unwrap();
+
+        assert!(
+            serialized.contains("\"timingProperties\":[\"scale\"]"),
+            "{scope}: {serialized}"
+        );
+    }
+}
+
+#[test]
+fn mixed_root_duplicates_report_both_declarations_in_every_scope() {
+    for scope in ANIMATION_SCOPES {
+        for body in [
+            "opacity: 1; self { opacity: .5 }",
+            "opacity ~> { 100%: 1 }; self { opacity: .5 }",
+            "opacity: 1; self { opacity ~> { 100%: .5 } }",
+            "self { opacity: 1 } self { scale: 1 }",
+        ] {
+            let result = compile(
+                &format!("motion example {{ {} }}", scope.replace("BODY", body)),
+                true,
+            );
+            let errors: Vec<_> = result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "semantic.duplicate")
+                .collect();
+
+            assert!(result.definitions.is_empty(), "{scope}: {body}");
+            assert_eq!(errors.len(), 1, "{:?}", result.diagnostics);
+            assert_eq!(errors[0].related.len(), 1);
+        }
     }
 }
 
@@ -207,4 +263,35 @@ fn explicit_named_target_duplicates_remain_errors() {
                     && diagnostic.related.len() == 1)
         );
     }
+}
+
+#[test]
+fn editor_edits_keep_shared_self_timing_local_and_preserve_shorthand() {
+    let source = "motion example { @tween(duration: 100) layer base { opacity: 1; @spring() self { scale: 1 } } }";
+    let path = "example/layer/base/target/self/property/scale";
+    let edited = apply_edits(
+        source,
+        &[Edit::Timing {
+            path: path.into(),
+            value: Some("tween(duration: 200)".into()),
+        }],
+    )
+    .unwrap();
+
+    assert!(edited.source.contains("@spring() self"));
+    assert!(edited.source.contains("opacity: 1"));
+    assert!(edited.source.contains("scale: 1 @tween(duration: 200)"));
+
+    let restored = apply_edits(
+        &edited.source,
+        &[Edit::Timing {
+            path: path.into(),
+            value: None,
+        }],
+    )
+    .unwrap();
+
+    assert!(restored.source.contains("@spring() self"));
+    assert!(restored.source.contains("scale: 1"));
+    assert!(!restored.source.contains("duration: 200"));
 }

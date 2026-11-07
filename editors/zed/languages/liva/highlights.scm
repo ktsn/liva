@@ -3,6 +3,8 @@
 (type) @type
 (boolean) @boolean
 (identifier) @variable
+((identifier) @variable.builtin
+  (#eq? @variable.builtin "self"))
 (property name: (identifier) @property)
 (property_track name: (_) @property)
 "~>" @operator
@@ -19,3 +21,6 @@
 (interpolation ["${" "}"] @punctuation.special)
 ((punctuation) @attribute
   (#eq? @attribute "@"))
+
+(selector_block name: (identifier) @variable.builtin
+  (#eq? @variable.builtin "self"))

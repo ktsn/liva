@@ -1,6 +1,7 @@
 import {
   compositionLayerSelection,
   resolveLayerCascade,
+  targetTiming,
   transitionPropertySources,
   type LayerSelection,
 } from './layer-cascade.ts'
@@ -254,13 +255,15 @@ export function resolveLayerTracks(
         target.name,
         property.name,
       )
+      const sharedTiming = targetTiming(transitionTarget, property.name)
+
       if (
         !layerPropertyChanged(previous, target.name, property) &&
         !instruction &&
         !transition?.timingExpression &&
         !transition?.timing &&
-        !transitionTarget?.timingExpression &&
-        !transitionTarget?.timing &&
+        !sharedTiming?.timingExpression &&
+        !sharedTiming?.timing &&
         !retarget(target.name, property.name)
       )
         continue
@@ -303,7 +306,11 @@ export function resolveLayerTracks(
         destinationValue: property.value,
         implicitStart: !explicit?.some((frame) => frame.offset === 0),
         directionalOwner:
-          instruction || rendered?.timing || rendered?.targets[0].timing ? owner : undefined,
+          instruction ||
+          rendered?.timing ||
+          targetTiming(rendered?.targets[0], property.name)?.timing
+            ? owner
+            : undefined,
         ownerState: next.states.get(owner),
         keyframes: normalizeFrames(
           displayed(target.name, property.name),

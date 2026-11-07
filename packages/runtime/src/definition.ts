@@ -58,6 +58,8 @@ export interface Property {
 }
 
 export interface Target<T> {
+  /** Limits target timing to properties declared in its explicit block when root forms coexist. */
+  readonly timingProperties?: readonly string[]
   readonly timingExpression?: Expression
   readonly timing?: Timing
   readonly name: string

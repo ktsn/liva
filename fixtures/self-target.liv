@@ -1,0 +1,26 @@
+motion rooted(active: boolean) {
+  let movement = drag(target: self)
+
+  @tween(duration: 100)
+  layer base {
+    opacity: 1
+    @spring(duration: 300)
+    self {
+      translate: 0 0
+      scale: 1 @tween(duration: 200)
+    }
+    icon { rotate: 0deg }
+  }
+
+  layer interaction when active {
+    @tween(duration: 150)
+    self { scale: 1.2 }
+  }
+
+  @tween(duration: 400)
+  enter {
+    opacity: 0
+    @tween(duration: 200)
+    self { scale: .8 }
+  }
+}

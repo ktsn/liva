@@ -180,9 +180,9 @@ fn identifiers_and_duplicate_declarations_use_names_and_related_names() {
             "reserved built-in target",
         ),
         (
-            "motion a { layer idle { «self» { opacity: 1 } } }",
-            "semantic.variable",
-            "implicit target",
+            "motion a { layer idle { ‹self› { opacity: 1 } «self» { scale: 1 } } }",
+            "semantic.duplicate",
+            "Duplicate declaration",
         ),
     ] {
         assert_diagnostic(source, code, message);
