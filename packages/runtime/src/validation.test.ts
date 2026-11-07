@@ -122,16 +122,10 @@ describe('serialized definition validation', () => {
         { name: 'off', targets: [{ name: 'thumb', properties: [{ name: 'scale', value: 1 }] }] },
       ],
     },
-    { ...valid, directionalTransitions: [{ from: 'off', to: 'on' }] },
   ])('rejects malformed state and transition references: %j', expectInvalidDefinition)
 
-  it.each([
-    { states: [] },
-    { generalTransition: { targets: [] } },
-    { directionalTransitions: [] },
-    { layers: undefined },
-  ])('rejects removed motion-state fields and missing layers: %j', (fields) => {
-    expect(isDefinition({ ...valid, ...fields })).toBe(false)
+  it.each([undefined, null, {}])('rejects missing or malformed layers: %j', (layers) => {
+    expect(isDefinition({ ...valid, layers })).toBe(false)
   })
 
   describe.each(['enter', 'leave'])('%s animation validation', (field) => {

@@ -174,16 +174,12 @@ function isStyleScope(value: unknown): value is State {
   )
 }
 
-function isState(value: unknown): value is State {
-  return isStyleScope(value) && !('when' in value)
-}
-
 function isLayer(value: unknown): value is Layer {
   return (
     isStyleScope(value) &&
     isRecord(value) &&
     (value.when === undefined || isExpression(value.when)) &&
-    (value.states === undefined || isArrayOf(value.states, isState)) &&
+    (value.states === undefined || isArrayOf(value.states, isStyleScope)) &&
     (value.initialState === undefined || typeof value.initialState === 'string') &&
     (value.transitions === undefined ||
       (Array.isArray(value.transitions) &&
@@ -221,9 +217,6 @@ export function isDefinition(value: unknown): value is Definition {
         value.events.every(
           (event: unknown) =>
             isRecord(event) && typeof event.name === 'string' && isExpression(event.when),
-        ))) &&
-    !('states' in value) &&
-    !('generalTransition' in value) &&
-    !('directionalTransitions' in value)
+        )))
   )
 }
