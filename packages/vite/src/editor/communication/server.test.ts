@@ -283,10 +283,56 @@ it.each([
         requestId: crypto.randomUUID(),
         instanceId: 'instance',
         sequence: 1,
-        edits: [],
+        edits: [{ op: 'set', path: 'toggle/unsupported', value: '2' }],
       }),
     ).rejects.toThrow('read-only')
   }
 
   expect(await readFile(join(root, 'Toggle.vue'), 'utf8')).toBe(content)
+})
+
+async function layerPreview() {
+  const content =
+    '<template><div /></template><liva>motion toggle { layer base { body { opacity: 1 } } }</liva>'
+  await writeFile(join(root, 'Toggle.vue'), content)
+  const inspection = await service.request({ action: 'inspect', sourceId, definition: 'toggle' })
+  const previewRequest: EditorRequest = {
+    action: 'preview',
+    sourceId,
+    definition: 'toggle',
+    baseHash: inspection.hash,
+    instanceId: 'instance',
+    sequence: 1,
+    edits: [],
+  }
+
+  return { content, inspection, previewRequest }
+}
+
+describe('unchanged composition preview transactions', () => {
+  it('previews without changing source', async () => {
+    const { content, inspection, previewRequest } = await layerPreview()
+
+    const result = await service.request(previewRequest)
+
+    expect(result.definition).toEqual(inspection.definition)
+    expect(result.sequence).toBe(1)
+    expect(await readFile(join(root, 'Toggle.vue'), 'utf8')).toBe(content)
+  })
+
+  it('requires an explicit edit list', async () => {
+    const { previewRequest } = await layerPreview()
+
+    await expect(service.request({ ...previewRequest, edits: undefined })).rejects.toThrow(
+      'Invalid edit list',
+    )
+  })
+
+  it('rejects stale source snapshots', async () => {
+    const { previewRequest } = await layerPreview()
+
+    await expect(service.request({ ...previewRequest, baseHash: 'stale' })).rejects.toThrow(
+      'Source changed',
+    )
+  })
 })

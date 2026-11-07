@@ -1,12 +1,21 @@
 import { timelineReadOnly, readOnlyMessage } from './capabilities.ts'
 import type { InstanceBinding } from '@liva/vue'
+import type { Composition, CompositionTransition } from '@liva/runtime'
 import type { EditorReply, EditorRequest, Edit, Inspection } from './communication/protocol.ts'
 
 export type EditorBinding = Pick<InstanceBinding, 'component' | 'definition' | 'requestedState'> & {
   readonly root: Pick<HTMLElement, 'getAttribute' | 'textContent' | 'getBoundingClientRect'>
   readonly runtime: Pick<
     InstanceBinding['runtime'],
-    'definition' | 'state' | 'animations' | 'replaceDefinition' | 'setState' | 'previewLifecycle'
+    | 'definition'
+    | 'state'
+    | 'animations'
+    | 'replaceDefinition'
+    | 'setState'
+    | 'previewLifecycle'
+    | 'composition'
+    | 'previewComposition'
+    | 'endCompositionPreview'
   >
 }
 
@@ -72,6 +81,7 @@ export class EditorController {
           this.previewActive = false
         }
       } else if (this.selected === entry) {
+        binding.runtime.endCompositionPreview()
         this.previewActive = false
         this.sequence++
         if (binding.runtime.definition !== binding.definition)
@@ -177,6 +187,45 @@ export class EditorController {
     }
   }
 
+  async previewComposition(
+    from: Composition,
+    to: Composition,
+    transitions: readonly CompositionTransition[] = [],
+  ): Promise<void> {
+    const selected = this.selected
+    const inspection = this.inspection
+
+    if (!selected || !inspection || !this.active(selected)) {
+      throw new Error('Select a mounted instance')
+    }
+
+    const sequence = ++this.sequence
+    const reply = await this.send({
+      action: 'preview',
+      sourceId: selected.sourceId,
+      definition: selected.binding.definition.name,
+      instanceId: selected.id,
+      baseHash: inspection.hash,
+      sequence,
+      edits: this.draft,
+    })
+
+    if (
+      sequence !== this.sequence ||
+      this.selected !== selected ||
+      !this.active(selected) ||
+      reply.sequence !== sequence ||
+      this.stale
+    )
+      return
+
+    this.previewActive = false
+    selected.binding.runtime.previewComposition(from, to, transitions, reply.definition)
+    this.previewActive = true
+    this.message = 'Previewing this instance only. Source is unchanged.'
+    this.notify()
+  }
+
   endPreview() {
     this.sequence++
     this.restoreSelected()
@@ -186,6 +235,7 @@ export class EditorController {
   private restoreSelected() {
     this.previewActive = false
     const selected = this.selected
+    selected?.binding.runtime.endCompositionPreview()
     if (
       selected &&
       this.active(selected) &&

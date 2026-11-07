@@ -179,7 +179,11 @@ export class EditorService {
     const { file, snapshot } = await this.snapshot(request.sourceId)
     const original = this.inspection(snapshot, request.definition)
     if (request.action === 'inspect') return original
-    if (timelineReadOnly(original.definition)) throw new EditorError(422, readOnlyMessage)
+    if (
+      timelineReadOnly(original.definition) &&
+      (request.action !== 'preview' || (request.edits?.length ?? 0) > 0)
+    )
+      throw new EditorError(422, readOnlyMessage)
     if (request.baseHash !== snapshot.hash)
       throw new EditorError(409, 'Source changed; inspect the latest revision before saving')
     const candidate = this.candidate(snapshot, request)
