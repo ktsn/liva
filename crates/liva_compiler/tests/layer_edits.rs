@@ -262,11 +262,22 @@ fn typed_lifecycle_timing_creates_a_motion_level_track_for_a_layer_property() {
 
 #[test]
 fn new_track_timing_starts_the_block_on_the_next_indented_line() {
-    for (newline, indent) in [("\n", "  "), ("\r\n", "\t")] {
+    for (newline, indent, compact) in [
+        ("\n", "  ", false),
+        ("\r\n", "\t", false),
+        ("\n", "", true),
+        ("\r\n", "", true),
+    ] {
         let track_indent = indent.repeat(3);
-        let source = format!(
-            "motion sample {{{newline}{indent}layer base {{{newline}{indent}{indent}body {{{newline}{track_indent}opacity ~> {{ 100%: 1 }}{newline}{indent}{indent}}}{newline}{indent}}}{newline}}}"
-        );
+        let source = if compact {
+            format!(
+                "// header{newline}motion sample {{ layer base {{ body {{ opacity ~> {{ 100%: 1 }} }} }} }}"
+            )
+        } else {
+            format!(
+                "motion sample {{{newline}{indent}layer base {{{newline}{indent}{indent}body {{{newline}{track_indent}opacity ~> {{ 100%: 1 }}{newline}{indent}{indent}}}{newline}{indent}}}{newline}}}"
+            )
+        };
 
         let result = apply_edits(
             &source,
@@ -278,18 +289,29 @@ fn new_track_timing_starts_the_block_on_the_next_indented_line() {
         .unwrap();
 
         assert!(result.source.contains(&format!(
-            "{track_indent}@tween(duration: 200){newline}{track_indent}opacity ~>"
+            "{newline}{track_indent}@tween(duration: 200){newline}{track_indent}opacity ~>"
         )));
     }
 }
 
 #[test]
 fn track_conversion_moves_value_timing_to_a_separate_indented_prefix() {
-    for (newline, indent) in [("\n", "  "), ("\r\n", "\t")] {
+    for (newline, indent, compact) in [
+        ("\n", "  ", false),
+        ("\r\n", "\t", false),
+        ("\n", "", true),
+        ("\r\n", "", true),
+    ] {
         let track_indent = indent.repeat(3);
-        let source = format!(
-            "motion sample {{{newline}{indent}layer base {{{newline}{indent}{indent}body {{{newline}{track_indent}opacity: 1 @tween(duration: 200){newline}{indent}{indent}}}{newline}{indent}}}{newline}}}"
-        );
+        let source = if compact {
+            format!(
+                "// header{newline}motion sample {{ layer base {{ body {{ opacity: 1 @tween(duration: 200) }} }} }}"
+            )
+        } else {
+            format!(
+                "motion sample {{{newline}{indent}layer base {{{newline}{indent}{indent}body {{{newline}{track_indent}opacity: 1 @tween(duration: 200){newline}{indent}{indent}}}{newline}{indent}}}{newline}}}"
+            )
+        };
 
         let result = apply_edits(
             &source,
@@ -303,7 +325,7 @@ fn track_conversion_moves_value_timing_to_a_separate_indented_prefix() {
         .unwrap();
 
         assert!(result.source.contains(&format!(
-            "{track_indent}@tween(duration: 200){newline}{track_indent}opacity ~>"
+            "{newline}{track_indent}@tween(duration: 200){newline}{track_indent}opacity ~>"
         )));
     }
 }

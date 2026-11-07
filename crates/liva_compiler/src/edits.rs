@@ -302,12 +302,19 @@ fn structural_decorator(source: &str, offset: usize, expression: &str) -> String
         "\n"
     };
     let line_start = source[..offset].rfind('\n').map_or(0, |index| index + 1);
-    let indentation: String = source[line_start..offset]
+    let preceding = &source[line_start..offset];
+    let indentation: String = preceding
         .chars()
         .take_while(|character| matches!(character, ' ' | '\t'))
         .collect();
 
-    format!("@{}{newline}{indentation}", expression.trim())
+    let leading = if preceding.trim().is_empty() {
+        String::new()
+    } else {
+        format!("{newline}{indentation}")
+    };
+
+    format!("{leading}@{}{newline}{indentation}", expression.trim())
 }
 
 fn edit_typed_timing(
