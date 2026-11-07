@@ -154,6 +154,19 @@ async function expectPlayhead(page: Page, position: number) {
   expect(Math.abs((await playhead(page)) - position)).toBeLessThanOrEqual(17)
 }
 
+async function expectPreviewEffectsAtPlayhead(page: Page) {
+  const position = await playhead(page)
+  const times = await page.evaluate(() =>
+    document.getAnimations().map((effect) => Number(effect.currentTime)),
+  )
+
+  expect(times.length).toBeGreaterThan(0)
+
+  for (const time of times) {
+    expect(Math.abs(time - position)).toBeLessThanOrEqual(1)
+  }
+}
+
 async function playhead(page: Page) {
   return Number(await page.getByLabel('Playhead').inputValue())
 }
@@ -167,9 +180,11 @@ test('speed scales animation time and changes continuously during playback', asy
 
   await page.clock.runFor(1000)
   await expectPlayhead(page, 100)
+  await expectPreviewEffectsAtPlayhead(page)
 
   await page.getByRole('combobox', { name: 'Speed', exact: true }).selectOption('0.5')
   await expectPlayhead(page, 100)
+  await expectPreviewEffectsAtPlayhead(page)
 
   await page.clock.runFor(200)
   await expectPlayhead(page, 200)
@@ -203,9 +218,11 @@ test('loop carries elapsed time, preserves speed, and stops after the current pa
 
   await loop.click({ force: true })
   await expectPlayhead(page, 100)
+  await expectPreviewEffectsAtPlayhead(page)
 
   await page.clock.runFor(duration * 4)
   await expectPlayhead(page, 100)
+  await expectPreviewEffectsAtPlayhead(page)
   await expect(loop).toHaveAttribute('aria-pressed', 'true')
 
   await page.getByRole('button', { name: 'Pause', exact: true }).click({ force: true })
@@ -507,6 +524,7 @@ for (const phase of ['enter', 'leave']) {
     await page.clock.runFor(duration * 3 + 100)
 
     await expectPlayhead(page, 100)
+    await expectPreviewEffectsAtPlayhead(page)
     await expect(first).toHaveCount(1)
     await expect(first).toBeVisible()
     await expect(first).toHaveAttribute('aria-pressed', 'false')
