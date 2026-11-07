@@ -104,12 +104,13 @@ CSS-value edit, not a visual expression editor.
 
 ## Enter and leave editing
 
-For layer motions, choose **Enter · default** or **Leave · default** in **Editing**.
+For layer motions, choose **Enter** or **Leave** in **Existing transition**.
 A single **Baseline** composition selects the settled layer presentation used for
 lifecycle endpoints. The baseline is independent of application state and does not
 create state-specific lifecycle declarations. Lifecycle-only properties and targets
-from inactive layers remain visible in the timeline. Only explicit lifecycle
-endpoints have editable source fields; implicit endpoints do not edit layer values.
+from inactive layers remain visible in the timeline. Explicit endpoints edit lifecycle
+keyframes. Implicit endpoints show and edit the contributing layer or state declaration
+from the baseline; captured CSS has no editable source declaration.
 Typed timing and keyframe edits use motion-level paths. A local timing override can
 create a missing lifecycle block for a property already declared in a layer.
 

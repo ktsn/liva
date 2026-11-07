@@ -34,7 +34,6 @@ import {
 } from '../timeline.ts'
 import TimelineRow from './TimelineRow.ce.vue'
 import TimelineInspector from './TimelineInspector.ce.vue'
-import CompositionChoice from './CompositionChoice.ce.vue'
 import CompositionSelectors from './CompositionSelectors.ce.vue'
 import { copyComposition, compatibleTransition, selectTransition } from '../compositions.ts'
 
@@ -189,6 +188,7 @@ const selectionProvenance = computed(
       ? lifecycleProvenance(
           candidateInspection.value,
           phase.value,
+          compositionTo.value,
           selection.value.target,
           selection.value.property,
         )
@@ -564,7 +564,13 @@ function swapCompositions() {
   time.value = 0
 }
 
+function choosePhase(value: LifecyclePhase) {
+  scope.value = `${value}-default`
+  changeDirection()
+}
+
 function chooseTransition(identity: CompositionTransition | undefined) {
+  scope.value = 'directional'
   endPreview()
   selectedTransition.value = identity
 
@@ -616,25 +622,24 @@ onScopeDispose(() => {
 
 <template>
   <CompositionSelectors
-    v-if="layered && !phase"
+    v-if="layered"
     :layers="layers"
     :from="compositionFrom"
     :to="compositionTo"
     :transition="selectedTransition"
+    :phase="phase"
     @change="changeComposition"
     @swap="swapCompositions"
     @transition="chooseTransition"
-  />
-  <CompositionChoice
-    v-if="layered && phase"
-    :layers="layers"
-    :value="compositionTo"
-    label="Baseline"
-    @change="changeComposition('to', $event)"
+    @phase="choosePhase"
   />
   <p v-if="timelineResult.error" role="alert">{{ String(timelineResult.error) }}</p>
   <div class="toolbar">
-    <label>Editing<select v-model="scope" aria-label="Editing scope" @change="changeDirection">
+    <label v-if="!layered">Editing<select
+        v-model="scope"
+        aria-label="Editing scope"
+        @change="changeDirection"
+      >
         <option value="directional">{{
           layered ? 'Composition' : 'Directional transition'
         }}</option>

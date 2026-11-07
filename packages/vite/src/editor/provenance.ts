@@ -157,10 +157,19 @@ export function trackProvenance(
 export function lifecycleProvenance(
   inspection: Inspection,
   phase: 'enter' | 'leave',
+  baseline: Composition,
   target: string,
   property: string,
 ): TrackProvenance {
   const { fields } = inspection
+  const baselineSource = trackProvenance(
+    inspection,
+    baseline,
+    baseline,
+    undefined,
+    target,
+    property,
+  )
   const path = `${inspection.definition.name}/${phase}`
   const destination = `${path}/target/${target}/property/${property}`
   const localTiming = field(fields, `${destination}/timing`)
@@ -170,14 +179,12 @@ export function lifecycleProvenance(
     field(fields, `${path}/timing`)
 
   return {
-    fromDeclarationPath: destination,
-    toDeclarationPath: destination,
+    fromDeclarationPath: baselineSource.fromDeclarationPath,
+    toDeclarationPath: baselineSource.toDeclarationPath,
     frameDeclarationPath: destination,
-    from: field(fields, `${destination}/frame/0/value`),
-    to: field(fields, `${destination}/frame/1/value`),
+    from: field(fields, `${destination}/frame/0/value`) ?? baselineSource.from,
+    to: field(fields, `${destination}/frame/1/value`) ?? baselineSource.to,
     sharedValue: false,
-    fromDescription: 'Implicit lifecycle endpoint from the selected baseline or captured CSS.',
-    toDescription: 'Implicit lifecycle endpoint from the selected baseline or captured CSS.',
     owner: `Motion ${phase}`,
     overridden: [],
     timingSource,

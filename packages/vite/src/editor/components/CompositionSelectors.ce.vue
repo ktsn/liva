@@ -6,9 +6,11 @@ const props = defineProps<{
   layers: readonly Layer[]
   from: Composition
   to: Composition
+  phase?: 'enter' | 'leave'
   transition?: CompositionTransition
 }>()
 const emit = defineEmits<{
+  phase: [value: 'enter' | 'leave']
   change: [side: 'from' | 'to', composition: Composition]
   swap: []
   transition: [identity: CompositionTransition | undefined]
@@ -25,7 +27,9 @@ const transitions = props.layers.flatMap((layer) =>
 )
 
 function choose(value: string) {
-  emit('transition', transitions.find((item) => item.value === value)?.identity)
+  if (value === 'enter-default' || value === 'leave-default')
+    emit('phase', value === 'enter-default' ? 'enter' : 'leave')
+  else emit('transition', transitions.find((item) => item.value === value)?.identity)
 }
 </script>
 
@@ -36,18 +40,27 @@ function choose(value: string) {
         <select
           aria-label="Existing transition"
           class="composition-shortcut composition-action-control"
-          :value="transition ? JSON.stringify(transition) : ''"
+          :value="phase ? `${phase}-default` : transition ? JSON.stringify(transition) : ''"
           @change="choose(($event.target as HTMLSelectElement).value)"
         >
           <option value="">No selected transition</option>
+          <option value="enter-default">Enter</option>
+          <option value="leave-default">Leave</option>
           <option v-for="item in transitions" :key="item.value" :value="item.value">{{
             item.label
           }}</option>
         </select>
       </label>
-      <button class="composition-action-control" @click="emit('swap')">Swap</button>
+      <button v-if="!phase" class="composition-action-control" @click="emit('swap')">Swap</button>
     </div>
-    <div class="composition-pair">
+    <CompositionChoice
+      v-if="phase"
+      :layers="layers"
+      :value="to"
+      label="Baseline"
+      @change="emit('change', 'to', $event)"
+    />
+    <div v-else class="composition-pair">
       <CompositionChoice
         v-for="side in sides"
         :key="side"

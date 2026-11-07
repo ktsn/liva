@@ -1457,6 +1457,21 @@ it('clears frame selection after a composition frame is deleted', async () => {
   ])
 })
 
+it('switches between lifecycle and composition editing in the transition selector', async () => {
+  await setupEditor(undefined, compositionDefinition)
+  await click('Motion editor')
+  await input('Existing transition', 'leave-default')
+
+  expect(host!.querySelector('[aria-label="Baseline machine state"]')).not.toBeNull()
+  expect(host!.querySelector('[aria-label="From machine state"]')).toBeNull()
+
+  await input('Existing transition', JSON.stringify({ layer: 'machine', index: 0 }))
+
+  expect(host!.querySelector('[aria-label="Baseline machine state"]')).toBeNull()
+  expect(selectValue('From machine state')).toBe('idle')
+  expect(selectValue('To machine state')).toBe('active')
+})
+
 it('uses one composition baseline for lifecycle rows and isolated scrub-ready playback', async () => {
   const definition: Definition = {
     ...compositionDefinition,
@@ -1476,7 +1491,7 @@ it('uses one composition baseline for lifecycle rows and isolated scrub-ready pl
   const { controller } = await setupEditor(undefined, definition)
 
   await click('Motion editor')
-  await input('Editing scope', 'enter-default')
+  await input('Existing transition', 'enter-default')
 
   expect(host!.querySelector('[aria-label="From base enabled"]')).toBeNull()
   expect(host!.querySelector('[aria-label="Baseline base enabled"]')).not.toBeNull()
@@ -1497,8 +1512,10 @@ it('uses one composition baseline for lifecycle rows and isolated scrub-ready pl
 
   const inspector = host?.querySelector('[aria-label="Selection inspector"]')
 
-  expect(inspector?.textContent).toContain('Motion enter')
-  expect(inspector?.textContent).toContain('Implicit lifecycle endpoint')
+  expect(inspector?.querySelector('[aria-label="Editing location"]')?.textContent).toBe(
+    'External CSS',
+  )
+  expect(host!.querySelector('[aria-label="Editing scope"]')).toBeNull()
 
   await click('Play')
 
@@ -1538,13 +1555,13 @@ it.each(['enter', 'leave'] as const)(
 
     await setupEditor(undefined, definition)
     await click('Motion editor')
-    await input('Editing scope', `${phase}-default`)
+    await input('Existing transition', `${phase}-default`)
     await click('▸ body')
     await click('opacity')
 
     const inspector = host?.querySelector('[aria-label="Selection inspector"]')
 
-    expect(inspector?.querySelector('[aria-label="Editing location"]')?.textContent).toBe(
+    expect(inspector?.querySelector('[aria-label="Timing editing location"]')?.textContent).toBe(
       `Motion ${phase}`,
     )
     expect(inspector?.textContent?.includes('Completion restores')).toBe(phase === 'enter')

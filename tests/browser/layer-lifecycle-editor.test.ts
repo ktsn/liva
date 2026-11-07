@@ -26,7 +26,7 @@ async function seek(page: Page, time: number) {
 for (const phase of ['enter', 'leave']) {
   test(`${phase} retains rows for lifecycle-only targets`, async ({ page }) => {
     await open(page)
-    await page.getByLabel('Editing scope').selectOption(`${phase}-default`)
+    await page.getByLabel('Existing transition').selectOption(`${phase}-default`)
     await page.getByRole('button', { name: 'Toggle badge tracks', exact: true }).click()
 
     await expect(page.getByLabel('Select badge.opacity', { exact: true })).toBeVisible()
@@ -38,7 +38,7 @@ test('composition lifecycle previews isolate the selected instance', async ({ pa
   const first = page.getByRole('button', { name: 'First lifecycle', exact: true })
   const second = page.getByRole('button', { name: 'Second lifecycle', exact: true })
 
-  await page.getByLabel('Editing scope').selectOption('enter-default')
+  await page.getByLabel('Existing transition').selectOption('enter-default')
   await page.getByLabel('Baseline active enabled', { exact: true }).check()
   await seek(page, 100)
 
@@ -53,7 +53,7 @@ test('leave scrubs bidirectionally without removing the DOM and restores the app
   await open(page)
   const first = page.getByRole('button', { name: 'First lifecycle', exact: true })
 
-  await page.getByLabel('Editing scope').selectOption('leave-default')
+  await page.getByLabel('Existing transition').selectOption('leave-default')
   await page.getByLabel('Baseline active enabled', { exact: true }).check()
   await seek(page, 200)
 
@@ -80,7 +80,7 @@ test('typed lifecycle source expressions save and reach shared instances through
 
   try {
     await open(page)
-    await page.getByLabel('Editing scope').selectOption('enter-default')
+    await page.getByLabel('Existing transition').selectOption('enter-default')
     await page.getByRole('button', { name: 'Toggle body tracks', exact: true }).click()
     await page.getByRole('button', { name: 'body.opacity 0%', exact: true }).click()
     await page.getByLabel('Keyframe source value', { exact: true }).fill('${start * 2}')
@@ -125,7 +125,7 @@ test('typed lifecycle source expressions save and reach shared instances through
       if (!id) throw new Error(`Missing preview instance: ${label}`)
 
       await page.getByLabel('Preview instance', { exact: true }).selectOption(id)
-      await page.getByLabel('Editing scope').selectOption('enter-default')
+      await page.getByLabel('Existing transition').selectOption('enter-default')
       await seek(page, 0)
 
       await expect(page.getByRole('button', { name: label, exact: true })).toHaveCSS(
@@ -152,7 +152,7 @@ test('application inputs end lifecycle preview and the next preview captures upd
   await open(page)
   const first = page.getByRole('button', { name: 'First lifecycle', exact: true })
 
-  await page.getByLabel('Editing scope').selectOption('enter-default')
+  await page.getByLabel('Existing transition').selectOption('enter-default')
   await seek(page, 0)
 
   await expect(first).toHaveCSS('opacity', '0.2')

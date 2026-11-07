@@ -293,22 +293,53 @@ describe('lifecycle source provenance', () => {
       const info = inspection(
         `motion sample { layer base { body { opacity: 1 } } enter ${shared} { body ${target} { opacity ${property} { 0%: 0 } } } }`,
       )
-      const result = lifecycleProvenance(info, 'enter', 'body', 'opacity')
+      const result = lifecycleProvenance(
+        info,
+        'enter',
+        { layers: { base: true }, states: {} },
+        'body',
+        'opacity',
+      )
 
       expect(result.timingSource?.path).toBe(origin)
       expect(result.timingDestination).toBe('sample/enter/target/body/property/opacity')
       expect(result.from?.text).toBe('0')
-      expect(result.to).toBeUndefined()
+      expect(result.to?.text).toBe('1')
     },
   )
 
-  it('offers a motion lifecycle destination without treating the baseline as editable', () => {
+  it.each(['enter', 'leave'] as const)('resolves the selected state baseline for %s', (phase) => {
+    const info = inspection(
+      'motion sample { layer machine { state idle initial { body { opacity: 0.2 } } state active { body { opacity: 0.8 } } } }',
+    )
+    const result = lifecycleProvenance(
+      info,
+      phase,
+      { layers: {}, states: { machine: 'active' } },
+      'body',
+      'opacity',
+    )
+
+    expect(result.from?.text).toBe('0.8')
+    expect(result.to?.path).toBe(
+      'sample/layer/machine/state/active/target/body/property/opacity/value',
+    )
+    expect(result.toDeclarationPath).toBe(result.to?.path)
+  })
+
+  it('resolves implicit lifecycle endpoints to the baseline declaration', () => {
     const info = inspection('motion sample { layer base { body { opacity: 1 } } }')
-    const result = lifecycleProvenance(info, 'leave', 'body', 'opacity')
+    const result = lifecycleProvenance(
+      info,
+      'leave',
+      { layers: { base: true }, states: {} },
+      'body',
+      'opacity',
+    )
 
     expect(result.timingSource).toBeUndefined()
     expect(result.frameDestination).toBe('sample/leave/target/body/property/opacity')
-    expect(result.from).toBeUndefined()
-    expect(result.to).toBeUndefined()
+    expect(result.from?.path).toBe('sample/layer/base/target/body/property/opacity/value')
+    expect(result.to?.text).toBe('1')
   })
 })
