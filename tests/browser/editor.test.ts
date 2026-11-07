@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { readFile, writeFile } from 'node:fs/promises'
+import { compileSfc } from '../../packages/vite/src/compiler.ts'
 import type { EditorController } from '../../packages/vite/src/editor/controller.ts'
 
 declare global {
@@ -18,6 +19,21 @@ async function open(page: Page, fixture = false) {
   await page
     .getByLabel('Existing transition')
     .selectOption(JSON.stringify({ layer: fixture ? 'selection' : 'toggle', index: 0 }))
+}
+
+async function restoreEditorToggle(page: Page, source: string) {
+  await writeFile(file, source)
+
+  const expected = compileSfc(source, file.pathname, false).result.definitions[0]
+
+  // Wait for the restored definition's HMR before another test can open this shared fixture.
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        [...window.__LIVA_EDITOR__.entries.values()].map((entry) => entry.binding.definition),
+      ),
+    )
+    .toContainEqual(expected)
 }
 
 async function expectMessage(page: Page, message: string) {
@@ -312,7 +328,7 @@ test('timeline saves timing, new frames and endpoint state values with shared HM
     await save(page)
     expect(await readFile(file, 'utf8')).toContain('background-color: green')
   } finally {
-    await writeFile(file, original)
+    await restoreEditorToggle(page, original)
   }
 })
 
@@ -350,7 +366,7 @@ test('Instant timing saves, previews immediately, and removes back to inherited 
     await expect(page.getByLabel('Timing mode')).toHaveValue('tween')
     await expect(page.getByLabel('Track duration')).toHaveValue('50')
   } finally {
-    await writeFile(file, original)
+    await restoreEditorToggle(page, original)
   }
 })
 
@@ -395,7 +411,7 @@ test('Instant edits remain immediate when a motion shadows instant', async ({
 
     expect(await readFile(file, 'utf8')).toContain('@tween(duration: 0)')
   } finally {
-    await writeFile(file, original)
+    await restoreEditorToggle(page, original)
   }
 })
 
