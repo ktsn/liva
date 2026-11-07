@@ -1,64 +1,70 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 
-const hovered = ref(false)
-const pointerPressed = ref(false)
-const keyboardPressed = ref(false)
-const pressed = computed(() => pointerPressed.value || keyboardPressed.value)
-const focused = ref(false)
+const selected = ref(false)
+const disabled = ref(false)
 </script>
 
 <template>
   <section class="demo">
     <h1>Interactive button</h1>
-    <p>Hover, focus, and press can contribute independently. Press wins for scale.</p>
+    <p>Press wins over hover for scale. Selection keeps its color during either interaction.</p>
     <button
-      v-liva:button="{ hovered, pressed, focused }"
-      v-liva-target:body
+      v-liva:button="{ selected, disabled }"
+      :disabled="disabled"
+      :aria-pressed="selected"
       data-testid="interactive-button"
-      @pointerenter="hovered = true"
-      @pointerleave="hovered = false; pointerPressed = false"
-      @pointerdown="pointerPressed = true"
-      @pointerup="pointerPressed = false"
-      @pointercancel="pointerPressed = false"
-      @focus="focused = true"
-      @blur="focused = false; keyboardPressed = false"
-      @keydown.space="keyboardPressed = true"
-      @keyup.space="keyboardPressed = false"
-      @keydown.enter="keyboardPressed = true"
-      @keyup.enter="keyboardPressed = false"
+      @click="selected = !selected"
     >Press me</button>
+    <label class="disable-control">
+      <input v-model="disabled" type="checkbox" />
+      Disable button
+    </label>
   </section>
 </template>
 
+<style scoped>
+.disable-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-block-start: 24px;
+}
+</style>
+
 <liva lang="liva">
-motion button(hovered: boolean, pressed: boolean, focused: boolean) {
+motion button(selected: boolean, disabled: boolean) {
+  let ui = interaction(target: self)
+
+  @tween(duration: 180, easing: easeOut)
   layer base {
-    @tween(duration: 180, easing: easeOut)
-    body {
-      scale: 1
-      background-color: #d9f3e8
-      box-shadow: 0 0 0 0px #16795b
-    }
+    scale: 1
+    background-color: #d9f3e8
+    box-shadow: 0 0 0 0px #16795b
+    opacity: 1
   }
 
-  layer hover when hovered {
-    body {
-      scale: 1.08
-      background-color: #b5e4d1
-    }
+  layer hover when ui.hover && !disabled {
+    scale: 1.08
+    background-color: #b5e4d1
   }
 
-  layer focus when focused {
-    body {
-      box-shadow: 0 0 0 4px #16795b
-    }
+  layer selected when selected {
+    background-color: #64c69e
   }
 
-  layer press when pressed {
-    body {
-      scale: 0.94
-    }
+  layer focus when ui.focusVisible {
+    box-shadow: 0 0 0 4px #16795b
+  }
+
+  layer press when ui.active && !disabled {
+    scale: 0.94
+  }
+
+  layer disabled when disabled {
+    scale: 1
+    background-color: #d3d8d5
+    opacity: 0.55
   }
 }
 </liva>

@@ -32,7 +32,7 @@ test('the inspector follows the selected endpoint declaration', async ({ page })
   await page.goto(`${base}/interactive-button`)
   await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
   await page.getByLabel('To hover enabled', { exact: true }).check()
-  await page.getByRole('button', { name: 'Toggle body tracks', exact: true }).click()
+  await page.getByRole('button', { name: 'Toggle self tracks', exact: true }).click()
 
   const inspector = page.getByLabel('Selection inspector', { exact: true })
 
@@ -41,7 +41,7 @@ test('the inspector follows the selected endpoint declaration', async ({ page })
     { offset: 100, layer: 'hover', value: '#b5e4d1' },
   ]) {
     await page
-      .getByRole('button', { name: `body.background-color ${offset}%`, exact: true })
+      .getByRole('button', { name: `self.background-color ${offset}%`, exact: true })
       .click()
 
     await expect(inspector.getByLabel('Editing location', { exact: true })).toHaveText(
