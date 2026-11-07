@@ -1,24 +1,23 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-defineProps<{ label: string }>()
-const checked = ref(false)
+
+const { label, initialChecked = false } = defineProps<{ label: string; initialChecked?: boolean }>()
+
+const checked = ref(initialChecked)
 </script>
 
 <template>
-  <div class="toggle-row">
-    <strong>{{ label }}</strong>
-    <button
-      v-liva:toggle="{ checked }"
-      v-liva-target:track
-      role="switch"
-      :aria-label="label"
-      :aria-checked="checked"
-      class="switch"
-      @click="checked = !checked"
-    >
-      <span v-liva-target:thumb class="thumb" />
-    </button>
-  </div>
+  <button
+    v-liva:toggle="{ checked }"
+    v-liva-target:track
+    role="switch"
+    :aria-label="label"
+    :aria-checked="checked"
+    class="switch"
+    @click="checked = !checked"
+  >
+    <span v-liva-target:thumb class="thumb" />
+  </button>
 </template>
 
 <liva lang="liva">
@@ -34,38 +33,13 @@ motion toggle(checked: boolean) {
     }
   }
 
-  layer selection {
-    state off initial {
-      thumb {
-        scale: 1
-      }
+  layer selection when checked {
+    track {
+      background-color: #34b27b
     }
 
-    state on {
-      track {
-        background-color: #34b27b
-      }
-
-      thumb {
-        translate: 24px 0
-        scale: 1
-      }
-    }
-
-    transition off -> on when checked {
-      thumb {
-        @tween(duration: 350) scale {
-          40%: 1.3 1 @easeIn
-          70%: 0.95 1 @easeOut
-        }
-      }
-    }
-
-    transition on -> off when !checked {
-      thumb {
-        @spring(stiffness: 350, damping: 22) translate {
-        }
-      }
+    thumb {
+      translate: 24px 0
     }
   }
 }

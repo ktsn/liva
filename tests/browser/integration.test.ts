@@ -10,41 +10,62 @@ import { test, expect } from '@playwright/test'
 
 const base = 'http://127.0.0.1:4180'
 
-test('real Vue switches remain independent and keyboard accessible through rapid reversals', async ({
-  page,
-}) => {
-  const errors: string[] = []
-  page.on('pageerror', (error) => errors.push(error.message))
-  await page.goto(base)
-  const first = page.getByRole('switch', { name: 'Notifications' })
-  const second = page.getByRole('switch', { name: 'Product updates' })
-  await first.focus()
-  await page.keyboard.press('Space')
-  await expect(first).toHaveAttribute('aria-checked', 'true')
-  await expect(second).toHaveAttribute('aria-checked', 'false')
-  expect(await second.evaluate((element) => element.getAnimations({ subtree: true }).length)).toBe(
-    0,
-  )
+test.describe('toggle demo', () => {
+  test('mounts OFF and ON side by side with only accessible switch controls', async ({ page }) => {
+    await page.goto(base)
 
-  for (let i = 0; i < 5; i++) await first.click()
-  await expect(first).toHaveAttribute('aria-checked', 'false')
-  await expect
-    .poll(() => first.evaluate((element) => element.getAnimations({ subtree: true }).length))
-    .toBe(0)
-  const thumb = first.locator('.thumb')
-  await expect
-    .poll(() => thumb.evaluate((element) => parseFloat(getComputedStyle(element).translate)))
-    .toBe(0)
-  for (let i = 0; i < 3; i++) {
-    await first.click()
-    await page.getByRole('button', { name: 'Unmount switches' }).click()
-    await expect(page.getByRole('switch')).toHaveCount(0)
-    await page.getByRole('button', { name: 'Mount switches' }).click()
+    const first = page.getByRole('switch', { name: 'Notifications' })
+    const second = page.getByRole('switch', { name: 'Product updates' })
     await expect(page.getByRole('switch')).toHaveCount(2)
     await expect(first).toHaveAttribute('aria-checked', 'false')
-  }
+    await expect(second).toHaveAttribute('aria-checked', 'true')
+    await expect(first).toHaveCSS('background-color', 'rgb(136, 136, 136)')
+    await expect(second).toHaveCSS('background-color', 'rgb(52, 178, 123)')
+    await expect(first.locator('.thumb')).toHaveCSS('translate', '0px')
+    await expect(second.locator('.thumb')).toHaveCSS('translate', '24px')
 
-  expect(errors).toEqual([])
+    const layout = await page.getByRole('switch').evaluateAll((elements) =>
+      elements.map((element) => ({
+        x: element.getBoundingClientRect().x,
+        y: element.getBoundingClientRect().y,
+      })),
+    )
+    expect(layout).toHaveLength(2)
+
+    expect(layout[1].x).toBeGreaterThan(layout[0].x)
+    expect(layout[1].y).toBe(layout[0].y)
+    await expect(page.locator('.demo-content')).toHaveText('')
+  })
+
+  test('keeps switches independent through keyboard activation and rapid reversals', async ({
+    page,
+  }) => {
+    const errors: string[] = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    await page.goto(base)
+
+    const first = page.getByRole('switch', { name: 'Notifications' })
+    const second = page.getByRole('switch', { name: 'Product updates' })
+    await first.focus()
+    await page.keyboard.press('Space')
+    await expect(first).toHaveAttribute('aria-checked', 'true')
+    await expect(second).toHaveAttribute('aria-checked', 'true')
+
+    for (let i = 0; i < 5; i++) await first.click()
+
+    await expect(first).toHaveAttribute('aria-checked', 'false')
+    await expect
+      .poll(() => first.evaluate((element) => element.getAnimations({ subtree: true }).length))
+      .toBe(0)
+    await expect(first.locator('.thumb')).toHaveCSS('translate', '0px')
+    await expect(second.locator('.thumb')).toHaveCSS('translate', '24px')
+
+    await second.focus()
+    await page.keyboard.press('Enter')
+    await expect(second).toHaveAttribute('aria-checked', 'false')
+    await expect(first).toHaveAttribute('aria-checked', 'false')
+    expect(errors).toEqual([])
+  })
 })
 
 test('demo routes mount one demo at a time and support browser navigation', async ({ page }) => {
@@ -59,7 +80,7 @@ test('demo routes mount one demo at a time and support browser navigation', asyn
 
   await page.goto(base)
   await expect(page).toHaveURL(`${base}/toggle`)
-  await expect(page.getByRole('heading', { name: 'Toggle', exact: true })).toBeVisible()
+  await expect(page.getByRole('switch')).toHaveCount(2)
   await expect.poll(definitions).toEqual(['toggle', 'toggle'])
 
   await page.getByRole('link', { name: 'Beacon', exact: true }).click()
