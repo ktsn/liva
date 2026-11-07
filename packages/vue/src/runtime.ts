@@ -2,6 +2,8 @@ import { LivaPresenceBoundary, type PresenceEntry, type PresenceTarget } from '.
 import type { App, ComponentCustomOptions, DirectiveBinding, ObjectDirective, Plugin } from 'vue'
 import {
   LivaInstance,
+  ROOT_TARGET,
+  rootTargetBindings,
   type Definition,
   type RuntimeDiagnostic,
   type LifecycleSession,
@@ -80,7 +82,10 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
 
       const reconcileNow = () => {
         const bindings = new Map<InstanceBinding, [string, HTMLElement][]>()
-        for (const root of roots.values()) bindings.set(root, [['self', root.root]])
+
+        for (const root of roots.values()) {
+          bindings.set(root, [])
+        }
 
         for (const [element, target] of targets) {
           const explicit = lifecycleTargets.get(element)
@@ -92,12 +97,14 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
             root = parent ? roots.get(parent) : undefined
           }
 
-          if (root && owners.get(root.root) === target.owner && target.name !== 'self') {
+          if (root && owners.get(root.root) === target.owner) {
             bindings.get(root)!.push([target.name, element])
           }
         }
 
-        for (const [root, entries] of bindings) root.runtime.bind(entries)
+        for (const [root, entries] of bindings) {
+          root.runtime.bind(rootTargetBindings(root.root, entries))
+        }
       }
 
       const reconcile = () => {
@@ -180,7 +187,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
       const rootDirective: ObjectDirective<HTMLElement, MotionValue | PresenceBinding> = {
         created(element, binding) {
           mount(element, binding)
-          registerLifecycleTarget(element, binding, 'self')
+          registerLifecycleTarget(element, binding, ROOT_TARGET)
         },
         updated(element, binding) {
           const record = roots.get(element)

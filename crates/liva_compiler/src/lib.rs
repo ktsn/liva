@@ -4,6 +4,7 @@ mod diagnostic_source;
 pub mod edits;
 pub mod expression;
 pub mod ir;
+mod target;
 
 use diagnostic_source::{header_range, name_range, significant_range};
 use expression::ExprExt;
@@ -13,6 +14,7 @@ use liva_syntax::ast::{self as syn, AstNode, HasHeader, HasItems, HasValue};
 use liva_syntax::{Diagnostic, Kind, Range, parse};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+use target::{TargetId, TargetOrigin, TimedProperty};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,50 +42,6 @@ struct Compiler {
     diagnostics: Vec<Diagnostic>,
     mappings: BTreeMap<String, Mapping>,
     sources: BTreeMap<String, liva_syntax::SyntaxNode>,
-}
-
-/// Direct declarations retain their source node while sharing the self destination.
-fn animation_targets(node: &impl AstNode) -> Vec<(String, syn::Block, bool)> {
-    let mut targets = vec![];
-
-    for child in node.syntax().children() {
-        if let Some(target) = syn::Target::cast(child.clone()) {
-            targets.push((
-                target.header().unwrap_or_default(),
-                syn::Block::cast(child).unwrap(),
-                false,
-            ));
-        }
-    }
-
-    if syn::animation_properties(node).next().is_some() {
-        targets.insert(
-            0,
-            (
-                "self".into(),
-                syn::Block::cast(node.syntax().clone()).unwrap(),
-                true,
-            ),
-        );
-    }
-
-    targets
-}
-
-fn merge_targets<P>(targets: Vec<Target<P>>) -> Vec<Target<P>> {
-    let mut merged: Vec<Target<P>> = vec![];
-
-    for target in targets {
-        if target.name == "self"
-            && let Some(previous) = merged.iter_mut().find(|item| item.name == "self")
-        {
-            previous.properties.extend(target.properties);
-        } else {
-            merged.push(target);
-        }
-    }
-
-    merged
 }
 
 impl Compiler {
@@ -462,187 +420,139 @@ impl Compiler {
         };
         self.mapping(path, node, "block");
         let timing_expression = self.decorator_expression(node, scope, expression::Type::Timing);
-        let mut targets = vec![];
-        let mut seen = BTreeMap::new();
-
-        let mut target_properties = BTreeMap::new();
-
-        for binding in node.children::<syn::LetBinding>() {
-            self.error(
-                "semantic.structure",
-                "Let declarations belong directly to a motion",
-                &binding,
-            );
-        }
-
-        for (name, target, implicit) in animation_targets(node) {
-            if name != "self" || !implicit {
-                self.unique(&mut seen, &name, &target);
-            }
-            let target_path = format!("{path}/target/{name}");
-            self.mapping(
-                &target_path,
-                &target,
-                if implicit { "implicitTarget" } else { "block" },
-            );
-            for binding in target.bindings().filter(|_| !implicit) {
-                self.error(
-                    "semantic.structure",
-                    "Let declarations belong directly to a motion",
-                    &binding,
-                );
-            }
-            let target_timing = if implicit {
-                None
-            } else {
-                self.decorator_expression(&target, scope, expression::Type::Timing)
-            };
-            let mut properties = vec![];
-            let mut local_properties = BTreeMap::new();
-            let property_names = if name == "self" {
-                target_properties
-                    .entry(name.clone())
-                    .or_insert_with(BTreeMap::new)
-            } else {
-                &mut local_properties
-            };
-
-            for item in syn::animation_properties(&target) {
-                let property = match item {
-                    syn::AnimationProperty::Keyframes(property) => property,
-                    syn::AnimationProperty::Shorthand(property) => {
-                        let offset = endpoint;
-                        let name = property.header().unwrap_or_default();
-                        self.unique(property_names, &name, &property);
-                        let property_path = format!("{target_path}/property/{name}");
-                        self.mapping(&property_path, &property, "block");
-                        if !liva_syntax::is_property(&name) {
-                            self.error(
-                                "semantic.declaration",
-                                "Expected a CSS property",
-                                &property,
-                            );
-                            continue;
-                        }
-                        let value = property.value_text().unwrap_or_default();
-                        let value_node = property.value_node().unwrap();
-                        if value.is_empty() {
-                            self.error("semantic.value", "Value must not be empty", &value_node);
-                        }
-                        let frame_path = format!("{property_path}/frame/{offset}");
-                        self.mapping(&frame_path, &property, "block");
-                        self.mapping(&format!("{frame_path}/value"), &value_node, "value");
-                        properties.push(PropertyTransition {
-                            timing_expression: self.decorator_expression(
-                                &property,
-                                scope,
-                                expression::Type::Timing,
-                            ),
-                            name,
-                            timing: None,
-                            keyframes: Some(vec![Frame {
-                                easing_expression: None,
-                                offset,
-                                value,
-                                easing: None,
-                                template: self.css_template(&property, scope),
-                            }]),
-                        });
-                        continue;
-                    }
-                };
-                let name = property.header().unwrap_or_default();
-                self.unique(property_names, &name, &property);
-                let property_path = format!("{target_path}/property/{name}");
-                self.mapping(&property_path, &property, "block");
-                self.animation_declarations(&property, &property_path);
-                let timing_expression =
-                    self.decorator_expression(&property, scope, expression::Type::Timing);
-                let mut frames = vec![];
-                let mut offsets = BTreeMap::new();
-
-                for block in property.blocks() {
-                    self.error(
-                        "semantic.structure",
-                        "Property tracks contain inline keyframes",
-                        &block,
-                    );
-                }
-
-                for frame in property.keyframes() {
-                    let raw = frame.header().unwrap();
-                    let offset =
-                        raw.trim_end_matches('%').parse::<f64>().unwrap_or(f64::NAN) / 100.0;
-                    if !offset.is_finite() || !(0.0..=1.0).contains(&offset) {
-                        self.error(
-                            "semantic.offset",
-                            "Frame offset must be between 0% and 100%",
-                            &frame,
-                        );
-                        continue;
-                    }
-                    self.unique(&mut offsets, &offset.to_string(), &frame);
-                    let frame_path = format!("{property_path}/frame/{offset}");
-                    self.mapping(&frame_path, &frame, "block");
-                    self.mapping(
-                        &format!("{frame_path}/offset"),
-                        &frame.header_node().unwrap(),
-                        "value",
-                    );
-                    let value_node = frame.value_node().unwrap();
-                    let value = frame.value_text().unwrap_or_default();
-
-                    if value.is_empty() {
-                        self.error("semantic.frame", "Frame requires a value", &value_node);
-                    }
-
-                    self.mapping(&format!("{frame_path}/value"), &value_node, "value");
-                    let template = self.css_template(&frame, scope);
-                    let easing_expression =
-                        self.decorator_expression(&frame, scope, expression::Type::Easing);
-
-                    frames.push(Frame {
-                        easing_expression: easing_expression.clone(),
-                        template,
-                        offset,
-                        value,
-                        easing: None,
-                    });
-                }
-
-                frames.sort_by(|a, b| a.offset.total_cmp(&b.offset));
-                properties.push(PropertyTransition {
-                    timing_expression,
-                    name,
-                    timing: None,
-                    keyframes: if frames.is_empty() {
-                        None
-                    } else {
-                        Some(frames)
-                    },
-                });
-            }
-
-            if name == "self" {
-                for property in &mut properties {
-                    if property.timing_expression.is_none() {
-                        property.timing_expression = target_timing.clone();
-                    }
-                }
-            }
-
-            targets.push(Target {
-                timing_expression: if name == "self" { None } else { target_timing },
-                name,
-                properties,
-            });
-        }
+        let targets = self.compile_targets(node, path, scope, |compiler, target, path, seen| {
+            compiler.transition_properties(target, path, scope, seen, endpoint)
+        });
 
         Transition {
             timing: None,
-            targets: merge_targets(targets),
+            targets,
             timing_expression,
         }
+    }
+
+    fn transition_properties(
+        &mut self,
+        target: &syn::Block,
+        target_path: &str,
+        scope: &expression::Scope,
+        property_names: &mut BTreeMap<String, Range>,
+        endpoint: f64,
+    ) -> Vec<PropertyTransition> {
+        let mut properties = vec![];
+
+        for item in syn::animation_properties(target) {
+            let property = match item {
+                syn::AnimationProperty::Keyframes(property) => property,
+                syn::AnimationProperty::Shorthand(property) => {
+                    let offset = endpoint;
+                    let name = property.header().unwrap_or_default();
+                    self.unique(property_names, &name, &property);
+                    let property_path = format!("{target_path}/property/{name}");
+                    self.mapping(&property_path, &property, "block");
+                    if !liva_syntax::is_property(&name) {
+                        self.error("semantic.declaration", "Expected a CSS property", &property);
+                        continue;
+                    }
+                    let value = property.value_text().unwrap_or_default();
+                    let value_node = property.value_node().unwrap();
+                    if value.is_empty() {
+                        self.error("semantic.value", "Value must not be empty", &value_node);
+                    }
+                    let frame_path = format!("{property_path}/frame/{offset}");
+                    self.mapping(&frame_path, &property, "block");
+                    self.mapping(&format!("{frame_path}/value"), &value_node, "value");
+                    properties.push(PropertyTransition {
+                        timing_expression: self.decorator_expression(
+                            &property,
+                            scope,
+                            expression::Type::Timing,
+                        ),
+                        name,
+                        timing: None,
+                        keyframes: Some(vec![Frame {
+                            easing_expression: None,
+                            offset,
+                            value,
+                            easing: None,
+                            template: self.css_template(&property, scope),
+                        }]),
+                    });
+                    continue;
+                }
+            };
+            let name = property.header().unwrap_or_default();
+            self.unique(property_names, &name, &property);
+            let property_path = format!("{target_path}/property/{name}");
+            self.mapping(&property_path, &property, "block");
+            self.animation_declarations(&property, &property_path);
+            let timing_expression =
+                self.decorator_expression(&property, scope, expression::Type::Timing);
+            let mut frames = vec![];
+            let mut offsets = BTreeMap::new();
+
+            for block in property.blocks() {
+                self.error(
+                    "semantic.structure",
+                    "Property tracks contain inline keyframes",
+                    &block,
+                );
+            }
+
+            for frame in property.keyframes() {
+                let raw = frame.header().unwrap();
+                let offset = raw.trim_end_matches('%').parse::<f64>().unwrap_or(f64::NAN) / 100.0;
+                if !offset.is_finite() || !(0.0..=1.0).contains(&offset) {
+                    self.error(
+                        "semantic.offset",
+                        "Frame offset must be between 0% and 100%",
+                        &frame,
+                    );
+                    continue;
+                }
+                self.unique(&mut offsets, &offset.to_string(), &frame);
+                let frame_path = format!("{property_path}/frame/{offset}");
+                self.mapping(&frame_path, &frame, "block");
+                self.mapping(
+                    &format!("{frame_path}/offset"),
+                    &frame.header_node().unwrap(),
+                    "value",
+                );
+                let value_node = frame.value_node().unwrap();
+                let value = frame.value_text().unwrap_or_default();
+
+                if value.is_empty() {
+                    self.error("semantic.frame", "Frame requires a value", &value_node);
+                }
+
+                self.mapping(&format!("{frame_path}/value"), &value_node, "value");
+                let template = self.css_template(&frame, scope);
+                let easing_expression =
+                    self.decorator_expression(&frame, scope, expression::Type::Easing);
+
+                frames.push(Frame {
+                    easing_expression: easing_expression.clone(),
+                    template,
+                    offset,
+                    value,
+                    easing: None,
+                });
+            }
+
+            frames.sort_by(|a, b| a.offset.total_cmp(&b.offset));
+            properties.push(PropertyTransition {
+                timing_expression,
+                name,
+                timing: None,
+                keyframes: if frames.is_empty() {
+                    None
+                } else {
+                    Some(frames)
+                },
+            });
+        }
+
+        properties
     }
 
     fn style_properties(
@@ -789,7 +699,7 @@ impl Compiler {
         bindings: &[BindingView],
     ) -> expression::Scope {
         use expression::Type;
-        let mut scope = expression::Scope::from([("self".into(), Type::Target)]);
+        let mut scope = expression::Scope::from([(TargetId::Root.name().into(), Type::Target)]);
         let mut declared: BTreeMap<_, _> = node
             .parameters()
             .map(|parameter| {
@@ -801,10 +711,10 @@ impl Compiler {
             .collect();
 
         for parameter in parameters {
-            if parameter.name == "self" {
+            if TargetId::from_name(parameter.name.clone()) == TargetId::Root {
                 let parameter = node
                     .parameters()
-                    .find(|item| item.header().as_deref() == Some("self"))
+                    .find(|item| item.header().as_deref() == Some(TargetId::Root.name()))
                     .unwrap();
                 self.error(
                     "semantic.variable",
@@ -845,7 +755,7 @@ impl Compiler {
                 );
             }
 
-            if name == "self" {
+            if TargetId::from_name(name.clone()) == TargetId::Root {
                 continue;
             }
 
@@ -907,10 +817,47 @@ impl Compiler {
         path: &str,
         scope: &expression::Scope,
     ) -> Vec<Target<Property>> {
-        let mut targets = vec![];
-        let mut target_names = BTreeMap::new();
+        self.compile_targets(node, path, scope, |compiler, target, path, seen| {
+            compiler.style_properties(target, path, scope, seen)
+        })
+    }
 
-        let mut target_properties = BTreeMap::new();
+    fn compile_targets<P: TimedProperty>(
+        &mut self,
+        node: &impl AstNode,
+        path: &str,
+        scope: &expression::Scope,
+        mut compile_properties: impl FnMut(
+            &mut Self,
+            &syn::Block,
+            &str,
+            &mut BTreeMap<String, Range>,
+        ) -> Vec<P>,
+    ) -> Vec<Target<P>> {
+        let mut declarations = vec![];
+
+        if syn::animation_properties(node).next().is_some() {
+            declarations.push((
+                TargetId::Root,
+                TargetOrigin::Implicit,
+                syn::Block::cast(node.syntax().clone()).unwrap(),
+            ));
+        }
+
+        declarations.extend(node.syntax().children().filter_map(|child| {
+            let target = syn::Target::cast(child.clone())?;
+
+            Some((
+                TargetId::from_name(target.header().unwrap_or_default()),
+                TargetOrigin::Explicit,
+                syn::Block::cast(child).unwrap(),
+            ))
+        }));
+
+        let mut targets: Vec<Target<P>> = vec![];
+        let mut root_index: Option<usize> = None;
+        let mut target_names = BTreeMap::new();
+        let mut root_properties = BTreeMap::new();
 
         for binding in node.children::<syn::LetBinding>() {
             self.error(
@@ -920,55 +867,63 @@ impl Compiler {
             );
         }
 
-        for (target_name, target, implicit) in animation_targets(node) {
-            if target_name != "self" || !implicit {
-                self.unique(&mut target_names, &target_name, &target);
-            }
-            let target_path = format!("{path}/target/{target_name}");
-            self.mapping(
-                &target_path,
-                &target,
-                if implicit { "implicitTarget" } else { "block" },
-            );
-            for binding in target.bindings().filter(|_| !implicit) {
-                self.error(
-                    "semantic.structure",
-                    "Let declarations belong directly to a motion",
-                    &binding,
-                );
-            }
+        for (id, origin, source) in declarations {
+            let name = id.name();
+            let target_path = format!("{path}/target/{name}");
+            self.mapping(&target_path, &source, origin.mapping_kind());
+
+            let timing = match origin {
+                TargetOrigin::Implicit => None,
+                TargetOrigin::Explicit => {
+                    self.unique(&mut target_names, name, &source);
+
+                    for binding in source.bindings() {
+                        self.error(
+                            "semantic.structure",
+                            "Let declarations belong directly to a motion",
+                            &binding,
+                        );
+                    }
+
+                    self.decorator_expression(&source, scope, expression::Type::Timing)
+                }
+            };
 
             let mut local_properties = BTreeMap::new();
-            let seen = if target_name == "self" {
-                target_properties
-                    .entry(target_name.clone())
-                    .or_insert_with(BTreeMap::new)
-            } else {
-                &mut local_properties
+            let seen = match id {
+                TargetId::Root => &mut root_properties,
+                TargetId::Named(_) => &mut local_properties,
             };
-            let mut properties = self.style_properties(&target, &target_path, scope, seen);
-            let timing = if implicit {
-                None
-            } else {
-                self.decorator_expression(&target, scope, expression::Type::Timing)
-            };
+            let mut properties = compile_properties(self, &source, &target_path, seen);
 
-            if target_name == "self" {
-                for property in &mut properties {
-                    if property.timing_expression.is_none() {
-                        property.timing_expression = timing.clone();
+            match id {
+                TargetId::Root => {
+                    // A fragment's timing belongs only to its own properties, even
+                    // when implicit and explicit root declarations are merged.
+                    for property in &mut properties {
+                        property.inherit_timing(&timing);
+                    }
+
+                    if let Some(index) = root_index {
+                        targets[index].properties.extend(properties);
+                    } else {
+                        root_index = Some(targets.len());
+                        targets.push(Target {
+                            name: id.name().into(),
+                            timing_expression: None,
+                            properties,
+                        });
                     }
                 }
+                TargetId::Named(name) => targets.push(Target {
+                    name,
+                    timing_expression: timing,
+                    properties,
+                }),
             }
-
-            targets.push(Target {
-                timing_expression: if target_name == "self" { None } else { timing },
-                name: target_name,
-                properties,
-            });
         }
 
-        merge_targets(targets)
+        targets
     }
 
     fn definition(&mut self, node: &syn::Motion) -> Definition {
@@ -1259,7 +1214,7 @@ impl Compiler {
                 for target in &animation.targets {
                     let target_path = format!("{path}/target/{}", target.name);
 
-                    if target.name != "self"
+                    if TargetId::from_name(target.name.clone()) != TargetId::Root
                         && !def
                             .layers
                             .iter()

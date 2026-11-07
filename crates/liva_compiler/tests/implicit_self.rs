@@ -137,3 +137,55 @@ fn editor_track_edits_preserve_implicit_self_and_surrounding_source() {
 
     assert_eq!(result.source[range.start..range.end].trim(), "1.1");
 }
+
+#[test]
+fn root_fragment_timing_matches_property_timing_in_styles_and_transitions() {
+    let mixed = "opacity: .5; @tween(duration: 200)\nself { scale: 1; rotate: 20deg @tween(duration: 300) }";
+    let flattened =
+        "opacity: .5; scale: 1 @tween(duration: 200); rotate: 20deg @tween(duration: 300)";
+
+    for scope in [
+        "@tween(duration: 100)\nlayer base { BODY }",
+        "layer base {} @tween(duration: 100)\nenter { BODY }",
+        "layer base {} @tween(duration: 100)\nleave { BODY }",
+    ] {
+        let mixed = valid(&format!(
+            "motion example {{ {} }}",
+            scope.replace("BODY", mixed)
+        ));
+        let flattened = valid(&format!(
+            "motion example {{ {} }}",
+            scope.replace("BODY", flattened)
+        ));
+
+        assert_eq!(mixed.definitions, flattened.definitions, "{scope}");
+    }
+}
+
+#[test]
+fn explicit_target_duplicates_remain_errors_after_root_fragment_merging() {
+    for scope in ["layer base { BODY }", "layer base {} enter { BODY }"] {
+        for declarations in [
+            "self { opacity: 1 } self { scale: 1 }",
+            "box { opacity: 1 } box { scale: 1 }",
+        ] {
+            let result = compile(
+                &format!(
+                    "motion example {{ {} }}",
+                    scope.replace("BODY", declarations)
+                ),
+                true,
+            );
+
+            assert!(result.definitions.is_empty());
+            assert!(
+                result.diagnostics.iter().any(|diagnostic| {
+                    diagnostic.code == "semantic.duplicate"
+                        && diagnostic.message.starts_with("Duplicate declaration:")
+                }),
+                "{:?}",
+                result.diagnostics
+            );
+        }
+    }
+}

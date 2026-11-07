@@ -255,10 +255,9 @@ fn ensure_typed_property(
         return insert(source, target, &property);
     }
 
-    let target = if target_name == "self" {
-        property
-    } else {
-        format!("{target_name} {{ {property} }}")
+    let target = match crate::target::TargetId::from_name(target_name) {
+        crate::target::TargetId::Root => property,
+        crate::target::TargetId::Named(name) => format!("{name} {{ {property} }}"),
     };
 
     if mapping(compiled, &transition_path, "block").is_err() {

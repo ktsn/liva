@@ -1,6 +1,6 @@
 import { NodeTypes, ElementTypes, type ElementNode, type DirectiveNode } from '@vue/compiler-core'
 import { MagicString, parse } from '@vue/compiler-sfc'
-import { hasLifecycle, lifecycleTransitions, type Definition } from '@liva/runtime'
+import { hasLifecycle, lifecycleTransitions, ROOT_TARGET, type Definition } from '@liva/runtime'
 
 type Root = NonNullable<ReturnType<typeof parse>['descriptor']['template']>['ast']
 type Element = ElementNode
@@ -107,7 +107,7 @@ export function planPresence(source: string, filename: string, definitions: read
       roots.has(target) &&
       lifecycleTransitions(roots.get(target)!.definition, 'enter')
         .concat(lifecycleTransitions(roots.get(target)!.definition, 'leave'))
-        .some((transition) => transition.targets.some((item) => item.name === 'self'))
+        .some((transition) => transition.targets.some((item) => item.name === ROOT_TARGET))
     if (!targetDirective && !selfTarget) continue
     const root = path.findLast((node) => directive(node, 'liva'))
     if (!root || !roots.has(root)) continue
@@ -116,7 +116,10 @@ export function planPresence(source: string, filename: string, definitions: read
     if (targetDirective && !declaredName && hasLifecycle(definition)) {
       fail(target, 'Liva presence requires a static target directive argument.')
     }
-    const targetNames = [...(selfTarget ? ['self'] : []), ...(declaredName ? [declaredName] : [])]
+    const targetNames = [
+      ...(selfTarget ? [ROOT_TARGET] : []),
+      ...(declaredName ? [declaredName] : []),
+    ]
     if (!targetNames.length) continue
     const enter = lifecycleTransitions(definition, 'enter').some((transition) =>
       transition.targets.some((item) => targetNames.includes(item.name)),

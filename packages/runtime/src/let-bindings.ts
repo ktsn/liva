@@ -1,3 +1,4 @@
+import { ROOT_TARGET } from './targets.ts'
 import type {
   Definition,
   Expression,
@@ -19,7 +20,7 @@ export function targetValues(
   previous: VariableValues = {},
 ): VariableValues {
   const names = new Set([
-    'self',
+    ROOT_TARGET,
     ...definition.layers
       .flatMap((layer) => [layer, ...(layer.states ?? [])])
       .flatMap((state) => state.targets.map((target) => target.name)),
