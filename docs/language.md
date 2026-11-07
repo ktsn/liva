@@ -13,7 +13,11 @@ motion card {
   let movement = drag(target: body)
 
   layer interaction {
-    body { translate: 0 0; @tween(duration: 200, easing: easeOut) scale ~> { 100%: 1 } }
+    body {
+      translate: 0 0
+      @tween(duration: 200, easing: easeOut)
+      scale ~> { 100%: 1 }
+    }
 
     state idle initial {}
     state dragging {
@@ -23,8 +27,10 @@ motion card {
     transition idle -> dragging when movement.active
     transition dragging -> idle when !movement.active {
       body {
-        @spring(stiffness: 300, damping: 20) translate ~> {}
-        @tween(duration: 180, easing: easeOut) scale ~> {}
+        @spring(stiffness: 300, damping: 20)
+        translate ~> {}
+        @tween(duration: 180, easing: easeOut)
+        scale ~> {}
       }
     }
   }
@@ -225,7 +231,8 @@ and individual frame easing follow their values.
 ## Inline keyframes
 
 ```liva
-@tween(duration: 350, easing: easeInOut) scale ~> {
+@tween(duration: 350, easing: easeInOut)
+scale ~> {
   40%: 1.3 1 @easeIn
   70%: 0.95 1 @cubicBezier(x1: 0.2, y1: 0.8, x2: 0.2, y2: 1)
   100%: 1
@@ -256,10 +263,12 @@ motion panel(open: boolean) {
   layer opened when open { content { scale: 1 } }
 
   enter {
-    @tween(duration: 250, easing: easeOut) content { opacity: 0; scale: 0.8 }
+    @tween(duration: 250, easing: easeOut)
+    content { opacity: 0; scale: 0.8 }
   }
   leave {
-    @tween(duration: 200, easing: easeIn) content { opacity: 0; scale: 0.9 }
+    @tween(duration: 200, easing: easeIn)
+    content { opacity: 0; scale: 0.9 }
   }
 }
 ```
@@ -376,7 +385,8 @@ structure are authored in source.
 
 ```liva
 motion toggle(checked: boolean) {
-  @tween(duration: 350, easing: easeOut) layer toggle {
+  @tween(duration: 350, easing: easeOut)
+  layer toggle {
     track { background-color: #888 @tween(duration: 200, easing: easeInOut) }
     thumb { translate: 0 0 @spring(stiffness: 300, damping: 20); scale: 1 }
 
@@ -391,7 +401,8 @@ motion toggle(checked: boolean) {
     }
     transition on -> off when !(checked) {
       thumb {
-        @spring(duration: 350, bounce: 0.2) translate ~> {}
+        @spring(duration: 350, bounce: 0.2)
+        translate ~> {}
         scale ~> { 40%: 1.3 1 @easeIn; 70%: 0.95 1 @easeOut }
       }
     }
@@ -528,10 +539,12 @@ declarations cannot have timing decorators. A keyframe segment accepts an easing
 motion button {
   let quick = tween(duration: 150, easing: easeOut)
   layer base {
-    @quick body {
+    @quick
+    body {
       opacity: 1
       scale: 1 @spring(stiffness: 300, damping: 20)
-      @tween(duration: 400) translate ~> {
+      @tween(duration: 400)
+      translate ~> {
         0%: 0 20px
         50%: 0 5px @easeOut
         100%: 0 0
@@ -543,7 +556,9 @@ motion button {
 
 Timing decorators precede layers, states, directional transitions, motion-level
 enter/leave, targets, and property keyframe blocks. They attach to the next
-structural declaration, whether on the same line or a preceding line. Comments
+structural declaration. Write each structural decorator on its own line, with
+the block starting on the following line at the same indentation. The parser
+also accepts same-line prefixes. Comments
 between the expression and declaration are preserved. `motion`, `let`, and
 `event` do not accept decorators.
 
@@ -553,7 +568,7 @@ An easing decorator on 100% has no outgoing interval and produces a warning.
 Omitted transition/lifecycle endpoints are completed at runtime, so an easing on
 an earlier last explicit frame still controls the interval to the implicit 100%.
 Timing and easing expressions use the ordinary expression grammar and type checks.
-Source edits emit same-line structural prefixes and keep value decorators as suffixes;
+Source edits emit structural prefixes on their own lines and keep value decorators as suffixes;
 there is no standalone formatter, and unrelated source formatting is preserved.
 
 The target timing is a default; a property's decorator replaces that whole value.
@@ -580,13 +595,15 @@ Shared transition timing can animate resolved properties without declaring track
 Headers can span lines, and a guarded transition can omit its body:
 
 ```liva
-@tween (duration: 200) layer interaction {
+@tween (duration: 200)
+layer interaction {
   body {
     opacity: 1;
   }
   state idle initial {
   }
-  @spring (duration: 400) state active {
+  @spring (duration: 400)
+  state active {
     body {
       opacity: 0.5;
     }

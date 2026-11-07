@@ -111,7 +111,8 @@ motion panel {
     }
   }
 
-  @tween(duration: 100) enter {
+  @tween(duration: 100)
+  enter {
 
     direct {
       opacity ~> {
@@ -162,7 +163,8 @@ motion panel {
     }
   }
 
-  @tween(duration: 300) leave {
+  @tween(duration: 300)
+  leave {
 
     direct {
       opacity ~> {
@@ -189,7 +191,8 @@ motion panel {
     }
 
     secondary {
-      @tween(duration: 500) opacity ~> {
+      @tween(duration: 500)
+      opacity ~> {
         100%: 0
       }
     }
@@ -221,7 +224,8 @@ motion panel {
 }
 
 motion nested(dimmed: boolean) {
-  @tween(duration: 1) layer base {
+  @tween(duration: 1)
+  layer base {
     body {
       opacity: 1
     }
@@ -233,7 +237,8 @@ motion nested(dimmed: boolean) {
     }
   }
 
-  @tween(duration: 400) leave {
+  @tween(duration: 400)
+  leave {
 
     body {
       opacity ~> {
@@ -244,7 +249,8 @@ motion nested(dimmed: boolean) {
 }
 
 motion parameters(value: boolean, owner: boolean, entries: boolean) {
-  @tween(duration: 1) layer base {
+  @tween(duration: 1)
+  layer base {
     body {
       opacity: 1
     }
@@ -256,7 +262,8 @@ motion parameters(value: boolean, owner: boolean, entries: boolean) {
     }
   }
 
-  @tween(duration: 100) enter {
+  @tween(duration: 100)
+  enter {
 
     body {
       opacity ~> {

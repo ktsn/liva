@@ -18,7 +18,8 @@ const active = ref(false)
 
 <liva lang="liva">
 motion motion(checked: boolean) {
-  @tween(duration: 50) layer selection {
+  @tween(duration: 50)
+  layer selection {
     state off initial { box { background-color: red } }
     state on { box { background-color: blue } }
     transition off -> on when checked

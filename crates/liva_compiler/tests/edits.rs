@@ -209,7 +209,7 @@ fn timing_edits_preserve_existing_frames_and_comments() {
     assert!(
         result
             .source
-            .contains("@tween(duration: 3000, easing: easeIn) scale")
+            .contains("@tween(duration: 3000, easing: easeIn)\n      scale")
     );
 }
 

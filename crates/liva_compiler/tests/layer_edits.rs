@@ -215,7 +215,7 @@ fn moving_a_transition_shorthand_preserves_its_timing_and_value_expression() {
     assert!(
         result
             .source
-            .contains("@tween(duration: 200) opacity ~> { 80%: ${amount} }")
+            .contains("@tween(duration: 200)\nopacity ~> { 80%: ${amount} }")
     );
 }
 
@@ -257,5 +257,53 @@ fn typed_lifecycle_timing_creates_a_motion_level_track_for_a_layer_property() {
 
     assert!(result.compilation.definitions[0].enter.is_some());
     assert!(result.source.contains("layer base { body { opacity: 1 } }"));
-    assert!(result.source.contains("@tween(duration: 200) opacity"));
+    assert!(result.source.contains("@tween(duration: 200)\nopacity"));
+}
+
+#[test]
+fn new_track_timing_starts_the_block_on_the_next_indented_line() {
+    for (newline, indent) in [("\n", "  "), ("\r\n", "\t")] {
+        let track_indent = indent.repeat(3);
+        let source = format!(
+            "motion sample {{{newline}{indent}layer base {{{newline}{indent}{indent}body {{{newline}{track_indent}opacity ~> {{ 100%: 1 }}{newline}{indent}{indent}}}{newline}{indent}}}{newline}}}"
+        );
+
+        let result = apply_edits(
+            &source,
+            &[Edit::Timing {
+                path: OPACITY.into(),
+                value: Some("tween(duration: 200)".into()),
+            }],
+        )
+        .unwrap();
+
+        assert!(result.source.contains(&format!(
+            "{track_indent}@tween(duration: 200){newline}{track_indent}opacity ~>"
+        )));
+    }
+}
+
+#[test]
+fn track_conversion_moves_value_timing_to_a_separate_indented_prefix() {
+    for (newline, indent) in [("\n", "  "), ("\r\n", "\t")] {
+        let track_indent = indent.repeat(3);
+        let source = format!(
+            "motion sample {{{newline}{indent}layer base {{{newline}{indent}{indent}body {{{newline}{track_indent}opacity: 1 @tween(duration: 200){newline}{indent}{indent}}}{newline}{indent}}}{newline}}}"
+        );
+
+        let result = apply_edits(
+            &source,
+            &[Edit::AddFrame {
+                path: OPACITY.into(),
+                offset: 0.5,
+                value: "0.5".into(),
+                easing: None,
+            }],
+        )
+        .unwrap();
+
+        assert!(result.source.contains(&format!(
+            "{track_indent}@tween(duration: 200){newline}{track_indent}opacity ~>"
+        )));
+    }
 }

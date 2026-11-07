@@ -295,6 +295,21 @@ fn property_syntax(source: &str, field: &Mapping) -> Result<liva_syntax::SyntaxN
         .ok_or_else(|| "Unknown property declaration".into())
 }
 
+fn structural_decorator(source: &str, offset: usize, expression: &str) -> String {
+    let newline = if source.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let line_start = source[..offset].rfind('\n').map_or(0, |index| index + 1);
+    let indentation: String = source[line_start..offset]
+        .chars()
+        .take_while(|character| matches!(character, ' ' | '\t'))
+        .collect();
+
+    format!("@{}{newline}{indentation}", expression.trim())
+}
+
 fn edit_typed_timing(
     source: &str,
     compiled: &Compilation,
@@ -341,7 +356,10 @@ fn edit_typed_timing(
                         - prepared[boundary.start..boundary.end].trim_end().len());
                 result.insert_str(end, &format!(" @{}", value.trim()));
             } else {
-                result.insert_str(field.range.start, &format!("@{} ", value.trim()));
+                result.insert_str(
+                    field.range.start,
+                    &structural_decorator(&prepared, field.range.start, value),
+                );
             }
         }
         (None, None) => return Err("This property has no local timing override".into()),
@@ -386,7 +404,9 @@ fn prepare_typed_track(source: &str, compiled: &Compilation, path: &str) -> Resu
     let timing = property
         .decorators()
         .next()
-        .map(|decorator| format!("@{} ", decorator.expression_text().trim()))
+        .map(|decorator| {
+            structural_decorator(&prepared, field.range.start, &decorator.expression_text())
+        })
         .unwrap_or_default();
     let endpoint = if path.contains("/enter/") { 0 } else { 100 };
     let body = format!("{timing}{name} ~> {{ {endpoint}%: {value} }}");
