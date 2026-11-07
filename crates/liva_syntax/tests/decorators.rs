@@ -128,7 +128,7 @@ fn prefixes_attach_to_the_next_structure_with_expression_boundaries() {
 }
 
 #[test]
-fn misplaced_decorators_have_migration_diagnostics_and_lossless_recovery() {
+fn malformed_headers_preserve_source_and_following_layers() {
     for header in [
         "layer base @quick {}",
         "layer base { state off initial @quick {} state on {} transition off -> on @quick when true }",
@@ -139,12 +139,6 @@ fn misplaced_decorators_have_migration_diagnostics_and_lossless_recovery() {
         let parsed = parse(&source);
 
         assert_eq!(parsed.root.text(), source);
-        assert!(
-            parsed
-                .diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.message.contains("must precede"))
-        );
         assert!(
             parsed
                 .root

@@ -83,13 +83,7 @@ impl Parser<'_> {
             }
 
             let checkpoint = self.builder.checkpoint();
-            let legacy_property = self.at() == "@"
-                && self.tokens[self.index + 1..]
-                    .iter()
-                    .filter(|token| !token.trivia)
-                    .nth(1)
-                    .is_some_and(|token| token.text == ":");
-            let has_prefix = self.at() == "@" && !legacy_property;
+            let has_prefix = self.at() == "@";
 
             while has_prefix && self.at() == "@" {
                 self.start(Kind::Decorator);
@@ -189,21 +183,14 @@ impl Parser<'_> {
                             self.tokens[begin].text,
                             "layer" | "state" | "transition" | "enter" | "leave"
                         )
-                        && continuation.is_some_and(|token| {
-                            matches!(token.text, "@" | "when" | "initial" | "{")
-                        })
+                        && continuation
+                            .is_some_and(|token| matches!(token.text, "when" | "initial" | "{"))
                     {
                         self.gap();
                         continue;
                     }
 
                     break;
-                }
-
-                if header_words > 0 && nesting_depth == 0 && self.at() == "@" {
-                    self.error("Structural decorators must precede the declaration; move @expression before its header");
-                    self.decorator(true);
-                    continue;
                 }
 
                 if depth == 2
@@ -272,15 +259,12 @@ impl Parser<'_> {
                         }
                     })
                     .collect::<String>();
-                if !(if in_state && depth < 4 {
-                    is_property(name.trim())
-                } else {
-                    is_property(name.trim().trim_start_matches('@'))
-                }) && ((in_state && depth < 4)
-                    || !name
-                        .trim()
-                        .strip_suffix('%')
-                        .is_some_and(|v| v.parse::<f64>().is_ok()))
+                if !is_property(name.trim())
+                    && ((in_state && depth < 4)
+                        || !name
+                            .trim()
+                            .strip_suffix('%')
+                            .is_some_and(|v| v.parse::<f64>().is_ok()))
                 {
                     self.error("Expected a property name");
                 }
@@ -368,7 +352,7 @@ impl Parser<'_> {
         self.end();
     }
 
-    fn decorator(&mut self, header: bool) {
+    fn decorator(&mut self) {
         self.start(Kind::Decorator);
         self.bump();
         let mut depth = 0usize;
@@ -376,7 +360,6 @@ impl Parser<'_> {
         while !self.at().is_empty() {
             if matches!(self.at(), "{" | "}")
                 || (depth == 0 && matches!(self.at(), ";" | "\n" | "\r"))
-                || (header && depth == 0 && matches!(self.at(), "when" | "initial" | "@"))
             {
                 break;
             }
@@ -398,7 +381,7 @@ impl Parser<'_> {
 
         while !self.at().is_empty() {
             if stack.is_empty() && self.at() == "@" {
-                self.decorator(false);
+                self.decorator();
                 break;
             }
 

@@ -464,8 +464,7 @@ Timing decorators precede layers, states, directional transitions, motion-level
 enter/leave, targets, and property keyframe blocks. They attach to the next
 structural declaration, whether on the same line or a preceding line. Comments
 between the expression and declaration are preserved. `motion`, `let`, and
-`event` do not accept decorators. Structural postfix headers are rejected with
-a migration diagnostic: write `@quick layer base`, not `layer base @quick`.
+`event` do not accept decorators.
 
 Value declarations retain suffix decorators: `opacity: 1 @quick` supplies timing,
 and `0%: 0 @easeOut` supplies easing for the outgoing interval to the next frame.
@@ -482,11 +481,8 @@ for scalar interpolation. Style tracks require an explicit 100% destination;
 transition tracks can omit endpoints for completion from their source/destination.
 Only the selected transition or lifecycle evaluates its timing and frame expressions.
 
-To migrate legacy `@tween: 150ms ease-out`, use `@tween(duration: 150, easing: easeOut)`
-on the target or property track. Replace legacy frame suffix `@ ease-out` with
-`@easeOut`, or reference a bound easing value. Removed animation declarations and
-CSS easing suffixes produce actionable compiler errors. The lossless CST retains
-invalid input for diagnostics and decorators separately from CSS value text.
+The lossless CST retains invalid input for diagnostics and decorators separately
+from CSS value text.
 
 ### Layer animation selection
 
@@ -536,14 +532,3 @@ Spring timing on layer tracks applies the sampled spring curve to the complete t
 including intermediate waypoints. Initial state guards resolve before target binding;
 DOM entry animation is controlled by the motion's lifecycle declaration rather than
 replaying an initial machine transition during binding.
-
-## Migration from motion-level states
-
-Move independent visual conditions into ordinary layers. Move exclusive states into
-a stateful layer with one `initial` state and explicit guarded transitions. Replace
-motion-level general timing with shared layer or target decorators and directional
-transitions with local guarded transitions. Pass a parameter object to `v-liva` and
-`LivaInstance`; string state bindings and `setState` are unsupported. Use
-`updateParameters` for application inputs and `composition` for resolved selections.
-The runtime rejects Definition IR containing motion-level `states`,
-`generalTransition`, or `directionalTransitions` instead of executing a compatibility path.

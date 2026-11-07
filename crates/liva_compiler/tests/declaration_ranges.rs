@@ -234,17 +234,7 @@ fn misplaced_declarations_have_local_ranges() {
 
 #[test]
 fn unexpected_animation_declarations_point_to_the_field_name() {
-    for field in [
-        "@tween",
-        "@spring",
-        "@tween-duration",
-        "@tween-easing",
-        "@spring-duration",
-        "@spring-bounce",
-        "@spring-stiffness",
-        "@spring-damping",
-        "@spring-mass",
-    ] {
+    for field in ["duration", "easing", "stiffness"] {
         for body in [
             format!("enter {{ «{field}»: 1; }}"),
             format!("enter {{ t {{ x {{ «{field}»: 1; 0%: 0 }} }} }}"),

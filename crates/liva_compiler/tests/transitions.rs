@@ -178,3 +178,25 @@ fn quoted_and_nested_at_characters_remain_css_values() {
         assert!(frames[0].easing_expression.is_none());
     }
 }
+
+#[test]
+fn malformed_structural_headers_are_rejected() {
+    for header in [
+        "layer base @quick {}",
+        "layer base { state off initial @quick {} state on {} transition off -> on @quick when true }",
+        "enter @quick {}",
+        "leave { body @quick { opacity @quick {} } }",
+    ] {
+        let source = format!("motion sample {{ {header}\nlayer next {{}} }}");
+        let result = compile(&source, true);
+
+        assert!(result.definitions.is_empty(), "{source}");
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.severity == "error"),
+            "{source}"
+        );
+    }
+}
