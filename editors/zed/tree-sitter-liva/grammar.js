@@ -33,7 +33,6 @@ module.exports = grammar({
         field('name', $.identifier),
         optional('initial'),
         optional($.decorator),
-        optional(seq('when', repeat1($._header_item))),
         $.block,
       ),
     layer: ($) =>
@@ -48,9 +47,12 @@ module.exports = grammar({
       prec.right(
         seq(
           'transition',
-          optional(seq($.identifier, '->', $.identifier)),
+          $.identifier,
+          '->',
+          $.identifier,
           optional($.decorator),
-          optional(seq('when', repeat1($._header_item))),
+          'when',
+          repeat1($._header_item),
           optional($.block),
         ),
       ),

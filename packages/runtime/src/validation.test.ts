@@ -16,7 +16,7 @@ function expectInvalidDefinition(definition: unknown) {
 
 describe('serialized definition validation', () => {
   it.each([
-    ['state transitions', fixture],
+    ['layer transitions', fixture],
     ['motion lifecycle animations', lifecycleFixture],
     ['lifecycle animations and events', presenceFixture],
   ])('accepts and freezes compiler output for %s', (_name, serialized) => {
@@ -24,7 +24,37 @@ describe('serialized definition validation', () => {
 
     const bundle = decodeBundle(JSON.stringify(serialized))
     expect(bundle.definitions).toEqual(serialized.definitions)
-    expect(Object.isFrozen(bundle.definitions[0].states)).toBe(true)
+    expect(Object.isFrozen(bundle.definitions[0].layers)).toBe(true)
+  })
+
+  it.each([
+    { kind: 'spring-duration', durationMs: 300, bounce: 0.2 },
+    { kind: 'spring-physics', stiffness: 300, damping: 20, mass: 1 },
+  ])('accepts evaluated spring timing at a lifecycle property: $kind', (timing) => {
+    const definition = {
+      ...valid,
+      enter: { targets: [{ name: 'thumb', properties: [{ name: 'scale', timing }] }] },
+    }
+
+    expect(
+      decodeBundle(JSON.stringify({ schemaVersion: 1, definitions: [definition] })).definitions[0]
+        .enter,
+    ).toEqual(definition.enter)
+  })
+
+  it.each([
+    { kind: 'spring-duration', durationMs: '300ms', bounce: 0.2 },
+    { kind: 'spring-duration', durationMs: 300, bounce: '0.2' },
+    { kind: 'spring-physics', stiffness: '300', damping: 20, mass: 1 },
+    { kind: 'spring-physics', stiffness: 300, damping: '20', mass: 1 },
+    { kind: 'spring-physics', stiffness: 300, damping: 20, mass: '1' },
+  ])('rejects malformed evaluated spring parameters: %j', (timing) => {
+    expect(
+      isDefinition({
+        ...valid,
+        enter: { targets: [{ name: 'thumb', properties: [{ name: 'scale', timing }] }] },
+      }),
+    ).toBe(false)
   })
 
   it('decodes typed decorators and rejects malformed expression payloads', () => {
@@ -37,7 +67,7 @@ describe('serialized definition validation', () => {
     const property = { name: 'opacity', value: '1', timingExpression, keyframes: [frame] }
     const definition = {
       ...valid,
-      states: [{ name: 'idle', targets: [{ name: 'body', properties: [property] }] }],
+      layers: [{ name: 'idle', targets: [{ name: 'body', properties: [property] }] }],
       enter: { targets: [{ name: 'body', properties: [property] }] },
     }
 
@@ -52,7 +82,7 @@ describe('serialized definition validation', () => {
     ]) {
       expectInvalidDefinition({
         ...definition,
-        states: [{ name: 'idle', targets: [{ name: 'body', properties: [changed] }] }],
+        layers: [{ name: 'idle', targets: [{ name: 'body', properties: [changed] }] }],
       })
       expectInvalidDefinition({
         ...definition,
@@ -85,17 +115,20 @@ describe('serialized definition validation', () => {
 
   it.each([
     null,
-    { ...valid, states: [{}] },
+    { ...valid, layers: [{}] },
     {
       ...valid,
-      states: [
+      layers: [
         { name: 'off', targets: [{ name: 'thumb', properties: [{ name: 'scale', value: 1 }] }] },
       ],
     },
-    { ...valid, directionalTransitions: [{ from: 'off', to: 'on' }] },
   ])('rejects malformed state and transition references: %j', expectInvalidDefinition)
 
-  describe.each(['generalTransition', 'enter', 'leave'])('%s animation validation', (field) => {
+  it.each([undefined, null, {}])('rejects missing or malformed layers: %j', (layers) => {
+    expect(isDefinition({ ...valid, layers })).toBe(false)
+  })
+
+  describe.each(['enter', 'leave'])('%s animation validation', (field) => {
     it.each(
       [
         null,
@@ -150,9 +183,9 @@ it('validates string expressions, unknown timing kinds and expression depth limi
 
   expectInvalidDefinition({
     ...valid,
-    generalTransition: { timing: { kind: 'unknown' }, targets: [] },
+    enter: { timing: { kind: 'unknown' }, targets: [] },
   })
-  expectInvalidDefinition({ ...valid, generalTransition: { timing: null, targets: [] } })
+  expectInvalidDefinition({ ...valid, enter: { timing: null, targets: [] } })
 
   let expression: unknown = { kind: 'boolean', value: true }
 

@@ -9,13 +9,15 @@ declare global {
 }
 
 const base = 'http://127.0.0.1:4180'
-test.describe.configure({ mode: 'serial' })
 const file = new URL('../../playground/tests/EditorToggle.vue', import.meta.url)
 
 async function open(page: Page, fixture = false) {
-  await page.goto(fixture ? `${base}/tests/editor.html` : `${base}/tests/legacy-toggle.html`)
+  await page.goto(fixture ? `${base}/tests/editor.html` : `${base}/tests/pulse-toggle.html`)
   await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
   await expect(page.getByLabel('Playhead')).toBeVisible()
+  await page
+    .getByLabel('Existing transition')
+    .selectOption(JSON.stringify({ layer: fixture ? 'selection' : 'toggle', index: 0 }))
 }
 
 async function expectMessage(page: Page, message: string) {
@@ -79,29 +81,23 @@ test('docked timeline scrubs both ways, isolates instances, and yields to applic
   await expect(first).toHaveCSS('background-color', 'rgb(52, 178, 123)')
 })
 
-test('editing inherited keys copies the collection, rejects collisions, and restores inheritance', async ({
+test('transition frame edits reject collisions without losing the selected source', async ({
   page,
 }) => {
   await open(page)
   await track(page, 'thumb', 'scale')
   await page.getByRole('button', { name: 'thumb.scale 40%', exact: true }).click()
-  await expect(page.getByText('Inherited common keyframe', { exact: true })).toBeVisible()
-  await page.getByLabel('Keyframe value', { exact: true }).fill('1.5')
+  await page.getByLabel('Keyframe source value', { exact: true }).fill('1.5')
   await page.getByRole('button', { name: 'Apply keyframe', exact: true }).click()
   await expectMessage(page, 'Previewing')
-  await expect(page.locator('[data-track="thumb.scale"] .key')).toHaveCount(4)
-  await expect(page.getByText('Local keyframe', { exact: true })).toBeVisible()
 
   await page.getByLabel('Keyframe percentage', { exact: true }).fill('70')
   await page.getByRole('button', { name: 'Apply keyframe', exact: true }).click()
-  await expectMessage(page, 'already exists')
+  await expectMessage(page, 'Duplicate declaration')
   await expect(page.getByRole('button', { name: 'thumb.scale 40%', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Use common keyframes', exact: true }).click()
-  await expectMessage(page, 'Previewing')
-  await expect(page.getByLabel('Keyframe value', { exact: true })).toHaveValue('1.3 1')
 })
 
-test('duration edits preserve offsets and spring tracks reject intermediate keys', async ({
+test('duration edits preserve frame offsets and spring editing uses typed expressions', async ({
   page,
 }) => {
   await open(page)
@@ -110,17 +106,15 @@ test('duration edits preserve offsets and spring tracks reject intermediate keys
   await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
   await expectMessage(page, 'Previewing')
   await page.getByRole('button', { name: 'thumb.scale 40%', exact: true }).click()
-  await expect(page.getByLabel('Keyframe time', { exact: true })).toHaveValue('280')
+  await expect(page.getByLabel('Keyframe percentage', { exact: true })).toHaveValue('40')
 
   await track(page, 'thumb', 'translate')
-  await expect(page.getByLabel('Timing mode', { exact: true })).toHaveValue('spring-physics')
   await expect(page.getByRole('button', { name: 'New keyframe at playhead' })).toBeDisabled()
-  await expect(page.getByRole('button', { name: 'Resize thumb.translate' })).toHaveCount(0)
-  await page.getByLabel('Timing mode', { exact: true }).selectOption('spring-duration')
-  await page.getByLabel('Track duration', { exact: true }).fill('400')
+  await page.getByLabel('Timing mode').selectOption('spring-duration')
+  await page.getByLabel('Track duration').fill('400')
   await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
   await expectMessage(page, 'Previewing')
-  await expect(page.getByRole('button', { name: 'Resize thumb.translate' })).toBeVisible()
+  await expect(page.getByLabel('Track duration', { exact: true })).toHaveValue('400')
 })
 
 test('playback pauses and close releases preview effects while retaining draft', async ({
@@ -154,9 +148,10 @@ test('timeline saves timing, new frames and endpoint state values with shared HM
     await track(page, 'box', 'background-color')
     await page.getByLabel('Track duration', { exact: true }).fill('200')
     await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
+    await expectMessage(page, 'Previewing')
     await seek(page, 100)
     await page.getByRole('button', { name: 'New keyframe at playhead' }).click()
-    await page.getByLabel('Keyframe value', { exact: true }).fill('purple')
+    await page.getByLabel('Keyframe source value', { exact: true }).fill('purple')
     await page.getByRole('button', { name: 'Add keyframe', exact: true }).click()
     await expectMessage(page, 'Previewing')
     expect(await readFile(file, 'utf8')).toBe(original)
@@ -164,12 +159,15 @@ test('timeline saves timing, new frames and endpoint state values with shared HM
 
     const saved = await readFile(file, 'utf8')
     expect(saved).toContain('transition off -> on')
-    expect(saved).toContain('@tween: 200ms')
+    expect(saved).toContain('@tween(duration: 200, easing: ease)')
     expect(saved).toContain('50%')
     expect(saved).toContain('%: purple')
     expect(saved.slice(0, saved.indexOf('<liva'))).toBe(
       original.slice(0, original.indexOf('<liva')),
     )
+    await page
+      .getByLabel('Existing transition')
+      .selectOption(JSON.stringify({ layer: 'selection', index: 0 }))
     await track(page, 'box', 'background-color')
     await page.getByRole('button', { name: 'box.background-color 50%', exact: true }).click()
     await page.getByRole('button', { name: 'Delete keyframe', exact: true }).click()
@@ -177,12 +175,8 @@ test('timeline saves timing, new frames and endpoint state values with shared HM
     expect(await readFile(file, 'utf8')).not.toContain('purple')
 
     await track(page, 'box', 'background-color')
-    await page.getByRole('button', { name: 'Use common keyframes', exact: true }).click()
-    await page
-      .getByRole('button', { name: 'box.background-color 100%', exact: true })
-      .press('Enter')
-    await page.getByLabel('Keyframe value', { exact: true }).fill('green')
-    await page.getByRole('button', { name: 'Update state value', exact: true }).click()
+    await page.getByLabel('Source value', { exact: true }).fill('green')
+    await page.getByRole('button', { name: 'Apply value', exact: true }).click()
     await save(page)
     expect(await readFile(file, 'utf8')).toContain('background-color: green')
   } finally {
@@ -213,57 +207,20 @@ test('editor rejects invalid sessions, origins, hosts and oversized requests', a
   expect(oversized.status()).toBe(413)
 })
 
-test('pointer editing adds and moves keys and resizes duration in real time', async ({ page }) => {
+test('timeline pointer gestures seek without changing source frames or timing', async ({
+  page,
+}) => {
   await open(page, true)
   await track(page, 'box', 'background-color')
+
   const lane = page.locator('[data-track="box.background-color"]')
-  const bounds = (await lane.boundingBox())!
-  const duration = Number(await page.getByLabel('Track duration', { exact: true }).inputValue())
 
-  await lane.dblclick({ position: { x: bounds.width * 0.2, y: 18 }, modifiers: ['Alt'] })
-  await page.getByLabel('Keyframe percentage', { exact: true }).fill('40')
-  await page.getByLabel('Keyframe value', { exact: true }).fill('purple')
-  await page.getByRole('button', { name: 'Add keyframe', exact: true }).click()
-  await expectMessage(page, 'Previewing')
-
-  const key = page.getByRole('button', { name: 'box.background-color 40%', exact: true })
-  const keyBounds = (await key.boundingBox())!
-  await page.mouse.move(keyBounds.x + keyBounds.width / 2, keyBounds.y + keyBounds.height / 2)
-  await page.mouse.down()
-  const extent = Number(await page.getByLabel('Playhead').getAttribute('max'))
-
-  await page.mouse.move(
-    bounds.x + bounds.width * ((duration * 0.6) / extent),
-    keyBounds.y + keyBounds.height / 2,
-    {
-      steps: 5,
-    },
-  )
-  await page.mouse.up()
+  await lane.dblclick({ position: { x: 20, y: 18 }, modifiers: ['Alt'] })
+  await expect(page.getByRole('button', { name: 'Add keyframe', exact: true })).toHaveCount(0)
   await expect(
-    page.getByRole('button', { name: 'box.background-color 60%', exact: true }),
-  ).toBeVisible()
-
-  const handle = page.getByRole('button', { name: 'Resize box.background-color', exact: true })
-  const handleBounds = (await handle.boundingBox())!
-  await page.mouse.move(
-    handleBounds.x + handleBounds.width / 4,
-    handleBounds.y + handleBounds.height / 2,
-  )
-  await page.mouse.down()
-  const resizeExtent = Number(await page.getByLabel('Playhead').getAttribute('max'))
-
-  await page.mouse.move(
-    bounds.x + bounds.width * (80 / resizeExtent),
-    handleBounds.y + handleBounds.height / 2,
-    {
-      steps: 5,
-    },
-  )
-  await page.mouse.up()
-  await expect(page.getByLabel('Track duration', { exact: true })).toHaveValue('80')
-  await page.getByRole('button', { name: 'box.background-color 60%', exact: true }).click()
-  await expect(page.getByLabel('Keyframe time', { exact: true })).toHaveValue('48')
+    page.getByRole('button', { name: 'Resize box.background-color', exact: true }),
+  ).toHaveCount(0)
+  expect(await page.evaluate(() => window.__LIVA_EDITOR__.draft)).toEqual([])
 })
 
 test('selection, discard, close and application updates invalidate pending previews', async ({
@@ -291,6 +248,9 @@ test('selection, discard, close and application updates invalidate pending previ
 
   for (const action of ['close', 'application'] as const) {
     await page.getByLabel('Track duration', { exact: true }).fill('600')
+    await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
+    await expectMessage(page, 'Previewing')
+    await page.getByLabel('Track duration', { exact: true }).fill('700')
     await page.evaluate((operation) => {
       const shadow = document.querySelector('[data-liva-editor]')!.shadowRoot!
       const buttons = [...shadow.querySelectorAll('button')]
@@ -300,12 +260,14 @@ test('selection, discard, close and application updates invalidate pending previ
       else document.querySelector<HTMLButtonElement>('[aria-label="Product updates"]')!.click()
     }, action)
 
-    // Observe beyond the 150ms debounce, so a canceled preview cannot pass early.
+    // Allow an in-flight server reply to arrive after cancellation.
     await page.waitForTimeout(300)
     expect(await page.evaluate(() => window.__LIVA_EDITOR__.previewActive)).toBe(false)
     if (action === 'close')
       await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
-    await expect(page.getByLabel('Track duration', { exact: true })).toHaveValue('600')
+    expect(await page.evaluate(() => window.__LIVA_EDITOR__.draft)).toContainEqual(
+      expect.objectContaining({ op: 'timing', value: 'tween(duration: 600, easing: easeOut)' }),
+    )
   }
 })
 
@@ -356,10 +318,11 @@ test('an unsettled spring keeps its parameter controls available for correction'
     const response = await route.fetch()
     const reply = await response.json()
     if (route.request().postDataJSON().action === 'inspect') {
-      const property = reply.definition.generalTransition.targets
+      const property = reply.definition.layers[0].targets
         .find((target: any) => target.name === 'thumb')
         .properties.find((candidate: any) => candidate.name === 'translate')
-      property.timing.damping = 0.000001
+      property.timingExpression = undefined
+      property.timing = { kind: 'spring-physics', stiffness: 300, damping: 0.000001, mass: 1 }
     }
     await route.fulfill({ response, json: reply })
   })
@@ -392,8 +355,8 @@ test('lifecycle previews capture templates, isolate instances, scrub and restore
   const first = page.getByRole('button', { name: 'First lifecycle', exact: true })
   const second = page.getByRole('button', { name: 'Second lifecycle', exact: true })
 
-  await page.getByLabel('Editing scope').selectOption('enter-default')
-  await page.getByLabel('To state').selectOption('idle')
+  await page.getByLabel('Existing transition').selectOption('enter-default')
+  await page.getByLabel('Baseline active enabled').uncheck()
   await track(page, 'body', 'opacity')
   await seek(page, 100)
 
@@ -401,8 +364,8 @@ test('lifecycle previews capture templates, isolate instances, scrub and restore
   await expect(second).toHaveCSS('opacity', '1')
   await expect(first).toHaveAttribute('aria-pressed', 'false')
 
-  await page.getByLabel('Editing scope').selectOption('leave-default')
-  await page.getByLabel('To state').selectOption('idle')
+  await page.getByLabel('Existing transition').selectOption('leave-default')
+  await page.getByLabel('Baseline active enabled').uncheck()
   await seek(page, 200)
   await expect(first).toHaveCSS('opacity', '0')
   await expect(first).toHaveCount(1)
@@ -421,26 +384,26 @@ test('motion-level lifecycle edits save with shared HMR', async ({ page, browser
 
   try {
     await openLifecycle(page)
-    await page.getByLabel('Editing scope').selectOption('enter-default')
-    await page.getByLabel('To state').selectOption('active')
+    await page.getByLabel('Existing transition').selectOption('enter-default')
+    await page.getByLabel('Baseline active enabled').check()
     await track(page, 'body', 'opacity')
     await page.getByRole('button', { name: 'body.opacity 0%', exact: true }).click()
-    await page.getByLabel('Keyframe value', { exact: true }).fill('${start * 2}')
+    await page.getByLabel('Keyframe source value', { exact: true }).fill('${start * 2}')
     await page.getByRole('button', { name: 'Apply keyframe', exact: true }).click()
     await save(page)
 
     expect(await readFile(lifecycleFile, 'utf8')).toContain('0%: ${start * 2}')
 
-    await page.getByLabel('Editing scope').selectOption('leave-default')
-    await page.getByLabel('To state').selectOption('idle')
+    await page.getByLabel('Existing transition').selectOption('leave-default')
+    await page.getByLabel('Baseline active enabled').uncheck()
     await track(page, 'body', 'opacity')
     await page.getByLabel('Track duration', { exact: true }).fill('500')
     await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
     await save(page)
 
     const saved = await readFile(lifecycleFile, 'utf8')
-    expect(saved).toContain('leave {')
-    expect(saved).toContain('@tween: 500ms')
+    expect(saved).toContain('leave @tween(duration: 200, easing: linear)')
+    expect(saved).toContain('@tween(duration: 500, easing: linear)')
     expect(saved.slice(0, saved.indexOf('<liva'))).toBe(
       original.slice(0, original.indexOf('<liva')),
     )

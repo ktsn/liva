@@ -19,10 +19,9 @@ export function targetValues(
   previous: VariableValues = {},
 ): VariableValues {
   const names = new Set(
-    [
-      ...definition.states,
-      ...(definition.layers ?? []).flatMap((layer) => [layer, ...(layer.states ?? [])]),
-    ].flatMap((state) => state.targets.map((target) => target.name)),
+    definition.layers
+      .flatMap((layer) => [layer, ...(layer.states ?? [])])
+      .flatMap((state) => state.targets.map((target) => target.name)),
   )
 
   return Object.fromEntries(
@@ -219,6 +218,10 @@ export function parameterValues(
   values: VariableValues,
   inputs: Readonly<Record<string, unknown>>,
 ): VariableValues {
+  if (typeof inputs !== 'object' || inputs === null || Array.isArray(inputs)) {
+    throw new Error('Motion inputs must be a parameter object')
+  }
+
   const next = { ...values }
 
   for (const name of Object.keys(inputs)) {

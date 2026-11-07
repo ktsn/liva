@@ -265,9 +265,7 @@
             }
           ]
         }
-      ],
-      "states": [],
-      "directionalTransitions": []
+      ]
     }
   ],
   "diagnostics": []

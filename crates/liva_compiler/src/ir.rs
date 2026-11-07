@@ -17,10 +17,6 @@ pub struct Definition {
     pub leave: Option<Transition>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layers: Vec<Layer>,
-    pub states: Vec<State>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub general_transition: Option<Transition>,
-    pub directional_transitions: Vec<DirectionalTransition>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -59,8 +55,6 @@ pub struct State {
     #[serde(rename = "timingExpression", skip_serializing_if = "Option::is_none")]
     pub timing_expression: Option<Expression>,
     pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub when: Option<Expression>,
     pub targets: Vec<Target<Property>>,
 }
 
@@ -91,13 +85,6 @@ pub struct Transition {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timing: Option<Timing>,
     pub targets: Vec<Target<PropertyTransition>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct DirectionalTransition {
-    pub from: String,
-    pub to: String,
-    pub transition: Transition,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

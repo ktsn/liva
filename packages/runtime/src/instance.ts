@@ -11,16 +11,9 @@ import {
 import { waapiProperty } from './animation.ts'
 export { waapiProperty } from './animation.ts'
 import { parameterValues, LetBindingGraph, targetValues } from './let-bindings.ts'
-import {
-  evaluate,
-  renderDefinition,
-  renderValue,
-  renderTransition,
-  selectState,
-  type VariableValues,
-} from './expression.ts'
+import { evaluate, renderTransition, type VariableValues } from './expression.ts'
 import type { Definition } from './definition.ts'
-import { getState, resolve, type ResolvedTrack } from './resolve.ts'
+import { type ResolvedTrack } from './resolve.ts'
 import {
   resolveLifecycle,
   resolveLifecycleTracks,
@@ -65,12 +58,11 @@ const layerPropertyKey = (target: string, property: string) => `${target}\0${pro
 
 export class LivaInstance {
   definition: Definition
-  state: string
-  private layerResolution?: LayerResolution
+  private layerResolution: LayerResolution
   private values: VariableValues = {}
   private letBindings: LetBindingGraph
   private letBindingCleanups: (() => void)[] = []
-  onReactiveState?: (state: string) => void
+  onUpdate?: () => void
   onEvent?: (name: string) => void
   private eventValues = new Map<string, boolean>()
   private targets = new Map<string, HTMLElement>()
@@ -91,28 +83,15 @@ export class LivaInstance {
 
   constructor(
     definition: Definition,
-    state: string | Readonly<Record<string, unknown>> = {},
+    inputs: Readonly<Record<string, unknown>> = {},
     report: (diagnostic: RuntimeDiagnostic) => void = console.warn,
   ) {
-    const variables = parameterValues(
-      definition.parameters ?? [],
-      targetValues(definition),
-      typeof state === 'string' ? {} : state,
-    )
+    const variables = parameterValues(definition.parameters ?? [], targetValues(definition), inputs)
     this.letBindings = new LetBindingGraph(definition.letBindings ?? [], variables)
     this.values = this.letBindings.evaluate(variables)
     this.definition = definition
     this.evaluateEvents(false)
-    this.layerResolution = definition.layers?.length
-      ? resolveLayers(definition, this.values)
-      : undefined
-    this.state = this.layerResolution
-      ? '@layers'
-      : typeof state === 'string'
-        ? state
-        : selectState(definition, this.values)
-
-    if (!this.layerResolution) getState(definition, this.state)
+    this.layerResolution = resolveLayers(definition, this.values)
     this.report = report
     this.motion = matchMedia('(prefers-reduced-motion: reduce)')
     this.motion.addEventListener('change', this.motionChanged)
@@ -140,7 +119,7 @@ export class LivaInstance {
         }
       }
 
-      if (phase === 'enter' && this.layerResolution && !this.disposed && !this.compositionPreview) {
+      if (phase === 'enter' && !this.disposed && !this.compositionPreview) {
         // Layers may change while enter plays toward its captured destination.
         // Restore first to clear styles absent from the latest presentation, then
         // apply that presentation. Preserve properties owned by remaining lifecycle
@@ -154,7 +133,7 @@ export class LivaInstance {
   }
 
   captureLifecycle(phase: 'enter' | 'leave', names: readonly string[], element?: HTMLElement) {
-    const definition = renderDefinition(this.definition, this.values, [this.state])
+    const definition = this.definition
     const targets = new Map(
       [...this.targets]
         .filter(([name]) => names.includes(name))
@@ -163,13 +142,11 @@ export class LivaInstance {
     const work = resolveLifecycle(
       phase,
       captureLifecycleDefinition(definition, phase, this.values),
-      this.layerResolution?.presentation ?? getState(definition, this.state),
+      this.layerResolution.presentation,
       targets,
     )
 
-    return this.layerResolution && phase === 'enter'
-      ? work.map((item) => ({ ...item, restoreOnCompletion: true }))
-      : work
+    return phase === 'enter' ? work.map((item) => ({ ...item, restoreOnCompletion: true })) : work
   }
 
   releaseLifecycle(names: readonly string[], element: HTMLElement, properties?: readonly string[]) {
@@ -183,16 +160,9 @@ export class LivaInstance {
     for (const entry of interrupted) entry.animation.cancel()
   }
 
-  get reactiveState(): string {
-    return this.layerResolution ? this.state : selectState(this.definition, this.values)
-  }
-
-  get composition(): Composition | undefined {
-    const composition = this.layerResolution?.composition
-
-    return composition
-      ? { layers: { ...composition.layers }, states: { ...composition.states } }
-      : undefined
+  get composition(): Composition {
+    const composition = this.layerResolution.composition
+    return { layers: { ...composition.layers }, states: { ...composition.states } }
   }
 
   get animations(): readonly Animation[] {
@@ -444,18 +414,12 @@ export class LivaInstance {
   private settle() {
     if (this.suspended || this.disposed) return
 
-    for (const target of (
-      this.layerResolution?.presentation ?? getState(this.definition, this.state)
-    ).targets) {
+    for (const target of this.layerResolution.presentation.targets) {
       for (const element of this.targetElements.get(target.name) ?? []) {
         for (const property of target.properties) {
-          if (this.layerResolution && this.lifecycleOwns(element, property.name)) continue
+          if (this.lifecycleOwns(element, property.name)) continue
 
-          try {
-            this.write(element, property.name, renderValue(property, this.values))
-          } catch (error) {
-            this.report({ code: 'runtime.expression', message: String(error), error })
-          }
+          this.write(element, property.name, property.value)
         }
       }
     }
@@ -466,10 +430,7 @@ export class LivaInstance {
 
     const next = new Map(entries)
     const duplicate = next.size !== entries.length && !hasLifecycle(this.definition)
-    const missing = [
-      ...this.definition.states.flatMap((state) => state.targets),
-      ...layerTargets(this.definition),
-    ].some((target) => !next.has(target.name))
+    const missing = layerTargets(this.definition).some((target) => !next.has(target.name))
     const unchanged =
       !duplicate &&
       (!missing || hasLifecycle(this.definition)) &&
@@ -481,9 +442,11 @@ export class LivaInstance {
 
     this.endCompositionPreview()
 
+    const previousInputs = JSON.stringify(this.values)
+
     this.clearLetBindings()
     this.cancel(false)
-    this.restore(this.layerResolution !== undefined && this.enterSessions.size > 0)
+    this.restore(this.enterSessions.size > 0)
     this.targets = next
     this.targetElements.clear()
     for (const [name, element] of entries) {
@@ -494,22 +457,13 @@ export class LivaInstance {
     this.duplicateBindings = duplicate
     this.suspended = duplicate || (missing && !hasLifecycle(this.definition))
 
-    if (this.layerResolution) {
-      this.layerResolution = resolveLayers(
-        this.definition,
-        this.values,
-        this.layerResolution.states,
-        false,
-      )
-    }
-
-    if (
-      !this.layerResolution &&
-      (this.definition.letBindings?.length || this.definition.parameters?.length)
-    ) {
-      this.state = selectState(this.definition, this.values)
-      this.onReactiveState?.(this.state)
-    }
+    this.layerResolution = resolveLayers(
+      this.definition,
+      this.values,
+      this.layerResolution.states,
+      // Subscription cleanup can publish a new logical input, such as ending a drag.
+      previousInputs !== JSON.stringify(this.values),
+    )
 
     if (this.suspended) {
       this.report({
@@ -522,10 +476,9 @@ export class LivaInstance {
     }
   }
 
-  replaceDefinition(definition: Definition, state = this.state) {
+  replaceDefinition(definition: Definition) {
     if (this.disposed) return
     this.endCompositionPreview()
-    if (!definition.layers?.length) getState(definition, state)
 
     const inputs = Object.fromEntries(
       (definition.parameters ?? [])
@@ -554,30 +507,12 @@ export class LivaInstance {
     this.definition = definition
     this.eventValues.clear()
     this.evaluateEvents(false)
-    this.layerResolution = definition.layers?.length
-      ? resolveLayers(definition, this.values)
-      : undefined
-    this.state = this.layerResolution ? '@layers' : state
+    this.layerResolution = resolveLayers(definition, this.values)
     this.suspended =
       this.duplicateBindings ||
-      (!hasLifecycle(definition) &&
-        [...definition.states.flatMap((s) => s.targets), ...layerTargets(definition)].some(
-          (t) => !this.targets.has(t.name),
-        ))
+      (!hasLifecycle(definition) && layerTargets(definition).some((t) => !this.targets.has(t.name)))
     if (!this.suspended) this.bindLetBindings()
     this.settle()
-  }
-
-  setState(state: string, options: { paused?: boolean } = {}): boolean {
-    if (this.layerResolution) {
-      this.report({
-        code: 'runtime.state',
-        message: 'Layer motions are controlled through reactive inputs',
-      })
-      return false
-    }
-
-    return this.transitionTo(state, options, this.values)
   }
 
   /** Preview explicit selections while retaining the application's definition and machine history. */
@@ -597,7 +532,7 @@ export class LivaInstance {
     definition: Definition,
     phase?: 'enter' | 'leave',
   ): void {
-    if (this.disposed || this.suspended || !this.layerResolution) {
+    if (this.disposed || this.suspended) {
       throw new Error('Composition preview requires a mounted layer instance')
     }
 
@@ -711,207 +646,10 @@ export class LivaInstance {
   /** Prepare scrub-ready lifecycle effects without invoking presence removal callbacks. */
   previewLifecycle(
     phase: 'enter' | 'leave',
-    composition?: Composition,
+    composition = this.composition,
     definition = this.definition,
-  ): boolean {
-    if (composition) {
-      this.prepareCompositionPreview(composition, composition, [], definition, phase)
-      return true
-    }
-
-    if (this.disposed || this.suspended) return false
-
-    const prepared: ActiveTrack[] = []
-
-    try {
-      const work = [...this.targetElements].flatMap(([name, elements]) =>
-        elements.flatMap((element) => this.captureLifecycle(phase, [name], element)),
-      )
-
-      for (const { track, element } of work) {
-        const timing =
-          track.timing.kind === 'tween'
-            ? { durationMs: track.timing.durationMs, easing: 'linear' }
-            : sampleSpring(track.timing)
-        const effect = new KeyframeEffect(
-          element,
-          track.keyframes.map((frame) => ({
-            [waapiProperty(track.property)]: frame.value,
-            offset: frame.offset,
-            easing: frame.easing,
-          })),
-          {
-            duration: timing.durationMs,
-            easing: timing.easing,
-            fill: phase === 'enter' ? 'backwards' : 'both',
-          },
-        )
-        const animation = new Animation(effect, document.timeline)
-
-        prepared.push({ track, element, animation })
-      }
-
-      this.cancel()
-      this.active = prepared
-      this.manuallyPaused = true
-
-      for (const { animation } of prepared) {
-        animation.pause()
-        animation.currentTime = 0
-      }
-
-      return true
-    } catch (error) {
-      for (const { animation } of prepared) animation.cancel()
-
-      this.report({ code: 'runtime.animation', message: String(error), error })
-      return false
-    }
-  }
-
-  private transitionTo(
-    state: string,
-    options: { paused?: boolean },
-    previousValues: VariableValues,
-  ): boolean {
-    if (this.disposed) return false
-
-    let tracks: ResolvedTrack[]
-
-    try {
-      tracks = resolve(
-        renderDefinition(
-          renderDefinition(this.definition, previousValues, [this.state]),
-          this.values,
-          [state],
-        ),
-        this.state,
-        state,
-        this.values,
-      )
-    } catch (error) {
-      this.report({ code: 'runtime.state', message: String(error), error })
-      return false
-    }
-
-    if (state === this.state) return true
-
-    if (this.suspended || (this.motion.matches && !options.paused)) {
-      this.state = state
-      this.cancel()
-      this.settle()
-      return true
-    }
-
-    tracks = tracks.filter((track) => this.targets.has(track.target))
-
-    const interrupted =
-      this.enterSessions.size > 0 ||
-      this.active.length > 0 ||
-      (this.definition.letBindings?.length ?? 0) + (this.definition.parameters?.length ?? 0) > 0
-    const snapshots = new Map<HTMLElement, Map<string, string>>()
-
-    const boundTracks = tracks.flatMap((track) =>
-      /* v8 ignore start -- @preserve: Tracks were filtered against targets, which bind populates together with targetElements. */
-      (this.targetElements.get(track.target) ?? [])
-        /* v8 ignore stop -- @preserve */
-        .filter(
-          (element) =>
-            ![...this.leaveSessions].some((session) => session.owns(element, track.property)),
-        )
-        .map((element) => ({ track, element })),
-    )
-
-    // Read every displayed value before canceling any effect or writing styles.
-    for (const { track, element } of [...this.active, ...boundTracks]) {
-      let properties = snapshots.get(element)
-
-      if (!properties) {
-        properties = new Map()
-        snapshots.set(element, properties)
-      }
-
-      properties.set(track.property, getComputedStyle(element).getPropertyValue(track.property))
-    }
-
-    const prepared: ActiveTrack[] = []
-    let preparing: ResolvedTrack | undefined
-
-    try {
-      for (const { track, element } of boundTracks) {
-        preparing = track
-        const timing =
-          track.timing.kind === 'tween'
-            ? { durationMs: track.timing.durationMs, easing: 'linear' }
-            : sampleSpring(track.timing)
-
-        if (timing.durationMs === 0) continue
-
-        const frames = track.keyframes.map((frame, index) => ({
-          [waapiProperty(track.property)]:
-            interrupted && index === 0 ? snapshots.get(element)!.get(track.property)! : frame.value,
-          offset: frame.offset,
-          easing: frame.easing,
-        }))
-        const effect = new KeyframeEffect(element, frames, {
-          duration: timing.durationMs,
-          easing: timing.easing,
-          fill: options.paused ? 'backwards' : 'both',
-        })
-        const animation = new Animation(effect, document.timeline)
-        prepared.push({ track, element, animation })
-      }
-    } catch (error) {
-      for (const { animation } of prepared) animation.cancel()
-      this.report({ code: 'runtime.animation', message: String(error), track: preparing, error })
-      return false
-    }
-
-    this.cancel()
-    this.state = state
-    const generation = this.generation
-    this.settle()
-
-    for (const { track, element } of options.paused ? [] : prepared) {
-      this.write(element, track.property, snapshots.get(element)!.get(track.property)!)
-    }
-
-    this.active = prepared
-    this.manuallyPaused = options.paused ?? false
-    const start = document.timeline.currentTime
-
-    try {
-      for (const entry of prepared) {
-        const { animation, track, element } = entry
-        if (options.paused) {
-          animation.pause()
-          animation.currentTime = 0
-          continue
-        }
-
-        animation.play()
-        /* v8 ignore else -- @preserve: The active document timeline has a numeric currentTime; null belongs to inactive documents. */
-        if (typeof start === 'number') animation.startTime = start
-
-        void animation.finished
-          .then(() => {
-            if (this.disposed || generation !== this.generation || !this.active.includes(entry))
-              return undefined
-            this.write(element, track.property, track.destinationValue)
-            animation.cancel()
-            this.active = this.active.filter((a) => a !== entry)
-            return undefined
-          })
-          .catch(() => {})
-      }
-    } catch (error) /* v8 ignore next -- @preserve: Effects are already constructed on the document timeline; synchronous playback failure requires replacing browser APIs. */ {
-      this.cancel()
-      this.settle()
-      this.report({ code: 'runtime.animation', message: String(error), track: preparing, error })
-      return false
-    }
-
-    return true
+  ): void {
+    this.prepareCompositionPreview(composition, composition, [], definition, phase)
   }
 
   updateParameters(inputs: Readonly<Record<string, unknown>>) {
@@ -948,54 +686,9 @@ export class LivaInstance {
       this.evaluateEvents()
       if (this.disposed) return
 
-      if (this.layerResolution) {
-        const resolution = resolveLayers(this.definition, values, this.layerResolution.states)
-        this.applyLayerResolution(this.layerResolution, resolution)
-
-        this.onReactiveState?.(this.state)
-        return
-      }
-
-      const state = selectState(this.definition, values)
-      const properties = getState(this.definition, state).targets.flatMap((target) =>
-        target.properties
-          .filter((property) => property.template)
-          .map((property) => ({
-            target: target.name,
-            property,
-            value: renderValue(property, values),
-          })),
-      )
-      if (state !== this.state) {
-        if (!this.transitionTo(state, {}, previous)) {
-          this.values = previous
-          return
-        }
-      } else if (!this.suspended) {
-        for (const { target, property, value } of properties) {
-          let unchanged = false
-
-          try {
-            unchanged = value === renderValue(property, previous)
-          } catch {
-            // A valid update can recover a template that failed during initial settlement.
-          }
-
-          if (unchanged) continue
-          for (const session of this.enterSessions) session.cancel('superseded')
-          this.enterSessions.clear()
-          const replaced = this.active.filter(
-            (entry) => entry.track.target === target && entry.track.property === property.name,
-          )
-          this.active = this.active.filter((entry) => !replaced.includes(entry))
-          for (const entry of replaced) entry.animation.cancel()
-          for (const element of this.targetElements.get(target) ?? []) {
-            this.write(element, property.name, value)
-          }
-        }
-      }
-
-      this.onReactiveState?.(state)
+      const resolution = resolveLayers(this.definition, values, this.layerResolution.states)
+      this.applyLayerResolution(this.layerResolution, resolution)
+      this.onUpdate?.()
     } catch (error) {
       this.values = previous
       this.report({ code: 'runtime.expression', message: String(error), error })
@@ -1168,7 +861,7 @@ export class LivaInstance {
     this.targetElements.clear()
     this.eventValues.clear()
     this.onEvent = undefined
-    this.onReactiveState = undefined
+    this.onUpdate = undefined
     this.disposed = true
   }
 }

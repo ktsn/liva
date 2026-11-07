@@ -1,6 +1,6 @@
 # Language specification
 
-A motion declares states, transitions, let bindings, and host parameters. Rust
+A motion declares layers, lifecycle animations, let bindings, and host parameters. Rust
 compiles lossless CST into serializable Definition IR; the browser interpolates
 CSS through WAAPI.
 
@@ -11,11 +11,23 @@ Every top-level definition starts with `motion`:
 ```css
 motion card {
   let movement = drag(target: body)
-  state idle { body { translate: 0 0 } }
-  state dragging when movement.active {
-    body { translate: ${movement.offset.x}px 0 }
+
+  layer interaction {
+    body { translate: 0 0; scale @tween(duration: 200, easing: easeOut) { 100%: 1 } }
+
+    state idle initial {}
+    state dragging {
+      body { translate: ${movement.offset.x}px ${movement.offset.y}px; scale: 1.05 }
+    }
+
+    transition idle -> dragging when movement.active
+    transition dragging -> idle when !movement.active {
+      body {
+        translate @spring(stiffness: 300, damping: 20) {}
+        scale @tween(duration: 180, easing: easeOut) {}
+      }
+    }
   }
-  transition { @spring: 300 20 1 }
 }
 
 motion progressIndicator(
@@ -23,7 +35,7 @@ motion progressIndicator(
   enabled: boolean,
   label: string
 ) {
-  state idle {
+  layer base {
     body { opacity: ${progress}; --label: ${label} }
   }
 }
@@ -36,8 +48,8 @@ are declaration-time metadata, separate from runtime expression nodes. Annotatio
 are never function arguments or runtime values. User-defined functions and advanced parameter types are outside scope.
 
 Parameters, let bindings, and targets share one variable namespace throughout their
-motion, regardless of declaration order. Each target declared in a state's target
-block introduces a target-valued variable; the same target across states is one
+motion, regardless of declaration order. Each target declared in a layer or local state
+introduces a target-valued variable; the same target across layers is one
 variable. Duplicate declarations and collisions between variable kinds are errors.
 Names are local to each motion. Unknown types, invalid
 parameter declarations, unresolved references, and primitive member access are errors.
@@ -77,7 +89,7 @@ checks required arguments, duplicate/unknown arguments, and argument types.
 The built-in `drag` function accepts one required `target` argument of target type.
 In `drag(target: body)`, `body` is an ordinary variable reference resolved in the
 motion's scope. Its value refers to the `body` target declared in that motion's
-states. Argument expressions use the same name resolution and type checking as
+layers. Argument expressions use the same name resolution and type checking as
 other expressions. A string-valued variable does not satisfy a target parameter.
 The return value has
 `active: boolean`, `released: boolean`, and `offset: { x: number, y: number }`. These fields belong to
@@ -101,14 +113,12 @@ gesture with `released: false` and never trigger release events. Target
 replacement and disposal remove listeners and release capture. Set `touch-action:
 none` on draggable targets; the adapter does not change application CSS.
 
-Each definition has exactly one unconditional fallback state. Conditions use
-`state on when checked { ... }`, without interpolation delimiters. Conditions are
-Boolean; the last declared true condition wins. Declaration order is significant.
-Initial selection settles without animation. Same-state variable updates update
-only affected dynamic values, without replaying a transition. Dynamic properties
-follow input immediately: a newer value cancels that property's running effect,
-while unrelated effects (such as scale) continue. State changes start from displayed
-values, including interrupted return springs, without carrying release velocity.
+Every motion requires at least one layer. Ordinary layers independently activate
+from Boolean conditions. Stateful layers retain one local state and advance through
+guarded transitions. Initial presentation settles without animation. Updates start
+from displayed values, including interrupted springs, without carrying velocity.
+A dynamic property without timing follows input immediately; unrelated running effects
+continue. Timing and value ownership follow the layer cascade described below.
 
 ## Expressions and CSS templates
 
@@ -128,58 +138,33 @@ translate: ${movement.offset.x}px ${movement.offset.y}px
 
 Units are explicit text. The compiler validates expression references and member
 paths. Non-finite runtime arithmetic reports a diagnostic and retains valid styles.
-CSS validity and easing validity are delegated to the browser. Conditional states inherit omitted targets and properties from the unconditional
-fallback state. The fallback must provide the complete state property set; implicit
-DOM fallback for missing state properties remains outside scope. Dynamic destination
-properties without transition timing update immediately.
-
-## Animation declarations
-
-```css
-@tween: 350ms ease-out
-@tween-duration: 200ms
-@tween-easing: cubic-bezier(0.2, 0.8, 0.2, 1)
-@spring: 300 20 1
-@spring: 350ms 0.2;
-```
-
-Tween shorthand expands duration and easing (default `linear`). Spring shorthand
-expands stiffness/damping/mass (mass defaults to 1) or duration/bounce (bounce
-defaults to 0). Longhands use the corresponding `@spring-` prefixes. Duration is
-finite `ms` or `s`; tween duration is nonnegative and spring duration positive.
-Physics parameters are positive. Bounce is in `[0, 1)`.
-
-Later declarations override earlier fields. Shorthands reset their whole timing
-configuration. A tween/spring family switch clears the previous family. Mixing
-physics and duration spring longhands is an error unless a shorthand resets the
-configuration. Longhands may complete earlier longhands in the same block; a
-complete normalized timing is required locally. They do not partially merge with
-an inherited transition. Normalization is local to each block.
-
-General and directional transitions merge per property: directional property,
-general property, directional global, then general global timing. Timing is an
-atomic override. A property's explicit keyframe collection replaces the inherited
-collection as a whole. No timing for an animated property is a compilation error.
+CSS validity is delegated to the browser. Omitted properties expose lower active
+layers or external CSS. There is no requirement for a complete fallback state.
 
 ## Inline keyframes
 
 ```css
-40%: 1.3 1 @ ease-in 70%: 0.95 1 @ cubic-bezier(0.2, 0.8, 0.2, 1);
+scale @tween(duration: 350, easing: easeInOut) {
+  40%: 1.3 1 @easeIn
+  70%: 0.95 1 @cubicBezier(x1: 0.2, y1: 0.8, x2: 0.2, y2: 1)
+  100%: 1
+}
 ```
 
-Offsets are unique finite percentages in `[0, 100]`; IR sorts keyframes, never
-states. A top-level `@` separates optional interval easing from the opaque CSS
-value; quoted or grouped `@` characters remain CSS text. Missing endpoints derive
-from the states. Tween easing is the default per interval, overridden by each
-frame's easing. WAAPI effect easing stays linear for tweens. Intermediate frames
-or frame easing with springs are errors. Explicit endpoints can differ from states
-but warn because final settlement uses the destination state. Runtime templates are supported in state CSS values and lifecycle keyframes.
-Ordinary transition keyframe templates remain unsupported.
+Offsets are unique finite percentages in `[0, 100]`; IR sorts keyframes while
+preserving layer and state declaration order. A top-level `@expression` supplies
+typed interval easing; quoted or grouped `@` characters remain CSS text. Style tracks
+require an explicit 100% destination. Transition endpoints may be omitted and use
+the displayed start and resolved destination. Tween easing is the default per
+interval; frame easing overrides it. WAAPI effect easing remains linear for tweens.
+Spring tracks use the solver curve and do not expose per-frame easing controls.
+CSS templates are supported in style, transition, and lifecycle frames. Completion
+restores the resolved destination even when an explicit transition endpoint differs.
 
 ## Enter, leave, and events
 
 A motion may declare one `enter` and one `leave` directly in its body. Targets
-must be declared in its layers (including local states) or legacy states. The root
+must be declared in its layers (including local states). The root
 is animated only when explicitly bound as a named target. Lifecycle timing is
 independent of ordinary layer timing. Lifecycle property timing overrides target
 timing, which overrides the lifecycle shared decorator. All are captured at start.
@@ -273,7 +258,7 @@ define the animation in Liva. Unrelated transitions remain unchanged.
 ## Syntax and recovery
 
 Declarations are separated by newline or optional semicolon. Balanced CSS groups
-may span lines. Strings, escapes, `//` and `/* */` comments are preserved. Motion,
+may span lines. Strings, escapes, `//` and `/* */` comments are preserved. Motion, layer, and
 state names follow `[A-Za-z_][A-Za-z0-9_-]*`. Variable names (targets, let bindings,
 and parameters), function names, and expression member names follow
 `[A-Za-z_][A-Za-z0-9_-]*`. A hyphen without surrounding whitespace belongs to the
@@ -281,7 +266,7 @@ identifier: `max-min` is one name. Binary subtraction requires whitespace on bot
 sides, as in `max - min`; unary minus remains valid in `-1` and `-value`. CSS property names also allow custom properties.
 
 Numbers with units, such as `20px` and `100ms`, are single lexical tokens.
-They remain opaque CSS/timing values; unit-bearing arithmetic in Liva expressions
+They remain opaque CSS values; unit-bearing arithmetic in Liva expressions
 is unsupported. URLs must be quoted, including arguments to `url()`, for example
 `url("https://example.com/image.png")` or `url("image.png")`.
 
@@ -300,67 +285,33 @@ Standalone file imports, framework adapters other than Vue, SSR animation,
 component-root directive forwarding, Teleport targets and Shadow DOM target
 traversal are unsupported.
 
-No velocity input, inertia, retained states, state-change persistence events,
-simultaneous state layers, scroll/orientation sources, user functions, custom CSS
-interpolation, or standalone preview environment. Omitted-state CSS sampling and
-additional source types are unsupported. DOM-derived state values require decisions
-about when to sample computed or animated styles, when to refresh them, and how to
-restore the CSS cascade after removing Liva-owned inline values. The editor edits transition and lifecycle parameters and frames, including
-motion-level lifecycle tracks on legacy motions; layer/decorator motions are read-only in the timeline, and let/condition authoring is textual.
+Velocity input, inertia, state-change persistence events, scroll/orientation sources,
+user functions, custom CSS interpolation, and a standalone preview environment are
+unsupported. The editor edits resolved layer values, typed timing, existing transition
+frames, and motion-level lifecycles. Let bindings, guards, and new state-machine
+structure are authored in source.
 
 ## Toggle example
 
 ```css
 motion toggle(checked: boolean) {
-  state off {
-    track {
-      background-color: #888
+  layer toggle @tween(duration: 350, easing: easeOut) {
+    track { background-color: #888 @tween(duration: 200, easing: easeInOut) }
+    thumb { translate: 0 0 @spring(stiffness: 300, damping: 20); scale: 1 }
+
+    state off initial {}
+    state on {
+      track { background-color: #34b27b }
+      thumb { translate: 24px 0 }
     }
 
-    thumb {
-      translate: 0 0
-      scale: 1
+    transition off -> on when checked {
+      thumb { scale { 40%: 1.3 1 @easeIn; 70%: 0.95 1 @easeOut } }
     }
-  }
-
-  state on when checked {
-    track {
-      background-color: #34b27b
-    }
-
-    thumb {
-      translate: 24px 0
-      scale: 1
-    }
-  }
-
-  transition {
-    @tween: 350ms ease-out
-
-    track {
-      background-color {
-        @tween-duration: 200ms
-        @tween-easing: ease-in-out
-      }
-    }
-
-    thumb {
-      translate {
-        @spring: 300 20 1
-      }
-
-      scale {
-        40%: 1.3 1 @ ease-in
-
-        70%: 0.95 1 @ ease-out
-      }
-    }
-  }
-
-  transition on -> off {
-    thumb {
-      translate {
-        @spring: 350ms 0.2
+    transition on -> off when !(checked) {
+      thumb {
+        translate @spring(duration: 350, bounce: 0.2) {}
+        scale { 40%: 1.3 1 @easeIn; 70%: 0.95 1 @easeOut }
       }
     }
   }
@@ -369,7 +320,6 @@ motion toggle(checked: boolean) {
 
 ## Reactive layer declarations
 
-`layer` is the replacement direction for simple reactive `state ... when` selection.
 An unconditional layer is always active; conditional layers are independently active
 when their Boolean expressions are true. Declaration order is preserved in Definition
 IR for property-level cascade resolution. Layers do not imply additive composition.
@@ -383,9 +333,8 @@ motion button(hovered: boolean, pressed: boolean) {
 ```
 
 Layer names are unique within a motion. CSS values retain CSS syntax and units;
-`${expression}` interpolates scalar values. The compiler represents layers separately
-from legacy states, preserving existing state selection behavior. Runtime layer
-resolution is a separate integration step.
+`${expression}` interpolates scalar values. The compiler preserves the layer declarations; the runtime resolves their active
+values and timing on each input update.
 
 ### Stateful layers
 
@@ -448,9 +397,8 @@ so cycles cannot drain synchronously. A subsequent parameter or reactive-source
 notification schedules another evaluation; no internal loop or application-data
 mutation is performed. Multiple stateful layers can advance on the same update.
 
-Layer motions take parameter objects rather than explicit legacy state-name commands.
-A motion cannot mix layers with legacy motion-level states; move exclusive states
-inside a layer when migrating.
+Motion instances take parameter objects. Exclusive states are local to stateful
+layers; the runtime exposes their current selections through `composition.states`.
 Timing selection, transition animation ownership, and lifecycle precedence are separate
 steps of the layer animation pipeline.
 
@@ -487,8 +435,7 @@ A timing value is replaced as a whole. Different calls never merge their paramet
 Timing and easing values cannot be interpolated into CSS or used as Boolean guards.
 Types are checked by the compiler; argument value errors from evaluated expressions
 are reported by the runtime. Use typed easing values, rather than CSS strings, as
-`tween` arguments. Legacy CSS-like animation declarations remain supported while
-expression decorators provide the migration path for these values.
+`tween` arguments. Animation configuration uses typed expressions exclusively.
 
 ### Typed animation decorators
 
@@ -499,7 +446,7 @@ declarations cannot have timing decorators. A keyframe segment accepts an easing
 ```css
 motion button {
   let quick = tween(duration: 150, easing: easeOut)
-  state idle {
+  layer base {
     body @quick {
       opacity: 1
       scale: 1 @spring(stiffness: 300, damping: 20)
@@ -521,9 +468,9 @@ Only the selected transition or lifecycle evaluates its timing and frame express
 
 To migrate legacy `@tween: 150ms ease-out`, use `@tween(duration: 150, easing: easeOut)`
 on the target or property track. Replace legacy frame suffix `@ ease-out` with
-`@easeOut`, or reference a bound easing value. Legacy animation declarations and
-CSS easing suffixes continue to parse. The lossless CST retains decorators separately
-from header names and CSS value text; source-preserving tooling must retain those nodes.
+`@easeOut`, or reference a bound easing value. Removed animation declarations and
+CSS easing suffixes produce actionable compiler errors. The lossless CST retains
+invalid input for diagnostics and decorators separately from CSS value text.
 
 ### Layer animation selection
 
@@ -564,7 +511,17 @@ Interrupted properties retarget from their current displayed value. Unchanged pr
 animations continue. Properties with no timing apply immediately.
 
 Spring timing on layer tracks applies the sampled spring curve to the complete track,
-including intermediate waypoints. Legacy state-transition spring constraints remain
-unchanged. Initial state guards resolve before target binding; DOM entry animation is
-controlled by the motion's lifecycle declaration rather than replaying an initial
-machine transition during binding.
+including intermediate waypoints. Initial state guards resolve before target binding;
+DOM entry animation is controlled by the motion's lifecycle declaration rather than
+replaying an initial machine transition during binding.
+
+## Migration from motion-level states
+
+Move independent visual conditions into ordinary layers. Move exclusive states into
+a stateful layer with one `initial` state and explicit guarded transitions. Replace
+motion-level general timing with shared layer or target decorators and directional
+transitions with local guarded transitions. Pass a parameter object to `v-liva` and
+`LivaInstance`; string state bindings and `setState` are unsupported. Use
+`updateParameters` for application inputs and `composition` for resolved selections.
+The runtime rejects Definition IR containing motion-level `states`,
+`generalTransition`, or `directionalTransitions` instead of executing a compatibility path.

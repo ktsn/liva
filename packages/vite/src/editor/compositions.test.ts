@@ -4,8 +4,7 @@ import { compatibleTransition, copyComposition, selectTransition } from './compo
 
 const definition: Definition = {
   name: 'motion',
-  states: [],
-  directionalTransitions: [],
+
   layers: [
     {
       name: 'machine',

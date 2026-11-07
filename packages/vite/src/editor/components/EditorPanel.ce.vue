@@ -2,7 +2,6 @@
 import { nextTick, onMounted, onScopeDispose, ref, shallowRef, useTemplateRef } from 'vue'
 import type { EditorController } from '../controller.ts'
 import EditorForm from './EditorForm.ce.vue'
-import { timelineReadOnly, readOnlyMessage } from '../capabilities.ts'
 
 defineOptions({ inheritAttrs: false })
 
@@ -21,7 +20,6 @@ function snapshot() {
       label: `${entry.label} · ${entry.binding.definition.name}`,
     })),
     selectedId: controller.selected?.id ?? '',
-    requestedState: controller.selected?.binding.requestedState,
     inspection: controller.inspection,
     draft: controller.draft,
     message: controller.message,
@@ -119,18 +117,8 @@ onScopeDispose(() => {
         </select>
         <button @click="toggle">Close</button>
       </div>
-      <p
-        v-if="
-          state.inspection &&
-          !state.inspection.definition.layers?.length &&
-          timelineReadOnly(state.inspection.definition)
-        "
-        role="status"
-      >{{
-        readOnlyMessage
-      }}</p>
       <EditorForm
-        v-else-if="state.inspection"
+        v-if="state.inspection"
         :key="inspectionVersion"
         :inspection="state.inspection"
         :controller="controller"

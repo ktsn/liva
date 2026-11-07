@@ -3,12 +3,11 @@ import { compileSfc, diagnosticLocation, hasErrors } from './compiler.ts'
 
 describe('SFC compiler boundary', () => {
   it('maps UTF-8 diagnostics to SFC lines and UTF-16 columns', () => {
-    const motion =
-      'motion a { state on when true { t { x: 1 } } /* 日本語😀 */ state off { t {} } }'
+    const motion = 'motion a { layer base { t { x: 1 } /* 日本語😀 */ t {} } }'
     const source = `<template><p>日本語😀</p></template>\r\n<liva>\r\n${motion}\r\n</liva>`
     const snapshot = compileSfc(source, 'Unicode.vue', true)
     expect(hasErrors(snapshot)).toBe(true)
-    const diagnostic = snapshot.result.diagnostics.find((d) => d.code === 'semantic.completeness')!
+    const diagnostic = snapshot.result.diagnostics.find((d) => d.code === 'semantic.duplicate')!
     expect(diagnosticLocation(snapshot, diagnostic)).toEqual({
       line: 3,
       column: motion.lastIndexOf('t {}'),
@@ -34,7 +33,7 @@ describe('SFC compiler boundary', () => {
 
   it('keeps production IR separate from development mappings', () => {
     const source =
-      '<template><div /></template><liva>motion a { state on { t { --value: "日本語" } } }</liva>'
+      '<template><div /></template><liva>motion a { layer on { t { --value: "日本語" } } }</liva>'
     expect(compileSfc(source, 'Valid.vue', false).result.mappings).toBeUndefined()
     expect(compileSfc(source, 'Valid.vue', true).result.mappings).toBeDefined()
   })

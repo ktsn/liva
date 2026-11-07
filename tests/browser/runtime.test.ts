@@ -25,7 +25,7 @@ test.beforeEach(async ({ page }) => {
     thumb.style.cssText = 'width:20px;height:20px'
     track.append(thumb)
     document.querySelector('#fixture')!.append(track)
-    const instance = new window.liva.LivaInstance(window.definition, 'off', (error) =>
+    const instance = new window.liva.LivaInstance(window.definition, { mode: 'off' }, (error) =>
       window.errors.push(error),
     )
     Object.assign(window, { track, thumb, instance })
@@ -43,7 +43,7 @@ test('interpolates three properties, coordinates time, and cleans completed effe
   console.log(`Browser baseline ${browser.browserType().name()} ${browser.version()}`)
   const result = await page.evaluate(async () => {
     const { instance, track, thumb } = window
-    instance.setState('on')
+    instance.updateParameters({ mode: 'on' })
     await Promise.all(instance.animations.map((a) => a.ready))
     const starts = instance.animations.map((a) => a.startTime)
 
@@ -83,24 +83,24 @@ test('spring overshoot is evaluated by the browser', async ({ page }) => {
     const original = window.definition
     const definition: Runtime.Definition = {
       ...original,
-      generalTransition: {
-        ...original.generalTransition,
-        targets: original.generalTransition!.targets.map((target) => ({
+      layers: original.layers.map((layer) => ({
+        ...layer,
+        targets: layer.targets.map((target) => ({
           ...target,
-          properties: target.properties.map((property) => ({
-            ...property,
-            timing:
-              target.name === 'thumb' &&
-              property.name === 'translate' &&
-              property.timing?.kind === 'spring-physics'
-                ? { ...property.timing, damping: 10 }
-                : property.timing,
-          })),
+          properties: target.properties.map((property) =>
+            target.name === 'thumb' && property.name === 'translate'
+              ? {
+                  ...property,
+                  timingExpression: undefined,
+                  timing: { kind: 'spring-physics' as const, stiffness: 300, damping: 10, mass: 1 },
+                }
+              : property,
+          ),
         })),
-      },
+      })),
     }
     window.instance.replaceDefinition(definition)
-    window.instance.setState('on')
+    window.instance.updateParameters({ mode: 'on' })
     await Promise.all(window.instance.animations.map((a) => a.ready))
     const curve = window.liva.sampleSpring({
       kind: 'spring-physics',
@@ -131,7 +131,7 @@ for (const progress of [0.25, 0.5, 0.75]) {
   test(`reversal at ${progress} preserves displayed values`, async ({ page }) => {
     const result = await page.evaluate(async (fraction) => {
       const { instance, thumb, track } = window
-      instance.setState('on')
+      instance.updateParameters({ mode: 'on' })
       await Promise.all(instance.animations.map((a) => a.ready))
 
       for (const animation of instance.animations) {
@@ -145,7 +145,7 @@ for (const progress of [0.25, 0.5, 0.75]) {
         getComputedStyle(track).backgroundColor,
       ]
       const before = read()
-      instance.setState('off')
+      instance.updateParameters({ mode: 'off' })
       for (const animation of instance.animations) {
         animation.pause()
         animation.currentTime = 0
@@ -169,16 +169,16 @@ for (const progress of [0.25, 0.5, 0.75]) {
   })
 }
 
-test('initial state, noops, invalid states, suspension, restoration, and independent instances', async ({
+test('parameter updates preserve instance isolation, binding suspension, and style ownership', async ({
   page,
 }) => {
   const result = await page.evaluate(() => {
     const { instance, thumb, track } = window
     const initial = instance.animations.length
-    instance.setState('off')
+    instance.updateParameters({ mode: 'off' })
     const noop = instance.animations.length
-    const invalid = instance.setState('missing')
-    const state = instance.state
+    instance.updateParameters({ mode: false })
+    const state = instance.composition.states.toggle
     const siblingThumb = thumb.cloneNode()
     const siblingTrack = track.cloneNode()
     if (!(siblingThumb instanceof HTMLElement) || !(siblingTrack instanceof HTMLElement)) {
@@ -186,13 +186,14 @@ test('initial state, noops, invalid states, suspension, restoration, and indepen
     }
     siblingTrack.append(siblingThumb)
     document.body.append(siblingTrack)
-    const sibling = new window.liva.LivaInstance(window.definition, 'off')
+    const sibling = new window.liva.LivaInstance(window.definition, { mode: 'off' })
     sibling.bind([
       ['track', siblingTrack],
       ['thumb', siblingThumb],
     ])
-    instance.setState('on')
-    const independent = sibling.animations.length === 0 && sibling.state === 'off'
+    instance.updateParameters({ mode: 'on' })
+    const independent =
+      sibling.animations.length === 0 && sibling.composition.states.toggle === 'off'
     instance.bind([['track', track]])
     const suspended = instance.animations.length
     instance.bind([
@@ -210,7 +211,6 @@ test('initial state, noops, invalid states, suspension, restoration, and indepen
     return {
       initial,
       noop,
-      invalid,
       state,
       independent,
       suspended,
@@ -224,7 +224,6 @@ test('initial state, noops, invalid states, suspension, restoration, and indepen
   expect(result).toMatchObject({
     initial: 0,
     noop: 0,
-    invalid: false,
     state: 'off',
     independent: true,
     suspended: 0,
@@ -232,61 +231,100 @@ test('initial state, noops, invalid states, suspension, restoration, and indepen
     effects: 0,
   })
   expect(parseFloat(result.rebound)).toBe(24)
-  expect(result.errors).toEqual(['runtime.state', 'runtime.targets', 'runtime.targets'])
+  expect(result.errors).toEqual(['runtime.parameter', 'runtime.targets', 'runtime.targets'])
 })
 
 test('reduced motion changes settle immediately', async ({ page }) => {
-  await page.evaluate(() => window.instance.setState('on'))
+  await page.evaluate(() => window.instance.updateParameters({ mode: 'on' }))
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await expect.poll(() => page.evaluate(() => window.instance.animations.length)).toBe(0)
   expect(await page.evaluate(() => parseFloat(getComputedStyle(window.thumb).translate))).toBe(24)
-  await page.evaluate(() => window.instance.setState('off'))
+  await page.evaluate(() => window.instance.updateParameters({ mode: 'off' }))
   expect(await page.evaluate(() => window.instance.animations.length)).toBe(0)
 })
 
-test('zero duration is synchronous and WAAPI exceptions leave a usable instance', async ({
-  page,
-}) => {
+test('zero duration settles synchronously', async ({ page }) => {
   const result = await page.evaluate(() => {
-    const targetName = window.definition.states[0].targets[0].name
-    const make = (durationMs: number, easing: string) => ({
-      name: 'a',
-      states: [
+    const definition: Runtime.Definition = {
+      name: 'zero',
+      parameters: [{ name: 'mode', type: 'string' }],
+      layers: [
         {
-          name: 'off',
-          targets: [{ name: targetName, properties: [{ name: 'opacity', value: '0' }] }],
-        },
-        {
-          name: 'on',
-          targets: [{ name: targetName, properties: [{ name: 'opacity', value: '1' }] }],
+          name: 'base',
+          timing: { kind: 'tween', durationMs: 0, easing: 'linear' },
+          targets: [
+            {
+              name: 'track',
+              properties: [
+                {
+                  name: 'opacity',
+                  value: '${mode}',
+                  template: [{ kind: 'reference', path: ['mode'] }],
+                },
+              ],
+            },
+          ],
         },
       ],
-      generalTransition: { timing: { kind: 'tween' as const, durationMs, easing }, targets: [] },
-      directionalTransitions: [],
-    })
-    window.instance.replaceDefinition(make(0, 'linear'))
-    window.instance.setState('on')
-    const zero = { value: window.track.style.opacity, effects: window.instance.animations.length }
-    window.instance.replaceDefinition(make(300, 'invalid-easing'), 'off')
-    const invalid = window.instance.setState('on')
-    const count = document.getAnimations().length
-    window.instance.replaceDefinition(make(300, 'linear'))
-    const recovered = window.instance.setState('on')
-    window.instance.dispose()
-    return { zero, invalid, count, recovered, errors: window.errors.map((e) => e.code) }
+    }
+
+    window.instance.updateParameters({ mode: '0' })
+    window.instance.replaceDefinition(definition)
+    window.instance.updateParameters({ mode: '1' })
+
+    return { value: window.track.style.opacity, effects: window.instance.animations.length }
   })
 
-  expect(result).toEqual({
-    zero: { value: '1', effects: 0 },
-    invalid: false,
-    count: 0,
-    recovered: true,
-    errors: ['runtime.animation'],
-  })
+  expect(result).toEqual({ value: '1', effects: 0 })
 })
 
-test('tweens use interval easing and opaque CSS reaches the adapter', async ({ page }) => {
-  const result = await page.evaluate(async () => {
+test('WAAPI exceptions retain a usable instance', async ({ page }) => {
+  const result = await page.evaluate(() => {
+    const targetName = window.definition.layers[0].targets[0].name
+    const make = (easing: string): Runtime.Definition => ({
+      name: 'failure',
+      parameters: [{ name: 'mode', type: 'string' }],
+      layers: [
+        {
+          name: 'base',
+          timing: { kind: 'tween', durationMs: 300, easing },
+          targets: [
+            {
+              name: targetName,
+              properties: [
+                {
+                  name: 'opacity',
+                  value: '${mode}',
+                  template: [{ kind: 'reference', path: ['mode'] }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+
+    window.instance.updateParameters({ mode: '0' })
+    window.instance.replaceDefinition(make('invalid-easing'))
+    window.instance.updateParameters({ mode: '1' })
+
+    const count = document.getAnimations().length
+
+    window.instance.replaceDefinition(make('linear'))
+    window.instance.updateParameters({ mode: '1' })
+
+    const recovered = window.instance.animations.length > 0
+
+    window.instance.dispose()
+
+    return { count, recovered, errors: window.errors.map((error) => error.code) }
+  })
+
+  expect(result).toEqual({ count: 0, recovered: true, errors: ['runtime.expression'] })
+})
+
+test('opaque CSS reaches the adapter', async ({ page }) => {
+  const result = await page.evaluate(() => {
     const values: Record<string, string> = {
       'unknown-property': 'nonsense',
       '--offset': '10px',
@@ -297,82 +335,107 @@ test('tweens use interval easing and opaque CSS reaches the adapter', async ({ p
       easing: 'nonsense',
       composite: 'nonsense',
     }
-    const properties = Object.keys(values)
-    const definition = {
-      name: 'a',
-      states: ['off', 'on'].map((name) => ({
+    const definition: Runtime.Definition = {
+      name: 'opaque',
+      parameters: [{ name: 'mode', type: 'string' }],
+      layers: ['off', 'on'].map((name) => ({
         name,
+        when: {
+          kind: 'binary',
+          operator: '==',
+          left: { kind: 'reference', path: ['mode'] },
+          right: { kind: 'string', value: name },
+        },
+        timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
         targets: [
           {
             name: 'track',
-            properties: properties.map((property) => ({
+            properties: Object.keys(values).map((property) => ({
               name: property,
               value: name === 'off' ? 'initial' : values[property],
             })),
           },
         ],
       })),
-      generalTransition: {
-        timing: { kind: 'tween' as const, durationMs: 200, easing: 'linear' },
-        targets: [],
-      },
-      directionalTransitions: [],
     }
-    window.instance.replaceDefinition(definition, 'off')
-    const ok = window.instance.setState('on')
-    const opaqueCount = window.instance.animations.length
-    const easingResults = []
 
-    for (const easing of [
-      'ease-in',
-      'cubic-bezier(0.42, 0, 1, 1)',
-      'steps(2, end)',
-      'linear(0, .2 50%, 1)',
-    ]) {
-      const def = {
-        name: 'e',
-        states: ['off', 'on'].map((name) => ({
+    window.instance.replaceDefinition(definition)
+    window.instance.updateParameters({ mode: 'on' })
+
+    const count = window.instance.animations.length
+
+    window.instance.dispose()
+
+    return { count, errors: window.errors.map((error) => error.code) }
+  })
+
+  expect(result).toEqual({ count: 8, errors: [] })
+})
+
+for (const [easing, expected] of [
+  ['ease-in', 0.1577],
+  ['cubic-bezier(0.42, 0, 1, 1)', 0.1577],
+  ['steps(2, end)', 0.25],
+  ['linear(0, .2 50%, 1)', 0.1],
+] as const) {
+  test(`tweens apply ${easing} to each keyframe interval`, async ({ page }) => {
+    const result = await page.evaluate(async (intervalEasing) => {
+      const definition: Runtime.Definition = {
+        name: 'interval',
+        parameters: [{ name: 'mode', type: 'string' }],
+        layers: ['off', 'on'].map((name) => ({
           name,
-          targets: [
-            { name: 'track', properties: [{ name: 'opacity', value: name === 'off' ? '0' : '1' }] },
-          ],
-        })),
-        generalTransition: {
-          timing: { kind: 'tween' as const, durationMs: 1000, easing },
+          when: {
+            kind: 'binary',
+            operator: '==',
+            left: { kind: 'reference', path: ['mode'] },
+            right: { kind: 'string', value: name },
+          },
+          timing: { kind: 'tween', durationMs: 1000, easing: intervalEasing },
           targets: [
             {
               name: 'track',
-              properties: [{ name: 'opacity', keyframes: [{ offset: 0.5, value: '0.5' }] }],
+              properties: [
+                {
+                  name: 'opacity',
+                  value: name === 'off' ? '0' : '1',
+                  keyframes:
+                    name === 'on'
+                      ? [
+                          { offset: 0.5, value: '0.5' },
+                          { offset: 1, value: '1' },
+                        ]
+                      : undefined,
+                },
+              ],
             },
           ],
-        },
-        directionalTransitions: [],
+        })),
       }
-      window.instance.replaceDefinition(def, 'off')
-      window.instance.setState('on')
-      await Promise.all(window.instance.animations.map((a) => a.ready))
+
+      window.instance.replaceDefinition(definition)
+      window.instance.updateParameters({ mode: 'on' })
+      await Promise.all(window.instance.animations.map((animation) => animation.ready))
+
       const animation = window.instance.animations[0]
+
       animation.pause()
       animation.currentTime = 250
-      easingResults.push({
+
+      const snapshot = {
         value: Number(getComputedStyle(window.track).opacity),
         effectEasing: animation.effect!.getTiming().easing,
-      })
-    }
+      }
 
-    window.instance.dispose()
-    return { ok, opaqueCount, easingResults, errors: window.errors.map((e) => e.code) }
+      window.instance.dispose()
+
+      return snapshot
+    }, easing)
+
+    expect(result.effectEasing).toBe('linear')
+    expect(result.value).toBeCloseTo(expected, 2)
   })
-
-  expect(result.ok).toBe(true)
-  expect(result.opaqueCount).toBe(8)
-  expect(result.errors).toEqual([])
-  result.easingResults.forEach((r) => expect(r.effectEasing).toBe('linear'))
-  expect(result.easingResults[0].value).toBeCloseTo(0.1577, 2)
-  expect(result.easingResults[1].value).toBeCloseTo(0.1577, 2)
-  expect(result.easingResults[2].value).toBeCloseTo(0.25, 2)
-  expect(result.easingResults[3].value).toBeCloseTo(0.1, 2)
-})
+}
 
 test('definition replacement preserves duplicate suspension and disposal respects external styles', async ({
   page,
@@ -387,7 +450,7 @@ test('definition replacement preserves duplicate suspension and disposal respect
       ['thumb', extra],
     ])
     instance.replaceDefinition(definition)
-    instance.setState('on')
+    instance.updateParameters({ mode: 'on' })
     const suspended = instance.animations.length
     instance.bind([
       ['track', track],
@@ -414,7 +477,7 @@ test('restores shorthand side effects and overlapping longhands with priorities'
     document.body.append(element)
     const definition = {
       name: 'a',
-      states: [
+      layers: [
         {
           name: 'on',
           targets: [
@@ -428,9 +491,8 @@ test('restores shorthand side effects and overlapping longhands with priorities'
           ],
         },
       ],
-      directionalTransitions: [],
     }
-    const instance = new window.liva.LivaInstance(definition, 'on')
+    const instance = new window.liva.LivaInstance(definition, {})
     instance.bind([['box', element]])
     instance.dispose()
     return {
@@ -455,12 +517,11 @@ test('restores variable shorthands without overwriting unrelated external edits'
     document.body.append(element)
     const definition = {
       name: 'a',
-      states: [
+      layers: [
         { name: 'on', targets: [{ name: 'box', properties: [{ name: 'margin', value: '10px' }] }] },
       ],
-      directionalTransitions: [],
     }
-    const instance = new window.liva.LivaInstance(definition, 'on')
+    const instance = new window.liva.LivaInstance(definition, {})
     instance.bind([['box', element]])
     element.style.width = '20px'
     element.style.removeProperty('color')
@@ -480,19 +541,18 @@ test('tracks pending shorthand substitutions and retains external priority remov
     document.body.append(element)
     const definition = {
       name: 'a',
-      states: [
+      layers: [
         {
           name: 'on',
           targets: [{ name: 'box', properties: [{ name: 'margin', value: 'var(--b)' }] }],
         },
       ],
-      directionalTransitions: [],
     }
-    const instance = new window.liva.LivaInstance(definition, 'on')
+    const instance = new window.liva.LivaInstance(definition, {})
     instance.bind([['box', element]])
     instance.dispose()
     const restored = element.style.margin
-    const second = new window.liva.LivaInstance(definition, 'on')
+    const second = new window.liva.LivaInstance(definition, {})
     second.bind([['box', element]])
     element.style.width = '20px'
     second.dispose()

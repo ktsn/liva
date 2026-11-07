@@ -6,7 +6,7 @@ const UnmountProbe = defineComponent({
     return () => h('span', { id: 'probe' }, 'Probe')
   },
 })
-const manualState = ref('idle')
+const dimmed = ref(false)
 const parameters = ref({ value: false, owner: false, entries: false })
 const visible = ref(true)
 const shown = ref(true)
@@ -16,14 +16,14 @@ const rootVisible = ref(true)
 const innerVisible = ref(true)
 
 function updateBindings() {
-  manualState.value = 'dim'
+  dimmed.value = true
   parameters.value = { value: true, owner: true, entries: true }
 }
 </script>
 
 <template>
   <button id="binding-update" @click="updateBindings">Update bindings</button>
-  <div id="manual-binding" v-liva:nested="manualState" v-liva-target:body>Manual</div>
+  <div id="manual-binding" v-liva:nested="{ dimmed }" v-liva-target:body>Manual</div>
   <div id="parameter-binding" v-liva:parameters="parameters" v-liva-target:body>Parameters</div>
   <button id="toggle" @click="visible = !visible">Toggle</button>
   <button id="show" @click="shown = !shown">Show</button>
@@ -36,7 +36,8 @@ function updateBindings() {
       <UnmountProbe />
       <div id="content" v-liva-target:content>Content</div>
       <div id="secondary" v-liva-target:secondary>Secondary</div>
-      <div v-if="innerVisible" id="nested" v-liva:nested v-liva-target:body>Nested</div>
+      <div v-if="innerVisible" id="nested" v-liva:nested="{ dimmed: false }" v-liva-target:body
+      >Nested</div>
     </section>
     <div v-if="visible" id="direct" v-liva-target:direct>Direct</div>
     <div v-show="shown" id="direct-visibility" v-liva-target:directVisibility>
@@ -56,9 +57,10 @@ function updateBindings() {
       <div v-liva-target:third>Third</div>
     </section>
   </div>
-  <div v-if="rootVisible" id="motion-root" v-liva:nested v-liva-target:body>Root</div>
+  <div v-if="rootVisible" id="motion-root" v-liva:nested="{ dimmed: false }" v-liva-target:body
+  >Root</div>
   <section v-for="item in items" :id="'row-' + item" :key="item">
-    <div :id="'row-body-' + item" v-liva:nested v-liva-target:body>Row</div>
+    <div :id="'row-body-' + item" v-liva:nested="{ dimmed: false }" v-liva-target:body>Row</div>
   </section>
 </template>
 
@@ -71,7 +73,7 @@ function updateBindings() {
 
 <liva lang="liva">
 motion panel {
-  state idle {
+  layer base {
     direct {
       opacity: 1
     }
@@ -109,8 +111,7 @@ motion panel {
     }
   }
 
-  enter {
-    @tween: 100ms
+  enter @tween(duration: 100) {
 
     direct {
       opacity {
@@ -161,8 +162,7 @@ motion panel {
     }
   }
 
-  leave {
-    @tween: 300ms
+  leave @tween(duration: 300) {
 
     direct {
       opacity {
@@ -189,8 +189,7 @@ motion panel {
     }
 
     secondary {
-      opacity {
-        @tween: 500ms
+      opacity @tween(duration: 500) {
         100%: 0
       }
     }
@@ -221,25 +220,20 @@ motion panel {
   }
 }
 
-motion nested {
-  state idle {
+motion nested(dimmed: boolean) {
+  layer base @tween(duration: 1) {
     body {
       opacity: 1
     }
   }
 
-  state dim when false {
+  layer dim when dimmed {
     body {
       opacity: 0.4
     }
   }
 
-  transition {
-    @tween: 1ms
-  }
-
-  leave {
-    @tween: 400ms
+  leave @tween(duration: 400) {
 
     body {
       opacity {
@@ -250,24 +244,19 @@ motion nested {
 }
 
 motion parameters(value: boolean, owner: boolean, entries: boolean) {
-  state idle {
+  layer base @tween(duration: 1) {
     body {
       opacity: 1
     }
   }
 
-  state dim when value && owner && entries {
+  layer dim when value && owner && entries {
     body {
       opacity: 0.3
     }
   }
 
-  transition {
-    @tween: 1ms
-  }
-
-  enter {
-    @tween: 100ms
+  enter @tween(duration: 100) {
 
     body {
       opacity {

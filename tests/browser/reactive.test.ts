@@ -36,7 +36,9 @@ test('drag follows input, preserves the scale effect, returns and can be interru
 
   await page.mouse.move(x, y)
   await page.mouse.down()
-  await expect.poll(() => page.evaluate(() => window.instance.state)).toBe('dragging')
+  await expect
+    .poll(() => page.evaluate(() => window.instance.composition.states.interaction))
+    .toBe('dragging')
   await page.evaluate(() => {
     const scale = window.instance.animations.find((animation) =>
       (animation.effect instanceof KeyframeEffect ? animation.effect.getKeyframes() : []).some(
@@ -65,7 +67,7 @@ test('drag follows input, preserves the scale effect, returns and can be interru
     translate.pause()
     translate.currentTime = 0
     return {
-      state: instance.state,
+      state: instance.composition.states.interaction,
       first:
         translate.effect instanceof KeyframeEffect
           ? translate.effect.getKeyframes()[0].translate
@@ -114,7 +116,10 @@ test('pointer cancellation and disposal release capture and remove listeners', a
   const canceled = await page.evaluate(() => {
     const id = Number(window.track.dataset.pointer)
     window.track.dispatchEvent(new PointerEvent('pointercancel', { pointerId: id }))
-    return { state: window.instance.state, captured: window.track.hasPointerCapture(id) }
+    return {
+      state: window.instance.composition.states.interaction,
+      captured: window.track.hasPointerCapture(id),
+    }
   })
   expect(canceled).toEqual({ state: 'idle', captured: false })
   await page.mouse.up()
@@ -162,7 +167,7 @@ test('parameter updates select states and repeated values retain running effects
     const animations = [...instance.animations]
     instance.updateParameters({ checked: true })
     const snapshot = {
-      state: instance.state,
+      state: instance.composition.states.toggle,
       same: animations.every((animation, index) => instance.animations[index] === animation),
     }
     instance.dispose()
@@ -226,7 +231,9 @@ test('lost capture, target rebinding and editor replacement do not retain draggi
   for (const operation of ['lost', 'rebind', 'replace'] as const) {
     await page.mouse.move(box.x + 30, box.y + 30)
     await page.mouse.down()
-    expect(await page.evaluate(() => window.instance.state)).toBe('dragging')
+    expect(await page.evaluate(() => window.instance.composition.states.interaction)).toBe(
+      'dragging',
+    )
 
     const snapshot = await page.evaluate((action) => {
       const { instance, track } = window
@@ -236,15 +243,20 @@ test('lost capture, target rebinding and editor replacement do not retain draggi
         instance.bind([])
         instance.bind([['body', track]])
       } else {
-        instance.replaceDefinition(instance.definition, 'idle')
+        instance.replaceDefinition(instance.definition)
       }
-      return { captured: track.hasPointerCapture(id), selected: instance.reactiveState }
+      return {
+        captured: track.hasPointerCapture(id),
+        selected: instance.composition.states.interaction,
+      }
     }, operation)
     expect(snapshot.captured).toBe(false)
     if (operation !== 'lost') expect(snapshot.selected).toBe('idle')
 
     await page.mouse.up()
-    await expect.poll(() => page.evaluate(() => window.instance.reactiveState)).toBe('idle')
+    await expect
+      .poll(() => page.evaluate(() => window.instance.composition.states.interaction))
+      .toBe('idle')
     await expect.poll(() => page.evaluate(() => window.instance.animations.length)).toBe(0)
   }
 })
@@ -257,7 +269,7 @@ test('dynamic errors retain the last valid value and inactive templates do not b
   await page.evaluate((fixture) => {
     const original = window.liva.decodeBundle(JSON.stringify(fixture)).definitions[0]
     const definition = structuredClone(original)
-    const dynamic = definition.states[1].targets[0].properties[0]
+    const dynamic = definition.layers[0].states![1].targets[0].properties[0]
     Object.assign(dynamic, {
       template: [
         {
@@ -285,9 +297,11 @@ test('dynamic errors retain the last valid value and inactive templates do not b
 
   await page.mouse.move(x, y)
   await page.mouse.down()
-  expect(await page.evaluate(() => window.instance.state)).toBe('idle')
+  expect(await page.evaluate(() => window.instance.composition.states.interaction)).toBe('idle')
   await page.mouse.move(x + 20, y)
-  await expect.poll(() => page.evaluate(() => window.instance.state)).toBe('dragging')
+  await expect
+    .poll(() => page.evaluate(() => window.instance.composition.states.interaction))
+    .toBe('dragging')
   await page.mouse.move(x + 25, y)
   expect(
     await page.locator('#card').evaluate((element) => getComputedStyle(element).translate),
@@ -298,7 +312,9 @@ test('dynamic errors retain the last valid value and inactive templates do not b
     await page.locator('#card').evaluate((element) => getComputedStyle(element).translate),
   ).toBe('4px')
   await page.mouse.up()
-  await expect.poll(() => page.evaluate(() => window.instance.state)).toBe('idle')
+  await expect
+    .poll(() => page.evaluate(() => window.instance.composition.states.interaction))
+    .toBe('idle')
   await expect.poll(() => page.evaluate(() => window.instance.animations.length)).toBe(0)
   expect(
     await page.evaluate(() => window.errors.every((error) => error.code === 'runtime.expression')),
@@ -318,7 +334,7 @@ test('typed parameter instances update CSS independently and retain values after
         { name: 'label', type: 'string' },
         { name: 'enabled', type: 'boolean' },
       ],
-      states: [
+      layers: [
         {
           name: 'idle',
           targets: [
@@ -340,7 +356,6 @@ test('typed parameter instances update CSS independently and retain values after
           ],
         },
       ],
-      directionalTransitions: [],
     }
     const elements = [document.createElement('div'), document.createElement('div')]
     const errors: string[] = []
@@ -389,7 +404,11 @@ test('missing parameters reject creation, updates and incompatible replacements 
 
     for (const input of [undefined, {}, 'off']) {
       try {
-        const unexpected = new window.liva.LivaInstance(definition, input)
+        const unexpected = new window.liva.LivaInstance(
+          definition,
+          // Exercise the JavaScript boundary with a removed string binding.
+          input,
+        )
         unexpected.dispose()
       } catch (error) {
         failures.push(String(error))
@@ -426,14 +445,14 @@ test('missing parameters reject creation, updates and incompatible replacements 
 
     const retained = {
       definition: instance.definition === definition,
-      state: instance.state,
-      selected: instance.reactiveState,
+      state: instance.composition.states.toggle,
+      selected: instance.composition.states.toggle,
       effects:
         animations.length > 0 &&
         animations.every((animation, index) => instance.animations[index] === animation),
     }
     instance.updateParameters({ checked: false })
-    const recovered = instance.state
+    const recovered = instance.composition.states.toggle
 
     instance.dispose()
     track.remove()
@@ -443,7 +462,7 @@ test('missing parameters reject creation, updates and incompatible replacements 
   expect(result.failures).toEqual([
     'Error: Missing motion parameter: checked',
     'Error: Missing motion parameter: checked',
-    'Error: Missing motion parameter: checked',
+    'Error: Motion inputs must be a parameter object; string-state bindings were removed',
     'Error: Missing motion parameter: added',
     'Error: Motion parameter checked requires number',
   ])
@@ -462,8 +481,8 @@ test('built-in subscriptions keep instance-local values across definition replac
       window.liva.decodeBundle(JSON.stringify(fixture)).definitions[0],
     )
     Object.assign(
-      definition.states[0].targets[0].properties[0],
-      definition.states[1].targets[0].properties[0],
+      definition.layers[0].targets[0].properties[0],
+      definition.layers[0].states![1].targets[0].properties[0],
     )
     const instances = [0, 1].map((index) => {
       const element = document.createElement('div')
@@ -490,13 +509,15 @@ test('built-in subscriptions keep instance-local values across definition replac
 
   await page.evaluate(() => {
     const instance = window.letInstances[0]
-    instance.replaceDefinition(instance.definition, 'idle')
+    instance.replaceDefinition(instance.definition)
   })
   await page.mouse.up()
 
   await expect(first).toHaveCSS('translate', '70px 30px')
   expect(
-    await page.evaluate(() => window.letInstances.map((instance) => instance.reactiveState)),
+    await page.evaluate(() =>
+      window.letInstances.map((instance) => instance.composition.states.interaction),
+    ),
   ).toEqual(['idle', 'idle'])
 
   const secondBox = (await second.boundingBox())!
@@ -544,7 +565,7 @@ test('derived let bindings follow parameters and drag through aliases and preser
   await page.mouse.down()
   await page.mouse.move(box.x + 60, box.y + 20)
   await expect(first).toHaveCSS('translate', '50px')
-  expect(await page.evaluate(() => window.letInstances[0].state)).toBe('dragging')
+  expect(await page.evaluate(() => window.letInstances[0].composition.layers.dragging)).toBe(true)
 
   await page.evaluate(() => window.letInstances[0].updateParameters({ progress: 20, divisor: 1 }))
   await expect(first).toHaveCSS('translate', '60px')
@@ -556,7 +577,7 @@ test('derived let bindings follow parameters and drag through aliases and preser
   await page.evaluate(() => window.letInstances[0].updateParameters({ progress: 30, divisor: 1 }))
   await expect(first).toHaveCSS('translate', '80px')
   await page.mouse.up()
-  expect(await page.evaluate(() => window.letInstances[0].state)).toBe('idle')
+  expect(await page.evaluate(() => window.letInstances[0].composition.layers.dragging)).toBe(false)
 
   await page.evaluate(() => {
     const instance = window.letInstances[0]

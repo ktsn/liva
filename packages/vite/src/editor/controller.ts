@@ -1,17 +1,14 @@
-import { timelineReadOnly, readOnlyMessage } from './capabilities.ts'
 import type { InstanceBinding } from '@liva/vue'
 import type { Composition, CompositionTransition } from '@liva/runtime'
 import type { EditorReply, EditorRequest, Edit, Inspection } from './communication/protocol.ts'
 
-export type EditorBinding = Pick<InstanceBinding, 'component' | 'definition' | 'requestedState'> & {
+export type EditorBinding = Pick<InstanceBinding, 'component' | 'definition'> & {
   readonly root: Pick<HTMLElement, 'getAttribute' | 'textContent' | 'getBoundingClientRect'>
   readonly runtime: Pick<
     InstanceBinding['runtime'],
     | 'definition'
-    | 'state'
     | 'animations'
     | 'replaceDefinition'
-    | 'setState'
     | 'previewLifecycle'
     | 'composition'
     | 'previewComposition'
@@ -86,8 +83,6 @@ export class EditorController {
         binding.runtime.endCompositionPreview()
         this.previewActive = false
         this.sequence++
-        if (binding.runtime.definition !== binding.definition)
-          binding.runtime.replaceDefinition(binding.definition, binding.requestedState)
         this.message = 'Application state superseded the preview. Your draft is retained.'
       }
     }
@@ -119,9 +114,7 @@ export class EditorController {
     })
     if (this.selected !== selected || sequence !== this.sequence) return
     this.inspection = inspection
-    this.message = timelineReadOnly(inspection.definition)
-      ? readOnlyMessage
-      : 'Preview affects this instance. Saving updates the shared source.'
+    this.message = 'Preview affects this instance. Saving updates the shared source.'
     this.notify()
   }
 
@@ -130,52 +123,6 @@ export class EditorController {
     this.sequence++
     this.draft = edits
     this.pendingCommit = undefined
-    this.notify()
-  }
-
-  async preview(state: string, from?: string, general = false, phase?: 'enter' | 'leave') {
-    const selected = this.selected
-    const inspection = this.inspection
-    if (!selected || !inspection || !this.active(selected))
-      throw new Error('Select a mounted instance')
-    if (timelineReadOnly(inspection.definition)) throw new Error(readOnlyMessage)
-    if (inspection.definition.layers?.length)
-      throw new Error('Layer motions use composition previews')
-
-    const sequence = ++this.sequence
-    const reply = await this.send({
-      action: 'preview',
-      sourceId: selected.sourceId,
-      definition: selected.binding.definition.name,
-      instanceId: selected.id,
-      baseHash: inspection.hash,
-      sequence,
-      edits: this.draft,
-    })
-    if (
-      sequence !== this.sequence ||
-      this.selected !== selected ||
-      !this.active(selected) ||
-      reply.sequence !== sequence ||
-      this.stale
-    )
-      return
-    const definition =
-      general && !phase ? { ...reply.definition, directionalTransitions: [] } : reply.definition
-    selected.binding.runtime.replaceDefinition(
-      definition,
-      phase ? state : (from ?? selected.binding.requestedState),
-    )
-    const succeeded = phase
-      ? selected.binding.runtime.previewLifecycle(phase)
-      : from === undefined
-        ? selected.binding.runtime.setState(state)
-        : selected.binding.runtime.setState(state, { paused: true })
-    this.previewActive = succeeded
-    if (!this.previewActive)
-      throw new Error('The runtime could not prepare this transition. Check its timing and easing.')
-
-    this.message = 'Previewing this instance only. Source is unchanged.'
     this.notify()
   }
 
@@ -244,16 +191,6 @@ export class EditorController {
     this.previewActive = false
     const selected = this.selected
     selected?.binding.runtime.endCompositionPreview()
-    if (
-      selected &&
-      this.active(selected) &&
-      (selected.binding.runtime.definition !== selected.binding.definition ||
-        selected.binding.runtime.state !== selected.binding.requestedState)
-    )
-      selected.binding.runtime.replaceDefinition(
-        selected.binding.definition,
-        selected.binding.requestedState,
-      )
   }
 
   async cancel() {
@@ -292,7 +229,6 @@ export class EditorController {
     const selected = this.selected
     const inspection = this.inspection
     if (!selected || !inspection) throw new Error('Select an instance first')
-    if (timelineReadOnly(inspection.definition)) throw new Error(readOnlyMessage)
 
     const signature = JSON.stringify({
       sourceId: selected.sourceId,

@@ -75,7 +75,7 @@
           "type": "number"
         }
       ],
-      "states": [
+      "layers": [
         {
           "name": "idle",
           "targets": [
@@ -122,8 +122,7 @@
             }
           ]
         }
-      ],
-      "directionalTransitions": []
+      ]
     }
   ],
   "diagnostics": []

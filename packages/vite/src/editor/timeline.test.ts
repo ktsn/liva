@@ -1,13 +1,13 @@
 import { resolveComposition, type Definition } from '@liva/runtime'
+import { renderTransition } from '../../../runtime/src/expression.ts'
 import { describe, expect, it } from 'vite-plus/test'
 import { compile } from '../compiler.ts'
 import { readFileSync } from 'node:fs'
 import {
-  normalizedOffset,
-  snapTime,
-  timelineTracks,
   compositionTimelineTracks,
   compositionLifecycleTracks,
+  timingText,
+  editableDefinition,
 } from './timeline.ts'
 
 const definition = compile(
@@ -15,34 +15,34 @@ const definition = compile(
   true,
 ).definitions[0]
 
-const reverseTranslation = (general: boolean) =>
-  timelineTracks(definition, 'on', 'off', general).find((track) => track.property === 'translate')!
+function fixtureTracks(source = definition, reverse = false) {
+  const from = { layers: {}, states: { toggle: reverse ? 'on' : 'off' } }
+  const to = { layers: {}, states: { toggle: reverse ? 'off' : 'on' } }
+
+  return compositionTimelineTracks(
+    resolveComposition(source, {}, from),
+    resolveComposition(source, {}, to, from, [{ layer: 'toggle', index: reverse ? 1 : 0 }]),
+  )
+}
 
 describe('timeline coordinates and inheritance', () => {
   it('keeps real-time coordinates distinct from per-property percentages', () => {
-    const tracks = timelineTracks(definition, 'off', 'on', false)
-    const scale = tracks.find((track) => track.property === 'scale')!
-    const color = tracks.find((track) => track.property === 'background-color')!
+    const tracks = fixtureTracks()
+    const scale = tracks.find((track) => track.property === 'scale')
+    const color = tracks.find((track) => track.property === 'background-color')
 
-    expect(scale.duration).toBe(350)
-    expect(color.duration).toBe(200)
-    expect(scale.frames.map((frame) => frame.offset)).toEqual([0, 0.4, 0.7, 1])
-    expect(scale.inheritedFrames).toBe(true)
-    expect(normalizedOffset(140, scale.duration)).toBe(0.4)
-    expect(normalizedOffset(140, color.duration)).toBe(0.7)
+    expect(scale?.duration).toBe(350)
+    expect(color?.duration).toBe(200)
+    expect(scale?.frames.map((frame) => frame.offset)).toEqual([0, 0.4, 0.7, 1])
   })
 
-  it('shows common settings independently of directional timing', () => {
-    expect(reverseTranslation(false).timing?.kind).toBe('spring-duration')
-    expect(reverseTranslation(true).timing?.kind).toBe('spring-physics')
-    expect(reverseTranslation(false).duration).toBe(350)
-  })
+  it('uses the timing of the explicitly selected return transition', () => {
+    const forward = fixtureTracks().find((track) => track.property === 'translate')
+    const reverse = fixtureTracks(definition, true).find((track) => track.property === 'translate')
 
-  it('snaps to real-time markers and bypasses snapping with the modifier', () => {
-    expect(snapTime(143, 1000, [140], 1000, false)).toBe(140)
-    expect(snapTime(143, 1000, [140], 1000, true)).toBe(143)
-    expect(snapTime(151, 1000, [140], 1000, false)).toBe(151)
-    expect(normalizedOffset(1, 3)).toBe(0.333333)
+    expect(forward?.timing?.kind).toBe('spring-physics')
+    expect(reverse?.timing?.kind).toBe('spring-duration')
+    expect(reverse?.duration).toBe(350)
   })
 })
 
@@ -50,85 +50,114 @@ it('contains spring solver failures within the affected track', () => {
   const source = readFileSync(
     new URL('../../../../fixtures/toggle.liv', import.meta.url),
     'utf8',
-  ).replace('@spring: 300 20', '@spring: 300 0.000001')
+  ).replace('damping: 20', 'damping: 0.000001')
   const compiled = compile(source, true)
-  expect(compiled.diagnostics.filter((item) => item.severity === 'error')).toEqual([])
+  const tracks = fixtureTracks(compiled.definitions[0])
 
-  const tracks = timelineTracks(compiled.definitions[0], 'off', 'on', false)
+  expect(compiled.diagnostics.filter((item) => item.severity === 'error')).toEqual([])
   expect(tracks.find((track) => track.property === 'translate')?.diagnostic).toBeTruthy()
   expect(tracks.find((track) => track.property === 'scale')?.duration).toBe(350)
 })
 
-it('formats all timing variants and handles missing states and timing', async () => {
-  const { timingText } = await import('./timeline.ts')
-
+it('formats evaluated timing variants as display labels', () => {
   expect(timingText({ kind: 'tween', durationMs: 100, easing: 'linear' })).toBe(
-    '@tween: 100ms linear',
+    'Tween: 100 ms, linear',
   )
   expect(timingText({ kind: 'spring-duration', durationMs: 200, bounce: 0.3 })).toBe(
-    '@spring: 200ms 0.3',
+    'Spring: 200 ms, bounce 0.3',
   )
   expect(timingText({ kind: 'spring-physics', stiffness: 100, damping: 10, mass: 1 })).toBe(
-    '@spring: 100 10 1',
+    'Spring: stiffness 100, damping 10, mass 1',
   )
-  expect(timelineTracks(definition, 'off', 'missing', false)).toEqual([])
-  expect(normalizedOffset(100, 0)).toBe(0)
-  expect(normalizedOffset(-100, 10)).toBe(0)
-  expect(normalizedOffset(100, 10)).toBe(1)
-
-  const bare = { ...definition, generalTransition: undefined, directionalTransitions: [] }
-  const tracks = timelineTracks(bare, 'missing', 'off', true)
-
-  expect(tracks.every((track) => track.duration === 0)).toBe(true)
-  expect(tracks[0].frames[0].value).toBe(tracks[0].frames[1].value)
 })
 
-it('previews motion-level lifecycle endpoints in the selected legacy state', async () => {
-  const { editableDefinition, transitionAt, transitionPath } = await import('./timeline.ts')
-  const compiled = compile(
+describe('composition lifecycle timeline', () => {
+  const source = compile(
     `motion panel {
-    state idle { body { opacity: 1 } extra { opacity: 1 } }
-    enter { @tween: 200ms; body { opacity: 0 } }
-    leave { @tween: 300ms; body { translate: 10px 0 } extra { opacity: 0 } }
+    layer base { body { opacity: 1 } extra { opacity: 1 } }
+    enter @tween(duration: 200) { body { opacity: 0 } }
+    leave @tween(duration: 300) { body { translate: 10px 0 } extra { opacity: 0 } }
   }`,
     true,
-  )
-  const model = editableDefinition(compiled.definitions[0])
-
-  expect(model).not.toBe(compiled.definitions[0])
-  expect(transitionAt(model, 'idle', 'idle', false, 'enter')).toBe(model.enter)
-  expect(transitionPath(model, 'idle', 'idle', false, 'enter')).toBe('panel/enter')
-
-  const enter = timelineTracks(model, 'idle', 'idle', true, 'enter')[0]
-
-  expect(enter.frames.map((frame) => frame.value)).toEqual(['0', '1'])
-  expect(enter.duration).toBe(200)
-
-  const leave = timelineTracks(model, 'idle', 'idle', true, 'leave').find(
-    (track) => track.property === 'translate',
-  )!
-
-  expect(leave.frames.map((frame) => frame.value)).toEqual(['', '10px 0'])
-  expect(leave.duration).toBe(300)
-})
-
-it('displays lifecycle-only targets without inventing an endpoint state', () => {
-  const compiled = compile(
-    'motion panel { state idle { extra { opacity: 1 } } leave { @tween: 200ms; extra { opacity: 0 } } }',
-    false,
   ).definitions[0]
-  const tracks = timelineTracks(compiled, 'missing', 'missing', false, 'leave')
 
-  expect(tracks[0].target).toBe('extra')
-  expect(tracks[0].frames.map((frame) => frame.value)).toEqual(['', '0'])
+  it('resolves lifecycle endpoints from the selected composition', () => {
+    const model = editableDefinition(source)
+    const baseline = resolveComposition(
+      model,
+      {},
+      { layers: { base: true }, states: {} },
+    ).presentation
+    const enter = compositionLifecycleTracks(
+      model.name,
+      'enter',
+      baseline,
+      renderTransition(model.enter!, {}),
+    )[0]
+    const leave = compositionLifecycleTracks(
+      model.name,
+      'leave',
+      baseline,
+      renderTransition(model.leave!, {}),
+    ).find((track) => track.property === 'translate')
+
+    expect(model).not.toBe(source)
+    expect(enter.frames.map((frame) => frame.value)).toEqual(['0', '1'])
+    expect(enter.duration).toBe(200)
+    expect(leave?.frames.map((frame) => frame.value)).toEqual(['', '10px 0'])
+    expect(leave?.duration).toBe(300)
+  })
+
+  it.each([
+    { stiffness: 300, damping: 20, mass: 1, fails: false },
+    { stiffness: 0.001, damping: 0.001, mass: 100, fails: true },
+  ])(
+    'exposes lifecycle spring duration or solver failure: $fails',
+    ({ stiffness, damping, mass, fails }) => {
+      const baseline = resolveComposition(
+        source,
+        {},
+        { layers: { base: true }, states: {} },
+      ).presentation
+      const [row] = compositionLifecycleTracks(source.name, 'enter', baseline, {
+        timing: { kind: 'spring-physics', stiffness, damping, mass },
+        targets: [
+          {
+            name: 'body',
+            properties: [{ name: 'opacity', keyframes: [{ offset: 0, value: '0' }] }],
+          },
+        ],
+      })
+
+      expect(Boolean(row.diagnostic)).toBe(fails)
+      expect(row.duration > 0).toBe(!fails)
+      expect(row.frames.map((frame) => frame.value)).toEqual(['0', '1'])
+    },
+  )
+
+  it('displays lifecycle-only targets without inventing a composition endpoint', () => {
+    const baseline = resolveComposition(
+      source,
+      {},
+      { layers: { base: false }, states: {} },
+    ).presentation
+    const tracks = compositionLifecycleTracks(
+      source.name,
+      'leave',
+      baseline,
+      renderTransition(source.leave!, {}),
+    )
+    const extra = tracks.find((track) => track.target === 'extra')
+
+    expect(extra?.frames.map((frame) => frame.value)).toEqual(['', '0'])
+  })
 })
 
 describe('composition timeline rows', () => {
   it('includes unchanged and untimed properties and resolves owning transition frames', () => {
     const source: Definition = {
       name: 'layers',
-      states: [],
-      directionalTransitions: [],
+
       layers: [
         {
           name: 'base',
@@ -199,8 +228,7 @@ describe('composition timeline rows', () => {
   ])('represents spring durations and diagnostics: $timing.kind', ({ timing, expected }) => {
     const source: Definition = {
       name: 'layers',
-      states: [],
-      directionalTransitions: [],
+
       layers: [
         {
           name: 'base',
@@ -248,6 +276,7 @@ describe('composition lifecycle resolved endpoints', () => {
         targets: [{ name: 'body', properties: [{ name: 'opacity', value: '1' }] }],
       }
       const transition = {
+        timing: { kind: 'tween' as const, durationMs: 200, easing: 'linear' },
         targets: [
           {
             name: 'body',

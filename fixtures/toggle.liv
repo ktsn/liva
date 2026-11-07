@@ -1,54 +1,21 @@
-motion toggle {
-  state off {
-    track {
-      background-color: #888
+motion toggle(mode: string) {
+  layer toggle @tween(duration: 350, easing: easeOut) {
+    track { background-color: #888 @tween(duration: 200, easing: easeInOut) }
+    thumb { translate: 0 0 @spring(stiffness: 300, damping: 20); scale: 1 }
+
+    state off initial {}
+    state on {
+      track { background-color: #34b27b }
+      thumb { translate: 24px 0 }
     }
 
-    thumb {
-      translate: 0 0
-      scale: 1
+    transition off -> on when mode == 'on' {
+      thumb { scale { 40%: 1.3 1 @easeIn; 70%: 0.95 1 @easeOut } }
     }
-  }
-
-  state on when true {
-    track {
-      background-color: #34b27b
-    }
-
-    thumb {
-      translate: 24px 0
-      scale: 1
-    }
-  }
-
-  transition {
-    @tween-duration: 350ms
-    @tween-easing: ease-out
-
-    track {
-      background-color {
-        @tween-duration: 200ms
-        @tween-easing: ease-in-out
-      }
-    }
-
-    thumb {
-      translate {
-        @spring: 300 20
-      }
-
-      scale {
-        40%: 1.3 1 @ ease-in
-
-        70%: 0.95 1 @ ease-out
-      }
-    }
-  }
-
-  transition on -> off {
-    thumb {
-      translate {
-        @spring: 350ms 0.25
+    transition on -> off when !(mode == 'on') {
+      thumb {
+        translate @spring(duration: 350, bounce: 0.25) {}
+        scale { 40%: 1.3 1 @easeIn; 70%: 0.95 1 @easeOut }
       }
     }
   }

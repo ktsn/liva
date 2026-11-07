@@ -12,20 +12,19 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-const definition: Definition = { name: 'motion', states: [], directionalTransitions: [] }
+const definition: Definition = { name: 'motion', layers: [{ name: 'base', targets: [] }] }
+const from = { layers: { base: true }, states: {} }
+const to = { layers: { base: false }, states: {} }
 const reply = { hash: 'original', definition, fields: [] } satisfies EditorReply
 const edits = [
-  { op: 'set', path: 'motion/transition/general/timing/duration', value: '200ms' },
+  { op: 'set', path: 'motion/layer/base/timing', value: 'tween(duration: 200)' },
 ] satisfies Edit[]
-
-const stateSpies = new WeakMap<EditorBinding, ReturnType<typeof vi.fn>>()
 
 function binding(label: string) {
   const runtime = {
     definition,
-    state: 'off',
     animations: [],
-    composition: undefined,
+    composition: from,
     inspectComposition: vi.fn<InstanceBinding['runtime']['inspectComposition']>(),
     inspectLifecycle: vi.fn<InstanceBinding['runtime']['inspectLifecycle']>(),
     previewComposition: vi.fn<InstanceBinding['runtime']['previewComposition']>(),
@@ -36,8 +35,7 @@ function binding(label: string) {
     ) {
       this.definition = next
     }),
-    setState: vi.fn<InstanceBinding['runtime']['setState']>().mockReturnValue(true),
-    previewLifecycle: vi.fn<InstanceBinding['runtime']['previewLifecycle']>().mockReturnValue(true),
+    previewLifecycle: vi.fn<InstanceBinding['runtime']['previewLifecycle']>(),
   }
   const result = {
     root: {
@@ -48,9 +46,7 @@ function binding(label: string) {
     component: { livaSource: 'source' },
     runtime,
     definition,
-    requestedState: 'off',
   } satisfies EditorBinding
-  stateSpies.set(result, runtime.setState)
   return result
 }
 
@@ -68,7 +64,7 @@ async function setup(send: (request: EditorRequest) => Promise<EditorReply>) {
 describe('editor revision lifecycle', () => {
   it('only displays source diagnostics for the selected source', async () => {
     const { controller } = await setup(async () => reply)
-    await controller.preview('on')
+    await controller.previewComposition(from, to)
     const message = controller.message
 
     controller.reportSourceDiagnostics('other-source', 'Invalid duration')
@@ -91,8 +87,8 @@ describe('editor revision lifecycle', () => {
       requests.push({ request, response })
       return response.promise
     })
-    const old = controller.preview('on')
-    const latest = controller.preview('off')
+    const old = controller.previewComposition(from, to)
+    const latest = controller.previewComposition(to, from)
     requests[1].response.resolve({
       ...reply,
       definition: { ...definition },
@@ -101,21 +97,26 @@ describe('editor revision lifecycle', () => {
     await latest
     requests[0].response.resolve({ ...reply, sequence: requests[0].request.sequence })
     await old
-    expect(stateSpies.get(first)).toHaveBeenCalledExactlyOnceWith('off')
+    expect(first.runtime.previewComposition).toHaveBeenCalledExactlyOnceWith(
+      to,
+      from,
+      [],
+      expect.objectContaining(definition),
+    )
 
-    const stale = controller.preview('on')
+    const stale = controller.previewComposition(from, to)
     controller.sourceChanged('source')
     requests[2].response.resolve({ ...reply, sequence: requests[2].request.sequence })
     await stale
     expect(first.runtime.definition).toBe(definition)
-    expect(stateSpies.get(first)).toHaveBeenCalledTimes(1)
+    expect(first.runtime.previewComposition).toHaveBeenCalledTimes(1)
 
     await controller.cancel()
-    const unmounted = controller.preview('on')
+    const unmounted = controller.previewComposition(from, to)
     controller.observe('unmount', first)
     requests[3].response.resolve({ ...reply, sequence: requests[3].request.sequence })
     await unmounted
-    expect(stateSpies.get(first)).toHaveBeenCalledTimes(1)
+    expect(first.runtime.previewComposition).toHaveBeenCalledTimes(1)
   })
 
   it.each(['selection', 'draft'])(
@@ -128,7 +129,7 @@ describe('editor revision lifecycle', () => {
       controller.setDraft(edits)
       const saving = controller.commit()
       if (change === 'selection') await controller.select(b)
-      const newer: Edit[] = [{ ...edits[0], value: '300ms' }]
+      const newer: Edit[] = [{ ...edits[0], value: 'tween(duration: 300)' }]
       controller.setDraft(newer)
 
       saved.resolve(reply)
@@ -174,7 +175,7 @@ describe('editor selection and saves', () => {
 
     await controller.select('missing')
 
-    await expect(controller.preview('on')).rejects.toThrow('mounted')
+    await expect(controller.previewComposition(from, to)).rejects.toThrow('mounted')
     await expect(controller.commit()).rejects.toThrow('first')
 
     controller.sourceChanged('other')
@@ -247,13 +248,13 @@ describe('editor selection and saves', () => {
     expect(listener).toHaveBeenCalledTimes(2)
   })
 
-  it('previews general timing, seeks, and restores after application updates', async () => {
+  it('previews compositions, seeks, and restores after application updates', async () => {
     const { controller, first } = await setup(async (request) => ({
       ...reply,
       sequence: request.sequence,
     }))
 
-    await controller.preview('on', 'off', true)
+    await controller.previewComposition(from, to)
 
     expect(controller.previewActive).toBe(true)
 
@@ -275,9 +276,11 @@ describe('editor selection and saves', () => {
       sequence: request.sequence,
     }))
 
-    stateSpies.get(first)!.mockReturnValue(false)
+    first.runtime.previewComposition.mockImplementation(() => {
+      throw new Error('Could not prepare preview')
+    })
 
-    await expect(controller.preview('on')).rejects.toThrow('could not prepare')
+    await expect(controller.previewComposition(from, to)).rejects.toThrow('Could not prepare')
     expect(controller.previewActive).toBe(false)
 
     const inspection = deferred<EditorReply>()
@@ -332,7 +335,7 @@ it('allocates a new retry identity when a public draft changes after failure', a
 
   await expect(controller.commit()).rejects.toThrow('Connection lost')
 
-  controller.draft = [{ ...edits[0], value: '400ms' }]
+  controller.draft = [{ ...edits[0], value: 'tween(duration: 400)' }]
 
   await expect(controller.commit()).rejects.toThrow('Connection lost')
 
@@ -371,75 +374,40 @@ it('does not apply previews started against an already stale inspection', async 
   const { controller } = await setup(async (request) => ({ ...reply, sequence: request.sequence }))
 
   controller.sourceChanged('source')
-  await controller.preview('on')
+  await controller.previewComposition(from, to)
 
   expect(controller.previewActive).toBe(false)
   expect(controller.stale).toBe(true)
 })
 
-it.each(['enter', 'leave'] as const)(
-  'previews motion-level %s and restores on cancellation',
-  async (phase) => {
-    const lifecycle = { ...definition, [phase]: { targets: [] } }
-    const { controller, first } = await setup(async (request) => ({
-      ...reply,
-      definition: lifecycle,
-      sequence: request.sequence,
-    }))
+describe('lifecycle preview coordination', () => {
+  it.each(['enter', 'leave'] as const)(
+    'previews motion-level %s without replacing the application definition',
+    async (phase) => {
+      const lifecycle = { ...definition, [phase]: { targets: [] } }
+      const { controller, first } = await setup(async (request) => ({
+        ...reply,
+        definition: lifecycle,
+        sequence: request.sequence,
+      }))
 
-    await controller.preview('on', undefined, true, phase)
+      await controller.previewComposition(from, to, [], phase)
 
-    expect(first.runtime.replaceDefinition).toHaveBeenLastCalledWith(lifecycle, 'on')
-    expect(first.runtime.previewLifecycle).toHaveBeenLastCalledWith(phase)
-    expect(first.runtime.setState).not.toHaveBeenCalled()
+      expect(first.runtime.previewLifecycle).toHaveBeenCalledExactlyOnceWith(phase, to, lifecycle)
+      expect(first.runtime.previewComposition).not.toHaveBeenCalled()
+      expect(first.runtime.replaceDefinition).not.toHaveBeenCalled()
 
-    await controller.preview('on', undefined, false, phase)
+      controller.endPreview()
 
-    expect(first.runtime.replaceDefinition).toHaveBeenLastCalledWith(lifecycle, 'on')
-
-    controller.endPreview()
-
-    expect(first.runtime.replaceDefinition).toHaveBeenLastCalledWith(definition, 'off')
-  },
-)
-
-it('rejects legacy typed timeline preview and save without replacing the live definition', async () => {
-  const layered = {
-    ...definition,
-    enter: {
-      timingExpression: { kind: 'call' as const, function: 'tween', arguments: [] },
-      targets: [],
+      expect(first.runtime.endCompositionPreview).toHaveBeenCalled()
+      expect(first.runtime.definition).toBe(definition)
     },
-  }
-  const send = vi
-    .fn<(request: EditorRequest) => Promise<EditorReply>>()
-    .mockResolvedValue({ ...reply, definition: layered })
-  const { controller, first } = await setup(send)
-
-  expect(controller.message).toContain('read-only')
-
-  await expect(controller.preview('on')).rejects.toThrow('read-only')
-  await expect(controller.commit()).rejects.toThrow('read-only')
-
-  expect(send).toHaveBeenCalledTimes(1)
-  expect(first.runtime.replaceDefinition).not.toHaveBeenCalled()
-})
-
-it('requires the composition API for layer playback', async () => {
-  const layered = { ...definition, layers: [{ name: 'base', targets: [] }] }
-  const send = vi
-    .fn<(request: EditorRequest) => Promise<EditorReply>>()
-    .mockResolvedValue({ ...reply, definition: layered })
-  const { controller, first } = await setup(send)
-
-  await expect(controller.preview('on')).rejects.toThrow('composition previews')
-
-  expect(first.runtime.replaceDefinition).not.toHaveBeenCalled()
+  )
 })
 
 describe('composition preview coordination', () => {
-  const from = { layers: { base: true }, states: {} }
-  const to = { layers: { base: false }, states: {} }
+  const fromComposition = { layers: { base: true }, states: {} }
+  const toComposition = { layers: { base: false }, states: {} }
 
   it('applies only the latest mounted preview response without replacing application definitions', async () => {
     const pending: ReturnType<typeof deferred<EditorReply>>[] = []
@@ -452,16 +420,16 @@ describe('composition preview coordination', () => {
       return item.promise
     })
 
-    const old = controller.previewComposition(from, to)
-    const latest = controller.previewComposition(to, from)
+    const old = controller.previewComposition(fromComposition, toComposition)
+    const latest = controller.previewComposition(toComposition, fromComposition)
     pending[1].resolve({ ...reply, sequence: requests[1].sequence })
     await latest
     pending[0].resolve({ ...reply, sequence: requests[0].sequence })
     await old
 
     expect(first.runtime.previewComposition).toHaveBeenCalledExactlyOnceWith(
-      to,
-      from,
+      toComposition,
+      fromComposition,
       [],
       definition,
     )
@@ -480,7 +448,7 @@ describe('composition preview coordination', () => {
         return pending.promise
       })
 
-      const preview = controller.previewComposition(from, to)
+      const preview = controller.previewComposition(fromComposition, toComposition)
 
       if (action === 'close') controller.endPreview()
       if (action === 'discard') await controller.cancel()
@@ -502,7 +470,9 @@ describe('composition preview coordination', () => {
   it('rejects preview requests with no mounted selection', async () => {
     const controller = new EditorController(async () => reply)
 
-    await expect(controller.previewComposition(from, to)).rejects.toThrow('mounted instance')
+    await expect(controller.previewComposition(fromComposition, toComposition)).rejects.toThrow(
+      'mounted instance',
+    )
   })
 
   it('returns runtime failures to callers with their cause intact', async () => {
@@ -516,7 +486,7 @@ describe('composition preview coordination', () => {
       throw error
     })
 
-    await expect(controller.previewComposition(from, to)).rejects.toBe(error)
+    await expect(controller.previewComposition(fromComposition, toComposition)).rejects.toBe(error)
     expect(controller.previewActive).toBe(false)
   })
 })

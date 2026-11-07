@@ -33,7 +33,7 @@ it('mounts the development editor and observes real component lifetimes', async 
     setup() {
       const directive = resolveDirective('liva')!
 
-      return () => withDirectives(h('div', 'Example'), [[directive, 'off', 'toggle']])
+      return () => withDirectives(h('div', 'Example'), [[directive, { mode: 'off' }, 'toggle']])
     },
   })
   const app = createApp(component).use(plugin)

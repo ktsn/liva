@@ -43,8 +43,6 @@ const track: TimelineTrack = {
     { offset: 1, value: '1' },
   ],
   explicit: [{ offset: 0.5, value: '0.5' }],
-  inheritedFrames: false,
-  timingOrigin: 'base',
 }
 
 function setup(
@@ -177,7 +175,6 @@ describe('composition source inspector', () => {
           fromValue: '0.2',
           toValue: '1',
           explicit: [{ offset, value: inheritedValue }],
-          inheritedFrames: true,
         },
         provenance: {
           ...provenance,

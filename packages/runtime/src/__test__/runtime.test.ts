@@ -1,66 +1,134 @@
 import { describe, expect, it } from 'vite-plus/test'
 import fixture from '../../../../fixtures/toggle.json'
-import { decodeBundle, type Definition, type Timing } from '../definition.ts'
-import { resolve } from '../resolve.ts'
+import { decodeBundle, type Definition, type Timing, type Transition } from '../definition.ts'
+import { normalizeFrames } from '../resolve.ts'
+import { resolveComposition, resolveLayerTracks } from '../layers.ts'
 import { sampleSpring, springResponse, SPRING_ERROR } from '../spring.ts'
 import { waapiProperty } from '../instance.ts'
 
 const definition = decodeBundle(JSON.stringify(fixture)).definitions[0]
 const tween = (durationMs: number): Timing => ({ kind: 'tween', durationMs, easing: 'linear' })
 
-function changed(mutator: (definition: any) => void): Definition {
-  const copy = structuredClone(definition)
-  mutator(copy)
-  return copy
+function withReturnTransition(transition: Transition): Definition {
+  const layer = definition.layers[0]
+
+  // The toggle fixture declares both outgoing and returning transitions.
+  const transitions = layer.transitions!
+
+  return {
+    ...definition,
+    layers: [{ ...layer, transitions: [transitions[0], { ...transitions[1], transition }] }],
+  }
+}
+
+function returnTracks(source: Definition) {
+  const from = { layers: {}, states: { toggle: 'on' } }
+  const to = { layers: {}, states: { toggle: 'off' } }
+  const previous = resolveComposition(source, {}, from)
+  const next = resolveComposition(source, {}, to, from, [{ layer: 'toggle', index: 1 }])
+
+  // Every animated property in this fixture has a declared value in both compositions.
+  return resolveLayerTracks(
+    previous,
+    next,
+    {},
+    (target, property) =>
+      previous.presentation.targets
+        .find((item) => item.name === target)!
+        .properties.find((item) => item.name === property)!.value,
+    () => {},
+  )
 }
 
 describe('transition resolution', () => {
-  it('preserves general property timing over directional global timing', () => {
-    const def = changed((d) => {
-      d.directionalTransitions[0].transition.timing = tween(500)
+  it('uses transition-wide timing ahead of layer timing and preserves property overrides', () => {
+    const def = withReturnTransition({
+      timing: tween(500),
+      targets: [
+        {
+          name: 'thumb',
+          properties: [
+            {
+              name: 'translate',
+              timing: { kind: 'spring-duration', durationMs: 350, bounce: 0.25 },
+            },
+          ],
+        },
+      ],
     })
-    const tracks = resolve(def, 'on', 'off')
-    expect(tracks.find((t) => t.property === 'background-color')?.timing).toEqual({
-      kind: 'tween',
-      durationMs: 200,
-      easing: 'ease-in-out',
-    })
-    expect(tracks.find((t) => t.property === 'translate')?.timing).toEqual({
+    const tracks = returnTracks(def)
+
+    expect(tracks.find((track) => track.property === 'background-color')?.timing).toEqual(
+      tween(500),
+    )
+    expect(tracks.find((track) => track.property === 'translate')?.timing).toEqual({
       kind: 'spring-duration',
       durationMs: 350,
       bounce: 0.25,
     })
-    expect(tracks.find((t) => t.property === 'scale')?.timing).toEqual(tween(500))
   })
 
-  it('replaces frames atomically and schedules equal-value pulses', () => {
-    const def = changed((d) => {
-      d.directionalTransitions[0].transition.targets[0].properties.push({
-        name: 'scale',
-        keyframes: [{ offset: 0.6, value: '2' }],
-      })
+  it('schedules equal-value pulses from the explicitly selected transition', () => {
+    const def = withReturnTransition({
+      targets: [
+        {
+          name: 'thumb',
+          properties: [{ name: 'scale', keyframes: [{ offset: 0.6, value: '2' }] }],
+        },
+      ],
     })
-    const scale = resolve(def, 'on', 'off').find((t) => t.property === 'scale')!
-    expect(scale.keyframes.map((f) => f.offset)).toEqual([0, 0.6, 1])
-    expect(scale.keyframes.map((f) => f.value)).toEqual(['1', '2', '1'])
-    expect(resolve(def, 'off', 'off')).toEqual([])
-    expect(() => resolve(def, 'off', 'missing')).toThrow('Unknown')
+    const scale = returnTracks(def).find((track) => track.property === 'scale')
+
+    expect(scale?.keyframes.map((frame) => frame.offset)).toEqual([0, 0.6, 1])
+    expect(scale?.keyframes.map((frame) => frame.value)).toEqual(['1', '2', '1'])
   })
 
-  it('retains explicit endpoints and rejects effective spring frames', () => {
-    const def = changed((d) => {
-      d.generalTransition.targets[1].properties[1].keyframes = [
-        { offset: 0, value: '2', easing: 'steps(2)' },
-        { offset: 1, value: '3' },
-      ]
+  it('preserves explicit endpoints separately from the settled destination', () => {
+    const def = withReturnTransition({
+      targets: [
+        {
+          name: 'thumb',
+          properties: [
+            {
+              name: 'scale',
+              keyframes: [
+                { offset: 0, value: '2', easing: 'steps(2)' },
+                { offset: 1, value: '3' },
+              ],
+            },
+          ],
+        },
+      ],
     })
-    const scale = resolve(def, 'off', 'on').find((t) => t.property === 'scale')!
-    expect(scale.destinationValue).toBe('1')
-    expect(scale.keyframes[0]).toEqual({ offset: 0, value: '2', easing: 'steps(2)' })
-    const springFrames = changed((d) => {
-      d.generalTransition.timing = { kind: 'spring-duration', durationMs: 350, bounce: 0.2 }
+    const scale = returnTracks(def).find((track) => track.property === 'scale')
+
+    expect(scale?.destinationValue).toBe('1')
+    expect(scale?.keyframes[0]).toEqual({ offset: 0, value: '2', easing: 'steps(2)' })
+  })
+
+  it.each([[-0.1], [1.1], [NaN], [0.5, 0.5]])('rejects invalid frame offsets %j', (...offsets) => {
+    expect(() =>
+      normalizeFrames(
+        '0',
+        '1',
+        offsets.map((offset) => ({ offset, value: '2' })),
+        tween(100),
+      ),
+    ).toThrow('Invalid or duplicate')
+  })
+
+  it('supports intermediate frames and easing with evaluated spring timing', () => {
+    const frames = normalizeFrames('0', '1', [{ offset: 0.5, value: '2', easing: 'ease-in' }], {
+      kind: 'spring-duration',
+      durationMs: 350,
+      bounce: 0.2,
     })
-    expect(() => resolve(springFrames, 'off', 'on')).toThrow('Spring')
+
+    expect(frames).toEqual([
+      { offset: 0, value: '0', easing: 'linear' },
+      { offset: 0.5, value: '2', easing: 'ease-in' },
+      { offset: 1, value: '1', easing: 'linear' },
+    ])
   })
 
   it('maps WAAPI keys without probing browser support', () => {
@@ -130,47 +198,6 @@ describe('scalar spring solver', () => {
   })
 })
 
-it('rejects incomplete transitions and invalid frame offsets', () => {
-  const incomplete = changed((d) => {
-    d.states[0].targets = []
-  })
-
-  expect(() => resolve(incomplete, 'off', 'on')).toThrow('Incomplete state')
-
-  const missing = changed((d) => {
-    d.generalTransition = undefined
-    d.directionalTransitions = []
-  })
-
-  expect(() => resolve(missing, 'off', 'on')).toThrow('Missing timing')
-
-  for (const offsets of [[-0.1], [1.1], [NaN], [0.5, 0.5]]) {
-    const invalid = changed((d) => {
-      d.generalTransition.targets[1].properties[1].keyframes = offsets.map((offset) => ({
-        offset,
-        value: '2',
-      }))
-    })
-
-    expect(() => resolve(invalid, 'off', 'on')).toThrow('Invalid or duplicate')
-  }
-})
-
-it('settles reactive template properties without transition timing', () => {
-  const def = changed((d) => {
-    d.generalTransition = undefined
-    d.directionalTransitions = []
-
-    for (const state of d.states) {
-      for (const target of state.targets) {
-        for (const property of target.properties) property.template = [property.value]
-      }
-    }
-  })
-
-  expect(resolve(def, 'off', 'on')).toEqual([])
-})
-
 it('rejects invalid duration springs and resolves critical damping', () => {
   for (const durationMs of [0, -1, Infinity, NaN]) {
     expect(() => sampleSpring({ kind: 'spring-duration', durationMs, bounce: 0 })).toThrow(
@@ -197,14 +224,4 @@ it('enforces the sample cap after adaptive refinement', () => {
   expect(() =>
     sampleSpring({ kind: 'spring-physics', stiffness: 100000, damping: 10.02, mass: 1 }),
   ).toThrow('easing sample cap')
-})
-
-it('rejects easing attached to spring endpoints', () => {
-  const invalid = changed((d) => {
-    const property = d.generalTransition.targets[1].properties[0]
-
-    property.keyframes = [{ offset: 0, value: '0 0', easing: 'linear' }]
-  })
-
-  expect(() => resolve(invalid, 'off', 'on')).toThrow('Spring tracks cannot')
 })

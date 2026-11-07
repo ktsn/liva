@@ -59,10 +59,22 @@ function applyTiming() {
       min="0"
       type="number"
     /></label>
-  <label v-if="kind === 'tween'">Default easing<input
+  <label v-if="kind === 'tween'">Default easing<select
       v-model="defaultEasing"
       aria-label="Track easing"
-    /></label>
+    >
+      <option value="linear">linear</option><option value="ease">ease</option>
+      <option value="ease-in">easeIn</option><option value="ease-out">easeOut</option><option
+        value="ease-in-out"
+      >easeInOut</option>
+      <option value="step-start">stepStart</option><option value="step-end">stepEnd</option>
+      <option
+        v-if="!['linear', 'ease', 'ease-in', 'ease-out', 'ease-in-out', 'step-start', 'step-end'].includes(
+          defaultEasing,
+        )"
+        :value="defaultEasing"
+      >Current expression</option>
+    </select></label>
   <label v-if="kind === 'spring-duration'">Bounce<input
       v-model.number="bounce"
       max="0.99"

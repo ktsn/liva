@@ -33,7 +33,7 @@ and return optional fields for incomplete input. Semantic analysis consumes thes
 views and emits validated data without putting semantic state into the tree.
 All views implement `liva_syntax::ast::AstNode`, which provides checked casts,
 access to the underlying Rowan node, text, and absolute byte ranges. `Document`
-exposes `Motion` views; motions expose parameters, let bindings, states, events,
+exposes `Motion` views; motions expose parameters, let bindings, layers, events,
 and animation blocks. `enters()` and `leaves()` select lifecycle declarations;
 `transitions()` traverses all animation blocks, including enter and leave.
 Target `animation_properties()` visits shorthand declarations and explicit tracks in source order.
@@ -55,7 +55,7 @@ retain their spelling, with embedded template tokens using the same lexer and ab
 byte ranges. Expression literals decode escapes during lowering; CSS text retains them.
 
 The document parser passes slices of this token stream to the expression parser for
-let initializers, state conditions, and interpolations. Both parsers write directly to
+let initializers, layer conditions, transition guards, and interpolations. Both parsers write directly to
 the same Rowan builder. No intermediate document tree or expression retokenization is
 needed. Interpolation recovery belongs to the parser and stops at an unquoted newline
 when the closing brace is missing. The compiler reads the completed CST through typed
@@ -90,7 +90,7 @@ references, not dependencies on their full language tooling stacks.
 `crates/liva_compiler/src/builtins/` registers function signatures. Each function
 has its own module; `drag.rs` declares its target argument and return fields.
 The compiler builds one typed variable scope from parameters, inferred let expression types,
-and the targets declared across states. The generic call checker evaluates argument
+and the targets declared across layers and local states. The generic call checker evaluates argument
 types through the expression checker and selects a matching overload. Required
 arguments and incompatible overload groups produce diagnostics.
 Let type inference follows dependencies and rejects cycles. Expression member checking
@@ -102,7 +102,7 @@ uses ordinary call/argument nodes without knowing any built-in function names.
 returns a value and a binding function whose cleanup releases browser resources.
 `LivaInstance` creates, binds, and cleans up these handles without built-in-specific
 branches. The let binding graph reevaluates expressions in dependency order before
-state selection and template rendering. `FunctionResult` is either `RuntimeValue` or `ReactiveSubscription`, defined in
+layer resolution and template rendering. `FunctionResult` is either `RuntimeValue` or `ReactiveSubscription`, defined in
 `reactive-value.ts`. The runtime recognizes subscriptions by their `value` and
 callable `bind` members. Ordinary records remain ordinary values. Each call site
 caches its evaluated arguments and result; unchanged arguments reuse that result.
@@ -139,12 +139,9 @@ Definition {
   parameters?: MotionParameter[]
   letBindings?: LetBinding[]
   events?: { name: string, when: Expression }[]
-  layers?: Layer[]
+  layers: Layer[]
   enter?: Transition
   leave?: Transition
-  states: State[]
-  generalTransition?: Transition
-  directionalTransitions: { from: string, to: string, transition: Transition }[]
 }
 Layer {
   name: string
@@ -157,7 +154,6 @@ Layer {
 }
 State {
   name: string
-  when?: Expression
   timingExpression?: Expression
   targets: Target<Property>[]
 }
@@ -204,7 +200,8 @@ initializer. Call expressions contain a function name and named argument express
 tagged scalar/reference/call/unary/binary tree, validated in Rust and evaluated without
 JavaScript code generation. CSS templates retain the original opaque `value` for
 inspection and expose text/expression segments for runtime rendering. The IR uses schema version 1. The compiler
-requires exactly one fallback, while low-level editor playback can choose states.
+requires at least one layer and one initial state per stateful layer. Manual editor
+playback selects compositions without evaluating guards.
 
 Offsets normalize to `[0, 1]`; times normalize to milliseconds. CSS values and
 easing remain strings. Preserve definition/state/target/property source order for
@@ -214,9 +211,9 @@ arguments have already been validated and defaults applied within each atomic
 value. Ordinary transition inheritance and missing endpoints are resolved at runtime;
 motion-level lifecycle tracks are compiled as described below.
 
-The compiler can validate every state pair's effective configuration without
-serializing a flattened transition matrix. This catches inherited spring/frame
-conflicts early while keeping runtime resolution explicit and independently tested.
+The runtime resolves layer timing against current inputs without serializing a
+flattened transition matrix. Production IR contains neither source ranges nor
+mutable application state.
 
 Definition IR contains no DOM handles, source paths, source ranges, clocks,
 instance IDs, mutable caches, or animation objects. Deeply read-only TypeScript
@@ -227,16 +224,12 @@ safely when generating JavaScript modules.
 ## Resolved animation contract
 
 ```text
-ResolvedAnimation {
-  fromState: string
-  toState: string
-  tracks: {
-    target: string
-    property: string
-    timing: Timing
-    keyframes: { offset: number, value: string, easing?: string }[]
-    destinationValue: string
-  }[]
+ResolvedTrack {
+  target: string
+  property: string
+  timing: Timing
+  keyframes: { offset: number, value: string, easing?: string }[]
+  destinationValue: string
 }
 ```
 
@@ -247,22 +240,22 @@ browser property-name conversion belong to execution, not to the language model.
 
 Resolution order:
 
-1. Validate the requested state and target bindings; select the general and exact
-   directional transition using the logical source state.
-2. Merge property settings and resolve timing using the language precedence rules. Schedule
-   state differences and explicitly keyed tracks, including equal-value pulses.
-3. Complete missing endpoints from source/destination state values. During an
-   interruption, replace the first frame with the displayed value even if an
-   explicit `0%` was authored. Preserve remaining frames and restart their full
-   timeline; do not attempt to preserve partial progress or spring velocity.
-4. Validate Liva track structure and timing constraints, normalize interval easing, and pass resolved
-   tracks to the executor together with destination values for settlement.
+1. Validate parameters and resolve ordinary layer activation and retained local
+   states. Advance each stateful layer at most once through the last eligible guard.
+2. Cascade property values and timing independently. Only the final value owner's
+   selected transition supplies temporary timing and frames. Schedule changed values
+   and explicit tracks, including equal-value pulses.
+3. Complete omitted endpoints from displayed presentation and resolved destination.
+   During interruption, replace the first frame with the displayed value. Retain
+   remaining frames and restart their full timeline without preserving velocity.
+4. Validate resolved track structure and timing, normalize interval easing, and pass
+   tracks with destination values to the executor.
 
 ## Runtime lifecycle and interruption
 
-An instance owns parameter values, let values and built-in subscriptions, target bindings, selected state, animation generation,
+An instance owns parameter values, let values and built-in subscriptions, target bindings, layer selections, animation generation,
 active effects, and original inline property values/priorities. Instance lifecycle:
-`create -> bind -> apply initial state -> transition* -> dispose`.
+`create -> bind -> settle composition -> update* -> dispose`.
 
 `updateParameters` accepts a complete named parameter snapshot and reevaluates
 selection and templates.
@@ -271,12 +264,12 @@ and removes obsolete values. A new required parameter or incompatible type rejec
 the replacement before changing the instance or its effects; no defaults are supplied.
 Matching drag bindings retain offsets while releasing active gestures.
 
-For each selected-state change, batch-read displayed values for the union of old active and new
+For each composition or rendered-value change, batch-read displayed values for the union of old active and new
 tracks using computed style before canceling anything. Validate Liva constraints
 and prepare the next tracks before disturbing current effects; do not validate
 CSS properties or values. Cancel old effects, retain captured
 values as the temporary baseline, then start new tracks in the same rendering
-turn. Tracks that do not need motion settle to destination state values. Use one
+turn. Tracks that do not need motion settle to resolved destination values. Use one
 WAAPI effect per target/property so timing stays independent, with a shared
 start time for coordinated motion. Translate kebab-case property names into WAAPI
 keyframe keys through the adapter; do not change the language's spelling. Preserve
@@ -292,16 +285,16 @@ Liva conflict validation. See the browser's
 
 Catch actual WAAPI construction/playback exceptions
 and report the affected instance/track with the original error. Clean up partially
-created effects for that request and keep the runtime usable for subsequent state
+created effects for that request and keep the runtime usable for subsequent input
 changes. This is exception containment, not CSS validation. Ignored properties
 need neither a diagnostic nor a fallback, and are not treated as failed requests.
 
-The runtime's optional paused transition mode prepares the same effects without
-completion callbacks. Effects use backwards fill over a destination-state inline
+The runtime's explicit composition preview prepares the same effects without
+completion callbacks. Effects use backwards fill over a resolved-destination inline
 baseline, allowing repeated forward/backward seeks and correct settlement at each
 track's end. Manually paused effects survive reduced-motion changes; the editor
 stops automatic playback when that preference becomes active. The editor owns the
-playhead clock, server validation, and restoring the application's requested state.
+playhead clock, server validation, and restoring the application's composition.
 See the [timeline editor guide](editor.md) for controls and lifecycle behavior.
 
 On completion, write the destination values to inline style and cancel filled
@@ -311,10 +304,11 @@ cancel effects and restore original inline values only where Liva still owns the
 Require exclusive ownership of animated properties: competing Vue style bindings,
 CSS transitions, and external animations on those properties are unsupported.
 
-Invalid state requests leave the prior valid state unchanged and emit a diagnostic.
+Invalid parameter updates retain the prior values and composition and emit a diagnostic.
 Missing/duplicate targets suspend the affected instance with diagnostics; target
-removal cancels its effects. Rebinding applies the current requested state without
-replaying old transitions. The reduced-motion policy settles immediately
+removal cancels its effects. Rebinding settles the current composition without replaying old animations. If
+subscription cleanup changes logical inputs, guards reevaluate once; an unchanged
+input snapshot does not advance state-machine history. The reduced-motion policy settles immediately
 when `prefers-reduced-motion: reduce` is active; controls and application state
 continue working. Initial mount never animates from an unspecified state.
 
@@ -373,7 +367,7 @@ and the internal `v-liva-entry` directive on structural elements. Owner metadata
 carried by `v-liva`, and target registration metadata by `v-liva-target`.
 Compiler-generated bindings use the reserved `compiled` modifier and a wrapper
 containing the original `value` and internal metadata. The adapter unwraps current
-and previous values before handling state or parameter updates; ordinary parameter
+and previous values before handling parameter updates; ordinary parameter
 objects are never interpreted as metadata based on their property names.
 
 Each owner identity consists of its static SFC root ID and enclosing keyed-loop
@@ -389,7 +383,7 @@ Snapshots unused by that render patch are released in a microtask. Vue component
 unmount hooks and reactive-effect disposal retain their normal ordering; retained
 DOM does not keep the original Motion alive.
 
-`packages/runtime/src/lifecycle.ts` resolves lifecycle tracks from active-state
+`packages/runtime/src/lifecycle.ts` resolves lifecycle tracks from resolved layer
 values and a presentation snapshot. A session owns only resolved tracks, element
 references, temporary inline presentations, and WAAPI handles. Completion joins
 all tracks. Supersession, owner teardown, cancellation/failure, and normal
@@ -419,27 +413,25 @@ Enter completion restores original ownership and applies the latest cascade;
 leave completion releases Vue's pending removal/hide callback. No new Vue boundary
 or directive is needed, and component/application data remains Vue-owned.
 
-### Product migration and editor safety
+### Product examples and editor safety
 
 Toggle and async-submit demonstrate local machines and directional tracks;
 interactive-button demonstrates overlapping reactive layers; drag/swipe combine
-reactive input with motion-level presence. Legacy states remain supported for
-existing motions, but cannot be mixed with layers in one motion.
+reactive input with motion-level presence. Every executable motion uses layers and
+typed animation expressions. The compiler rejects removed motion-level state and
+transition syntax with migration diagnostics; runtime validation rejects its old IR.
 
-Layer motions use composition selectors and the shared timeline/playback controls.
-Their source editing remains disabled until declaration destinations are available.
-The legacy state-pair editor cannot preserve typed decorators through track
-replacement, so typed legacy motions remain read-only. The server rejects unsupported
-edits and commits while permitting unchanged-source previews. The lossless parser
-and language-server expression hovers cover layer guards and decorators. There is
-no standalone Liva formatter; tools must preserve custom block text and decorator nodes.
+The editor uses composition selectors, shared timeline/playback controls, and typed
+source operations. The lossless parser and language-server expression hovers cover
+layer guards and decorators. There is no standalone Liva formatter; tools preserve
+custom block text and decorator nodes.
 
 ## Composition inspection and manual resolution
 
 `LivaInstance.composition` returns an isolated snapshot of ordinary layer activation
 (`layers`, including disabled layers) and current stateful layer states (`states`).
-It reads retained state-machine history without reevaluating guards. Legacy motions
-without layers return `undefined`.
+It reads retained state-machine history without reevaluating guards. Every definition
+has layers, so the getter always returns a composition.
 
 `resolveComposition(definition, values, composition, from?, transitions?)` resolves
 an explicit complete selection using the normal property and independent timing

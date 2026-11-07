@@ -12,7 +12,7 @@ export function compatibleTransition(
 ): CompositionTransition | undefined {
   if (!identity) return undefined
 
-  const transition = definition.layers?.find((layer) => layer.name === identity.layer)
+  const transition = definition.layers.find((layer) => layer.name === identity.layer)
     ?.transitions?.[identity.index]
 
   return transition &&
@@ -28,7 +28,7 @@ export function selectTransition(
   to: Composition,
   identity: CompositionTransition,
 ): { from: Composition; to: Composition } {
-  const transition = definition.layers?.find((layer) => layer.name === identity.layer)
+  const transition = definition.layers.find((layer) => layer.name === identity.layer)
     ?.transitions?.[identity.index]
 
   if (!transition) throw new Error('Unknown transition declaration')

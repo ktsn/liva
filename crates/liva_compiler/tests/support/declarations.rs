@@ -3,7 +3,7 @@ use liva_syntax::{Diagnostic, Range};
 
 pub fn motion(body: &str) -> String {
     format!(
-        "// 日本語 😀\r\nmotion a(enabled: boolean, amount: number, label: string) {{\nstate idle {{ body {{ opacity: 1; translate: 0 0 }} badge {{ opacity: 1 }} }}\n{body}\n}}"
+        "// 日本語 😀\r\nmotion a(enabled: boolean, amount: number, label: string) {{\nlayer idle {{ body {{ opacity: 1; translate: 0 0 }} badge {{ opacity: 1 }} }}\n{body}\n}}"
     )
 }
 
@@ -36,7 +36,7 @@ pub fn assert_error(body: &str, code: &str) -> Diagnostic {
 }
 
 pub fn assert_recovers(body: &str) {
-    let source = format!("{}\nmotion valid {{ state idle {{}} }}", motion(body));
+    let source = format!("{}\nmotion valid {{ layer idle {{}} }}", motion(body));
     let result = compile(&source, false);
 
     assert_eq!(

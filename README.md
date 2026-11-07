@@ -1,7 +1,7 @@
 # Liva
 
 Liva is a declarative animation language for interactive Web UI. Define conditional
-states, transitions and lifecycle animations in a Vue `<liva>` block, drive them
+layers, local states, transitions and lifecycle animations in a Vue `<liva>` block, drive them
 with application values or drag input, and adjust motion in the running page.
 Vue retains component structure, application state and business logic.
 

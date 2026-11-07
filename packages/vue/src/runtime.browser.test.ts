@@ -26,7 +26,7 @@ afterEach(() => {
 
 async function mount(reactive = false, initial?: string) {
   const value = ref<string | Record<string, unknown> | undefined>(
-    reactive ? { checked: false } : (initial ?? 'off'),
+    reactive ? { checked: false } : (initial ?? { mode: 'off' }),
   )
   const name = ref('toggle')
   const shown = ref(true)
@@ -81,26 +81,25 @@ async function mount(reactive = false, initial?: string) {
 }
 
 describe('Vue motion directives', () => {
-  it('mounts targets, updates states, rejects unknown states and disposes removed roots', async () => {
+  it('mounts targets, updates inputs, rejects invalid parameters and disposes removed roots', async () => {
     const { value, shown, records, errors, host } = await mount()
     const runtime = records[0].binding.runtime
 
     expect(records[0].event).toBe('mount')
     expect(host.querySelector<HTMLElement>('[data-target="thumb"]')!.style.scale).toBe('1')
 
-    value.value = 'on'
+    value.value = { mode: 'on' }
 
     await nextTick()
 
-    expect(runtime.state).toBe('on')
-    expect(records.at(-1)?.binding.requestedState).toBe('on')
+    expect(runtime.composition.states.toggle).toBe('on')
 
-    value.value = 'missing'
+    value.value = { mode: false }
 
     await nextTick()
 
-    expect(errors.at(-1)?.code).toBe('runtime.state')
-    expect(runtime.state).toBe('on')
+    expect(errors.at(-1)?.code).toBe('runtime.parameter')
+    expect(runtime.composition.states.toggle).toBe('on')
 
     shown.value = false
 
@@ -120,8 +119,7 @@ describe('Vue motion directives', () => {
 
     await nextTick()
 
-    expect(records.at(-1)?.binding.runtime.state).toBe('on')
-    expect(records.at(-1)?.binding.requestedState).toBe('on')
+    expect(records.at(-1)?.binding.runtime.composition.states.toggle).toBe('on')
     expect(events).toEqual(['liva-ready'])
 
     value.value = undefined
@@ -155,9 +153,9 @@ describe('Vue motion directives', () => {
   })
 })
 
-it('reports initial state failures without registering a runtime', async () => {
+it('rejects removed string-state bindings without registering a runtime', async () => {
   const { errors, records } = await mount(false, 'missing')
 
-  expect(errors).toContainEqual(expect.objectContaining({ code: 'vue.state' }))
+  expect(errors).toContainEqual(expect.objectContaining({ code: 'vue.initialization' }))
   expect(records).toEqual([])
 })

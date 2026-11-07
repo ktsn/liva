@@ -7,12 +7,11 @@ motion first(value: number) {
   let doubled = later * 2
   let later = value
   let movement = drag(target: body)
-  state idle { body { opacity: ${doubled} } }
-  state active when movement.active { body { opacity: ${movement.offset.x} } }
-  transition { @tween: 100ms }
+  layer idle { body { opacity: ${doubled} } }
+  layer active when movement.active { body { opacity: ${movement.offset.x} } }
 }
 motion second(value: string) {
-  state idle { body { content: ${value} } }
+  layer idle { body { content: ${value} } }
 }
 "#;
     let labels: Vec<_> = hovers(source)
@@ -50,7 +49,7 @@ motion test(value: number) {
   let invalid = value + true
   let cycle = cycle
   let quoted = "value"
-  state idle {
+  layer idle {
     body { value: value; opacity: ${value} }
   }
 }
@@ -79,9 +78,8 @@ fn hyphenated_names_have_whole_identifier_hover_ranges() {
     let source = r#"motion demo(max-value: number) {
   let adjusted-value = max-value - 1
   let pointer-state = drag(target: main-body)
-  state idle { main-body { opacity: ${adjusted-value} } }
-  state active when pointer-state.active { main-body { opacity: ${max-value} } }
-  transition { @tween: 100ms }
+  layer idle { main-body { opacity: ${adjusted-value} } }
+  layer active when pointer-state.active { main-body { opacity: ${max-value} } }
 }"#;
     let found = hovers(source);
     for name in ["max-value", "adjusted-value", "main-body"] {
@@ -103,7 +101,7 @@ fn hyphenated_names_have_whole_identifier_hover_ranges() {
 
 #[test]
 fn lifecycle_templates_expose_typed_hovers_in_both_property_forms() {
-    let source = "// 日本語\r\nmotion panel(distance: number) { state idle { body { translate: 0px 0 } } enter { @tween: 1ms; body { translate: ${distance}px 0 } } leave { @tween: 1ms; body { translate { 100%: ${distance}px 0 } } } }";
+    let source = "// 日本語\r\nmotion panel(distance: number) { layer idle { body { translate: 0px 0 } } enter @tween(duration: 1) { body { translate: ${distance}px 0 } } leave @tween(duration: 1) { body { translate { 100%: ${distance}px 0 } } } }";
     let found = hovers(source);
     let expected: Vec<_> = source
         .match_indices("${distance}")
@@ -126,7 +124,7 @@ fn layer_guards_and_decorators_expose_expression_types_at_source_offsets() {
       layer base { body @tween(duration: duration, easing: curve) { opacity: 1 } }
       layer hover when active { body { opacity: .5 } }
       layer workflow {
-        state idle initial {}
+        layer idle initial {}
         state busy {}
         transition idle -> busy when active
       }

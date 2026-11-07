@@ -90,6 +90,29 @@ for (const expression of [
     const original = await readFile(file, 'utf8')
 
     try {
+      if (expression.startsWith('tween')) {
+        await page.goto(`${base}/toggle`)
+        await expect(page.getByRole('switch', { name: 'Notifications', exact: true })).toBeVisible()
+
+        await writeFile(
+          file,
+          original.replace(
+            'background-color: #888',
+            'background-color: #888 @tween(duration: 200, easing: steps(count: 4, position: "jump-end"))',
+          ),
+        )
+
+        await expect
+          .poll(() =>
+            page.evaluate(() =>
+              [...window.__LIVA_EDITOR__.entries.values()].some(({ binding }) =>
+                JSON.stringify(binding.runtime.definition).includes('jump-end'),
+              ),
+            ),
+          )
+          .toBe(true)
+      }
+
       await openProperty(page)
       await page
         .getByLabel('Timing mode')
@@ -97,7 +120,7 @@ for (const expression of [
       await page.getByLabel('Track duration').fill('400')
 
       if (expression.startsWith('tween'))
-        await page.getByLabel('Track easing').fill('steps(4, jump-end)')
+        await expect(page.getByLabel('Track easing')).toHaveValue('steps(4, jump-end)')
 
       await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
       await expectMessage(page, 'Previewing')
@@ -138,7 +161,7 @@ test('ordinary property keyframes preserve the destination and typed easing on s
 
     const saved = await readFile(file, 'utf8')
 
-    expect(saved).toContain('50%: purple @ stepStart')
+    expect(saved).toContain('50%: purple @stepStart')
     expect(saved).toContain('100%: #888')
     expect(saved).toContain('track @tween(duration: 200, easing: easeInOut)')
   } finally {

@@ -21,7 +21,7 @@ beforeEach(async () => {
 
   await writeFile(
     file,
-    '<template><div /></template><liva>motion fade { state idle { box { opacity: 1 } } }</liva>',
+    '<template><div /></template><liva>motion fade { layer idle { box { opacity: 1 } } }</liva>',
   )
   service = new EditorService(root)
   sourceId = await service.register(file)

@@ -5,11 +5,19 @@ import { createApp, nextTick, type App } from 'vue'
 import { LivaInstance, decodeBundle, layerTargets, type RuntimeDiagnostic } from '@liva/runtime'
 import fixture from '../../../../../fixtures/toggle.json'
 import EditorPanel from '../components/EditorPanel.ce.vue'
-import TimelineInspector from '../components/TimelineInspector.ce.vue'
+import TimingControls from '../components/TimingControls.ce.vue'
 import type { Definition, Timing } from '@liva/runtime'
-import type { TimelineTrack } from '../timeline.ts'
 import { EditorController } from '../controller.ts'
 import type { EditorRequest, EditorReply } from '../communication/protocol.ts'
+
+const toggleFields: EditorReply['fields'] = [
+  { path: 'toggle/layer/toggle/target/track/property/background-color', kind: 'block', value: '' },
+  {
+    path: 'toggle/layer/toggle/target/track/property/background-color/value',
+    kind: 'value',
+    value: '#888',
+  },
+]
 
 let app: App | undefined
 let host: HTMLElement | undefined
@@ -65,14 +73,19 @@ function selectValue(label: string): string {
 async function setupEditor(
   send?: ConstructorParameters<typeof EditorController>[0],
   definition = decodeBundle(JSON.stringify(fixture)).definitions[0],
-  inputs: Record<string, number | boolean> = {},
+  inputs: Record<string, unknown> = definition.parameters?.some(
+    (parameter) => parameter.name === 'mode',
+  )
+    ? { mode: 'off' }
+    : {},
+  fields: EditorReply['fields'] = [],
 ) {
   const controller = new EditorController(
     send ??
       (async (request) => ({
         hash: 'original',
         definition,
-        fields: [],
+        fields,
         sequence: request.sequence,
       })),
   )
@@ -81,24 +94,15 @@ async function setupEditor(
   host.setAttribute('aria-label', 'Test motion')
   document.body.append(host)
   const diagnostics: RuntimeDiagnostic[] = []
-  runtime = new LivaInstance(definition, definition.layers?.length ? inputs : 'off', (diagnostic) =>
-    diagnostics.push(diagnostic),
-  )
+  runtime = new LivaInstance(definition, inputs, (diagnostic) => diagnostics.push(diagnostic))
   controller.observe('mount', {
     root: host,
     runtime,
     definition,
     component: { livaSource: 'source' },
-    requestedState: 'off',
   })
   runtime.bind(
-    [
-      ...new Set(
-        (definition.layers?.length ? layerTargets(definition) : definition.states[0].targets).map(
-          (target) => target.name,
-        ),
-      ),
-    ].map((name) => {
+    [...new Set(layerTargets(definition).map((target) => target.name))].map((name) => {
       const element = document.createElement('div')
 
       host!.append(element)
@@ -115,37 +119,14 @@ async function setupEditor(
   return { controller, definition, diagnostics }
 }
 
-it('opens the editor, edits track timing and state endpoints, and controls preview', async () => {
+it('opens composition playback, scrubs and restores on close', async () => {
   const { controller } = await setupEditor()
 
   await click('Motion editor')
-
-  expect(controller.inspection?.definition.name).toBe('toggle')
-
-  await click('▸ track')
-  host!.querySelector<HTMLButtonElement>('[aria-label="Select track.background-color"]')!.click()
-
-  await tick()
-
-  await input('Track duration', '450')
-  await click('Apply timing')
-
-  expect(controller.draft).toEqual([
-    expect.objectContaining({ op: 'track', timing: '@tween: 450ms ease-in-out' }),
-  ])
-
-  await expect.poll(() => controller.previewActive).toBe(true)
-
-  await click('Use common timing')
-
-  expect(controller.draft[0]).toMatchObject({ timing: undefined })
-
+  await input('To toggle state', 'on')
   await click('Play')
 
   expect(controller.previewActive).toBe(true)
-
-  await new Promise(requestAnimationFrame)
-  await new Promise(requestAnimationFrame)
 
   await click('Pause')
   await input('Playhead', '100')
@@ -154,123 +135,22 @@ it('opens the editor, edits track timing and state endpoints, and controls previ
 
   expect(controller.previewActive).toBe(false)
 
-  await input('Timing mode', 'spring-duration')
-  await click('Apply timing')
-
-  expect(controller.draft[0]).toMatchObject({ timing: '@spring: 200ms 0.25' })
-
-  await input('Timing mode', 'spring-physics')
-  await click('Apply timing')
-
-  expect(controller.draft[0]).toMatchObject({ timing: '@spring: 300 20 1' })
-
-  await input('Timing mode', 'tween')
-  await input('Track duration', '-1')
-  await click('Apply timing')
-
-  expect(controller.message).toContain('nonnegative')
-
-  await input('Timing mode', 'tween')
-  await input('Track duration', '200')
-  await click('Apply timing')
-  await input('Playhead', '100')
-  await click('New keyframe at playhead')
-  await click('Add keyframe')
-
-  expect(controller.message).toContain('Enter a value')
-
-  await input('Keyframe value', 'red')
-  await input('Keyframe percentage', '50')
-  await input('Keyframe easing', 'linear')
-  await click('Add keyframe')
-
-  expect(controller.draft[0]).toMatchObject({
-    frames: [{ offset: 0.5, value: 'red', easing: 'linear' }],
-  })
-
-  await input('Keyframe time', '60')
-  await click('Apply keyframe')
-
-  expect(controller.draft[0]).toMatchObject({ frames: [{ offset: 0.3, value: 'red' }] })
-
-  await click('Delete keyframe')
-
-  expect(controller.draft[0]).toMatchObject({
-    frames: [
-      { offset: 0, value: '#888' },
-      { offset: 1, value: '#34b27b' },
-    ],
-  })
-
-  await click('Use common keyframes')
-  host!.querySelector<HTMLButtonElement>('[aria-label="track.background-color 0%"]')!.click()
-
-  await tick()
-
-  await input('Keyframe value', '')
-  await click('Update state value')
-
-  expect(controller.message).toContain('Enter a state value')
-
-  await input('Keyframe value', 'blue')
-  await click('Update state value')
-
-  expect(controller.draft).toContainEqual({
-    op: 'set',
-    path: 'toggle/state/off/target/track/background-color',
-    value: 'blue',
-  })
-
-  await click('Create endpoint override')
-
-  expect(controller.draft).toContainEqual(
-    expect.objectContaining({ op: 'track', frames: [{ offset: 0, value: 'blue' }] }),
-  )
-
-  await input('From state', 'on')
-
-  expect(host!.querySelector<HTMLSelectElement>('[aria-label="To state"]')!.value).toBe('off')
-
-  await input('Editing scope', 'general')
-  await click('▾ track')
-  await click('▸ track')
-
-  await click('Discard changes')
-
-  expect(controller.draft).toEqual([])
-
   await click('Close')
 
   expect(button('Motion editor')).toBeDefined()
+  expect(runtime!.composition.states.toggle).toBe('off')
 })
 
-it('edits all spring fields and displays track diagnostics without timing', async () => {
-  const track: TimelineTrack = {
-    target: 'box',
-    property: 'opacity',
-    path: 'box/opacity',
-    duration: 0,
-    frames: [],
-    explicit: [],
-    inheritedFrames: false,
-    timingOrigin: 'Inherited common default',
-    diagnostic: 'Missing timing',
-  }
+it('edits duration and physics spring parameters through shared controls', async () => {
   const timings: Timing[] = []
 
   host = document.createElement('div')
   host.setAttribute('aria-label', 'Test motion')
   document.body.append(host)
-  app = createApp(TimelineInspector, {
-    track,
-    from: 'off',
-    to: 'on',
-    general: false,
-    onTiming: (timing: Timing) => timings.push(timing),
+  app = createApp(TimingControls, {
+    onApply: (timing: Timing) => timings.push(timing),
   })
   app.mount(host)
-
-  expect(host.querySelector('[role="alert"]')?.textContent).toBe('Missing timing')
 
   await input('Timing mode', 'spring-duration')
 
@@ -302,7 +182,7 @@ it('reports preview, save and discard failures without discarding the draft', as
   const { controller } = await setupEditor(async (request) => {
     if (failure) throw new Error(failure)
 
-    return { hash: 'original', definition, fields: [], sequence: request.sequence }
+    return { hash: 'original', definition, fields: toggleFields, sequence: request.sequence }
   })
 
   await click('Motion editor')
@@ -317,6 +197,7 @@ it('reports preview, save and discard failures without discarding the draft', as
 
   await tick()
 
+  failure = ''
   await input('Track duration', '450')
   await click('Apply timing')
   failure = 'Save unavailable'
@@ -335,60 +216,57 @@ it('reports preview, save and discard failures without discarding the draft', as
   expect(controller.selected).toBeUndefined()
 })
 
-it('rejects colliding keyframes and spring intermediates while resizing real timeline tracks', async () => {
-  const { controller } = await setupEditor()
+it('retains existing physics parameters when replacing timing through shared controls', async () => {
+  const timings: Timing[] = []
+  host = document.createElement('div')
+  document.body.append(host)
+  app = createApp(TimingControls, {
+    timing: { kind: 'spring-physics', stiffness: 450, damping: 35, mass: 2 },
+    onApply: (value: Timing) => timings.push(value),
+  })
+  app.mount(host)
 
-  await click('Motion editor')
-  await click('▸ thumb')
+  const dampingInput = host.querySelectorAll('input')[1]
 
-  const scale = host!.querySelector<HTMLElement>('[data-track="thumb.scale"]')!
-  const key = host!.querySelector<HTMLElement>('[aria-label="thumb.scale 40%"]')!
-  const extent = Number(host!.querySelector<HTMLInputElement>('[aria-label="Playhead"]')!.max)
-  const collisionX = scale.getBoundingClientRect().width * ((0.7 * 350) / extent)
-
-  await userEvent.dragAndDrop(key, scale, { targetPosition: { x: collisionX, y: 5 } })
-
-  await tick()
-
-  expect(controller.message).toContain('already exists')
-
-  host!.querySelector<HTMLButtonElement>('[aria-label="Select thumb.scale"]')!.click()
-
-  await tick()
-
-  await input('Timing mode', 'spring-physics')
+  dampingInput.value = '40'
+  dampingInput.dispatchEvent(new Event('input', { bubbles: true }))
   await click('Apply timing')
 
-  expect(controller.message).toContain('Remove intermediate keyframes')
+  expect(timings).toEqual([{ kind: 'spring-physics', stiffness: 450, damping: 40, mass: 2 }])
+})
 
-  host!.querySelector<HTMLButtonElement>('[aria-label="thumb.translate 0%"]')!.click()
-
-  await tick()
-
-  await click('Create endpoint override')
-  await input('Keyframe percentage', '50')
-  await click('Apply keyframe')
-
-  expect(controller.message).toContain('Spring tracks only support endpoints')
-
-  const resize = host!.querySelector<HTMLElement>('[aria-label="Resize thumb.scale"]')!
-
-  await userEvent.dragAndDrop(resize, scale, {
-    targetPosition: { x: scale.getBoundingClientRect().width / 2, y: 5 },
+it('retains duration-spring bounce when replacing its duration', async () => {
+  const timings: Timing[] = []
+  host = document.createElement('div')
+  document.body.append(host)
+  app = createApp(TimingControls, {
+    timing: { kind: 'spring-duration', durationMs: 400, bounce: 0.6 },
+    onApply: (value: Timing) => timings.push(value),
   })
+  app.mount(host)
 
-  await tick()
+  await input('Track duration', '500')
+  await click('Apply timing')
 
-  expect(controller.draft).toContainEqual(
-    expect.objectContaining({
-      path: expect.stringContaining('/scale'),
-      timing: expect.stringMatching(/^@tween:/),
-    }),
-  )
+  expect(timings).toEqual([{ kind: 'spring-duration', durationMs: 500, bounce: 0.6 }])
+})
+
+it('offers typed easing constants instead of a raw CSS input', async () => {
+  const timings: Timing[] = []
+  host = document.createElement('div')
+  document.body.append(host)
+  app = createApp(TimingControls, { onApply: (value: Timing) => timings.push(value) })
+  app.mount(host)
+
+  await input('Track easing', 'step-start')
+  await click('Apply timing')
+
+  expect(host.querySelector('[aria-label="Track easing"]')?.tagName).toBe('SELECT')
+  expect(timings.at(-1)).toMatchObject({ kind: 'tween', easing: 'step-start' })
 })
 
 it('plays to completion, restarts at the end and saves synchronized edits', async () => {
-  const { controller } = await setupEditor()
+  const { controller } = await setupEditor(undefined, undefined, undefined, toggleFields)
 
   await click('Motion editor')
   await click('Play')
@@ -421,35 +299,29 @@ it('plays to completion, restarts at the end and saves synchronized edits', asyn
   expect(controller.message).toContain('synchronized')
 })
 
-it('creates common timing for a single-state definition without a transition', async () => {
+it('creates a typed timing override for an ordinary layer property', async () => {
   const definition = {
     name: 'single',
-    states: [
-      { name: 'off', targets: [{ name: 'box', properties: [{ name: 'opacity', value: '1' }] }] },
+    layers: [
+      { name: 'base', targets: [{ name: 'box', properties: [{ name: 'opacity', value: '1' }] }] },
     ],
-    directionalTransitions: [],
   }
-  const { controller } = await setupEditor(undefined, definition)
+  const { controller } = await setupEditor(undefined, definition, {}, [
+    { path: 'single/layer/base/target/box/property/opacity', kind: 'block', value: '' },
+    { path: 'single/layer/base/target/box/property/opacity/value', kind: 'value', value: '1' },
+  ])
 
   await click('Motion editor')
-  await input('Editing scope', 'general')
-
-  expect(button('Play').disabled).toBe(true)
-
   await click('▸ box')
-  host!.querySelector<HTMLButtonElement>('[aria-label="Select box.opacity"]')!.click()
-
-  await tick()
-
+  await click('opacity')
   await input('Track duration', '100')
   await click('Apply timing')
 
   expect(controller.draft).toEqual([
     {
-      op: 'track',
-      path: 'single/transition/general/target/box/property/opacity',
-      timing: '@tween: 100ms linear',
-      frames: undefined,
+      op: 'timing',
+      path: 'single/layer/base/target/box/property/opacity',
+      value: 'tween(duration: 100, easing: linear)',
     },
   ])
 })
@@ -518,119 +390,25 @@ it('respects reduced motion both during playback and when starting a preview', a
   }
 })
 
-it('edits destination values, sorts multiple keys and clears common overrides', async () => {
-  const { controller } = await setupEditor()
+it('applies From edits to their source declaration', async () => {
+  const { controller } = await setupEditor(
+    async (request) => compositionSourceReply(request),
+    compositionDefinition,
+  )
 
   await click('Motion editor')
-  await input('To state', 'off')
-  await click('▸ track')
-
-  const lane = host!.querySelector<HTMLElement>('[data-track="track.background-color"]')!
-  const endpoint = host!.querySelector<HTMLElement>('[aria-label="track.background-color 0%"]')!
-
-  await userEvent.dragAndDrop(endpoint, lane, { targetPosition: { x: 100, y: 5 } })
-
+  await click('▸ body')
+  await click('opacity')
+  host!.querySelector<HTMLButtonElement>('[aria-label="body.opacity 0%"]')!.click()
   await tick()
+  await input('Source value', '0.4')
+  await click('Apply value')
+  await expect.poll(() => controller.previewActive).toBe(true)
 
-  expect(controller.message).toContain('State endpoints cannot be moved')
-
-  host!.querySelector<HTMLButtonElement>('[aria-label="track.background-color 100%"]')!.click()
-
-  await tick()
-
-  await input('Keyframe value', 'purple')
-  await click('Update state value')
-
-  expect(controller.draft).toContainEqual(
-    expect.objectContaining({
-      path: 'toggle/state/on/target/track/background-color',
-      value: 'purple',
-    }),
-  )
-
-  for (const [time, value] of [
-    ['50', 'red'],
-    ['100', 'blue'],
-  ]) {
-    host!.querySelector<HTMLButtonElement>('[aria-label="Select track.background-color"]')!.click()
-
-    await tick()
-
-    await input('Track easing', 'linear')
-    await input('Playhead', time)
-    await click('New keyframe at playhead')
-    await input('Keyframe value', value)
-    await click('Add keyframe')
-  }
-
-  expect(controller.draft).toContainEqual(
-    expect.objectContaining({
-      frames: [
-        { offset: 0.25, value: 'red' },
-        { offset: 0.5, value: 'blue' },
-      ],
-    }),
-  )
-
-  host!.querySelector<HTMLButtonElement>('[aria-label="Select track.background-color"]')!.click()
-
-  await tick()
-
-  const rect = lane.getBoundingClientRect()
-  const extent = Number(host!.querySelector<HTMLInputElement>('[aria-label="Playhead"]')!.max)
-
-  lane.dispatchEvent(
-    new MouseEvent('dblclick', { clientX: rect.left + (rect.width * 150) / extent, altKey: true }),
-  )
-
-  await tick()
-
-  expect(button('Add keyframe')).toBeDefined()
-
-  host!.querySelector<HTMLButtonElement>('[aria-label="Select track.background-color"]')!.click()
-
-  await tick()
-
-  await input('Playhead', '1000')
-  await click('New keyframe at playhead')
-
-  expect(host!.querySelector('[aria-label="Keyframe value"]')).toBeNull()
-
-  await input('Playhead', '0')
-  await click('New keyframe at playhead')
-
-  expect(button('Update state value')).toBeDefined()
-
-  await input('Editing scope', 'general')
-  host!.querySelector<HTMLButtonElement>('[aria-label="track.background-color 0%"]')!.click()
-
-  await tick()
-
-  await click('Create endpoint override')
-  await input('Keyframe easing', 'linear')
-  await input('Keyframe value', 'cyan')
-  await click('Apply keyframe')
-  host!.querySelector<HTMLButtonElement>('[aria-label="Select track.background-color"]')!.click()
-
-  await tick()
-
-  await input('Timing mode', 'spring-duration')
-  await click('Apply timing')
-
-  expect(controller.message).toContain('Remove intermediate keyframes')
-
-  host!.querySelector<HTMLButtonElement>('[aria-label="track.background-color 0%"]')!.click()
-
-  await tick()
-
-  await click('Delete keyframe')
-
-  expect(controller.draft).toContainEqual(
-    expect.objectContaining({
-      path: 'toggle/transition/general/target/track/property/background-color',
-      frames: undefined,
-    }),
-  )
+  expect(controller.draft).toEqual([
+    { op: 'set', path: 'layered/layer/base/target/body/property/opacity/value', value: '0.4' },
+  ])
+  expect(host!.querySelector<HTMLInputElement>('[aria-label="Source value"]')!.value).toBe('0.4')
 })
 
 it('stops timeline playback when application state supersedes the preview', async () => {
@@ -642,7 +420,7 @@ it('stops timeline playback when application state supersedes the preview', asyn
   expect(button('Pause')).toBeDefined()
   expect(controller.previewActive).toBe(true)
 
-  runtime!.setState('on')
+  runtime!.updateParameters({ mode: 'on' })
   controller.observe('update', controller.selected!.binding)
 
   await new Promise(requestAnimationFrame)
@@ -650,72 +428,37 @@ it('stops timeline playback when application state supersedes the preview', asyn
 
   expect(button('Play')).toBeDefined()
   expect(controller.previewActive).toBe(false)
-  expect(runtime!.state).toBe('on')
+  expect(runtime!.composition.states.toggle).toBe('on')
   expect(controller.message).toContain('Application state superseded the preview')
 })
 
 it.each(['enter', 'leave'] as const)(
-  'authors motion-level %s tracks for a single-state motion',
+  'authors motion-level %s timing for a layer property',
   async (phase) => {
     const definition = {
       name: 'single',
-      states: [
-        { name: 'off', targets: [{ name: 'box', properties: [{ name: 'opacity', value: '1' }] }] },
+      layers: [
+        { name: 'base', targets: [{ name: 'box', properties: [{ name: 'opacity', value: '1' }] }] },
       ],
-      directionalTransitions: [],
     }
     const { controller } = await setupEditor(undefined, definition)
 
     await click('Motion editor')
-    await input('Editing scope', `${phase}-default`)
+    await input('Existing transition', `${phase}-default`)
     await click('▸ box')
-
-    expect(button('Play').disabled).toBe(false)
-    expect(host!.querySelector('[aria-label="From state"]')).toBeNull()
-
-    const selectTrack = async () => {
-      host!.querySelector<HTMLButtonElement>('[aria-label="Select box.opacity"]')!.click()
-      await tick()
-    }
-    await selectTrack()
+    await click('opacity')
     await input('Track duration', '200')
     await click('Apply timing')
-    host!.querySelector<HTMLButtonElement>('[aria-label="box.opacity 0%"]')!.click()
-    await tick()
 
-    expect(host!.textContent).toContain('Captured state / presentation endpoint')
-    expect(
-      [...host!.querySelectorAll('button')].some(
-        (element) => element.textContent === 'Update state value',
-      ),
-    ).toBe(false)
-
-    await input('Keyframe value', '0.2')
-    await click('Create endpoint override')
-    host!.querySelector<HTMLButtonElement>('[aria-label="box.opacity 0%"]')!.click()
-    await tick()
-
-    expect(host!.textContent).toContain('Local keyframe')
-
-    await input('Keyframe value', '0.4')
-    await click('Apply keyframe')
-    await selectTrack()
-    await input('Track duration', '400')
-    await click('Apply timing')
-
-    expect(controller.draft).toContainEqual(
-      expect.objectContaining({
+    expect(controller.draft).toEqual([
+      {
+        op: 'timing',
         path: `single/${phase}/target/box/property/opacity`,
-        timing: '@tween: 400ms linear',
-        frames: [{ offset: 0, value: '0.4' }],
-      }),
-    )
-
-    await click('Play')
-    await expect.poll(() => controller.previewActive).toBe(true)
-    await click('End preview')
-
-    expect(controller.previewActive).toBe(false)
+        value: 'tween(duration: 200, easing: linear)',
+      },
+    ])
+    expect(host!.querySelector('[aria-label="From state"]')).toBeNull()
+    expect(runtime!.composition.layers.base).toBe(true)
   },
 )
 
@@ -873,8 +616,7 @@ it('pans the timeline only after a primary pointer drag on its background', asyn
 
 const compositionDefinition = {
   name: 'layered',
-  states: [],
-  directionalTransitions: [],
+
   layers: [
     {
       name: 'base',
@@ -1337,8 +1079,7 @@ it('preserves unapplied composition source input across timeline zoom renders', 
 async function setupCompositionFrames() {
   const definition = {
     name: 'frames',
-    states: [],
-    directionalTransitions: [],
+
     layers: [
       {
         name: 'base',
@@ -1404,10 +1145,65 @@ async function setupCompositionFrames() {
   return controller
 }
 
+it('selects an existing composition frame instead of adding a duplicate at the playhead', async () => {
+  const controller = await setupCompositionFrames()
+
+  await input('Playhead', '100')
+  await click('New keyframe at playhead')
+
+  expect(button('Apply keyframe')).toBeDefined()
+  expect(controller.draft).toEqual([])
+  expect(selectValue('Keyframe percentage')).toBe('50')
+})
+
+it.each([0, 100])('does not add a frame beyond a %s ms track duration', async (durationMs) => {
+  const definition: Definition = {
+    name: 'short',
+    layers: [
+      {
+        name: 'base',
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'opacity',
+                value: '1',
+                timing: { kind: 'tween', durationMs, easing: 'linear' },
+              },
+              {
+                name: 'scale',
+                value: '1',
+                timing: { kind: 'tween', durationMs: 500, easing: 'linear' },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  }
+  const path = 'short/layer/base/target/body/property/opacity'
+  const { controller } = await setupEditor(undefined, definition, {}, [
+    { path, kind: 'block', value: '' },
+    { path: `${path}/value`, kind: 'value', value: '1' },
+  ])
+
+  await click('Motion editor')
+  await click('▸ body')
+  await click('opacity')
+  await input('Playhead', '250')
+  await click('New keyframe at playhead')
+
+  expect(controller.draft).toEqual([])
+  expect(host!.querySelector('[aria-label="Keyframe source value"]')).toBeNull()
+})
+
 it.each([25, 33.333])(
   'clears pending selection after adding a composition frame at %s percent',
   async (percentage) => {
     const controller = await setupCompositionFrames()
+
+    await input('Playhead', '50')
     await click('New keyframe at playhead')
     await input('Keyframe percentage', String(percentage))
     await click('Add keyframe')

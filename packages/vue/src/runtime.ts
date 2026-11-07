@@ -19,7 +19,6 @@ export interface InstanceBinding {
   readonly component: ComponentCustomOptions
   readonly runtime: LivaInstance
   readonly definition: Definition
-  requestedState: string
 }
 
 export interface LivaOptions {
@@ -27,7 +26,7 @@ export interface LivaOptions {
   observe?: (event: 'mount' | 'update' | 'unmount', instance: InstanceBinding) => void
 }
 
-type MotionValue = string | Record<string, unknown> | undefined
+type MotionValue = Record<string, unknown> | undefined
 
 interface PresenceBinding {
   value: MotionValue
@@ -37,8 +36,8 @@ interface PresenceBinding {
 
 // Only compiler-generated bindings use this modifier; authored parameter objects
 // remain opaque, even when they contain value, owner, or entries properties.
-function motionValue(binding: DirectiveBinding, previous = false): MotionValue {
-  const value = previous ? binding.oldValue : binding.value
+function motionValue(binding: DirectiveBinding): MotionValue {
+  const value = binding.value
   return binding.modifiers.compiled ? value?.value : value
 }
 
@@ -135,23 +134,13 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
           const runtime = new LivaInstance(definition, value, report)
           runtime.onEvent = (name) =>
             element.dispatchEvent(new CustomEvent(`liva-${name}`, { bubbles: true }))
-          let requestedState = runtime.state
           const record = {
             root: element,
             component,
             runtime,
             definition,
-            get requestedState() {
-              return typeof value === 'string' ? requestedState : runtime.reactiveState
-            },
-            set requestedState(state: string) {
-              requestedState = state
-            },
           }
-          runtime.onReactiveState = (state) => {
-            record.requestedState = state
-            options.observe?.('update', record)
-          }
+          runtime.onUpdate = () => options.observe?.('update', record)
           roots.set(element, record)
           owners.set(element, binding.instance!)
 
@@ -162,7 +151,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
           options.observe?.('mount', record)
           reconcile()
         } catch (error) {
-          report({ code: 'vue.state', message: String(error), error })
+          report({ code: 'vue.initialization', message: String(error), error })
         }
       }
 
@@ -193,20 +182,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
           }
 
           const value = motionValue(binding)
-          const oldValue = motionValue(binding, true)
-
-          if (typeof value !== 'string') {
-            record.runtime.updateParameters(value ?? {})
-          } else if (value !== oldValue) {
-            if (!record.definition.states.some((state) => state.name === value)) {
-              record.runtime.setState(value)
-              return
-            }
-
-            record.requestedState = value
-            options.observe?.('update', record)
-            record.runtime.setState(value)
-          }
+          record.runtime.updateParameters(value ?? {})
 
           reconcile()
         },

@@ -5,32 +5,31 @@ motion swipe {
     && movement.offset.x > 120
   event reset when !movement.active && movement.offset.x == 0
 
-  state idle {
+  layer interaction {
     body { translate: 0 0; opacity: 1 }
     badge { opacity: 1 }
-  }
-  state dragging when movement.active {
-    body { translate: ${movement.offset.x}px 0 }
+
+    state idle initial {}
+    state dragging { body { translate: ${movement.offset.x}px 0 } }
+
+    transition idle -> dragging when movement.active
+    transition dragging -> idle when !movement.active {
+      body { translate @spring(stiffness: 300, damping: 20) {} }
+    }
   }
 
-  transition dragging -> idle {
-    body { translate { @spring: 300 20 1 } }
-  }
-
-  enter {
-    @tween: 0.25s ease-out
+  enter @tween(duration: 250, easing: easeOut) {
     body {
       opacity { 0%: 0 }
       translate { 0%: 0 -20px }
     }
-    badge { opacity { @spring: 350ms 0.2; 0%: 0 } }
+    badge { opacity @spring(duration: 350, bounce: 0.2) { 0%: 0 } }
   }
-  leave {
-    @tween: 200ms ease-in
+  leave @tween(duration: 200, easing: easeIn) {
     body {
       opacity { 100%: 0 }
       translate { 100%: 500px 0 }
     }
-    badge { opacity { @tween: 100ms; 100%: 0 } }
+    badge { opacity @tween(duration: 100) { 100%: 0 } }
   }
 }

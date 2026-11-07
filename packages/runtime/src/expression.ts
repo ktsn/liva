@@ -6,14 +6,7 @@ import {
   timingValue,
   easingCss,
 } from './timing-values.ts'
-import type {
-  CallExpression,
-  Definition,
-  Expression,
-  Property,
-  Frame,
-  Transition,
-} from './definition.ts'
+import type { CallExpression, Expression, Property, Frame, Transition } from './definition.ts'
 
 import type { RuntimeValue, Scalar } from './reactive-value.ts'
 
@@ -124,18 +117,6 @@ function finite(value: number): number {
   return value
 }
 
-export function selectState(definition: Definition, values: VariableValues): string {
-  let selected = definition.states.find((state) => !state.when)?.name
-
-  for (const state of definition.states) {
-    if (state.when && evaluate(state.when, values) === true) selected = state.name
-  }
-
-  /* v8 ignore if -- @preserve: The compiler requires a fallback state in every motion. */
-  if (!selected) throw new Error('Definition requires a fallback state')
-  return selected
-}
-
 export function renderValue(
   property: Pick<Property, 'value' | 'template'>,
   values: VariableValues,
@@ -180,33 +161,5 @@ export function renderTransition(transition: Transition, values: VariableValues)
         }
       }),
     })),
-  }
-}
-
-export function renderDefinition(
-  definition: Definition,
-  values: VariableValues,
-  states: readonly string[],
-): Definition {
-  return {
-    ...definition,
-    states: definition.states.map((state) =>
-      states.includes(state.name)
-        ? {
-            ...state,
-            targets: state.targets.map((target) => ({
-              ...target,
-              properties: target.properties.map((property) => ({
-                ...property,
-                value: renderValue(property, values),
-                timing: property.timingExpression
-                  ? timingValue(evaluate(property.timingExpression, values))
-                  : property.timing,
-                keyframes: property.keyframes?.map((frame) => renderFrame(frame, values)),
-              })),
-            })),
-          }
-        : state,
-    ),
   }
 }

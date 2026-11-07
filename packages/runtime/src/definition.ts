@@ -67,7 +67,6 @@ export interface Target<T> {
 export interface State {
   readonly timingExpression?: Expression
   readonly timing?: Timing
-  readonly when?: Expression
   readonly name: string
   readonly targets: readonly Target<Property>[]
 }
@@ -104,20 +103,13 @@ export interface Transition {
 }
 
 export interface Definition {
-  readonly layers?: readonly Layer[]
+  readonly layers: readonly Layer[]
   readonly enter?: Transition
   readonly leave?: Transition
   readonly events?: readonly { readonly name: string; readonly when: Expression }[]
   readonly parameters?: readonly MotionParameter[]
   readonly letBindings?: readonly LetBinding[]
   readonly name: string
-  readonly states: readonly State[]
-  readonly generalTransition?: Transition
-  readonly directionalTransitions: readonly {
-    readonly from: string
-    readonly to: string
-    readonly transition: Transition
-  }[]
 }
 
 export interface DefinitionBundle {

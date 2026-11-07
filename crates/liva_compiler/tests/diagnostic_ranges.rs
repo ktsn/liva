@@ -77,7 +77,7 @@ fn expression_nodes_report_the_offending_token_or_operand() {
     ] {
         assert_error(
             &format!(
-                "motion a {{ let movement = drag(target: body); let result = {expression}; state idle {{ body {{ opacity: 1 }} }} }}"
+                "motion a {{ let movement = drag(target: body); let result = {expression}; layer idle {{ body {{ opacity: 1 }} }} }}"
             ),
             message,
         );
@@ -93,47 +93,47 @@ fn conditions_templates_and_type_annotations_use_expression_ranges() {
             "Expected primitive type",
         ),
         (
-            "motion a { state idle when «'😀'» {} }",
-            "State condition must be Boolean",
+            "motion a { layer idle when «'😀'» {} }",
+            "Layer condition must be Boolean",
         ),
         (
-            "motion a { state idle when «body» { body { opacity: 1 } } }",
-            "State condition must be Boolean",
+            "motion a { layer idle when «body» { body { opacity: 1 } } }",
+            "Layer condition must be Boolean",
         ),
         (
-            "motion a { let movement = drag(target: body); state idle when «movement» { body { opacity: 1 } } }",
-            "State condition must be Boolean",
+            "motion a { let movement = drag(target: body); layer idle when «movement» { body { opacity: 1 } } }",
+            "Layer condition must be Boolean",
         ),
         (
-            "motion a { state idle { body { opacity: ${«drag(target: body)»} } } }",
+            "motion a { layer idle { body { opacity: ${«drag(target: body)»} } } }",
             "CSS templates require scalar",
         ),
         (
-            "motion a { let movement = drag(target: body); state idle { body { opacity: ${«movement.offset»} } } }",
+            "motion a { let movement = drag(target: body); layer idle { body { opacity: ${«movement.offset»} } } }",
             "CSS templates require scalar",
         ),
         (
-            "motion a { state idle when «1 + 2» { body { opacity: 1 } } }",
-            "State condition must be Boolean",
+            "motion a { layer idle when «1 + 2» { body { opacity: 1 } } }",
+            "Layer condition must be Boolean",
         ),
         (
-            "motion a { state idle when true && «1» { body { opacity: 1 } } }",
+            "motion a { layer idle when true && «1» { body { opacity: 1 } } }",
             "Incompatible expression operands",
         ),
         (
-            "motion a { state idle when /* 😀 */ «(1)» { body { opacity: 1 } } }",
-            "State condition must be Boolean",
+            "motion a { layer idle when /* 😀 */ «(1)» { body { opacity: 1 } } }",
+            "Layer condition must be Boolean",
         ),
         (
-            "motion a { state idle { body { opacity: ${«body»} } } }",
+            "motion a { layer idle { body { opacity: ${«body»} } } }",
             "CSS templates require scalar",
         ),
         (
-            "motion a { state idle { body { opacity: ${1} ${1 + «true»} } } }",
+            "motion a { layer idle { body { opacity: ${1} ${1 + «true»} } } }",
             "Incompatible expression operands",
         ),
         (
-            "motion a { state idle { body { opacity: ${'😀'} /* 日本 */ ${«absent»} } } }",
+            "motion a { layer idle { body { opacity: ${'😀'} /* 日本 */ ${«absent»} } } }",
             "Unknown variable:",
         ),
     ] {
@@ -179,9 +179,9 @@ fn nested_expression_errors_keep_their_range_in_conditions_and_interpolations() 
     ] {
         for body in [
             format!(
-                "state idle {{ body {{ opacity: 1 }} }} state active when {expression} {{ body {{ opacity: 1 }} }}"
+                "layer idle {{ body {{ opacity: 1 }} }} layer active when {expression} {{ body {{ opacity: 1 }} }}"
             ),
-            format!("state idle {{ body {{ opacity: ${{{expression}}} }} }}"),
+            format!("layer idle {{ body {{ opacity: ${{{expression}}} }} }}"),
         ] {
             assert_error(
                 &format!("motion a {{ let movement = drag(target: body); {body} }}"),
@@ -197,7 +197,7 @@ fn nested_expression_errors_keep_their_range_in_conditions_and_interpolations() 
         ("drag(target: «absent»)", "Unknown variable:"),
     ] {
         assert_error(
-            &format!("motion a {{ state idle {{ body {{ opacity: ${{{expression}}} }} }} }}"),
+            &format!("motion a {{ layer idle {{ body {{ opacity: ${{{expression}}} }} }} }}"),
             message,
         );
     }
@@ -207,27 +207,27 @@ fn nested_expression_errors_keep_their_range_in_conditions_and_interpolations() 
 fn when_calls_and_incomplete_expressions_have_local_ranges() {
     for (source, message) in [
         (
-            "motion a { state idle {} state active when «unknown»(value: true) {} }",
+            "motion a { layer idle {} layer active when «unknown»(value: true) {} }",
             "Unknown function",
         ),
         (
-            "motion a { state idle {} state active when drag(target: «true») {} }",
+            "motion a { layer idle {} layer active when drag(target: «true») {} }",
             "Invalid argument type",
         ),
         (
-            "motion a(checked: boolean) { state idle {} state active when checked «&&» {} }",
+            "motion a(checked: boolean) { layer idle {} layer active when checked «&&» {} }",
             "Expected expression",
         ),
         (
-            "motion a { let value = unknown(«1»); state idle {} }",
+            "motion a { let value = unknown(«1»); layer idle {} }",
             "Expected named argument",
         ),
         (
-            "motion a { state idle {} state active when unknown(«1») {} }",
+            "motion a { layer idle {} layer active when unknown(«1») {} }",
             "Expected named argument",
         ),
         (
-            "motion a { state idle {} state active when true «?» {} }",
+            "motion a { layer idle {} layer active when true «?» {} }",
             "Unsupported expression token",
         ),
     ] {
@@ -245,7 +245,7 @@ fn invalid_conditions_do_not_create_whole_motion_fallback_errors() {
         "unknown(value: true)",
         "drag(target: false)",
     ] {
-        let source = format!("motion a {{ state idle {{}} state active when {condition} {{}} }}");
+        let source = format!("motion a {{ layer idle {{}} layer active when {condition} {{}} }}");
         let result = compile(&source, false);
 
         assert_eq!(
@@ -271,8 +271,8 @@ fn identifier_unit_escape_and_subtraction_errors_use_local_ranges() {
         ("10«-» 2", "Subtraction requires whitespace"),
     ] {
         for body in [
-            format!("let value = {expression}; state idle {{}}"),
-            format!("state idle {{ body {{ content: ${{{expression}}} }} }}"),
+            format!("let value = {expression}; layer idle {{}}"),
+            format!("layer idle {{ body {{ content: ${{{expression}}} }} }}"),
         ] {
             assert_error(&format!("motion a {{ /* 😀 */ {body} }}"), message);
         }
