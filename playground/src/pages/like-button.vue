@@ -15,10 +15,10 @@ const liked = ref(false)
       class="like-button"
       @click="liked = !liked"
     >
-      <span v-liva-target:heart class="heart" aria-hidden="true">♥</span>
-      <span v-liva-target:sparkLeft class="spark spark-left" aria-hidden="true">✦</span>
-      <span v-liva-target:sparkTop class="spark spark-top" aria-hidden="true">✦</span>
-      <span v-liva-target:sparkRight class="spark spark-right" aria-hidden="true">✦</span>
+      <span v-liva-target:heart aria-hidden="true" class="heart">♥</span>
+      <span v-liva-target:sparkLeft aria-hidden="true" class="spark spark-left">✦</span>
+      <span v-liva-target:sparkTop aria-hidden="true" class="spark spark-top">✦</span>
+      <span v-liva-target:sparkRight aria-hidden="true" class="spark spark-right">✦</span>
     </button>
   </section>
 </template>
