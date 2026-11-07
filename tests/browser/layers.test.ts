@@ -1,38 +1,138 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator } from '@playwright/test'
 
 const base = 'http://127.0.0.1:4180'
 
-test('overlapping button layers compose hover, focus, and pointer or keyboard press', async ({
-  page,
-}) => {
-  await page.goto(`${base}/interactive-button`)
-  const button = page.getByTestId('interactive-button')
+async function expectBrowserScale(button: Locator) {
+  const expected = await button.evaluate((element) =>
+    element.matches(':disabled')
+      ? '1'
+      : element.matches(':active')
+        ? '0.94'
+        : element.matches(':hover')
+          ? '1.08'
+          : '1',
+  )
 
-  await button.focus()
-  await button.hover()
+  await expect(button).toHaveCSS('scale', expected)
+}
 
-  await expect(button).toHaveCSS('scale', '1.08')
+test.describe('interactive button', () => {
+  test('composes selected color with browser hover and active scale', async ({ page }) => {
+    await page.goto(`${base}/interactive-button`)
 
-  await page.keyboard.down('Space')
+    const button = page.getByTestId('interactive-button')
+    await button.click()
+    await expect(button).toHaveAttribute('aria-pressed', 'true')
+    await expect(button).toHaveCSS('background-color', 'rgb(100, 198, 158)')
+    await expectBrowserScale(button)
 
-  await expect(button).toHaveCSS('scale', '0.94')
-  await expect(button).toHaveCSS('box-shadow', 'rgb(22, 121, 91) 0px 0px 0px 4px')
+    await page.mouse.down()
 
-  await page.keyboard.up('Space')
+    await expectBrowserScale(button)
+    await expect(button).toHaveCSS('background-color', 'rgb(100, 198, 158)')
 
-  await expect(button).toHaveCSS('scale', '1.08')
+    await page.mouse.move(0, 0)
+    await page.mouse.up()
 
-  await page.mouse.down()
+    await expectBrowserScale(button)
+    await expect(button).toHaveAttribute('aria-pressed', 'true')
+    await expect(button).toHaveCSS('background-color', 'rgb(100, 198, 158)')
+  })
 
-  await expect(button).toHaveCSS('scale', '0.94')
+  for (const key of ['Space', 'Enter']) {
+    test(`uses native ${key} activation and browser active matching`, async ({ page }) => {
+      await page.goto(`${base}/interactive-button`)
 
-  await page.mouse.up()
+      const button = page.getByTestId('interactive-button')
+      await button.focus()
+      await page.keyboard.down(key)
 
-  await expect(button).toHaveCSS('scale', '1.08')
+      await expectBrowserScale(button)
+      expect(await button.evaluate((element) => element.matches(':focus-visible'))).toBe(true)
+      await expect(button).toHaveCSS('box-shadow', 'rgb(22, 121, 91) 0px 0px 0px 4px')
 
-  await page.mouse.move(0, 0)
+      await page.keyboard.up(key)
 
-  await expect(button).toHaveCSS('scale', '1')
+      await expect(button).toHaveAttribute('aria-pressed', 'true')
+      await expectBrowserScale(button)
+    })
+  }
+
+  test('suppresses disabled activation and keeps selection when re-enabled', async ({ page }) => {
+    await page.goto(`${base}/interactive-button`)
+
+    const button = page.getByTestId('interactive-button')
+    const disabled = page.getByRole('checkbox', { name: 'Disable button' })
+    await button.click()
+    await disabled.check()
+
+    await expect(button).toBeDisabled()
+    await button.hover({ force: true })
+    await page.mouse.down()
+    await page.mouse.up()
+    await button.evaluate((element) => {
+      if (!(element instanceof HTMLButtonElement)) throw new Error('Unexpected control element')
+
+      element.click()
+    })
+    await button.focus()
+    await expect(button).not.toBeFocused()
+
+    await expect(button).toHaveAttribute('aria-pressed', 'true')
+    await expect(button).toHaveCSS('scale', '1')
+    await expect(button).toHaveCSS('background-color', 'rgb(211, 216, 213)')
+
+    await disabled.uncheck()
+
+    await expect(button).toBeEnabled()
+    await expect(button).toHaveAttribute('aria-pressed', 'true')
+    await expect(button).toHaveCSS('background-color', 'rgb(100, 198, 158)')
+    await button.focus()
+    await page.keyboard.press('Space')
+    await expect(button).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  test('clears an active press when disabled and settles interrupted animations', async ({
+    page,
+  }) => {
+    await page.goto(`${base}/interactive-button`)
+
+    const button = page.getByTestId('interactive-button')
+    const disabled = page.getByRole('checkbox', { name: 'Disable button' })
+    await button.hover()
+    await page.mouse.down()
+    await expectBrowserScale(button)
+
+    // Toggle the separate native control while the pointer is still held on the button.
+    await disabled.evaluate((element) => {
+      if (!(element instanceof HTMLInputElement)) throw new Error('Unexpected control element')
+
+      element.click()
+    })
+
+    await expect(button).toBeDisabled()
+    await expect(button).toHaveCSS('scale', '1')
+    await page.mouse.up()
+    await expect(button).toHaveAttribute('aria-pressed', 'false')
+
+    await disabled.uncheck()
+    await button.hover()
+    const entry = await button.evaluate(async (element) => {
+      await new Promise(requestAnimationFrame)
+
+      return {
+        scale: parseFloat(getComputedStyle(element).scale),
+        active: element.getAnimations().length,
+      }
+    })
+    expect(entry.active).toBeGreaterThan(0)
+    expect(entry.scale).toBeGreaterThanOrEqual(1)
+    expect(entry.scale).toBeLessThan(1.08)
+    await page.mouse.move(0, 0)
+
+    await expectBrowserScale(button)
+    await expect.poll(() => button.evaluate((element) => element.getAnimations().length)).toBe(0)
+  })
 })
 
 test('toggle reactive animation retargets from its displayed midpoint', async ({ page }) => {
