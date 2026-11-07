@@ -149,12 +149,13 @@ describe('composition source inspector', () => {
       provenance: {
         ...provenance,
         frameDestination: destination,
+        transition: { from: 'pending', to: 'success' },
         fields: [{ path: `${destination}/frame/0.5/value`, kind: 'value', value: '0.4' }],
       },
     })
 
     expect(host!.querySelector('[aria-label="Editing location"]')!.textContent).toBe(
-      'Layer: machine · Transition: 2',
+      'Layer: machine · pending → success',
     )
     expect(host!.querySelector('[aria-label="Source value"]')).toBeNull()
 

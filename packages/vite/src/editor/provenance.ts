@@ -20,6 +20,7 @@ export interface TrackProvenance {
   fromDeclarationPath?: string
   toDeclarationPath?: string
   frameDeclarationPath?: string
+  transition?: { from: string; to: string }
   from?: DeclarationSource
   to?: DeclarationSource
   sharedValue: boolean
@@ -76,7 +77,8 @@ export function trackProvenance(
   const owner = after?.source
   const fromSource = before?.source
   const transitions = compositionTransitions(definition, to, from, selected ? [selected] : [])
-  const effectiveTransition = owner ? transitions.get(owner.layer.name)?.transition : undefined
+  const transition = owner ? transitions.get(owner.layer.name) : undefined
+  const effectiveTransition = transition?.transition
   const transitionPath =
     selected && effectiveTransition
       ? `${definition.name}/layer/${selected.layer}/transition/${selected.index}`
@@ -124,6 +126,7 @@ export function trackProvenance(
     fromDeclarationPath: fromSource ? valuePath(definition.name, fromSource) : undefined,
     toDeclarationPath: owner ? valuePath(definition.name, owner) : undefined,
     frameDeclarationPath: transitionPath ?? declaredStylePath,
+    transition,
     from: fromSource ? field(fields, valuePath(definition.name, fromSource)) : undefined,
     to: owner ? field(fields, valuePath(definition.name, owner)) : undefined,
     sharedValue:

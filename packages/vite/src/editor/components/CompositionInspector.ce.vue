@@ -25,9 +25,6 @@ const framePath = computed(() =>
 const frameSource = computed(() =>
   props.provenance.fields.find((field) => field.path === `${framePath.value}/value`),
 )
-const selectedFrame = computed(() =>
-  props.track.frames.find((frame) => frame.offset === props.offset),
-)
 const canChangeFrame = computed(
   () => !!props.provenance.frameDestination && props.track.timing?.kind === 'tween',
 )
@@ -57,7 +54,12 @@ function locationLabel(path?: string) {
   const label = `Layer: ${layer}`
 
   if (scope === 'state') return `${label} · State: ${name}`
-  if (scope === 'transition') return `${label} · Transition: ${Number(name) + 1}`
+  if (scope === 'transition') {
+    // Transition paths are produced only for the effective transition in provenance.
+    const transition = props.provenance.transition!
+
+    return `${label} · ${transition.from} → ${transition.to}`
+  }
 
   return label
 }
@@ -140,29 +142,6 @@ function saveFrame() {
           : 'External CSS has no editable source declaration.'
       }}</p>
     </form>
-    <h4>Timing</h4>
-    <p v-if="provenance.timingUnavailable">{{ provenance.timingUnavailable }}</p>
-    <template v-if="provenance.timingDestination">
-      <p aria-label="Timing editing location" class="location">{{
-        locationLabel(provenance.timingDestination)
-      }}</p>
-      <TimingControls :timing="track.timing" @apply="replaceTiming" />
-      <button
-        v-if="provenance.localTiming"
-        type="button"
-        @click="emit('edit', [{ op: 'timing', path: provenance.timingDestination! }])"
-      >Remove timing override</button>
-    </template>
-    <h4 v-if="editingFrame">Keyframe</h4>
-    <p v-if="provenance.framesUnavailable">{{ provenance.framesUnavailable }}</p>
-
-    <p v-if="track.explicit.some((frame) => frame.offset === 1 && frame.value !== track.toValue)"
-    >Completion restores the property’s resolved value after this keyframe.</p>
-    <dl v-if="selectedFrame && editingFrame" aria-label="Selected keyframe">
-      <dt>Position</dt><dd>{{ selectedFrame.offset * 100 }}%</dd>
-      <dt>Resolved value</dt><dd>{{ selectedFrame.value || 'External CSS' }}</dd>
-      <dt>Easing</dt><dd>{{ selectedFrame.easing || 'Track timing' }}</dd>
-    </dl>
     <form v-if="editingFrame && canChangeFrame && offset !== undefined" @submit.prevent="saveFrame">
       <label>Keyframe source value<input
           v-model="frameValue"
@@ -192,6 +171,23 @@ function saveFrame() {
         @click="emit('edit', [{ op: 'removeFrame', path: framePath! }])"
       >Delete keyframe</button>
     </form>
+    <h4>Timing</h4>
+    <p v-if="provenance.timingUnavailable">{{ provenance.timingUnavailable }}</p>
+    <template v-if="provenance.timingDestination">
+      <p aria-label="Timing editing location" class="location">{{
+        locationLabel(provenance.timingDestination)
+      }}</p>
+      <TimingControls :timing="track.timing" @apply="replaceTiming" />
+      <button
+        v-if="provenance.localTiming"
+        type="button"
+        @click="emit('edit', [{ op: 'timing', path: provenance.timingDestination! }])"
+      >Remove timing override</button>
+    </template>
+    <p v-if="provenance.framesUnavailable">{{ provenance.framesUnavailable }}</p>
+
+    <p v-if="track.explicit.some((frame) => frame.offset === 1 && frame.value !== track.toValue)"
+    >Completion restores the property’s resolved value after this keyframe.</p>
     <button
       v-if="provenance.frameDestination"
       class="add-keyframe"

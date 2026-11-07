@@ -163,10 +163,10 @@ test('added and moved keyframes remain selected for subsequent edits and deletio
 
     await page.getByLabel('Keyframe percentage', { exact: true }).fill('60')
     await page.getByRole('button', { name: 'Apply keyframe', exact: true }).click()
-    await expect(page.getByLabel('Selected keyframe', { exact: true })).toContainText('60%')
+    await expect(page.getByLabel('Keyframe percentage', { exact: true })).toHaveValue('60')
     await page.getByLabel('Keyframe source value', { exact: true }).fill('orange')
     await page.getByRole('button', { name: 'Apply keyframe', exact: true }).click()
-    await expect(page.getByLabel('Selected keyframe', { exact: true })).toContainText('orange')
+    await expect(page.getByLabel('Keyframe source value', { exact: true })).toHaveValue('orange')
 
     await page.getByRole('button', { name: 'Delete keyframe', exact: true }).click()
     await expect(page.getByLabel('Keyframe source value', { exact: true })).toHaveCount(0)
