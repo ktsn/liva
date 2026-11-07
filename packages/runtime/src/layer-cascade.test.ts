@@ -19,11 +19,9 @@ const layer = (name: string, properties: readonly Property[]): Layer => ({
   name,
   targets: [{ name: 'body', properties }],
 })
-const definition = (layers?: readonly Layer[]): Definition => ({
+const definition = (layers: readonly Layer[]): Definition => ({
   name: 'sample',
   layers,
-  states: [],
-  directionalTransitions: [],
 })
 const resolveSources = (selection: Iterable<LayerSelection>) =>
   resolveLayerCascade(selection, identity<PropertySource>, identity<TimingSource>)
@@ -104,14 +102,9 @@ function expectedTimingSource(selection: { layer: Layer; state: State }, winner:
 }
 
 describe('compositionLayerSelection', () => {
-  it.each([{ layers: undefined }, { layers: [] }])(
-    'accepts a definition without contributing layers ($layers)',
-    ({ layers }) => {
-      expect([
-        ...compositionLayerSelection(definition(layers), { layers: {}, states: {} }),
-      ]).toEqual([])
-    },
-  )
+  it('accepts a definition without contributing layers', () => {
+    expect([...compositionLayerSelection(definition([]), { layers: {}, states: {} })]).toEqual([])
+  })
 
   it('uses explicit activation and state selections in definition order without evaluating guards', () => {
     const first = { ...layer('first', []), when: dynamic }

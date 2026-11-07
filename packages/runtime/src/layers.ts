@@ -78,7 +78,7 @@ function resolveLayerSelection(
       return
     }
 
-    for (const layer of definition.layers ?? []) {
+    for (const layer of definition.layers) {
       const active = !layer.when || evaluate(layer.when, values) === true
 
       if (!layer.states?.length) activeLayers[layer.name] = active

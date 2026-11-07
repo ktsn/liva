@@ -175,7 +175,6 @@ describe('composition source inspector', () => {
           fromValue: '0.2',
           toValue: '1',
           explicit: [{ offset, value: inheritedValue }],
-          inheritedFrames: true,
         },
         provenance: {
           ...provenance,

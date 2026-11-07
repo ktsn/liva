@@ -57,7 +57,7 @@ export function* compositionLayerSelection(
   definition: Definition,
   composition: Composition,
 ): Generator<LayerSelection> {
-  for (const layer of definition.layers ?? []) {
+  for (const layer of definition.layers) {
     if (!layer.states?.length) {
       if (composition.layers[layer.name]) yield { layer }
 

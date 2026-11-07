@@ -331,7 +331,8 @@ function add(track: TimelineTrack, offset: number) {
 
   // choose selects an existing track, so a layered selection has provenance.
   const existing = selectionProvenance.value!.fields.some(
-    (field) => field.path === `${selectionProvenance.value!.frameDestination}/frame/${offset}/value`,
+    (field) =>
+      field.path === `${selectionProvenance.value!.frameDestination}/frame/${offset}/value`,
   )
 
   if (!existing) selected.value!.pending = true

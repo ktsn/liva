@@ -102,20 +102,19 @@ test('duration edits preserve frame offsets and spring editing uses typed expres
 }) => {
   await open(page)
   await track(page, 'thumb', 'scale')
-  await page.getByLabel('Timing expression', { exact: true }).fill('tween(duration: 700)')
-  await page.getByRole('button', { name: 'Apply timing expression', exact: true }).click()
+  await page.getByLabel('Track duration', { exact: true }).fill('700')
+  await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
   await expectMessage(page, 'Previewing')
   await page.getByRole('button', { name: 'thumb.scale 40%', exact: true }).click()
   await expect(page.getByLabel('Keyframe percentage', { exact: true })).toHaveValue('40')
 
   await track(page, 'thumb', 'translate')
   await expect(page.getByRole('button', { name: 'New keyframe at playhead' })).toBeDisabled()
-  await page.getByLabel('Timing expression', { exact: true }).fill('spring(duration: 400)')
-  await page.getByRole('button', { name: 'Apply timing expression', exact: true }).click()
+  await page.getByLabel('Timing mode').selectOption('spring-duration')
+  await page.getByLabel('Track duration').fill('400')
+  await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
   await expectMessage(page, 'Previewing')
-  await expect(page.getByLabel('Timing expression', { exact: true })).toHaveValue(
-    'spring(duration: 400)',
-  )
+  await expect(page.getByLabel('Track duration', { exact: true })).toHaveValue('400')
 })
 
 test('playback pauses and close releases preview effects while retaining draft', async ({
@@ -123,8 +122,8 @@ test('playback pauses and close releases preview effects while retaining draft',
 }) => {
   await open(page)
   await track(page, 'thumb', 'scale')
-  await page.getByLabel('Timing expression', { exact: true }).fill('tween(duration: 3000)')
-  await page.getByRole('button', { name: 'Apply timing expression', exact: true }).click()
+  await page.getByLabel('Track duration', { exact: true }).fill('3000')
+  await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
   await expectMessage(page, 'Previewing')
   await page.getByRole('button', { name: 'Play', exact: true }).click()
   await expect.poll(() => page.getByLabel('Playhead').inputValue()).not.toBe('0')
@@ -135,9 +134,7 @@ test('playback pauses and close releases preview effects while retaining draft',
   await page.getByRole('button', { name: 'Close', exact: true }).click()
   await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0)
   await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
-  await expect(page.getByLabel('Timing expression', { exact: true })).toHaveValue(
-    'tween(duration: 3000)',
-  )
+  await expect(page.getByLabel('Track duration', { exact: true })).toHaveValue('3000')
 })
 
 test('timeline saves timing, new frames and endpoint state values with shared HMR', async ({
@@ -149,8 +146,8 @@ test('timeline saves timing, new frames and endpoint state values with shared HM
   try {
     await open(page, true)
     await track(page, 'box', 'background-color')
-    await page.getByLabel('Timing expression', { exact: true }).fill('tween(duration: 200)')
-    await page.getByRole('button', { name: 'Apply timing expression', exact: true }).click()
+    await page.getByLabel('Track duration', { exact: true }).fill('200')
+    await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
     await expectMessage(page, 'Previewing')
     await seek(page, 100)
     await page.getByRole('button', { name: 'New keyframe at playhead' }).click()
@@ -162,7 +159,7 @@ test('timeline saves timing, new frames and endpoint state values with shared HM
 
     const saved = await readFile(file, 'utf8')
     expect(saved).toContain('transition off -> on')
-    expect(saved).toContain('@tween(duration: 200)')
+    expect(saved).toContain('@tween(duration: 200, easing: ease)')
     expect(saved).toContain('50%')
     expect(saved).toContain('%: purple')
     expect(saved.slice(0, saved.indexOf('<liva'))).toBe(
@@ -178,8 +175,8 @@ test('timeline saves timing, new frames and endpoint state values with shared HM
     expect(await readFile(file, 'utf8')).not.toContain('purple')
 
     await track(page, 'box', 'background-color')
-    await page.getByLabel('TO source value', { exact: true }).fill('green')
-    await page.getByRole('button', { name: 'Apply TO value', exact: true }).click()
+    await page.getByLabel('Source value', { exact: true }).fill('green')
+    await page.getByRole('button', { name: 'Apply value', exact: true }).click()
     await save(page)
     expect(await readFile(file, 'utf8')).toContain('background-color: green')
   } finally {
@@ -242,24 +239,22 @@ test('selection, discard, close and application updates invalidate pending previ
   await page.getByLabel('Preview instance').selectOption(options[2])
   await expect(page.getByLabel('Playhead')).toBeVisible()
   await track(page, 'thumb', 'scale')
-  await page.getByLabel('Timing expression', { exact: true }).fill('tween(duration: 600)')
-  await page.getByRole('button', { name: 'Apply timing expression', exact: true }).click()
+  await page.getByLabel('Track duration', { exact: true }).fill('600')
+  await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
   await page.getByRole('button', { name: 'Discard changes', exact: true }).click()
   await expect(page.getByLabel('Playhead')).toBeVisible()
   await track(page, 'thumb', 'scale')
-  await expect(page.getByLabel('Timing expression', { exact: true })).toHaveValue(
-    'tween(duration: 350, easing: easeOut)',
-  )
+  await expect(page.getByLabel('Track duration', { exact: true })).toHaveValue('350')
 
   for (const action of ['close', 'application'] as const) {
-    await page.getByLabel('Timing expression', { exact: true }).fill('tween(duration: 600)')
-    await page.getByRole('button', { name: 'Apply timing expression', exact: true }).click()
+    await page.getByLabel('Track duration', { exact: true }).fill('600')
+    await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
     await expectMessage(page, 'Previewing')
-    await page.getByLabel('Timing expression', { exact: true }).fill('tween(duration: 700)')
+    await page.getByLabel('Track duration', { exact: true }).fill('700')
     await page.evaluate((operation) => {
       const shadow = document.querySelector('[data-liva-editor]')!.shadowRoot!
       const buttons = [...shadow.querySelectorAll('button')]
-      buttons.find((button) => button.textContent?.trim() === 'Apply timing expression')!.click()
+      buttons.find((button) => button.textContent?.trim() === 'Apply timing')!.click()
       if (operation === 'close')
         buttons.find((button) => button.textContent?.trim() === 'Close')!.click()
       else document.querySelector<HTMLButtonElement>('[aria-label="Product updates"]')!.click()
@@ -271,7 +266,7 @@ test('selection, discard, close and application updates invalidate pending previ
     if (action === 'close')
       await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
     expect(await page.evaluate(() => window.__LIVA_EDITOR__.draft)).toContainEqual(
-      expect.objectContaining({ op: 'timing', value: 'tween(duration: 600)' }),
+      expect.objectContaining({ op: 'timing', value: 'tween(duration: 600, easing: easeOut)' }),
     )
   }
 })
@@ -300,8 +295,8 @@ test('enabling reduced motion during Play settles immediately but still allows s
 }) => {
   await open(page)
   await track(page, 'thumb', 'scale')
-  await page.getByLabel('Timing expression', { exact: true }).fill('tween(duration: 3000)')
-  await page.getByRole('button', { name: 'Apply timing expression', exact: true }).click()
+  await page.getByLabel('Track duration', { exact: true }).fill('3000')
+  await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
   await expectMessage(page, 'Previewing')
   await page.getByRole('button', { name: 'Play', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
@@ -336,10 +331,8 @@ test('an unsettled spring keeps its parameter controls available for correction'
   await expect(page.getByRole('alert')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeDisabled()
 
-  await page
-    .getByLabel('Timing expression', { exact: true })
-    .fill('spring(stiffness: 300, damping: 20)')
-  await page.getByRole('button', { name: 'Apply timing expression', exact: true }).click()
+  await page.getByLabel('Damping', { exact: true }).fill('20')
+  await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
   await expectMessage(page, 'Previewing')
   await expect(page.getByRole('alert')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeEnabled()
@@ -404,13 +397,13 @@ test('motion-level lifecycle edits save with shared HMR', async ({ page, browser
     await page.getByLabel('Editing scope').selectOption('leave-default')
     await page.getByLabel('Baseline active enabled').uncheck()
     await track(page, 'body', 'opacity')
-    await page.getByLabel('Timing expression', { exact: true }).fill('tween(duration: 500)')
-    await page.getByRole('button', { name: 'Apply timing expression', exact: true }).click()
+    await page.getByLabel('Track duration', { exact: true }).fill('500')
+    await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
     await save(page)
 
     const saved = await readFile(lifecycleFile, 'utf8')
     expect(saved).toContain('leave @tween(duration: 200, easing: linear)')
-    expect(saved).toContain('@tween(duration: 500)')
+    expect(saved).toContain('@tween(duration: 500, easing: linear)')
     expect(saved.slice(0, saved.indexOf('<liva'))).toBe(
       original.slice(0, original.indexOf('<liva')),
     )

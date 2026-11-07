@@ -123,7 +123,7 @@ it('opens composition playback, scrubs and restores on close', async () => {
   const { controller } = await setupEditor()
 
   await click('Motion editor')
-  await input('TO toggle state', 'on')
+  await input('To toggle state', 'on')
   await click('Play')
 
   expect(controller.previewActive).toBe(true)
@@ -198,8 +198,8 @@ it('reports preview, save and discard failures without discarding the draft', as
   await tick()
 
   failure = ''
-  await input('Timing expression', 'tween(duration: 450)')
-  await click('Apply timing expression')
+  await input('Track duration', '450')
+  await click('Apply timing')
   failure = 'Save unavailable'
   await click('Save to source')
 
@@ -291,8 +291,8 @@ it('plays to completion, restarts at the end and saves synchronized edits', asyn
 
   await tick()
 
-  await input('Timing expression', 'tween(duration: 500)')
-  await click('Apply timing expression')
+  await input('Track duration', '500')
+  await click('Apply timing')
   await click('Save to source')
 
   await expect.poll(() => controller.draft.length).toBe(0)
@@ -314,14 +314,14 @@ it('creates a typed timing override for an ordinary layer property', async () =>
   await click('Motion editor')
   await click('▸ box')
   await click('opacity')
-  await input('Timing expression', 'tween(duration: 100)')
-  await click('Apply timing expression')
+  await input('Track duration', '100')
+  await click('Apply timing')
 
   expect(controller.draft).toEqual([
     {
       op: 'timing',
       path: 'single/layer/base/target/box/property/opacity',
-      value: 'tween(duration: 100)',
+      value: 'tween(duration: 100, easing: linear)',
     },
   ])
 })
@@ -390,7 +390,7 @@ it('respects reduced motion both during playback and when starting a preview', a
   }
 })
 
-it('applies FROM edits to their source declaration', async () => {
+it('applies From edits to their source declaration', async () => {
   const { controller } = await setupEditor(
     async (request) => compositionSourceReply(request),
     compositionDefinition,
@@ -399,16 +399,16 @@ it('applies FROM edits to their source declaration', async () => {
   await click('Motion editor')
   await click('▸ body')
   await click('opacity')
-  await input('FROM source value', '0.4')
-  await click('Apply FROM value')
+  host!.querySelector<HTMLButtonElement>('[aria-label="body.opacity 0%"]')!.click()
+  await tick()
+  await input('Source value', '0.4')
+  await click('Apply value')
   await expect.poll(() => controller.previewActive).toBe(true)
 
   expect(controller.draft).toEqual([
     { op: 'set', path: 'layered/layer/base/target/body/property/opacity/value', value: '0.4' },
   ])
-  expect(host!.querySelector('[aria-label="Selection inspector"]')!.textContent).toContain(
-    'FROM resolved: 0.4',
-  )
+  expect(host!.querySelector<HTMLInputElement>('[aria-label="Source value"]')!.value).toBe('0.4')
 })
 
 it('stops timeline playback when application state supersedes the preview', async () => {
@@ -447,14 +447,14 @@ it.each(['enter', 'leave'] as const)(
     await input('Editing scope', `${phase}-default`)
     await click('▸ box')
     await click('opacity')
-    await input('Timing expression', 'tween(duration: 200)')
-    await click('Apply timing expression')
+    await input('Track duration', '200')
+    await click('Apply timing')
 
     expect(controller.draft).toEqual([
       {
         op: 'timing',
         path: `single/${phase}/target/box/property/opacity`,
-        value: 'tween(duration: 200)',
+        value: 'tween(duration: 200, easing: linear)',
       },
     ])
     expect(host!.querySelector('[aria-label="From state"]')).toBeNull()
