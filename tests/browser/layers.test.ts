@@ -21,7 +21,9 @@ test.describe('interactive button', () => {
     await page.goto(`${base}/interactive-button`)
 
     const button = page.getByTestId('interactive-button')
+
     await button.click()
+
     await expect(button).toHaveAttribute('aria-pressed', 'true')
     await expect(button).toHaveCSS('background-color', 'rgb(100, 198, 158)')
     await expectBrowserScale(button)
@@ -44,6 +46,7 @@ test.describe('interactive button', () => {
       await page.goto(`${base}/interactive-button`)
 
       const button = page.getByTestId('interactive-button')
+
       await button.focus()
       await page.keyboard.down(key)
 
@@ -63,10 +66,12 @@ test.describe('interactive button', () => {
 
     const button = page.getByTestId('interactive-button')
     const disabled = page.getByRole('checkbox', { name: 'Disable button' })
+
     await button.click()
     await disabled.check()
 
     await expect(button).toBeDisabled()
+
     await button.hover({ force: true })
     await page.mouse.down()
     await page.mouse.up()
@@ -76,6 +81,7 @@ test.describe('interactive button', () => {
       element.click()
     })
     await button.focus()
+
     await expect(button).not.toBeFocused()
 
     await expect(button).toHaveAttribute('aria-pressed', 'true')
@@ -87,8 +93,10 @@ test.describe('interactive button', () => {
     await expect(button).toBeEnabled()
     await expect(button).toHaveAttribute('aria-pressed', 'true')
     await expect(button).toHaveCSS('background-color', 'rgb(100, 198, 158)')
+
     await button.focus()
     await page.keyboard.press('Space')
+
     await expect(button).toHaveAttribute('aria-pressed', 'false')
   })
 
@@ -99,8 +107,10 @@ test.describe('interactive button', () => {
 
     const button = page.getByTestId('interactive-button')
     const disabled = page.getByRole('checkbox', { name: 'Disable button' })
+
     await button.hover()
     await page.mouse.down()
+
     await expectBrowserScale(button)
 
     // Toggle the separate native control while the pointer is still held on the button.
@@ -112,11 +122,14 @@ test.describe('interactive button', () => {
 
     await expect(button).toBeDisabled()
     await expect(button).toHaveCSS('scale', '1')
+
     await page.mouse.up()
+
     await expect(button).toHaveAttribute('aria-pressed', 'false')
 
     await disabled.uncheck()
     await button.hover()
+
     const entry = await button.evaluate(async (element) => {
       await new Promise(requestAnimationFrame)
 
@@ -125,9 +138,11 @@ test.describe('interactive button', () => {
         active: element.getAnimations().length,
       }
     })
+
     expect(entry.active).toBeGreaterThan(0)
     expect(entry.scale).toBeGreaterThanOrEqual(1)
     expect(entry.scale).toBeLessThan(1.08)
+
     await page.mouse.move(0, 0)
 
     await expectBrowserScale(button)
