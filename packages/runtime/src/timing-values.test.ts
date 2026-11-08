@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vite-plus/test'
 import { evaluate } from './expression.ts'
 import { sampleSpring } from './spring.ts'
 import { LetBindingGraph } from './let-bindings.ts'
-import { callTiming, easingConstant, easingCss, timingValue } from './timing-values.ts'
+import { callTiming, builtinConstant, easingCss, timingValue } from './timing-values.ts'
 import type { Expression } from './definition.ts'
 
 const reference = (name: string): Expression => ({ kind: 'reference', path: [name] })
@@ -99,12 +99,20 @@ describe('typed timing values', () => {
     expect(() => callTiming(name, args)).toThrow(/Expected|must be/)
   })
 
+  it('resolves Instant as an explicit timing and honors motion shadowing', () => {
+    const immediate = evaluate(reference('instant'), {})
+
+    expect(timingValue(immediate)).toEqual({ kind: 'tween', durationMs: 0, easing: 'linear' })
+    expect(() => easingCss(immediate)).toThrow('Expected easing value')
+    expect(evaluate(reference('instant'), { instant: 20 })).toBe(20)
+  })
+
   it('keeps easing descriptions distinct from scalar CSS strings', () => {
     const value = evaluate(reference('easeIn'), {})
 
     expect(easingCss(value)).toBe('ease-in')
     expect(() => timingValue(value)).toThrow('Expected timing value')
-    expect(easingConstant('missing')).toBeUndefined()
+    expect(builtinConstant('missing')).toBeUndefined()
   })
 
   it('evaluates dynamic duration springs and preserves requested duration', () => {

@@ -6,7 +6,7 @@ const props = withDefaults(defineProps<{ timing?: Timing; actionLabel?: string }
   actionLabel: 'Apply timing',
 })
 const emit = defineEmits<{ apply: [timing: Timing] }>()
-const kind = ref<Timing['kind']>('tween')
+const kind = ref<Timing['kind'] | 'instant'>('tween')
 const duration = ref(350)
 const bounce = ref(0.25)
 const stiffness = ref(300)
@@ -18,7 +18,8 @@ watch(
   () => props.timing,
   () => {
     const timing = props.timing
-    kind.value = timing?.kind ?? 'tween'
+    kind.value =
+      timing?.kind === 'tween' && timing.durationMs === 0 ? 'instant' : (timing?.kind ?? 'tween')
     duration.value = timing && timing.kind !== 'spring-physics' ? timing.durationMs : 350
     if (timing?.kind === 'tween') defaultEasing.value = timing.easing
     if (timing?.kind === 'spring-duration') bounce.value = timing.bounce
@@ -33,16 +34,18 @@ watch(
 
 function applyTiming() {
   const timing: Timing =
-    kind.value === 'tween'
-      ? { kind: 'tween', durationMs: duration.value, easing: defaultEasing.value }
-      : kind.value === 'spring-duration'
-        ? { kind: 'spring-duration', durationMs: duration.value, bounce: bounce.value }
-        : {
-            kind: 'spring-physics',
-            stiffness: stiffness.value,
-            damping: damping.value,
-            mass: mass.value,
-          }
+    kind.value === 'instant'
+      ? { kind: 'tween', durationMs: 0, easing: 'linear' }
+      : kind.value === 'tween'
+        ? { kind: 'tween', durationMs: duration.value, easing: defaultEasing.value }
+        : kind.value === 'spring-duration'
+          ? { kind: 'spring-duration', durationMs: duration.value, bounce: bounce.value }
+          : {
+              kind: 'spring-physics',
+              stiffness: stiffness.value,
+              damping: damping.value,
+              mass: mass.value,
+            }
   emit('apply', timing)
 }
 </script>
@@ -50,10 +53,11 @@ function applyTiming() {
 <template>
   <label>Timing<select v-model="kind" aria-label="Timing mode">
       <option value="tween">Tween</option>
+      <option value="instant">Instant</option>
       <option value="spring-duration">Duration spring</option>
       <option value="spring-physics">Physics spring</option>
     </select></label>
-  <label v-if="kind !== 'spring-physics'">Duration (ms)<input
+  <label v-if="kind === 'tween' || kind === 'spring-duration'">Duration (ms)<input
       v-model.number="duration"
       aria-label="Track duration"
       min="0"

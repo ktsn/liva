@@ -47,7 +47,7 @@ motion card {
 
   layer dragging when movement.active {
     body {
-      translate: ${movement.offset.x}px ${movement.offset.y}px @tween(duration: 0)
+      translate: ${movement.offset.x}px ${movement.offset.y}px @instant
       scale: 1.05
     }
   }

@@ -11,7 +11,9 @@ const easingNames: Readonly<Record<string, string>> = {
   stepEnd: 'step-end',
 }
 
-export function easingConstant(name: string): RuntimeValue | undefined {
+export function builtinConstant(name: string): RuntimeValue | undefined {
+  if (name === 'instant') return Object.freeze({ kind: 'tween', durationMs: 0, easing: 'linear' })
+
   return Object.hasOwn(easingNames, name)
     ? Object.freeze({ kind: 'easing', css: easingNames[name] })
     : undefined

@@ -62,6 +62,21 @@ describe('composition source provenance', () => {
     )
   })
 
+  it.each([
+    'motion sample(instant: number) { layer base { body { opacity: 1 } } }',
+    'motion sample { let instant = tween(duration: 200); layer base { body { opacity: 1 } } }',
+    'motion sample { layer base { instant { opacity: 1 } body { opacity: 1 } } }',
+  ])('collects motion bindings that shadow timing constants: %s', (source) => {
+    const info = inspection(source)
+    const selection = { layers: { base: true }, states: {} }
+    const result = trackProvenance(info, selection, selection, undefined, 'body', 'opacity')
+
+    expect(result.timingBindings).toContain('instant')
+    expect(
+      typedTimingText({ kind: 'tween', durationMs: 0, easing: 'linear' }, result.timingBindings),
+    ).toBe('tween(duration: 0)')
+  })
+
   const timingScopes = [
     ['transitionProperty', 'transition/0/target/body/property/opacity'],
     ['transitionTarget', 'transition/0/target/body'],
@@ -281,6 +296,22 @@ describe('typed timing serialization', () => {
     ['cubic-bezier(0.2, 0, 0.4, 1)', 'cubicBezier(x1: 0.2, y1: 0, x2: 0.4, y2: 1)'],
   ])('preserves supported easing %s as a typed expression', (css, expected) => {
     expect(typedEasingText(css)).toBe(expected)
+  })
+
+  it('serializes immediate timing as Instant', () => {
+    expect(typedTimingText({ kind: 'tween', durationMs: 0, easing: 'linear' })).toBe('instant')
+  })
+
+  it('uses an unshadowed zero-duration tween when Instant is shadowed', () => {
+    expect(typedTimingText({ kind: 'tween', durationMs: 0, easing: 'linear' }, ['instant'])).toBe(
+      'tween(duration: 0)',
+    )
+  })
+
+  it('refuses Instant serialization when neither built-in is accessible', () => {
+    expect(() =>
+      typedTimingText({ kind: 'tween', durationMs: 0, easing: 'linear' }, ['instant', 'tween']),
+    ).toThrow('both shadowed')
   })
 
   it('serializes both spring signatures without legacy shorthand', () => {

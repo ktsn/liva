@@ -165,6 +165,7 @@ export function compositionLifecycleTracks(
 }
 
 export function timingText(timing: Timing): string {
+  if (timing.kind === 'tween' && timing.durationMs === 0) return 'Instant'
   if (timing.kind === 'tween') return `Tween: ${timing.durationMs} ms, ${timing.easing}`
   if (timing.kind === 'spring-duration')
     return `Spring: ${timing.durationMs} ms, bounce ${timing.bounce}`

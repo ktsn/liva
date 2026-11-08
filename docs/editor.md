@@ -51,7 +51,11 @@ using that declaration.
 Value edits preserve source expressions until explicitly replaced. Timing edits write
 `@expression` on the selected transition property, or on the ordinary/style property
 when no effective transition is selected. Removing a local override reveals its
-inherited default. Timing parameters are shown directly; Apply timing replaces the
+inherited default. **Instant** is available as a timing choice and has no duration or easing fields.
+It applies the resolved destination immediately in playback and scrubbing, including
+tracks with intermediate authored frames. Removing its override reveals inherited
+timing. Zero-duration tweens are displayed as Instant because they have identical
+execution semantics. Timing parameters are shown directly; Apply timing replaces the
 expression with those parameters. Unrelated edits retain existing expressions.
 
 Keyframe editing uses the explicitly selected existing transition in the final value
@@ -92,7 +96,19 @@ state. Missing targets are not mounted by the editor.
 The playhead seeks the actual DOM using paused WAAPI effects. **Play** advances
 from the current position, or restarts at zero when already at the end. **Pause**
 holds the pose. Shorter tracks settle to their destination while longer tracks
-continue. Playback ends at the longest displayed track. Enabling reduced motion
+continue. Playback ends at the longest displayed track unless **Loop** is enabled.
+**Speed** offers 0.1×, 0.25×, 0.5×, and 1× (the default). Timeline positions and
+readouts remain animation milliseconds: 600 ms at 0.5× takes 1.2 seconds of real
+time. Changing speed preserves the current position.
+
+**Loop** defaults to off and repeats the full timeline at the selected speed,
+carrying frame overshoot into the next pass. Each boundary snaps directly to the
+starting pose without a return animation or pause. Lifecycle previews seek the
+same effects without changing element presence or invoking completion callbacks.
+Turning Loop off lets the current pass finish; toggling it while paused does not
+start playback. Scrubbing and **To start** pause playback. Speed and Loop are
+session preferences retained across replay and selection changes, reset on page
+reload, and never saved into animation source. Zero-duration previews do not repeat. Enabling reduced motion
 settles automatic playback immediately; explicit manual scrubbing remains available.
 
 **End preview** restores the committed definition and latest application composition,
@@ -107,5 +123,5 @@ External source changes require discarding/reloading before further preview or s
 
 The editor does not add targets or new CSS property names. Lifecycle scopes also
 include properties already authored in lifecycle declarations.
-Clips, delays, looping, curve graphs, automatic key recording, multiselection,
+Clips, delays, curve graphs, automatic key recording, multiselection,
 undo/redo history, and a separate preview canvas are outside this implementation.
