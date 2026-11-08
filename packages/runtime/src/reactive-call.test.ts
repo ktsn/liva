@@ -314,4 +314,73 @@ describe('stable reactive calls', () => {
 
     graph.dispose()
   })
+  it('does not dispose borrowed calls when a candidate changes an indirect argument', () => {
+    const counter = installCounter()
+    const definitions: LetBinding[] = [
+      { name: 'selected', initializer: { kind: 'number', value: 1 } },
+      {
+        ...bindings[0],
+        initializer: {
+          kind: 'call',
+          function: 'createCounter',
+          arguments: [{ name: 'input', value: { kind: 'reference', path: ['selected'] } }],
+        },
+      },
+    ]
+    const live = new LetBindingGraph(definitions, {})
+    const candidate = new LetBindingGraph(
+      [{ name: 'selected', initializer: { kind: 'number', value: 2 } }, definitions[1]],
+      {},
+      live,
+    )
+
+    candidate.dispose(live)
+
+    expect(counter.disposed).toEqual([counter.instances[1]])
+    expect(live.evaluate({}).counter).toEqual({ input: 1 })
+
+    live.dispose()
+
+    expect(counter.disposed).toEqual([counter.instances[1], counter.instances[0]])
+  })
+
+  it('leaves borrowed subscriptions active when a candidate deactivates their branch', () => {
+    const dispose = vi.fn<() => void>()
+    const call: ReactiveCall = {
+      value: true,
+      bind: () => () => {},
+      prepareUpdate: () => {
+        throw new Error('No argument updates in this scenario')
+      },
+      dispose,
+    }
+    vi.spyOn(functions, 'callBuiltin').mockReturnValue(call)
+    const definitions: LetBinding[] = [
+      { name: 'enabled', initializer: { kind: 'boolean', value: true } },
+      {
+        name: 'selected',
+        initializer: {
+          kind: 'binary',
+          operator: '&&',
+          left: { kind: 'reference', path: ['enabled'] },
+          right: { kind: 'call', function: 'createCounter', arguments: [] },
+        },
+      },
+    ]
+    const live = new LetBindingGraph(definitions, {})
+    const candidate = new LetBindingGraph(
+      [{ name: 'enabled', initializer: { kind: 'boolean', value: false } }, definitions[1]],
+      {},
+      live,
+    )
+
+    candidate.dispose(live)
+
+    expect(dispose).not.toHaveBeenCalled()
+    expect(live.evaluate({}).selected).toBe(true)
+
+    live.dispose()
+
+    expect(dispose).toHaveBeenCalledTimes(1)
+  })
 })

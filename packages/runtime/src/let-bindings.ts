@@ -210,7 +210,9 @@ export class LetBindingGraph {
       committed = true
 
       for (const result of removed) {
-        if (!active.has(result) && isReactiveCall(result)) result.dispose()
+        // Initial caches are borrowed from a live graph, not owned by this candidate.
+        // Only dispose them when the caller accepts a replacement via old.dispose(new).
+        if (!this.initializing && !active.has(result) && isReactiveCall(result)) result.dispose()
       }
 
       return values
