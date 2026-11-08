@@ -121,6 +121,55 @@ describe('stable reactive calls', () => {
     expect(counter.discarded).toEqual([2])
   })
 
+  it('retains committed calls and subscriptions when a new subscription cannot bind', () => {
+    const counter = installCounter()
+    const disposedNewCall = vi.fn<() => void>()
+    const bindingError = new Error('Binding failed')
+    const graph = new LetBindingGraph(
+      [
+        ...bindings,
+        {
+          name: 'optional',
+          initializer: {
+            kind: 'binary',
+            operator: '&&',
+            left: { kind: 'reference', path: ['enabled'] },
+            right: { kind: 'call', function: 'failing', arguments: [] },
+          },
+        },
+      ],
+      { input: 1, enabled: false },
+    )
+    counter.factory.mockReturnValue({
+      value: true,
+      bind() {
+        throw bindingError
+      },
+      prepareUpdate() {
+        throw new Error('No argument updates in this scenario')
+      },
+      dispose: disposedNewCall,
+    })
+    const notified = vi.fn<() => void>()
+    graph.bind(new Map(), notified)
+
+    expect(() => graph.evaluate({ input: 2, enabled: true })).toThrow(bindingError)
+
+    expect(counter.instances[0]?.value).toEqual({ input: 1 })
+    expect(counter.commits).toEqual([])
+    expect(counter.discarded).toEqual([2])
+    expect(counter.disposed).toEqual([])
+    expect(disposedNewCall).toHaveBeenCalledTimes(1)
+
+    counter.publishers[0]?.()
+
+    expect(notified).toHaveBeenCalledTimes(1)
+    expect(graph.evaluate({ input: 1, enabled: false }).alias).toEqual({ input: 1 })
+    expect(counter.instances).toHaveLength(1)
+
+    graph.dispose()
+  })
+
   it('releases aborted creation and keeps separate call sites independent', () => {
     const counter = installCounter()
 
@@ -336,6 +385,43 @@ describe('stable reactive calls', () => {
 
     candidate.dispose(live)
 
+    expect(counter.disposed).toEqual([counter.instances[1]])
+    expect(live.evaluate({}).counter).toEqual({ input: 1 })
+
+    live.dispose()
+
+    expect(counter.disposed).toEqual([counter.instances[1], counter.instances[0]])
+  })
+
+  it('preserves borrowed calls when replacement construction fails', () => {
+    const counter = installCounter()
+    const definitions: LetBinding[] = [
+      { name: 'selected', initializer: { kind: 'number', value: 1 } },
+      {
+        ...bindings[0],
+        initializer: {
+          kind: 'call',
+          function: 'createCounter',
+          arguments: [{ name: 'input', value: { kind: 'reference', path: ['selected'] } }],
+        },
+      },
+    ]
+    const live = new LetBindingGraph(definitions, {})
+
+    expect(
+      () =>
+        new LetBindingGraph(
+          [
+            { name: 'selected', initializer: { kind: 'number', value: 2 } },
+            definitions[1],
+            { name: 'invalid', initializer: { kind: 'reference', path: ['missing'] } },
+          ],
+          {},
+          live,
+        ),
+    ).toThrow('Unknown variable')
+
+    expect(counter.commits).toEqual([])
     expect(counter.disposed).toEqual([counter.instances[1]])
     expect(live.evaluate({}).counter).toEqual({ input: 1 })
 
