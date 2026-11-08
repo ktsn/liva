@@ -1,6 +1,7 @@
 mod drag;
 mod interaction;
 mod measure;
+mod timeout;
 mod timing;
 
 use crate::{expression::Type, scope::SymbolKind, target::ROOT_TARGET};
@@ -33,6 +34,7 @@ pub struct Signature {
 pub fn functions() -> impl Iterator<Item = &'static Function> {
     [
         &measure::MEASURE,
+        &timeout::TIMEOUT,
         &drag::DRAG,
         &interaction::INTERACTION,
         &timing::TWEEN,

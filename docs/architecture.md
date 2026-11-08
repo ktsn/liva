@@ -108,14 +108,14 @@ uses ordinary call/argument nodes without knowing any built-in function names.
 `drag`, its per-instance value, and Pointer Events handling. `interaction.ts` reads browser
 pseudo-class snapshots and coalesces event-triggered rechecks. A built-in subscription
 returns a value and a binding function whose cleanup releases browser resources.
-`LivaInstance` creates, binds, and cleans up these handles without built-in-specific
-branches. The let binding graph reevaluates expressions in dependency order before
-layer resolution and template rendering. `FunctionResult` is either `RuntimeValue` or `ReactiveSubscription`, defined in
-`reactive-value.ts`. The runtime recognizes subscriptions by their `value` and
+`LivaInstance` delegates handle binding and cleanup to the let graph without
+built-in-specific branches. The let binding graph reevaluates expressions in dependency order before
+layer resolution and template rendering. `FunctionResult` is a `RuntimeValue`,
+`ReactiveSubscription`, or stateful `ReactiveCall`, defined in `reactive-value.ts`. The runtime recognizes subscriptions by their `value` and
 callable `bind` members. Ordinary records remain ordinary values. Each call site
 caches its evaluated arguments and result; unchanged arguments reuse that result.
-Subscription results expose their latest value, while changed arguments invoke the
-function again. Nested calls use the same evaluation rules. Active subscriptions
+Subscription results expose their latest value. Changed arguments invoke ordinary
+functions again or prepare an update on a retained `ReactiveCall`. Nested calls use the same evaluation rules. Active subscriptions
 are bound and cleaned up when branches or returned results change. Call-site caches
 are committed only after the complete graph evaluates successfully. Replacing a definition retains handles for matching initializers and arguments;
 cleanup releases gestures before reattachment while preserving retained offsets.
@@ -500,3 +500,34 @@ unexpected implementation exceptions propagate with their original causes.
 Liva layer/lifecycle effects register their layout-affecting animations with the
 scheduler. Normal invalidation remains detection-based; external animation tracking
 and automatic layout animation are separate features.
+
+## Stable reactive calls
+
+A stateful built-in may return a `ReactiveCall` from `reactive-value.ts`. It exposes
+an immutable readable `value`, a subscription binding, `prepareUpdate(args)`, and
+`dispose()`. Each evaluated call site retains its instance across argument updates;
+aliases share its snapshot, while distinct calls own independent instances.
+Ordinary functions keep argument-based result caching.
+
+`LetBindingGraph` owns dependency ordering, expression evaluation, and validation.
+`ReactiveCallStore` owns call-site caches, candidate snapshots, subscriptions,
+update commit/discard, disposal, and notification deferral. Each store evaluation
+runs a synchronous callback that reads calls by binding name and call-site index.
+The graph validates the complete candidate environment inside that callback; only
+its successful return allows the store to activate subscriptions and commit updates.
+Compatible initializer detection stays in the graph, which supplies the binding
+names whose cached calls a replacement store may borrow.
+
+Preparation must be pure: it returns a candidate snapshot plus `commit()` and
+`discard()` without mutating committed state, allocating active browser resources,
+or publishing. The graph evaluates all initializers and validates the resulting
+presentation before committing updates. A failed evaluation discards updates and
+disposes newly created calls. Commit must be infallible. Each implementation owns
+idempotent resource cleanup and immutable snapshots. A transaction reads each call
+once; commit-time notifications are deferred to a microtask after all calls commit.
+
+Subscriptions activate only when DOM targets bind. Source replacement transfers
+calls only for the same binding name, structurally identical initializer, and
+unchanged arguments. Changed or removed calls dispose; editor inspection uses an
+inactive graph and cannot update retained live calls. Binding cleanup cancels
+active resources; final graph disposal also releases the call instance.

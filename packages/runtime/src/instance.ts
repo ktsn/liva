@@ -170,16 +170,22 @@ export class LivaInstance {
     return this.active.map((a) => a.animation)
   }
 
+  private snapshotValues(definition: Definition): VariableValues {
+    const graph = new LetBindingGraph(definition.letBindings ?? [], this.values, this.letBindings)
+
+    try {
+      return graph.evaluate(this.values)
+    } finally {
+      graph.dispose(this.letBindings)
+    }
+  }
+
   inspectLifecycle(
     phase: 'enter' | 'leave',
     composition: Composition,
     definition = this.definition,
   ) {
-    const values = new LetBindingGraph(
-      definition.letBindings ?? [],
-      this.values,
-      this.letBindings,
-    ).evaluate(this.values)
+    const values = this.snapshotValues(definition)
 
     return {
       presentation: resolveComposition(definition, values, composition).presentation,
@@ -194,11 +200,7 @@ export class LivaInstance {
     definition = this.definition,
   ): LayerResolution {
     try {
-      const values = new LetBindingGraph(
-        definition.letBindings ?? [],
-        this.values,
-        this.letBindings,
-      ).evaluate(this.values)
+      const values = this.snapshotValues(definition)
 
       const resolution = resolveComposition(definition, values, composition, from, transitions)
 
@@ -506,6 +508,7 @@ export class LivaInstance {
     this.cancel()
     this.restore()
 
+    this.letBindings.dispose(letBindings)
     this.letBindings = letBindings
     this.values = letBindings.evaluate(variables)
     this.definition = definition
@@ -544,11 +547,7 @@ export class LivaInstance {
     const prepared: ActiveTrack[] = []
 
     try {
-      const values = new LetBindingGraph(
-        definition.letBindings ?? [],
-        this.values,
-        this.letBindings,
-      ).evaluate(this.values)
+      const values = this.snapshotValues(definition)
       const previous = resolveComposition(definition, values, from)
       const next = resolveComposition(definition, values, to, from, transitions)
       const lifecycle = phase ? captureLifecycleDefinition(definition, phase, values) : undefined
@@ -686,13 +685,18 @@ export class LivaInstance {
     const previous = this.values
 
     try {
-      values = this.letBindings.evaluate(values)
+      let resolution: LayerResolution | undefined
+      values = this.letBindings.evaluate(values, (snapshot) => {
+        resolution = resolveLayers(this.definition, snapshot, this.layerResolution.states)
+
+        for (const event of this.definition.events ?? []) evaluate(event.when, snapshot)
+      })
       this.values = values
       this.evaluateEvents()
       if (this.disposed) return
 
-      const resolution = resolveLayers(this.definition, values, this.layerResolution.states)
-      this.applyLayerResolution(this.layerResolution, resolution)
+      // Validation above always resolves the complete presentation before committing calls.
+      this.applyLayerResolution(this.layerResolution, resolution!)
       this.onUpdate?.()
     } catch (error) {
       this.values = previous
@@ -870,6 +874,7 @@ export class LivaInstance {
     for (const session of this.enterSessions) session.cancel('owner-teardown')
     this.enterSessions.clear()
     this.clearLetBindings()
+    this.letBindings.dispose()
     this.cancel()
     this.restore()
     this.motion.removeEventListener('change', this.motionChanged)

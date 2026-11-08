@@ -1,0 +1,319 @@
+import { callBuiltin } from './builtins/index.ts'
+import {
+  isReactiveSubscription,
+  isReactiveCall,
+  type PreparedUpdate,
+  type ReactiveCall,
+  type FunctionArguments,
+  type FunctionResult,
+  type ReactiveSubscription,
+  type RuntimeValue,
+} from './reactive-value.ts'
+
+type CallSite = {
+  readonly name: string
+  readonly args: FunctionArguments
+  readonly result: FunctionResult
+}
+
+type CallSites = Map<string, Map<number, CallSite>>
+
+/**
+ * Reads call results within one synchronous evaluation. Binding names and call-site
+ * indices must identify the same expression across evaluations. Do not retain this
+ * reader beyond the evaluation callback.
+ */
+interface ReactiveCallEvaluation {
+  invoke(binding: string, id: number, name: string, args: FunctionArguments): RuntimeValue
+}
+
+/**
+ * Manages built-in call results, subscriptions, and resource ownership for one let
+ * graph. The caller owns expression evaluation and validation; this store accepts
+ * call state only after that synchronous work succeeds.
+ *
+ * ReactiveCall preparation must be pure and commit must not throw. These contracts
+ * preserve committed state on evaluation failures; arbitrary committed side effects
+ * cannot be rolled back. Unbound stores read values without activating subscriptions.
+ * Borrowed calls must be preserved with dispose(retained) when accepting or rejecting
+ * a replacement store.
+ */
+export class ReactiveCallStore {
+  private calls: CallSites = new Map()
+  private initializing = true
+  private evaluating = false
+  private disposed = false
+  private notificationPending = false
+  private notificationQueued = false
+
+  private notify = () => {
+    if (!this.binding) return
+
+    if (!this.evaluating) {
+      this.binding.update()
+      return
+    }
+
+    // Binding and commit may publish synchronously. Reentry here would expose only
+    // part of the candidate state, so wait until the store leaves the current phase.
+    this.notificationPending = true
+  }
+
+  private flushNotifications() {
+    if (!this.notificationPending) return
+
+    this.notificationPending = false
+    if (this.notificationQueued) return
+    this.notificationQueued = true
+
+    // Several updates can finish before this task runs; one notification reads their
+    // latest committed state. Delivery checks that a binding still exists.
+    queueMicrotask(() => {
+      this.notificationQueued = false
+      this.notify()
+    })
+  }
+
+  private binding?: {
+    targets: ReadonlyMap<string, HTMLElement>
+    update: () => void
+    cleanups: Map<ReactiveSubscription, () => void>
+  }
+
+  /**
+   * Borrows caches for retainedBindings from previous. The caller must establish
+   * that these names have structurally identical initializers. Borrowing does not
+   * transfer ownership or activate subscriptions.
+   */
+  constructor(previous?: ReactiveCallStore, retainedBindings: readonly string[] = []) {
+    for (const name of retainedBindings) {
+      this.calls.set(name, new Map(previous?.calls.get(name)))
+    }
+  }
+
+  /**
+   * Runs read synchronously and returns its result after accepting candidate calls.
+   * read must complete all validation before returning and must not retain its reader.
+   * Evaluation or subscription-binding failures propagate, preserving committed calls
+   * and releasing candidate resources. Disposed or recursive evaluation throws.
+   * Notifications emitted during evaluation are deferred until it finishes.
+   */
+  evaluate<T>(read: (evaluation: ReactiveCallEvaluation) => T): T {
+    if (this.disposed) throw new Error('Cannot evaluate a disposed let graph')
+    if (this.evaluating) throw new Error('Cannot reenter a let evaluation')
+
+    // Isolate candidate caches and snapshots while the callback evaluates and validates
+    // the whole graph. Notifications cannot reenter until this transaction finishes.
+    this.evaluating = true
+    const evaluation = new PreparedCalls(this.calls, this.initializing)
+    let committed = false
+
+    try {
+      const value = read(evaluation)
+      const active = callResults(evaluation.calls)
+
+      // Bind additions before committing updates: binding can fail, whereas prepared
+      // commits must be infallible. Failed additions leave existing bindings intact.
+      this.updateSubscriptions(active)
+      evaluation.commitUpdates()
+
+      // Publish cache ownership only after all updates commit. Mark acceptance before
+      // retiring obsolete calls so finalization cannot discard already accepted state.
+      const removed = callResults(this.calls)
+      this.calls = evaluation.calls
+      committed = true
+
+      // Initial caches belong to a live graph until its caller accepts the candidate.
+      // Never update or dispose these borrowed instances during initial evaluation.
+      if (!this.initializing) disposeCalls(removed, active)
+      this.initializing = false
+
+      return value
+    } finally {
+      if (!committed) {
+        // Prepared updates have not changed live calls. Release only resources created
+        // by this attempt and suppress notifications from its unsuccessful binding work.
+        evaluation.discard()
+        this.notificationPending = false
+      }
+
+      this.evaluating = false
+      this.flushNotifications()
+    }
+  }
+
+  /**
+   * Releases subscriptions and calls once, except calls also held by retained.
+   * Retain the replacement on acceptance, or the live store on candidate rejection.
+   * Further evaluation throws; queued notifications no longer reach the binding.
+   */
+  dispose(retained?: ReactiveCallStore) {
+    if (this.disposed) return
+
+    this.disposed = true
+
+    // Unbind first so retiring a call cannot publish through this store's binding.
+    for (const cleanup of this.binding?.cleanups.values() ?? []) cleanup()
+    this.binding = undefined
+
+    disposeCalls(callResults(this.calls), retained ? callResults(retained.calls) : new Set())
+  }
+
+  private updateSubscriptions(results: ReadonlySet<FunctionResult>) {
+    const binding = this.binding
+    if (!binding) return
+
+    const active = new Set([...results].filter(isReactiveSubscription))
+    const added = new Map<ReactiveSubscription, () => void>()
+
+    // Stage additions without removing committed subscriptions: if a later bind
+    // throws, only additions from this attempt need cleanup.
+    try {
+      for (const subscription of active) {
+        if (!binding.cleanups.has(subscription)) {
+          let subscribed = true
+          const cleanup = subscription.bind(binding.targets, () => {
+            // Some sources retain callbacks after cleanup; neither removed subscriptions
+            // nor an older binding may notify the current consumer.
+            if (subscribed && this.binding === binding) this.notify()
+          })
+          added.set(subscription, () => {
+            subscribed = false
+            cleanup()
+          })
+        }
+      }
+    } catch (error) {
+      for (const cleanup of added.values()) cleanup()
+      throw error
+    }
+
+    // All additions succeeded, so the binding can adopt the candidate subscription set.
+    for (const [subscription, cleanup] of binding.cleanups) {
+      if (!active.has(subscription)) {
+        cleanup()
+        binding.cleanups.delete(subscription)
+      }
+    }
+
+    for (const [subscription, cleanup] of added) binding.cleanups.set(subscription, cleanup)
+  }
+
+  /**
+   * Activates cached subscriptions against targets and delivers later changes to update.
+   * Returns cleanup callbacks that stop this binding while retaining cached call values.
+   * Synchronous bind-time notifications are deferred; subscription errors propagate.
+   */
+  bind(targets: ReadonlyMap<string, HTMLElement>, update: () => void): (() => void)[] {
+    const binding = { targets, update, cleanups: new Map<ReactiveSubscription, () => void>() }
+    this.binding = binding
+
+    // Initial DOM reads may notify immediately. Use the evaluation guard until every
+    // subscription has bound so the consumer cannot observe a partially bound store.
+    this.evaluating = true
+
+    try {
+      this.updateSubscriptions(callResults(this.calls))
+    } finally {
+      this.evaluating = false
+      this.flushNotifications()
+    }
+
+    return [
+      () => {
+        for (const cleanup of binding.cleanups.values()) cleanup()
+        binding.cleanups.clear()
+        if (this.binding === binding) this.binding = undefined
+      },
+    ]
+  }
+}
+
+/**
+ * Holds tentative call results for one store evaluation. Reads expose candidate
+ * snapshots without updating retained calls; the store must either commit prepared
+ * updates or discard them and release newly created calls.
+ */
+class PreparedCalls implements ReactiveCallEvaluation {
+  readonly calls: CallSites = new Map()
+  private readonly prepared: PreparedUpdate[] = []
+  private readonly created = new Set<ReactiveCall>()
+  private readonly snapshots = new Map<FunctionResult, RuntimeValue>()
+  private readonly previous: CallSites
+  private readonly initializing: boolean
+
+  constructor(previous: CallSites, initializing: boolean) {
+    this.previous = previous
+    this.initializing = initializing
+  }
+
+  invoke(binding: string, id: number, name: string, args: FunctionArguments): RuntimeValue {
+    const retained = this.previous.get(binding)?.get(id)
+    const sameFunction = retained?.name === name
+    const matches =
+      sameFunction &&
+      Object.keys(args).length === Object.keys(retained.args).length &&
+      Object.entries(args).every(
+        ([argumentName, argument]) => retained.args[argumentName] === argument,
+      )
+    let site: CallSite
+
+    if (matches) {
+      site = retained
+    } else if (sameFunction && !this.initializing && isReactiveCall(retained.result)) {
+      // Dependent expressions need the updated value before validation, but the live
+      // instance must stay unchanged until the entire evaluation is accepted.
+      const update = retained.result.prepareUpdate(args)
+      this.prepared.push(update)
+      this.snapshots.set(retained.result, update.value)
+      site = { name, args, result: retained.result }
+    } else {
+      // Changed ordinary calls are recomputed. During initial evaluation, changed
+      // borrowed calls also need new instances to keep the live store untouched.
+      const result = callBuiltin(name, args)
+
+      if (isReactiveCall(result)) this.created.add(result)
+
+      site = { name, args, result }
+    }
+
+    // Record only calls reached by this evaluation. Omitting inactive branches lets
+    // acceptance retire results that no active call still needs.
+    let calls = this.calls.get(binding)
+
+    if (!calls) {
+      calls = new Map()
+      this.calls.set(binding, calls)
+    }
+
+    calls.set(id, site)
+
+    // Repeated reads of a shared result use one snapshot, even if its live getter
+    // changes. A prepared snapshot above takes precedence over the committed value.
+    if (!isReactiveSubscription(site.result)) return site.result
+    if (!this.snapshots.has(site.result)) this.snapshots.set(site.result, site.result.value)
+
+    return this.snapshots.get(site.result)!
+  }
+
+  commitUpdates() {
+    for (const update of this.prepared) update.commit()
+  }
+
+  discard() {
+    for (const update of this.prepared) update.discard()
+    for (const result of this.created) result.dispose()
+  }
+}
+
+function callResults(calls: CallSites): Set<FunctionResult> {
+  return new Set(
+    [...calls.values()].flatMap((sites) => [...sites.values()].map((site) => site.result)),
+  )
+}
+
+function disposeCalls(results: ReadonlySet<FunctionResult>, retained: ReadonlySet<FunctionResult>) {
+  for (const result of results) {
+    if (!retained.has(result) && isReactiveCall(result)) result.dispose()
+  }
+}

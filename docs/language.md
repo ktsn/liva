@@ -775,3 +775,23 @@ animated shell or remove application styles to discover intrinsic sizes. The mea
 layout playground demonstrates unequal responsive tabs and inner-content expansion.
 Editor playback preserves source expressions and uses its current live snapshot;
 scenario-specific preview capture remains deferred.
+
+## Motion-local feedback timers
+
+`timeout(when: boolean, duration: number)` returns a reactive Boolean. Duration is
+finite, nonnegative milliseconds. The result initially is false. A true condition
+starts a timer when the binding activates; expiration publishes true. False cancels
+pending work and resets the result. Unchanged arguments never restart the timer.
+Changing duration restarts an active timer from that update, including after expiry.
+A success-to-error status change whose condition remains true does not restart it.
+Zero duration is scheduled asynchronously. Unbinding, replacement, disposal, and
+HMR cancel obsolete work. Inactive editor inspection/scrubbing reads the current
+snapshot without starting or advancing timers.
+
+```liva
+let expired = timeout(when: status == "success" || status == "error", duration: 1500)
+```
+
+Use the result in ordinary guarded transitions to return local feedback to idle.
+Vue continues to own asynchronous requests, their outcomes, and duplicate submission
+prevention. The async-submit playground demonstrates both success and failure.
