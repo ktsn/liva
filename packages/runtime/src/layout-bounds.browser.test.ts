@@ -115,6 +115,30 @@ describe('untransformed layout bounds', () => {
     expect(after.attached).toBe(true)
   })
 
+  it.each(['static', 'relative'])(
+    'removes only effective scrolling through a %s intermediary',
+    (position) => {
+      const { root, target } = fixture()
+      const scroller = document.createElement('div')
+      scroller.style.cssText = `position:${position};width:160px;height:100px;overflow:auto;`
+      const spacer = document.createElement('div')
+      spacer.style.cssText = 'width:800px;height:800px;'
+      root.append(scroller)
+      scroller.append(spacer, target)
+      target.style.cssText += 'position:absolute;left:60px;top:40px;'
+      const before = readLayoutBounds(target, root)
+
+      scroller.scrollLeft = 30
+      scroller.scrollTop = 50
+
+      const after = readLayoutBounds(target, root)
+
+      expect(after.x).toBeCloseTo(before.x, 4)
+      expect(after.y).toBeCloseTo(before.y, 4)
+      expect(after.attached).toBe(true)
+    },
+  )
+
   it('distinguishes missing/hidden boxes from measurable invisible or empty boxes', () => {
     const { root, target } = fixture()
 

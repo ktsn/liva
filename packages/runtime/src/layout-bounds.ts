@@ -164,10 +164,15 @@ export function readLayoutBounds(
   const referenceIndex = boxes.findIndex((entry) => entry.element === reference)
   let x = 0
   let y = 0
+  let escapedUntil: Element | null = null
 
   for (let index = boxes.length - 1; index > referenceIndex; index--) {
     const child = boxes[index]
     const parent = boxes[index - 1]
+
+    if (child.style.position === 'absolute') escapedUntil = child.element.offsetParent
+    const scrollAffectsTarget = escapedUntil === null || escapedUntil === parent.element
+    if (escapedUntil === parent.element) escapedUntil = null
     const inverse = new DOMMatrix([
       parent.linear.a,
       parent.linear.b,
@@ -184,8 +189,9 @@ export function readLayoutBounds(
     const oy = length(origin[1], child.height)
     const shiftX = child.own.e + ox - child.own.a * ox - child.own.c * oy
     const shiftY = child.own.f + oy - child.own.b * ox - child.own.d * oy
-    x += delta.x - shiftX + parent.element.scrollLeft
-    y += delta.y - shiftY + parent.element.scrollTop
+    // Absolute descendants can escape static scrollers before their containing block.
+    x += delta.x - shiftX + (scrollAffectsTarget ? parent.element.scrollLeft : 0)
+    y += delta.y - shiftY + (scrollAffectsTarget ? parent.element.scrollTop : 0)
   }
 
   if (target !== reference) {
