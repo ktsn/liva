@@ -62,25 +62,25 @@ motion submit(status: string) {
     translate: 0 0
     opacity: 1
     background-color: #d9f3e8
-    loading { display: none }
-    success { display: none }
-    error { display: none }
+    loading { display: none @instant }
+    success { display: none @instant }
+    error { display: none @instant }
 
     state idle initial {}
 
     state pending {
       opacity: 0.6
-      loading { display: inline }
+      loading { display: inline @instant }
     }
 
     state success {
       background-color: #64c69e
-      success { display: inline }
+      success { display: inline @instant }
     }
 
     state error {
       background-color: #f0a3a3
-      error { display: inline }
+      error { display: inline @instant }
     }
 
     transition idle -> pending when status == "loading"
