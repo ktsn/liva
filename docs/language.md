@@ -708,3 +708,56 @@ Spring timing on layer tracks applies the sampled spring curve to the complete t
 including intermediate waypoints. Initial state guards resolve before target binding;
 DOM entry animation is controlled by the motion's lifecycle declaration rather than
 replaying an initial machine transition during binding.
+
+## Reactive layout bounds
+
+`measure(target: target, relativeTo: target = self)` returns a reactive record with
+`x`, `y`, `width`, `height`, and `attached`. Numbers are fractional physical CSS
+pixels: x increases rightward and y downward, including under RTL. Positions are
+relative to the reference padding-box origin, immediately inside its border.
+Dimensions describe the target border box. The reference must be the target or an
+ancestor. Self-measurement explicitly has x=y=0. Declare read-only named targets
+with an empty target block; those targets can be absent without suspending Motion.
+
+```liva
+let bounds = measure(target: label)
+layer base {
+  label {}
+  indicator { translate: ${bounds.x}px ${bounds.y}px; width: ${bounds.width}px }
+}
+```
+
+The receiving element must use a compatible containing block. Border-box measurements
+are not automatically converted into content-box CSS widths. Set
+`box-sizing: border-box` or perform application conversion explicitly.
+
+Measurements remove page, reference, and nested scroll offsets and supported 2D
+transforms without changing application styles. The initial scope is ordinary
+single-box HTML layout, including transformed ancestor chains. Fragmented inline
+boxes, SVG, sticky/fixed positioning, CSS zoom, perspective/3D transforms, and
+unresolvable transform expressions are unsupported. Unsupported, absent,
+disconnected, or display:none boxes return all zeros and attached=false;
+visibility:hidden and genuine zero-size boxes remain measurable. Layout changes
+update the bounds; scrolling or transforms alone do not change layout coordinates.
+
+Initial binding reads geometry synchronously before Motion settles its initial
+presentation, without an initial animation. Later supported invalidations coalesce
+into an animation-frame pass. All reads finish before snapshots publish; dependent
+writes schedule further reads on a later frame. Unchanged snapshots do not notify.
+The shared scheduler observes document-subtree structure, text, attributes, target
+and reference sizes, window resizing, and captured load/font completion events.
+Liva-managed layout animations also invalidate each frame while running. Registrations
+have independent cleanup; the document scheduler releases observers/listeners when
+its final registration leaves.
+
+External CSSOM edits, arbitrary script timing, and third-party CSS/Web Animations
+are not continuously synchronized. A third-party write after the read phase may
+leave a transient stale sample. There is no continuous polling option. Deferred
+reads do not solve feedback cycles: measuring self.width and writing width+10 is
+unsupported and can oscillate across frames.
+
+Measure naturally sized inner content for expansion; do not measure the constrained
+animated shell or remove application styles to discover intrinsic sizes. The measured
+layout playground demonstrates unequal responsive tabs and inner-content expansion.
+Editor playback preserves source expressions and uses its current live snapshot;
+scenario-specific preview capture remains deferred.

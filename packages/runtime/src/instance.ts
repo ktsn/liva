@@ -23,6 +23,7 @@ import {
   type LifecycleSession,
 } from './lifecycle.ts'
 import { sampleSpring } from './spring.ts'
+import { trackLayoutAnimation } from './layout-scheduler.ts'
 
 export interface RuntimeDiagnostic {
   readonly code: string
@@ -431,7 +432,9 @@ export class LivaInstance {
 
     const next = new Map(entries)
     const duplicate = next.size !== entries.length && !hasLifecycle(this.definition)
-    const missing = layerTargets(this.definition).some((target) => !next.has(target.name))
+    const missing = layerTargets(this.definition).some(
+      (target) => target.properties.length > 0 && !next.has(target.name),
+    )
     const unchanged =
       !duplicate &&
       (!missing || hasLifecycle(this.definition)) &&
@@ -511,7 +514,8 @@ export class LivaInstance {
     this.layerResolution = resolveLayers(definition, this.values)
     this.suspended =
       this.duplicateBindings ||
-      (!hasLifecycle(definition) && layerTargets(definition).some((t) => !this.targets.has(t.name)))
+      (!hasLifecycle(definition) &&
+        layerTargets(definition).some((t) => t.properties.length > 0 && !this.targets.has(t.name)))
     if (!this.suspended) this.bindLetBindings()
     this.settle()
   }
@@ -813,6 +817,7 @@ export class LivaInstance {
 
     for (const entry of prepared) {
       entry.animation.play()
+      trackLayoutAnimation(entry.element, entry.track.property, entry.animation)
       void entry.animation.finished
         .then(() => {
           if (!this.active.includes(entry)) return undefined
