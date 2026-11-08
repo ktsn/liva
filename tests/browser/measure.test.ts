@@ -46,10 +46,14 @@ test('natural inner content updates expansion and interrupted collapse begins at
   const shell = page.locator('.measured-shell')
   const inner = page.locator('.measured-inner')
   const toggle = page.getByRole('button', { name: 'Expand details', exact: true })
+  const explanation = page.getByRole('paragraph').filter({ hasText: 'The shell follows' })
 
   await expect(shell).toHaveCSS('block-size', '0px')
+  await expect(explanation).toHaveCount(0)
 
   await toggle.click()
+
+  await expect(explanation).toHaveCount(1)
 
   await expect
     .poll(async () => (await shell.boundingBox())?.height)
@@ -83,4 +87,5 @@ test('natural inner content updates expansion and interrupted collapse begins at
   expect(start).toBeCloseTo(midpoint, 1)
   await expect(shell).toHaveCSS('block-size', '0px')
   await expect(inner).toContainText('Changing content or viewport width')
+  await expect(explanation).toHaveCount(0)
 })

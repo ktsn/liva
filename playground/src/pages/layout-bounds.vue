@@ -37,7 +37,12 @@ const detailed = ref(false)
       aria-controls="measured-details"
       @click="expanded = !expanded"
     >{{ expanded ? 'Collapse' : 'Expand' }} details</button>
-    <div id="measured-details" v-liva:expansion="{ expanded }" class="measured-shell">
+    <div
+      id="measured-details"
+      v-liva:expansion="{ expanded }"
+      :aria-hidden="!expanded"
+      class="measured-shell"
+    >
       <div v-liva-target:inner class="measured-inner">
         <p>The shell follows the naturally sized inner content, including responsive wrapping.</p>
         <p v-if="detailed"
