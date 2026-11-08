@@ -37,6 +37,15 @@ type LetBindingNode = {
   readonly callIds: ReadonlyMap<CallExpression, number>
 }
 
+/**
+ * Evaluates motion-local let bindings and validates their candidate environment.
+ * Owns expression dependencies and call-site identities; ReactiveCallStore owns
+ * cached call results, subscriptions, and their resource lifetime.
+ *
+ * Construction evaluates the bindings and throws on dependency cycles or invalid
+ * expressions. A replacement may reuse calls from a previous graph only for the
+ * same binding name, structurally identical initializer, and unchanged arguments.
+ */
 export class LetBindingGraph {
   private readonly nodes: LetBindingNode[] = []
   private readonly calls: ReactiveCallStore
@@ -50,6 +59,8 @@ export class LetBindingGraph {
     const visiting = new Set<string>()
     const retainedBindings: string[] = []
 
+    // Resolve forward references before their consumers. The visiting set detects
+    // cycles before any call instances are created or borrowed.
     const visit = (name: string) => {
       const definition = pending.get(name)
       if (!definition) return
@@ -60,6 +71,9 @@ export class LetBindingGraph {
 
       visiting.delete(name)
       pending.delete(name)
+
+      // Matching initializer structure keeps expression-local call indices meaningful
+      // across definitions; equal binding names alone cannot establish compatibility.
       const retained = previous?.nodes.find(
         (node) =>
           node.definition.name === name &&
@@ -75,18 +89,31 @@ export class LetBindingGraph {
 
     for (const binding of letBindings) visit(binding.name)
 
+    // The candidate store borrows compatible caches for its first evaluation without
+    // updating live calls. Acceptance or rejection later decides which graph keeps them.
     this.calls = new ReactiveCallStore(previous?.calls, retainedBindings)
     this.evaluate(values)
   }
 
+  /**
+   * Returns a new environment containing the inputs and evaluated let values.
+   * validate must run synchronously and must not publish candidate state; it may
+   * reject values needed by presentation or other consumers by throwing.
+   * Evaluation, validation, and subscription-binding errors propagate without
+   * accepting candidate call state. Disposed or recursive evaluation throws.
+   */
   evaluate(
     variables: VariableValues,
     validate: (values: VariableValues) => void = () => {},
   ): VariableValues {
     return this.calls.evaluate((transaction) => {
+      // Keep candidate variables local so a later failure cannot publish a partial
+      // environment. Dependency order makes each completed value available below.
       const values = { ...variables }
 
       for (const node of this.nodes) {
+        // The graph resolves argument expressions, including nested calls; the store
+        // decides whether to reuse a result, prepare an update, or create an instance.
         const invoke = (call: CallExpression, scope: VariableValues): RuntimeValue => {
           const args = Object.fromEntries(
             call.arguments.map((argument) => [
@@ -109,17 +136,24 @@ export class LetBindingGraph {
         })
       }
 
+      // Presentation and other consumers must accept the complete environment before
+      // returning control to the store, which then activates and commits call state.
       validate(values)
 
       return values
     })
   }
 
-  /** Release call ownership, preserving compatible instances transferred to a replacement. */
+  /**
+   * Releases subscriptions and owned calls; repeated disposal is harmless.
+   * Pass the accepted replacement when retiring this graph, or the live graph when
+   * rejecting a candidate, to preserve any shared calls still in use.
+   */
   dispose(retained?: LetBindingGraph) {
     this.calls.dispose(retained?.calls)
   }
 
+  /** Activates call subscriptions for these targets and returns their cleanup callbacks. */
   bind(targets: ReadonlyMap<string, HTMLElement>, update: () => void): (() => void)[] {
     return this.calls.bind(targets, update)
   }
