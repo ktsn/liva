@@ -156,9 +156,25 @@ function box(
  * reference's padding-box origin. The reference must be the target or an ancestor.
  * Measuring the target relative to itself returns x=y=0.
  *
- * Missing, disconnected, or unsupported boxes return missingBounds. Unsupported
- * geometry additionally calls unsupported with its reason. This function only
- * reads geometry; observation and change publication belong to the caller.
+ * The target and its full ancestor chain must use supported single-box HTML layout.
+ * Unsupported conditions are:
+ * - Non-HTML elements (including SVG), inline display, or multiple box fragments.
+ * - Fixed/sticky positioning, perspective, 3D transforms, or non-default CSS zoom.
+ * - Singular or numerically collapsed cumulative transforms.
+ * - HTML transform-box: stroke-box.
+ * - Content/fill-box rotation, scaling, or skew when content and border dimensions
+ *   differ, because the rendered transform-origin cannot be determined reliably.
+ *   Translation-only content/fill-box transforms remain supported.
+ * - Unresolvable numeric dimensions or transform expressions, such as a translate
+ *   value that retains calc() instead of resolving to supported numeric components.
+ * - A reference that is neither the target nor an ancestor.
+ *
+ * Missing, disconnected, boxless (including display:none), or unsupported geometry
+ * returns missingBounds: zero coordinates/dimensions and attached=false. Unsupported
+ * conditions additionally call unsupported with their reason; normal absence does
+ * not. Visibility:hidden and zero-size boxes remain measurable when otherwise
+ * supported. Very small invertible scales can amplify browser rounding errors.
+ * This function only reads geometry; observation and publication belong to the caller.
  */
 export function readLayoutBounds(
   target: HTMLElement | undefined,
