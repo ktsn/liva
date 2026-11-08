@@ -1,5 +1,12 @@
 /** Shared per-document geometry reads. Publication never interleaves with the read phase. */
 type Registration = {
+  /**
+   * Reads geometry and returns a callback that publishes the captured snapshot.
+   * The scheduler completes every read before invoking any publication callback;
+   * change notifications run in a later microtask, after all snapshots are installed.
+   * This prevents notification-driven DOM updates from affecting subsequent reads
+   * in the same batch, and lets consumers observe the complete batch of snapshots.
+   */
   readonly read: () => () => void
   active: boolean
 }
