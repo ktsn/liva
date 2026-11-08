@@ -30,14 +30,26 @@ export function timeout(args: FunctionArguments): ReactiveCall {
     if (!publish || !current.when || expired) return
 
     const scheduledRevision = revision
-    timer = setTimeout(() => {
+    const deadline = performance.now() + current.duration
+
+    function tick() {
       if (scheduledRevision !== revision) return
+
+      const remaining = deadline - performance.now()
+
+      if (remaining > 0) {
+        // Browsers store timer delays in a signed 32-bit integer. Long waits use chunks.
+        timer = setTimeout(tick, Math.min(remaining, 2_147_483_647))
+        return
+      }
 
       timer = undefined
       expired = true
       // A matching revision still owns the binding; every unbind increments revision.
       publish!(true)
-    }, current.duration)
+    }
+
+    timer = setTimeout(tick, Math.min(current.duration, 2_147_483_647))
   }
 
   return {

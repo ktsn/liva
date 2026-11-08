@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { timeout } from './timeout.ts'
 
-beforeEach(() => vi.useFakeTimers())
+beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] }))
 afterEach(() => vi.useRealTimers())
 
 describe('timeout', () => {
@@ -129,5 +129,23 @@ describe('timeout', () => {
 
     timer.dispose()
     scheduled.mockRestore()
+  })
+  it('waits across the native signed 32-bit timer limit', () => {
+    const duration = 2_147_483_648
+    const timer = timeout({ when: true, duration })
+    const publish = vi.fn<(value: import('../reactive-value.ts').RuntimeValue) => void>()
+    timer.bind(new Map(), publish)
+
+    vi.advanceTimersByTime(2_147_483_647)
+
+    expect(timer.value).toBe(false)
+    expect(publish).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(1)
+
+    expect(timer.value).toBe(true)
+    expect(publish).toHaveBeenCalledExactlyOnceWith(true)
+
+    timer.dispose()
   })
 })
