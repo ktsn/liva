@@ -1,3 +1,4 @@
+import { measure } from './measure.ts'
 import { drag } from './drag.ts'
 import { interaction } from './interaction.ts'
 import type { FunctionResult, RuntimeValue } from '../reactive-value.ts'
@@ -8,6 +9,7 @@ const functions: ReadonlyMap<
   string,
   (args: Readonly<Record<string, RuntimeValue>>) => FunctionResult
 > = new Map([
+  ['measure', measure],
   ['drag', drag],
   ['interaction', interaction],
 ])

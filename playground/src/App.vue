@@ -14,6 +14,7 @@ import { RouterLink, RouterView } from 'vue-router'
         <RouterLink class="demo-link" to="/like-button">Like button</RouterLink>
         <RouterLink class="demo-link" to="/async-submit">Async submit</RouterLink>
         <RouterLink class="demo-link" to="/beacon">Beacon</RouterLink>
+        <RouterLink class="demo-link" to="/layout-bounds">Measured layout</RouterLink>
         <RouterLink class="demo-link" to="/drag">Drag</RouterLink>
         <RouterLink class="demo-link" to="/swipe">Swipe</RouterLink>
       </nav>

@@ -1,3 +1,4 @@
+import { trackLayoutAnimation } from './layout-scheduler.ts'
 import type { Definition, State, Transition } from './definition.ts'
 import { renderTransition, type VariableValues } from './expression.ts'
 import type { ResolvedTrack } from './resolve.ts'
@@ -181,6 +182,7 @@ export class LifecycleSession {
         const animation = new Animation(effect, document.timeline)
         this.effects.push(animation)
         animation.play()
+        trackLayoutAnimation(element, track.property, animation)
       }
 
       void Promise.all(this.effects.map((effect) => effect.finished)).then(

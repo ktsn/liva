@@ -708,3 +708,70 @@ Spring timing on layer tracks applies the sampled spring curve to the complete t
 including intermediate waypoints. Initial state guards resolve before target binding;
 DOM entry animation is controlled by the motion's lifecycle declaration rather than
 replaying an initial machine transition during binding.
+
+## Reactive layout bounds
+
+`measure(target: target, relativeTo: target = self)` returns a reactive record with
+`x`, `y`, `width`, `height`, and `attached`. Numbers are fractional physical CSS
+pixels: x increases rightward and y downward, including under RTL. Positions are
+relative to the reference padding-box origin, immediately inside its border.
+Dimensions describe the target border box. The reference must be the target or an
+ancestor. Self-measurement explicitly has x=y=0. Declare read-only named targets
+with an empty target block; those targets can be absent without suspending Motion.
+
+```liva
+let bounds = measure(target: label)
+layer base {
+  label {}
+  indicator { translate: ${bounds.x}px ${bounds.y}px; width: ${bounds.width}px }
+}
+```
+
+The receiving element must use a compatible containing block. Border-box measurements
+are not automatically converted into content-box CSS widths. Set
+`box-sizing: border-box` or perform application conversion explicitly.
+
+Measurements remove page, reference, and nested scroll offsets and supported 2D
+transforms without changing application styles. The initial scope is ordinary
+single-box HTML layout, including transformed ancestor chains. Fragmented inline
+boxes, SVG, sticky/fixed positioning, CSS zoom, perspective/3D transforms, and
+unresolvable transform expressions are unsupported. Unsupported, absent,
+disconnected, or display:none boxes return all zeros and attached=false;
+visibility:hidden and genuine zero-size boxes remain measurable. Layout changes
+update the bounds; scrolling or transforms alone do not change layout coordinates.
+
+Percentage `translate` values use the transform reference box: `content-box` and
+`fill-box` use content dimensions for HTML, while `border-box` and `view-box` use
+border dimensions. Border-box dimensions are still returned in all cases. HTML
+`stroke-box` transforms are unsupported because engines disagree on their percentage
+reference sizes. When content and border boxes differ, content/fill-box rotation,
+scale, and skew are also unsupported: CSSOM can resolve a percentage transform-origin
+against border-box dimensions while rendering against the content box, losing the
+original unit and making the used pivot ambiguous. These cases diagnose and return
+attached=false rather than publishing incorrect coordinates. Translation-only
+content/fill-box transforms remain measurable because they do not depend on the
+pivot. Resolving retained calc() expressions is outside the current numeric decoder.
+Very small invertible scales amplify viewport-coordinate rounding during inversion;
+fractional output does not imply a fixed positional error bound across engines.
+
+Initial binding reads geometry synchronously before Motion settles its initial
+presentation, without an initial animation. Later supported invalidations coalesce
+into an animation-frame pass. All reads finish before snapshots publish; dependent
+writes schedule further reads on a later frame. Unchanged snapshots do not notify.
+The shared scheduler observes document-subtree structure, text, attributes, target
+and reference sizes, window resizing, and captured load/font completion events.
+Liva-managed layout animations also invalidate each frame while running. Registrations
+have independent cleanup; the document scheduler releases observers/listeners when
+its final registration leaves.
+
+External CSSOM edits, arbitrary script timing, and third-party CSS/Web Animations
+are not continuously synchronized. A third-party write after the read phase may
+leave a transient stale sample. There is no continuous polling option. Deferred
+reads do not solve feedback cycles: measuring self.width and writing width+10 is
+unsupported and can oscillate across frames.
+
+Measure naturally sized inner content for expansion; do not measure the constrained
+animated shell or remove application styles to discover intrinsic sizes. The measured
+layout playground demonstrates unequal responsive tabs and inner-content expansion.
+Editor playback preserves source expressions and uses its current live snapshot;
+scenario-specific preview capture remains deferred.

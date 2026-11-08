@@ -481,3 +481,22 @@ target-wide timing. Runtime cascade and transition rendering consult this proper
 set, so target timing cannot leak into root shorthand outside the block. Source
 mappings retain each property's original location and the explicit block's shared
 decorator; editor provenance uses the same timing selection.
+
+## Shared layout measurement
+
+`layout-scheduler.ts` owns per-document invalidation and batching, independently of
+`measure()` language registration and `layout-bounds.ts` coordinate decoding.
+Read callbacks return publication closures: a pass completes all reads before any
+closure publishes. Reactive notifications run after all snapshots are installed.
+Initial registration reads synchronously; subsequent invalidations coalesce into
+one animation-frame pass, and writes never cause a recursive same-frame read.
+
+The geometry reader reconstructs transformed border origins from affine box corners,
+then removes local transform-origin shifts while accumulating ancestor-relative
+layout deltas and scroll offsets. It retains fractional CSSOM sizes and excludes the
+reference border. Unsupported geometry uses the explicit unattached snapshot;
+unexpected implementation exceptions propagate with their original causes.
+
+Liva layer/lifecycle effects register their layout-affecting animations with the
+scheduler. Normal invalidation remains detection-based; external animation tracking
+and automatic layout animation are separate features.
