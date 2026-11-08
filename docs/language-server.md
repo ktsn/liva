@@ -106,8 +106,16 @@ Installation failures are recorded by **zed: open log**. In particular,
 Other editors can launch `liva-lsp` with no arguments using standard LSP over
 stdin/stdout. Register `liva` for `.liv` and `.liva`, and optionally attach the
 same server to Vue documents. The server advertises full document synchronization,
-UTF-16 positions, and hover; it publishes diagnostics after open/change and clears
-them on close. Completion, formatting, and cross-file resolution are not implemented.
+UTF-16 positions, hover, expression completion, and full semantic tokens. It publishes
+diagnostics after open/change and clears them on close. Formatting and cross-file
+resolution are not implemented.
+
+`self` uses the theme-controlled Tree-sitter capture `variable.builtin` in Zed,
+for both explicit target blocks and expression references. The LSP emits semantic
+`variable` tokens with `readonly` and `defaultLibrary` modifiers for the same built-in
+target, including mapped Vue custom blocks; named targets keep their syntax scopes.
+Clients/themes choose the displayed colors. Semantic tokens follow the
+[LSP relative token encoding](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_semanticTokens).
 
 ## Verification and grammar changes
 

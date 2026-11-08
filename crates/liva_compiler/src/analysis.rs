@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Clone)]
 pub struct Hover {
+    /// Derived from symbol metadata, for theme-controlled root-target highlighting.
+    pub builtin_target: bool,
     pub range: Range,
     pub label: String,
 }
@@ -282,6 +284,7 @@ fn scan(text: &str, base: usize, scope: &expression::Scope, result: &mut Vec<Hov
 
         if let Some(label) = label {
             result.push(Hover {
+                builtin_target: scope.get(word).is_some_and(Symbol::is_builtin_target),
                 range: Range {
                     start: base + start,
                     end: base + previous_end,
@@ -305,6 +308,7 @@ fn expression_hovers(node: &impl AstNode, scope: &expression::Scope, result: &mu
                     continue;
                 };
                 result.push(Hover {
+                    builtin_target: scope.get(&path).is_some_and(Symbol::is_builtin_target),
                     range: first.range(),
                     label: format!("{path}: {}", type_name(value_type)),
                 });
@@ -320,6 +324,7 @@ fn expression_hovers(node: &impl AstNode, scope: &expression::Scope, result: &mu
                     path.push('.');
                     path.push_str(&name.text());
                     result.push(Hover {
+                        builtin_target: false,
                         range: name.range(),
                         label: format!("{path}: {}", type_name(value_type)),
                     });
@@ -336,6 +341,7 @@ fn expression_hovers(node: &impl AstNode, scope: &expression::Scope, result: &mu
                     continue;
                 };
                 result.push(Hover {
+                    builtin_target: false,
                     range: name.range(),
                     label,
                 });

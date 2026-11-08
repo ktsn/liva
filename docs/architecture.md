@@ -94,9 +94,10 @@ has its own module; `drag.rs` and `interaction.rs` declare target arguments and 
 The compiler places functions, easing constants, and the reserved `self` target in a
 built-in parent scope. A Motion child scope holds parameters, named targets, and let
 bindings; all names are declared before dependency inference. Same-scope duplicates
-are errors, while child declarations shadow ordinary built-ins. `self` cannot be
-shadowed or written as an explicit target block. References, calls, hover, and
-completion use the same symbol lookup. The generic call checker evaluates argument
+are errors, while child declarations shadow ordinary built-ins. Parameters and let
+bindings cannot rebind `self`; an explicit self block configures the existing root
+without introducing a variable. References, calls, hover, and completion use the
+same symbol lookup. The generic call checker evaluates argument
 types through the expression checker and selects a matching overload. Required
 arguments and incompatible overload groups produce diagnostics.
 Let type inference follows dependencies and rejects cycles. Expression member checking
@@ -167,6 +168,7 @@ State {
 Target<T> {
   name: string
   timingExpression?: Expression
+  timingProperties?: string[]
   properties: T[]
 }
 Property {
@@ -469,3 +471,13 @@ restore application presentation, report a diagnostic, and throw with the origin
 cause. The editor rejects stale or out-of-order replies and ends previews on close,
 discard, or selection changes. Source conflict checks still apply to previews with
 no edits; source mutation remains subject to the editor's supported-edit checks.
+
+### Shared timing in explicit root blocks
+
+The compiler merges shorthand root declarations and an explicit self block into one
+`self` target. Optional `timingProperties` on Target IR limits that block's shared
+timing to the properties declared inside it. Omitted metadata preserves ordinary
+target-wide timing. Runtime cascade and transition rendering consult this property
+set, so target timing cannot leak into root shorthand outside the block. Source
+mappings retain each property's original location and the explicit block's shared
+decorator; editor provenance uses the same timing selection.

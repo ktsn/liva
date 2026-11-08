@@ -239,6 +239,7 @@ export class LivaInstance {
                     timing: rendered.timing,
                     targets: rendered.targets.map((target) => ({
                       name: target.name,
+                      timingProperties: target.timingProperties,
                       timing: target.timing,
                       properties: target.properties.map((property) => ({
                         name: property.name,

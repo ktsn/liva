@@ -731,8 +731,7 @@ impl Compiler {
                 );
             }
 
-            // Explicit reserved targets are rejected where their animation scope
-            // is compiled, including lifecycle blocks that introduce no variable.
+            // Root target blocks configure the built-in without declaring a variable.
             if !scope.is_reserved(&name) {
                 declarations.push((name, SymbolKind::Value(Type::Target), name_range(&target)));
             }
@@ -839,6 +838,7 @@ impl Compiler {
 
         let mut targets: Vec<Target<P>> = vec![];
         let mut target_names = BTreeMap::new();
+        let mut root_properties = BTreeMap::new();
 
         for binding in node.children::<syn::LetBinding>() {
             self.error(
@@ -850,15 +850,6 @@ impl Compiler {
 
         for (id, origin, source) in declarations {
             let name = id.name();
-
-            if matches!(origin, TargetOrigin::Explicit) && scope.is_reserved(name) {
-                self.error(
-                    "semantic.variable",
-                    "self is an implicit target; write root properties directly",
-                    &source,
-                );
-                continue;
-            }
 
             let target_path = format!("{path}/target/{name}");
             self.mapping(&target_path, &source, origin.mapping_kind());
@@ -880,13 +871,44 @@ impl Compiler {
                 }
             };
 
-            let mut seen = BTreeMap::new();
-            let properties = compile_properties(self, &source, &target_path, &mut seen);
-            targets.push(Target {
-                name: name.into(),
-                timing_expression: timing,
-                properties,
-            });
+            let mut named_properties = BTreeMap::new();
+            let seen = if id == TargetId::Root {
+                &mut root_properties
+            } else {
+                &mut named_properties
+            };
+            let properties = compile_properties(self, &source, &target_path, seen);
+            let timing_properties = if id == TargetId::Root && timing.is_some() {
+                Some(
+                    syn::animation_properties(&source)
+                        .map(|property| match property {
+                            syn::AnimationProperty::Shorthand(property) => {
+                                property.header().unwrap_or_default()
+                            }
+                            syn::AnimationProperty::Keyframes(property) => {
+                                property.header().unwrap_or_default()
+                            }
+                        })
+                        .collect(),
+                )
+            } else {
+                None
+            };
+
+            if id == TargetId::Root
+                && let Some(target) = targets.iter_mut().find(|target| target.name == name)
+            {
+                target.properties.extend(properties);
+                target.timing_expression = timing;
+                target.timing_properties = timing_properties;
+            } else {
+                targets.push(Target {
+                    name: name.into(),
+                    timing_expression: timing,
+                    timing_properties,
+                    properties,
+                });
+            }
         }
 
         targets

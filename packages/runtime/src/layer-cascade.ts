@@ -43,6 +43,16 @@ export function timingProvider<T extends TimingDeclaration>(...candidates: (T | 
   return candidates.find((candidate) => candidate?.timingExpression || candidate?.timing)
 }
 
+/** Select shared target timing only for properties inside its authored block. */
+export function targetTiming<T>(
+  target: Target<T> | undefined,
+  property: string,
+): Target<T> | undefined {
+  return target?.timingProperties && !target.timingProperties.includes(property)
+    ? undefined
+    : target
+}
+
 /**
  * Yields the layers and states selected by an explicit composition in definition order.
  * Ordinary layers contribute only when enabled; stateful layers contribute their
@@ -148,7 +158,10 @@ export function resolveLayerCascade<Value, ResolvedTiming>(
 
           if (property)
             candidates.push({ layer, state: scope.state, target, property, declaration: property })
-          if (target) candidates.push({ layer, state: scope.state, target, declaration: target })
+          const sharedTiming = targetTiming(target, name)
+
+          if (sharedTiming)
+            candidates.push({ layer, state: scope.state, target, declaration: sharedTiming })
 
           candidates.push({ layer, state: scope.state, declaration: scope.declaration })
         }
@@ -178,7 +191,11 @@ export function transitionPropertySources(
 ) {
   const target = transition?.targets.find((item) => item.name === targetName)
   const property = target?.properties.find((item) => item.name === propertyName)
-  const timing = timingProvider<TimingDeclaration>(property, target, transition)
+  const timing = timingProvider<TimingDeclaration>(
+    property,
+    targetTiming(target, propertyName),
+    transition,
+  )
 
   return { target, property, timing }
 }

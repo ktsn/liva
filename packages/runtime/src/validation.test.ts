@@ -15,6 +15,16 @@ function expectInvalidDefinition(definition: unknown) {
 }
 
 describe('serialized definition validation', () => {
+  it.each(['invalid', [1]])(
+    'rejects malformed target timing property sets: %j',
+    (timingProperties) => {
+      const target = { name: 'self', timingProperties, properties: [] }
+
+      expect(isDefinition({ ...valid, layers: [{ name: 'base', targets: [target] }] })).toBe(false)
+      expect(isDefinition({ ...valid, enter: { targets: [target] } })).toBe(false)
+    },
+  )
+
   it.each([
     ['layer transitions', fixture],
     ['motion lifecycle animations', lifecycleFixture],

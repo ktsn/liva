@@ -209,8 +209,9 @@ Only `self` is reserved against all declarations.
 
 `self` is the built-in target bound to the Motion root (the element carrying `v-liva`).
 It is always available to target-taking functions such as `drag(target: self)`.
-It is reserved: parameters, `let` bindings, and explicit `self { ... }` target blocks
-cannot declare it. Write root styles directly; no `v-liva-target` directive is needed.
+Parameters and `let` bindings cannot rebind `self`. Explicit `self { ... }` blocks
+configure the existing root target; they do not declare a new target or require a
+`v-liva-target` directive.
 
 CSS declarations and tracks directly inside a reactive layer, stateful layer's common
 styles, state, directional transition, `enter`, or `leave` apply to `self`:
@@ -231,6 +232,41 @@ motion button {
 Direct declarations can mix with named target blocks. Declaring the same root
 property twice in one animation scope, including a value plus a track, reports a
 duplicate. Property timing decorators apply only to their property.
+
+An explicit self block is valid wherever a named target block is valid, including
+layers, common styles of stateful layers, states, directional transitions, and
+motion-level enter/leave. It can coexist with shorthand root properties and tracks
+when their property names are distinct. Both forms address the same root: duplicates
+within one animation scope are errors, including value/track duplicates split
+between the forms. A second self block in the same scope is also a duplicate.
+
+```liva
+motion card {
+  @tween(duration: 150)
+  layer base {
+    opacity: 1
+
+    @spring(stiffness: 300, damping: 20)
+    self {
+      translate: 0 0
+      scale: 1 @tween(duration: 200)
+    }
+
+    icon { rotate: 0deg }
+  }
+}
+```
+
+Only `translate` inherits the self block's spring; `scale` overrides it with its own
+tween. The shorthand `opacity` and sibling `icon` keep the layer's 150 ms tween.
+Putting the spring on `layer base` instead would make it the enclosing default.
+Self-block timing remains local to the properties declared inside that block while
+participating in the normal cross-layer, state, transition, and lifecycle timing
+cascade. Root shorthand continues to work without any explicit block.
+
+Editor highlighting identifies `self` as a theme-controlled built-in target, both
+in block names and expression references such as `drag(target: self)`. Named
+targets retain their ordinary target highlight.
 
 The delimiter determines the meaning without consulting CSS property names:
 `property: value` is a value, `property ~> { ... }` is a track, and `target { ... }`

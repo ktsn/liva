@@ -12,6 +12,7 @@ import { renderValue } from '../packages/runtime/src/expression.ts'
 
 for (const name of [
   'toggle',
+  'self-target',
   'reactive-toggle',
   'card',
   'derived',

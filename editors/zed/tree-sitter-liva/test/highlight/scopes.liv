@@ -53,3 +53,20 @@ motion animation(curve: easing, duration: timing) {
     }
   }
 }
+
+motion rooted {
+  let movement = drag(target: self)
+//                            ^ variable.builtin
+  layer base {
+    @spring() self {
+//            ^ variable.builtin
+      scale: 1
+    }
+    self: 1
+//  ^ property
+    icon {
+//  ^ selector.class
+      opacity: 1
+    }
+  }
+}
