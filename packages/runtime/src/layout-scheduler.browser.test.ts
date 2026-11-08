@@ -160,7 +160,6 @@ describe('shared layout scheduling', () => {
     const animation = root.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 1000 })
     cleanups.push(() => animation.cancel())
     trackLayoutAnimation(root, 'opacity', animation)
-    trackLayoutAnimation(root, '--custom', animation)
     let reads = 0
     cleanups.push(
       registerLayoutRead(document, () => {
@@ -221,5 +220,52 @@ describe('shared layout scheduling', () => {
     await settled()
 
     expect(publications).toBe(before + 1)
+  })
+  it('tracks registered custom-property animations that move an unmeasured sibling', async () => {
+    const property = `--measure-space-${crypto.randomUUID()}`
+    CSS.registerProperty({
+      name: property,
+      syntax: '<length>',
+      inherits: false,
+      initialValue: '0px',
+    })
+    const root = document.createElement('div')
+    root.style.cssText = 'width:300px;height:240px;'
+    const sibling = document.createElement('div')
+    sibling.style.height = `var(${property})`
+    const target = document.createElement('div')
+    target.style.cssText = 'width:100px;height:20px;'
+    root.append(sibling, target)
+    document.body.append(root)
+    cleanups.push(() => root.remove())
+    const source = measure({ target: { name: 'target' } })
+    cleanups.push(
+      source.bind(
+        new Map([
+          ['self', root],
+          ['target', target],
+        ]),
+        () => {},
+      ),
+    )
+    const initial = source.value
+    if (typeof initial !== 'object' || typeof initial.y !== 'number')
+      throw new Error('Expected bounds')
+    const animation = sibling.animate([{ [property]: '0px' }, { [property]: '100px' }], {
+      duration: 200,
+      fill: 'both',
+    })
+    trackLayoutAnimation(sibling, property, animation)
+    cleanups.push(() => animation.cancel())
+
+    await settled()
+
+    expect(source.value).not.toEqual(initial)
+
+    animation.finish()
+
+    await settled()
+
+    expect(source.value).toMatchObject({ y: initial.y + 100, attached: true })
   })
 })

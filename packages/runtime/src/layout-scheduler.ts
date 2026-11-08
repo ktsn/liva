@@ -166,7 +166,7 @@ export function registerLayoutRead(
 
 /** Only Liva-managed layout effects opt into per-frame invalidation. */
 export function trackLayoutAnimation(element: HTMLElement, property: string, animation: Animation) {
-  if (visualProperties.has(property) || property.startsWith('--')) return
+  if (visualProperties.has(property)) return
 
   const document = element.ownerDocument
   let active = managedAnimations.get(document)
