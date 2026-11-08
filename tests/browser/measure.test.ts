@@ -89,3 +89,64 @@ test('natural inner content updates expansion and interrupted collapse begins at
   await expect(inner).toContainText('Changing content or viewport width')
   await expect(explanation).toHaveCount(0)
 })
+
+for (const intermediaryPosition of ['static', 'relative'] as const) {
+  test(`fractional bounds survive affine transforms and scrolling through a ${intermediaryPosition} ancestor`, async ({
+    page,
+  }) => {
+    await page.goto('/tests/browser/')
+    const result = await page.evaluate(async (position) => {
+      const { readLayoutBounds } = await import('../../packages/runtime/src/layout-bounds.ts')
+
+      const root = document.createElement('div')
+      root.style.cssText =
+        'position:relative;box-sizing:border-box;width:320.5px;height:240.25px;border:3px solid;padding:16.5px;overflow:auto;'
+      const middle = document.createElement('div')
+      middle.style.cssText = `position:${position};width:180.25px;height:120.5px;padding:7.25px;border:1px solid;overflow:auto;`
+      const target = document.createElement('div')
+      target.style.cssText =
+        'position:absolute;box-sizing:border-box;left:60.25px;top:40.5px;width:120.25px;height:35.5px;'
+      const spacer = document.createElement('div')
+      spacer.style.cssText = 'width:800px;height:800px;'
+      middle.append(target, spacer)
+      root.append(middle)
+      document.body.append(root)
+
+      try {
+        const references = [root, middle, target]
+        const before = references.map((reference) => readLayoutBounds(target, reference))
+
+        root.style.transform = 'translate(13.25px, -4.5px) rotate(23deg) scale(-.7, 1.3)'
+
+        if (position === 'relative') middle.style.transform = 'rotate(-11deg) scale(1.1, .9)'
+
+        target.style.translate = '50% 4.25px'
+        target.style.transform = 'skew(12deg, -7deg) scale(-.7, 1.1)'
+        target.style.transformOrigin = '-15.25px 120%'
+        root.scrollTop = 30
+        middle.scrollTop = 40
+        middle.scrollLeft = 20
+
+        const authoredStyles = root.outerHTML
+
+        const after = references.map((reference) => readLayoutBounds(target, reference))
+
+        return { before, after, preservedStyles: root.outerHTML === authoredStyles }
+      } finally {
+        root.remove()
+      }
+    }, intermediaryPosition)
+
+    for (const [index, bounds] of result.after.entries()) {
+      const baseline = result.before[index]
+
+      // Fractional results remain useful despite engine-specific transform serialization precision.
+      expect(Math.abs(bounds.x - baseline.x)).toBeLessThan(0.25)
+      expect(Math.abs(bounds.y - baseline.y)).toBeLessThan(0.25)
+      expect(bounds).toMatchObject({ width: 120.25, height: 35.5, attached: true })
+    }
+
+    expect(result.after[2]).toMatchObject({ x: 0, y: 0 })
+    expect(result.preservedStyles).toBe(true)
+  })
+}
