@@ -9,6 +9,9 @@ import type {
 import { callBuiltin } from './builtins/index.ts'
 import {
   isReactiveSubscription,
+  isReactiveCall,
+  type PreparedUpdate,
+  type ReactiveCall,
   type FunctionResult,
   type ReactiveSubscription,
   type RuntimeValue,
@@ -51,6 +54,35 @@ type LetBindingNode = {
 
 export class LetBindingGraph {
   private readonly nodes: LetBindingNode[] = []
+  private initializing = true
+  private evaluating = false
+  private disposed = false
+  private notificationPending = false
+  private notificationQueued = false
+
+  private notify = () => {
+    if (!this.binding) return
+
+    if (!this.evaluating) {
+      this.binding.update()
+      return
+    }
+
+    this.notificationPending = true
+  }
+
+  private flushNotifications() {
+    if (!this.notificationPending) return
+
+    this.notificationPending = false
+    if (this.notificationQueued) return
+    this.notificationQueued = true
+
+    queueMicrotask(() => {
+      this.notificationQueued = false
+      this.notify()
+    })
+  }
   private binding?: {
     targets: ReadonlyMap<string, HTMLElement>
     update: () => void
@@ -90,51 +122,128 @@ export class LetBindingGraph {
     for (const binding of letBindings) visit(binding.name)
 
     this.evaluate(values)
+    this.initializing = false
   }
 
-  evaluate(variables: VariableValues): VariableValues {
+  evaluate(
+    variables: VariableValues,
+    validate: (values: VariableValues) => void = () => {},
+  ): VariableValues {
+    if (this.disposed) throw new Error('Cannot evaluate a disposed let graph')
+    if (this.evaluating) throw new Error('Cannot reenter a let evaluation')
+
+    this.evaluating = true
     const values = { ...variables }
-
     const evaluatedCalls = new Map<LetBindingNode, Map<number, CallSite>>()
+    const prepared: PreparedUpdate[] = []
+    const created = new Set<ReactiveCall>()
+    const snapshots = new Map<FunctionResult, RuntimeValue>()
+    let committed = false
 
-    for (const node of this.nodes) {
-      const calls = new Map<number, CallSite>()
-      const invoke = (call: CallExpression, scope: VariableValues): RuntimeValue => {
-        const args = Object.fromEntries(
-          call.arguments.map((argument) => [
-            argument.name,
-            evaluate(argument.value, scope, invoke),
-          ]),
-        )
-        const id = node.callIds.get(call)!
-        const retained = node.calls.get(id)
-        const matches =
-          retained?.name === call.function &&
-          Object.keys(args).length === Object.keys(retained.args).length &&
-          Object.entries(args).every(([name, argument]) => retained.args[name] === argument)
-        const site = matches
-          ? retained
-          : { name: call.function, args, result: callBuiltin(call.function, args) }
-        calls.set(id, site)
+    try {
+      for (const node of this.nodes) {
+        const calls = new Map<number, CallSite>()
 
-        return isReactiveSubscription(site.result) ? site.result.value : site.result
+        const invoke = (call: CallExpression, scope: VariableValues): RuntimeValue => {
+          const args = Object.fromEntries(
+            call.arguments.map((argument) => [
+              argument.name,
+              evaluate(argument.value, scope, invoke),
+            ]),
+          )
+          // Every initializer call is indexed by collectCalls, including inactive branches.
+          const id = node.callIds.get(call)!
+          const retained = node.calls.get(id)
+          const sameFunction = retained?.name === call.function
+          const matches =
+            sameFunction &&
+            Object.keys(args).length === Object.keys(retained.args).length &&
+            Object.entries(args).every(([name, argument]) => retained.args[name] === argument)
+          let site: CallSite
+
+          if (matches) {
+            site = retained
+          } else if (sameFunction && !this.initializing && isReactiveCall(retained.result)) {
+            const update = retained.result.prepareUpdate(args)
+            prepared.push(update)
+            snapshots.set(retained.result, update.value)
+            site = { name: call.function, args, result: retained.result }
+          } else {
+            const result = callBuiltin(call.function, args)
+            if (isReactiveCall(result)) created.add(result)
+            site = { name: call.function, args, result }
+          }
+
+          calls.set(id, site)
+
+          if (!isReactiveSubscription(site.result)) return site.result
+          if (!snapshots.has(site.result)) snapshots.set(site.result, site.result.value)
+
+          return snapshots.get(site.result)!
+        }
+
+        const value = evaluate(node.definition.initializer, values, invoke)
+        evaluatedCalls.set(node, calls)
+        Object.defineProperty(values, node.definition.name, {
+          value,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        })
       }
-      const value = evaluate(node.definition.initializer, values, invoke)
-      evaluatedCalls.set(node, calls)
 
-      Object.defineProperty(values, node.definition.name, {
-        value,
-        enumerable: true,
-        writable: true,
-        configurable: true,
-      })
+      validate(values)
+      this.updateSubscriptions([...evaluatedCalls.values()])
+
+      for (const update of prepared) update.commit()
+
+      const active = new Set(
+        [...evaluatedCalls.values()].flatMap((calls) =>
+          [...calls.values()].map((call) => call.result),
+        ),
+      )
+      const removed = new Set(
+        this.nodes.flatMap((node) => [...node.calls.values()].map((call) => call.result)),
+      )
+
+      for (const [node, calls] of evaluatedCalls) node.calls = calls
+      committed = true
+
+      for (const result of removed) {
+        if (!active.has(result) && isReactiveCall(result)) result.dispose()
+      }
+
+      return values
+    } finally {
+      if (!committed) {
+        for (const update of prepared) update.discard()
+        for (const result of created) result.dispose()
+        this.notificationPending = false
+      }
+
+      this.evaluating = false
+      this.flushNotifications()
     }
+  }
 
-    this.updateSubscriptions([...evaluatedCalls.values()])
+  /** Release call ownership, preserving compatible instances transferred to a replacement. */
+  dispose(retained?: LetBindingGraph) {
+    if (this.disposed) return
 
-    for (const [node, calls] of evaluatedCalls) node.calls = calls
+    this.disposed = true
+    const keep = new Set(
+      retained?.nodes.flatMap((node) => [...node.calls.values()].map((call) => call.result)),
+    )
+    const results = new Set(
+      this.nodes.flatMap((node) => [...node.calls.values()].map((call) => call.result)),
+    )
 
-    return values
+    for (const cleanup of this.binding?.cleanups.values() ?? []) cleanup()
+    this.binding = undefined
+
+    for (const result of results) {
+      if (!keep.has(result) && isReactiveCall(result)) result.dispose()
+    }
   }
 
   private updateSubscriptions(callMaps: readonly ReadonlyMap<number, CallSite>[]) {
@@ -151,7 +260,14 @@ export class LetBindingGraph {
     try {
       for (const subscription of active) {
         if (!binding.cleanups.has(subscription)) {
-          added.set(subscription, subscription.bind(binding.targets, binding.update))
+          let subscribed = true
+          const cleanup = subscription.bind(binding.targets, () => {
+            if (subscribed && this.binding === binding) this.notify()
+          })
+          added.set(subscription, () => {
+            subscribed = false
+            cleanup()
+          })
         }
       }
     } catch (error) {
@@ -172,7 +288,14 @@ export class LetBindingGraph {
   bind(targets: ReadonlyMap<string, HTMLElement>, update: () => void): (() => void)[] {
     const binding = { targets, update, cleanups: new Map<ReactiveSubscription, () => void>() }
     this.binding = binding
-    this.updateSubscriptions(this.nodes.map((node) => node.calls))
+    this.evaluating = true
+
+    try {
+      this.updateSubscriptions(this.nodes.map((node) => node.calls))
+    } finally {
+      this.evaluating = false
+      this.flushNotifications()
+    }
 
     return [
       () => {

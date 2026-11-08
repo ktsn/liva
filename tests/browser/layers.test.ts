@@ -203,6 +203,38 @@ test('async submit advances its local machine while Vue owns completion', async 
   await expect(button).toBeDisabled()
 })
 
+test('async submit expires successful feedback and allows another request', async ({ page }) => {
+  await page.goto(`${base}/async-submit`)
+  const button = page.getByTestId('submit')
+
+  await button.click()
+
+  await expect(button).toHaveCSS('background-color', 'rgb(100, 198, 158)')
+  await expect(button).toHaveCSS('background-color', 'rgb(217, 243, 232)')
+
+  await button.click()
+
+  await expect(button).toBeDisabled()
+  await expect(page.getByRole('status')).toHaveText('Saving…')
+})
+
+test('async submit expires error feedback and supports retry', async ({ page }) => {
+  await page.goto(`${base}/async-submit`)
+  const button = page.getByTestId('submit')
+  await page.getByTestId('submit-outcome').selectOption('error')
+
+  await button.click()
+
+  await expect(page.getByRole('status')).toHaveText('Request failed')
+  await expect(button).toHaveCSS('background-color', 'rgb(240, 163, 163)')
+  await expect(button).toHaveCSS('background-color', 'rgb(217, 243, 232)')
+
+  await page.getByTestId('submit-outcome').selectOption('success')
+  await button.click()
+
+  await expect(page.getByRole('status')).toHaveText('Saved')
+})
+
 test('composition selectors preview independently and restore application presentation', async ({
   page,
 }) => {

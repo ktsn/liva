@@ -500,3 +500,25 @@ unexpected implementation exceptions propagate with their original causes.
 Liva layer/lifecycle effects register their layout-affecting animations with the
 scheduler. Normal invalidation remains detection-based; external animation tracking
 and automatic layout animation are separate features.
+
+## Stable reactive calls
+
+A stateful built-in may return a `ReactiveCall` from `reactive-value.ts`. It exposes
+an immutable readable `value`, a subscription binding, `prepareUpdate(args)`, and
+`dispose()`. Each evaluated call site retains its instance across argument updates;
+aliases share its snapshot, while distinct calls own independent instances.
+Ordinary functions keep argument-based result caching.
+
+Preparation must be pure: it returns a candidate snapshot plus `commit()` and
+`discard()` without mutating committed state, allocating active browser resources,
+or publishing. The graph evaluates all initializers and validates the resulting
+presentation before committing updates. A failed evaluation discards updates and
+disposes newly created calls. Commit must be infallible. Each implementation owns
+idempotent resource cleanup and immutable snapshots. A transaction reads each call
+once; commit-time notifications are deferred to a microtask after all calls commit.
+
+Subscriptions activate only when DOM targets bind. Source replacement transfers
+calls only for the same binding name, structurally identical initializer, and
+unchanged arguments. Changed or removed calls dispose; editor inspection uses an
+inactive graph and cannot update retained live calls. Binding cleanup cancels
+active resources; final graph disposal also releases the call instance.
