@@ -20,6 +20,7 @@ type Box = {
   width: number
   height: number
   own: DOMMatrix
+  origin: DOMPoint
   linear: DOMMatrix
   center: DOMPoint
 }
@@ -75,6 +76,25 @@ function box(
     return undefined
   }
 
+  // Engines disagree on percentage transforms for stroke-box on HTML elements.
+  // Reject it explicitly rather than silently choosing one engine's reference size.
+  if (style.transformBox === 'stroke-box') {
+    unsupported('measure does not support stroke-box transforms on HTML elements')
+    return undefined
+  }
+
+  // For HTML layout boxes, fill-box uses the content box and view-box uses the
+  // border box. Percentage translations resolve against this reference box.
+  // https://www.w3.org/TR/css-transforms-1/#transform-box
+  const contentBox = style.transformBox === 'content-box' || style.transformBox === 'fill-box'
+  const insetX = parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth)
+  const insetY = parseFloat(style.paddingTop) + parseFloat(style.borderTopWidth)
+  const referenceWidth = contentBox
+    ? width - insetX - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth)
+    : width
+  const referenceHeight = contentBox
+    ? height - insetY - parseFloat(style.paddingBottom) - parseFloat(style.borderBottomWidth)
+    : height
   const own = new DOMMatrix()
 
   if (style.translate !== 'none') {
@@ -83,7 +103,7 @@ function box(
       unsupported('measure supports two-dimensional numeric transforms')
       return undefined
     }
-    own.translateSelf(length(parts[0], width), length(parts[1] ?? '0', height))
+    own.translateSelf(length(parts[0], referenceWidth), length(parts[1] ?? '0', referenceHeight))
   }
 
   if (style.rotate !== 'none') {
@@ -111,7 +131,23 @@ function box(
     return undefined
   }
 
-  return { element, style, width, height, own }
+  // Engines can resolve percentage origins against border-box dimensions even when
+  // content-box is used for rendering, discarding whether the authored value was
+  // a percentage or a length. Without DOM writes the used pivot is ambiguous.
+  // Translation-only matrices do not depend on the pivot and remain measurable.
+  if (
+    contentBox &&
+    (referenceWidth !== width || referenceHeight !== height) &&
+    (own.a !== 1 || own.b !== 0 || own.c !== 0 || own.d !== 1)
+  ) {
+    unsupported('measure cannot resolve content-box transform origins for rotation, scale, or skew')
+    return undefined
+  }
+
+  const parts = style.transformOrigin.split(/\s+/)
+  const origin = new DOMPoint(length(parts[0], width), length(parts[1], height))
+
+  return { element, style, width, height, own, origin }
 }
 
 /**
@@ -212,9 +248,7 @@ export function readLayoutBounds(
     // Locate the child's transformed center relative to its own border origin.
     // Subtract transform-origin before applying the local matrix and add it back
     // afterwards, matching the pivot used by CSS (including percentage origins).
-    const origin = child.style.transformOrigin.split(/\s+/)
-    const ox = length(origin[0], child.width)
-    const oy = length(origin[1], child.height)
+    const { x: ox, y: oy } = child.origin
     const transformedCenter = child.own.transformPoint(
       new DOMPoint(child.width / 2 - ox, child.height / 2 - oy),
     )

@@ -29,6 +29,74 @@ afterEach(() => {
 })
 
 describe('untransformed layout bounds', () => {
+  it.each([
+    ['content-box', 'border-box'],
+    ['fill-box', 'border-box'],
+    ['content-box', 'content-box'],
+    ['fill-box', 'content-box'],
+  ])('uses %s percentage translation references with %s sizing', (transformBox, boxSizing) => {
+    const { root, target } = fixture()
+    target.style.cssText += `box-sizing:${boxSizing};padding:3px 5px 9px 15px;transform-box:${transformBox};translate:50% 25%;`
+    const bounds = readLayoutBounds(target, root)
+
+    expect(bounds.x).toBeCloseTo(16.5, 3)
+    expect(bounds.y).toBeCloseTo(16.5, 3)
+    expect(bounds).toMatchObject({
+      width: boxSizing === 'border-box' ? 120.25 : 144.25,
+      height: boxSizing === 'border-box' ? 35.5 : 51.5,
+      attached: true,
+    })
+  })
+
+  it.each(['rotate:30deg', 'scale:2 .5', 'transform:skewX(20deg)'])(
+    'diagnoses an ambiguous content-box pivot rather than publishing a wrong position: %s',
+    (transform) => {
+      const { root, target } = fixture()
+      target.style.cssText += `padding:3px 5px 9px 15px;transform-box:content-box;transform-origin:20% 80%;${transform};`
+      const reasons: string[] = []
+
+      const bounds = readLayoutBounds(target, root, (reason) => reasons.push(reason))
+
+      expect(bounds).toBe(missingBounds)
+      expect(reasons).toEqual([
+        'measure cannot resolve content-box transform origins for rotation, scale, or skew',
+      ])
+    },
+  )
+
+  it('allows content-box rotation when content and border boxes coincide', () => {
+    const { root, target } = fixture()
+    target.style.cssText +=
+      'padding:0;border:0;transform-box:content-box;rotate:90deg;transform-origin:20% 80%;'
+
+    const bounds = readLayoutBounds(target, root)
+
+    expect(bounds.x).toBeCloseTo(16.5, 3)
+    expect(bounds.y).toBeCloseTo(16.5, 3)
+    expect(bounds.attached).toBe(true)
+  })
+
+  it.each(['matrix(1, 2, 2, 4, 0, 0)', 'scaleX(0)', 'scaleY(0)', 'scale(.000001)'])(
+    'rejects singular or numerically collapsed transforms: %s',
+    (transform) => {
+      const { root, target } = fixture()
+      target.style.transform = transform
+
+      expect(readLayoutBounds(target, root)).toBe(missingBounds)
+    },
+  )
+
+  it('diagnoses unresolved calc translation without publishing non-finite bounds', () => {
+    const { root, target } = fixture()
+    target.style.translate = 'calc(50% + 10px) 0px'
+    const reasons: string[] = []
+
+    const bounds = readLayoutBounds(target, root, (reason) => reasons.push(reason))
+
+    expect(bounds).toBe(missingBounds)
+    expect(reasons).toEqual(['measure supports two-dimensional numeric transforms'])
+  })
+
   it('uses fractional border boxes relative to the reference padding origin', () => {
     const { root, target } = fixture()
     const bounds = readLayoutBounds(target, root)
@@ -81,6 +149,7 @@ describe('untransformed layout bounds', () => {
 
   it.each([
     ['display', 'inline'],
+    ['transform-box', 'stroke-box'],
     ['perspective', '200px'],
     ['zoom', '2'],
     ['translate', '1px 2px 3px'],

@@ -740,6 +740,20 @@ disconnected, or display:none boxes return all zeros and attached=false;
 visibility:hidden and genuine zero-size boxes remain measurable. Layout changes
 update the bounds; scrolling or transforms alone do not change layout coordinates.
 
+Percentage `translate` values use the transform reference box: `content-box` and
+`fill-box` use content dimensions for HTML, while `border-box` and `view-box` use
+border dimensions. Border-box dimensions are still returned in all cases. HTML
+`stroke-box` transforms are unsupported because engines disagree on their percentage
+reference sizes. When content and border boxes differ, content/fill-box rotation,
+scale, and skew are also unsupported: CSSOM can resolve a percentage transform-origin
+against border-box dimensions while rendering against the content box, losing the
+original unit and making the used pivot ambiguous. These cases diagnose and return
+attached=false rather than publishing incorrect coordinates. Translation-only
+content/fill-box transforms remain measurable because they do not depend on the
+pivot. Resolving retained calc() expressions is outside the current numeric decoder.
+Very small invertible scales amplify viewport-coordinate rounding during inversion;
+fractional output does not imply a fixed positional error bound across engines.
+
 Initial binding reads geometry synchronously before Motion settles its initial
 presentation, without an initial animation. Later supported invalidations coalesce
 into an animation-frame pass. All reads finish before snapshots publish; dependent
