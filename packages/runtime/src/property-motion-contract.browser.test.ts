@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vite-plus/test'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { canonicalTracks, decodeProperty, propertyAddresses } from './property-codec.ts'
 import { PropertyMotion } from './property-motion.ts'
 
@@ -15,6 +15,8 @@ function target() {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks()
+
   for (const element of elements.splice(0)) {
     for (const animation of element.getAnimations()) animation.cancel()
     element.remove()
@@ -66,18 +68,25 @@ describe('property motion ownership contracts', () => {
     ])
   })
 
-  it('retains an already canonical track without changing its authored frames', () => {
-    const element = target()
-    const track = {
-      target: 'self',
-      property: 'width',
-      destinationValue: '200px',
-      timing: physics,
-      keyframes: [{ offset: 0, value: '100px' }],
-    }
+  it.each([
+    ['width', '200px', '100px'],
+    ['translate', '10px 20px', '3px 4px'],
+    ['background-color', 'red', 'blue'],
+  ])(
+    'retains an unexpanded %s track without changing authored frames',
+    (property, destinationValue, value) => {
+      const element = target()
+      const track = {
+        target: 'self',
+        property,
+        destinationValue,
+        timing: physics,
+        keyframes: [{ offset: 0, value }],
+      }
 
-    expect(canonicalTracks(element, track)).toEqual([track])
-  })
+      expect(canonicalTracks(element, track)).toEqual([track])
+    },
+  )
 
   it.each(['hidden', 'detached'] as const)('does not observe an unreadable %s target', (state) => {
     const element = target()
@@ -173,6 +182,9 @@ describe('property motion ownership contracts', () => {
   })
 
   it('keeps analytic spring velocity until the native effect finishes', () => {
+    // Recorded samples and prepareSpring's clock must share the same time origin.
+    vi.spyOn(performance, 'now').mockReturnValue(20)
+
     const element = target()
     const motion = new PropertyMotion()
     motion.record(element, 'translate', 0)
