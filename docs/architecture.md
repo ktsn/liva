@@ -329,6 +329,12 @@ Analytic solutions cover underdamped, critical and overdamped responses. Sampled
 CSS `linear()` effect easing lets WAAPI interpolate raw CSS endpoints, including
 overshoot. Tween tracks instead use linear effect easing and per-frame easing.
 
+`springState` is the shared scalar analytic solver for arbitrary start/end values
+and incoming velocity in units per second; `springResponse` uses its rest unit-step
+case. Property handoffs convert their component velocities from units per millisecond
+at this boundary. Their settling and sampling policies remain separate from ordinary
+progress easing.
+
 Duration mode maps bounce to damping ratio `1 - 0.9 * bounce` and scales the
 unit-frequency settling time to the requested duration. Physics mode requires
 absolute displacement below 0.00025 and velocity below 0.001 per second for 64 ms.
@@ -500,6 +506,14 @@ unexpected implementation exceptions propagate with their original causes.
 Liva layer/lifecycle effects register their layout-affecting animations with the
 scheduler. Normal invalidation remains detection-based; external animation tracking
 and automatic layout animation are separate features.
+
+## Numeric property rules
+
+`property-rules.ts` declares numeric kinds, canonical components, authored shorthand
+longhands, units, serialization bounds, and writing-mode mappings without reading the
+DOM. `property-codec.ts` uses these rules to decode CSSOM values and expand tracks;
+`property-motion.ts` owns their histories and velocity-aware spring sampling. Property
+ownership and track expansion therefore share the same component identities.
 
 ## Stable reactive calls
 

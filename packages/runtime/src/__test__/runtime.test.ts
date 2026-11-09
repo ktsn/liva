@@ -3,7 +3,7 @@ import fixture from '../../../../fixtures/toggle.json'
 import { decodeBundle, type Definition, type Timing, type Transition } from '../definition.ts'
 import { normalizeFrames } from '../resolve.ts'
 import { resolveComposition, resolveLayerTracks } from '../layers.ts'
-import { sampleSpring, springResponse, SPRING_ERROR } from '../spring.ts'
+import { sampleSpring, springResponse, springState, SPRING_ERROR } from '../spring.ts'
 import { waapiProperty } from '../instance.ts'
 
 const definition = decodeBundle(JSON.stringify(fixture)).definitions[0]
@@ -38,6 +38,38 @@ function returnTracks(source: Definition) {
         .properties.find((item) => item.name === property)!.value,
     () => {},
   )
+}
+
+function integrateSpring(
+  parameters: { stiffness: number; damping: number; mass: number },
+  start: number,
+  end: number,
+  initialVelocity: number,
+  seconds: number,
+) {
+  let value = start
+  let velocity = initialVelocity
+  const step = 1 / 8192
+  const acceleration = (position: number, speed: number) =>
+    -(parameters.damping * speed + parameters.stiffness * (position - end)) / parameters.mass
+
+  // RK4 integrates the equation of motion independently of the analytic damping
+  // branches. Test times are exact multiples of this fixed step.
+  for (let time = 0; time < seconds; time += step) {
+    const x1 = velocity
+    const v1 = acceleration(value, velocity)
+    const x2 = velocity + (step * v1) / 2
+    const v2 = acceleration(value + (step * x1) / 2, x2)
+    const x3 = velocity + (step * v2) / 2
+    const v3 = acceleration(value + (step * x2) / 2, x3)
+    const x4 = velocity + step * v3
+    const v4 = acceleration(value + step * x3, x4)
+
+    value += (step * (x1 + 2 * x2 + 2 * x3 + x4)) / 6
+    velocity += (step * (v1 + 2 * v2 + 2 * v3 + v4)) / 6
+  }
+
+  return { value, velocity }
 }
 
 describe('transition resolution', () => {
@@ -155,6 +187,70 @@ describe('transition resolution', () => {
 })
 
 describe('scalar spring solver', () => {
+  const springs = [
+    { name: 'underdamped', stiffness: 100, damping: 8, mass: 1 },
+    { name: 'critical', stiffness: 100, damping: 20, mass: 1 },
+    { name: 'overdamped', stiffness: 100, damping: 40, mass: 1 },
+    { name: 'near critical from below', stiffness: 100, damping: 20 * (1 - 1e-10), mass: 1 },
+    { name: 'near critical from above', stiffness: 100, damping: 20 * (1 + 1e-10), mass: 1 },
+    { name: 'non-unit mass', stiffness: 300, damping: 25, mass: 2 },
+  ]
+  const initialStates = [
+    { name: 'toward the target', start: 10, end: 100, velocity: 500 },
+    { name: 'away from the target', start: 10, end: 100, velocity: -500 },
+    { name: 'equal endpoints', start: 100, end: 100, velocity: 500 },
+    { name: 'reversed destination', start: 100, end: -20, velocity: 200 },
+  ]
+
+  it.each(springs)('retains the rest unit-step response for $name', (parameters) => {
+    for (const seconds of [0, 0.125, 0.5]) {
+      const expected = integrateSpring(parameters, 0, 1, 0, seconds)
+      const actual = springResponse(
+        parameters.stiffness,
+        parameters.damping,
+        parameters.mass,
+        seconds,
+      )
+
+      // Six decimal places allow integration error and the existing near-critical
+      // approximation while remaining well below displayed-value tolerances.
+      expect(actual.value).toBeCloseTo(expected.value, 6)
+      expect(actual.velocity).toBeCloseTo(expected.velocity, 6)
+    }
+  })
+
+  it.each(
+    springs.flatMap((parameters) =>
+      initialStates.map((initial) => ({
+        ...parameters,
+        ...initial,
+        name: `${parameters.name}, ${initial.name}`,
+      })),
+    ),
+  )('follows the equation of motion for $name', (parameters) => {
+    for (const seconds of [0, 0.125, 0.5]) {
+      const expected = integrateSpring(
+        parameters,
+        parameters.start,
+        parameters.end,
+        parameters.velocity,
+        seconds,
+      )
+      const actual = springState(
+        parameters.start,
+        parameters.end,
+        parameters.velocity,
+        parameters.stiffness,
+        parameters.damping,
+        parameters.mass,
+        seconds,
+      )
+
+      expect(actual.value).toBeCloseTo(expected.value, 6)
+      expect(actual.velocity).toBeCloseTo(expected.velocity, 6)
+    }
+  })
+
   it.each([10, 20, 40, 300])('is deterministic and converges for damping %s', (damping) => {
     const timing = { kind: 'spring-physics', stiffness: 300, damping, mass: 1 } as const
     const a = sampleSpring(timing)
