@@ -1,9 +1,14 @@
+import type { ReactiveNotification } from './events.ts'
+
 export type Scalar = number | boolean | string
 export type RuntimeValue = Scalar | { readonly [name: string]: RuntimeValue }
 
 export interface ReactiveSubscription {
   readonly value: RuntimeValue
-  bind(targets: ReadonlyMap<string, HTMLElement>, update: (value: RuntimeValue) => void): () => void
+  bind(
+    targets: ReadonlyMap<string, HTMLElement>,
+    update: (value: RuntimeValue, notification?: ReactiveNotification) => void,
+  ): () => void
 }
 
 export type FunctionArguments = Readonly<Record<string, RuntimeValue>>
@@ -16,7 +21,8 @@ export interface PreparedUpdate {
 }
 
 export interface ReactiveCall extends ReactiveSubscription {
-  prepareUpdate(args: FunctionArguments): PreparedUpdate
+  readSnapshot?(context: { readonly time: number }): RuntimeValue
+  prepareUpdate(args: FunctionArguments, context?: { readonly time: number }): PreparedUpdate
   dispose(): void
 }
 

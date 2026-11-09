@@ -1,5 +1,6 @@
 import { measure } from './measure.ts'
 import { timeout } from './timeout.ts'
+import { link } from './link.ts'
 import { drag } from './drag.ts'
 import { interaction } from './interaction.ts'
 import type { FunctionResult, RuntimeValue } from '../reactive-value.ts'
@@ -13,6 +14,7 @@ const functions: ReadonlyMap<
   ['measure', measure],
   ['timeout', timeout],
   ['drag', drag],
+  ['link', link],
   ['interaction', interaction],
 ])
 
