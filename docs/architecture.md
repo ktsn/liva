@@ -501,6 +501,14 @@ Liva layer/lifecycle effects register their layout-affecting animations with the
 scheduler. Normal invalidation remains detection-based; external animation tracking
 and automatic layout animation are separate features.
 
+## Numeric property rules
+
+`property-rules.ts` declares numeric kinds, canonical components, authored shorthand
+longhands, units, serialization bounds, and writing-mode mappings without reading the
+DOM. `property-codec.ts` uses these rules to decode CSSOM values and expand tracks;
+`property-motion.ts` owns their histories and velocity-aware spring sampling. Property
+ownership and track expansion therefore share the same component identities.
+
 ## Stable reactive calls
 
 A stateful built-in may return a `ReactiveCall` from `reactive-value.ts`. It exposes

@@ -27,6 +27,28 @@ afterEach(() => {
 })
 
 describe('canonical property codecs', () => {
+  it.each(['width', 'height', 'inline-size', 'block-size'])(
+    'bounds negative %s values only when requested by the caller',
+    (property) => {
+      const element = target()
+      const decoded = decodeProperty(element, property)
+
+      expect(decoded?.serialize([-10])).toBe('-10px')
+      expect(decoded?.serialize([-10], true)).toBe('0px')
+    },
+  )
+
+  it.each([
+    [-0.1, '0'],
+    [0.5, '0.5'],
+    [1.2, '1'],
+  ])('bounds opacity %s for both serialization modes', (value, expected) => {
+    const decoded = decodeProperty(target(), 'opacity')
+
+    expect(decoded?.serialize([value])).toBe(expected)
+    expect(decoded?.serialize([value], true)).toBe(expected)
+  })
+
   it('resolves logical dimensions in vertical flow and neutral rotation', () => {
     const element = target()
     element.style.writingMode = 'vertical-lr'

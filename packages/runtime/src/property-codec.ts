@@ -1,4 +1,5 @@
 import { waapiProperty } from './animation.ts'
+import { propertyRule, resolvePropertyComponents } from './property-rules.ts'
 
 export type NumericProperty = {
   readonly values: readonly number[]
@@ -114,85 +115,39 @@ function borderSize(style: CSSStyleDeclaration, axis: 'width' | 'height'): numbe
   )
 }
 
-function logicalSides(style: CSSStyleDeclaration) {
-  const vertical = style.writingMode !== 'horizontal-tb'
-  const reverse = (style.direction === 'rtl') !== (style.writingMode === 'sideways-lr')
-
-  return {
-    inline: vertical
-      ? reverse
-        ? ['bottom', 'top']
-        : ['top', 'bottom']
-      : reverse
-        ? ['right', 'left']
-        : ['left', 'right'],
-    block: vertical
-      ? style.writingMode.endsWith('rl')
-        ? ['right', 'left']
-        : ['left', 'right']
-      : ['top', 'bottom'],
-  }
-}
-
-function lengthAddresses(style: CSSStyleDeclaration, property: string): string[] | undefined {
-  const sides = logicalSides(style)
-  if (property === 'inset') return ['top', 'right', 'bottom', 'left']
-  if (property === 'inset-inline') return sides.inline
-  if (property === 'inset-block') return sides.block
-
-  const logical = property.match(/^inset-(inline|block)-(start|end)$/)
-  if (logical)
-    return [sides[logical[1] === 'inline' ? 'inline' : 'block'][logical[2] === 'start' ? 0 : 1]]
-  if (['top', 'right', 'bottom', 'left', 'width', 'height'].includes(property)) return [property]
-  if (property === 'inline-size')
-    return [style.writingMode === 'horizontal-tb' ? 'width' : 'height']
-  if (property === 'block-size') return [style.writingMode === 'horizontal-tb' ? 'height' : 'width']
-
-  return undefined
-}
-
 export function decodeProperty(
   element: HTMLElement,
   property: string,
 ): NumericProperty | undefined {
   if (!element.isConnected || element.getClientRects().length === 0) return undefined
+  const rule = propertyRule(property)
+  if (!rule) return undefined
 
   const style = getComputedStyle(element)
   const text = style.getPropertyValue(property).trim()
   let values: (number | undefined)[]
-  let addresses: string[]
-  let unit = ''
+  const addresses = resolvePropertyComponents(rule, style)
 
-  if (property === 'translate') {
+  if (rule.kind === 'translate') {
     const parts = text === 'none' ? [] : components(text)
     values = [
       numeric(parts[0] ?? '0', borderSize(style, 'width')),
       numeric(parts[1] ?? '0', borderSize(style, 'height')),
       numeric(parts[2] ?? '0', 0),
     ]
-    addresses = ['translate.x', 'translate.y', 'translate.z']
-    unit = 'px'
-  } else if (property === 'scale') {
+  } else if (rule.kind === 'scale') {
     const parts = text === 'none' ? [] : components(text)
     values = [
       numeric(parts[0] ?? '1', 1),
       numeric(parts[1] ?? parts[0] ?? '1', 1),
       numeric(parts[2] ?? '1', 1),
     ]
-    addresses = ['scale.x', 'scale.y', 'scale.z']
-  } else if (property === 'rotate') {
+  } else if (rule.kind === 'rotate') {
     values = [numeric(text === 'none' ? '0deg' : text, 0)]
-    addresses = ['rotate']
-    unit = 'deg'
-  } else if (property === 'opacity') {
+  } else if (rule.kind === 'opacity') {
     values = [numeric(text, 1)]
-    addresses = ['opacity']
   } else {
-    const lengths = lengthAddresses(style, property)
-    if (!lengths) return undefined
-    addresses = lengths
-    values = lengths.map((name) => numeric(style.getPropertyValue(name).trim(), 0))
-    unit = 'px'
+    values = addresses.map((name) => numeric(style.getPropertyValue(name).trim(), 0))
   }
 
   if (values.some((value) => value === undefined)) return undefined
@@ -202,11 +157,17 @@ export function decodeProperty(
     values: numbers,
     addresses,
     serialize(next, bounded = false) {
+      const clamp = rule.clamp
+
       return next
-        .map(
-          (value) =>
-            `${property === 'opacity' ? Math.max(0, Math.min(1, value)) : bounded && ['width', 'height', 'inline-size', 'block-size'].includes(property) ? Math.max(0, value) : value}${unit}`,
-        )
+        .map((value) => {
+          const result =
+            clamp && (!clamp.boundedOnly || bounded)
+              ? Math.max(clamp.minimum, Math.min(clamp.maximum, value))
+              : value
+
+          return `${result}${rule.unit}`
+        })
         .join(' ')
     },
   }
@@ -244,31 +205,9 @@ export function propertyReference(
   property: string,
   destination: string,
 ): string | undefined {
-  if (
-    ![
-      'translate',
-      'scale',
-      'rotate',
-      'opacity',
-      'width',
-      'height',
-      'inline-size',
-      'block-size',
-      'top',
-      'right',
-      'bottom',
-      'left',
-      'inset',
-      'inset-inline',
-      'inset-block',
-      'inset-inline-start',
-      'inset-inline-end',
-      'inset-block-start',
-      'inset-block-end',
-    ].includes(property) ||
-    !/%|(?:em|rem|vw|vh|vmin|vmax)\b|var\(/.test(destination)
-  )
-    return undefined
+  const rule = propertyRule(property)
+  if (!rule || !/%|(?:em|rem|vw|vh|vmin|vmax)\b|var\(/.test(destination)) return undefined
+
   const style = getComputedStyle(element)
   const container =
     style.position === 'absolute'
@@ -276,7 +215,7 @@ export function propertyReference(
       : element.parentElement
   const parent = container ? getComputedStyle(container) : undefined
   const percentage =
-    property === 'translate'
+    rule.kind === 'translate'
       ? [borderSize(style, 'width'), borderSize(style, 'height')]
       : parent
         ? [borderSize(parent, 'width'), borderSize(parent, 'height')]
@@ -296,11 +235,14 @@ export function propertyReference(
 }
 
 export function propertyAddresses(element: HTMLElement, property: string): readonly string[] {
-  if (property === 'translate' || property === 'scale')
-    return ['x', 'y', 'z'].map((axis) => `${property}.${axis}`)
-  if (property === 'rotate' || property === 'opacity') return [property]
+  const rule = propertyRule(property)
 
-  return lengthAddresses(getComputedStyle(element), property) ?? [property]
+  if (!rule) return [property]
+
+  // Static components need no CSSOM read; only length aliases depend on writing context.
+  return rule.kind === 'length'
+    ? resolvePropertyComponents(rule, getComputedStyle(element))
+    : rule.components
 }
 
 /** Expand compatible inset/logical declarations while keeping authored values and easing intact. */
@@ -308,14 +250,14 @@ export function canonicalTracks(
   element: HTMLElement,
   track: import('./resolve.ts').ResolvedTrack,
 ): readonly import('./resolve.ts').ResolvedTrack[] {
-  const addresses = lengthAddresses(getComputedStyle(element), track.property)
-  if (!addresses || (addresses.length === 1 && addresses[0] === track.property)) return [track]
-  const names =
-    track.property === 'inset'
-      ? addresses
-      : addresses.length === 2
-        ? [`${track.property}-start`, `${track.property}-end`]
-        : [track.property]
+  const rule = propertyRule(track.property)
+  if (rule?.kind !== 'length') return [track]
+  const addresses = resolvePropertyComponents(rule, getComputedStyle(element))
+  if (addresses.length === 1 && addresses[0] === track.property) return [track]
+
+  // Authored longhand names split the CSS value; resolved components determine
+  // which physical tracks receive it. Neither step resolves authored units.
+  const names = rule.longhands ?? [track.property]
   const split = (value: string): readonly string[] | undefined => {
     const style = element.ownerDocument.createElement('div').style
     style.setProperty(track.property, value)
