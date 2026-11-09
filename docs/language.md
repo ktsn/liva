@@ -391,9 +391,9 @@ Use ordinary DOM listeners such as `@liva-dismiss="removeItem(item.id)"`.
 Application state changes immediately; it never waits for the leave animation.
 
 The [swipe playground](../playground/src/pages/swipe.vue) combines drag,
-events, a return spring, and leave animation. Each draggable list item has its
-own Motion instance. Release selection uses the persistent drag flag; endpoint
-springs inherit displayed velocity.
+events, velocity-aware release projection, a return spring, and leave animation.
+Each draggable list item has its own Motion instance. Projection selects the snap
+destination; automatic spring momentum preserves the displayed release velocity.
 
 ## Vue presence support
 
@@ -881,7 +881,9 @@ selected, control release transfers that velocity to property motion history bef
 the selected spring is prepared. Distinct occurrences are queued in order, never recursively
 evaluated or coalesced. Mount, reconnection, target replacement, HMR, and disposal
 never replay historical events. The 200ms projection and 48px threshold above are
-application policy.
+application policy. The swipe demo uses projection for snapping, a longer actual
+travel threshold for immediate application deletion, and Vue input for outside
+closure; every row owns independent local state.
 
 ## Automatic spring momentum
 
