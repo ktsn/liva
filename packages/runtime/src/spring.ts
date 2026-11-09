@@ -1,7 +1,32 @@
 import type { Timing } from './definition.ts'
 
 type Spring = Exclude<Timing, { kind: 'tween' }>
+
+/** Midpoint interpolation-error target for adaptive scalar easing samples. */
 export const SPRING_ERROR = 0.0005
+
+/** Rest-position tolerance for unit displacement, retaining the half-easing-error policy. */
+export const SPRING_SETTLE_POSITION_ERROR = SPRING_ERROR / 2
+
+/** Rest-speed tolerance for unit displacement, in value units per second. */
+export const SPRING_SETTLE_VELOCITY_PER_SECOND = 0.001
+
+/**
+ * Consecutive sampled rest required by the scalar search, in seconds. Property
+ * motion uses the same span for a two-point lookback, not a continuous rest check.
+ */
+export const SPRING_SETTLE_WINDOW_SECONDS = 0.064
+
+/** Minimum coarse intervals, retaining short/slow curves' existing sampling density. */
+export const SPRING_MIN_INTERVALS = 32
+
+/**
+ * Coarse intervals per radian of natural frequency: step <= (1 / density) / omega.
+ * This retains the existing 0.1-radian step policy. Scalar easing additionally
+ * refines interpolation error; the density alone does not bound that error.
+ */
+export const SPRING_SAMPLING_DENSITY = 10
+
 export const SPRING_MAX_SECONDS = 10
 export const SPRING_MAX_SAMPLES = 8192
 
@@ -71,7 +96,7 @@ export function springResponse(
 }
 
 function settlingTime(stiffness: number, damping: number, mass: number, cap: number): number {
-  const step = Math.min(1 / 240, 0.1 / Math.sqrt(stiffness / mass))
+  const step = Math.min(1 / 240, 1 / SPRING_SAMPLING_DENSITY / Math.sqrt(stiffness / mass))
   let stable = 0
 
   if (!Number.isFinite(step) || step <= 0 || cap / step > 200_000) {
@@ -81,9 +106,12 @@ function settlingTime(stiffness: number, damping: number, mass: number, cap: num
   for (let t = step; t <= cap; t += step) {
     const { value, velocity } = springResponse(stiffness, damping, mass, t)
     stable =
-      Math.abs(1 - value) < SPRING_ERROR / 2 && Math.abs(velocity) < 0.001 ? stable + step : 0
+      Math.abs(1 - value) < SPRING_SETTLE_POSITION_ERROR &&
+      Math.abs(velocity) < SPRING_SETTLE_VELOCITY_PER_SECOND
+        ? stable + step
+        : 0
 
-    if (stable >= 0.064) {
+    if (stable >= SPRING_SETTLE_WINDOW_SECONDS) {
       return t
     }
   }
@@ -134,7 +162,10 @@ export function sampleSpring(timing: Spring): {
   const duration = durationMs / 1000
 
   const samples: { time: number; value: number }[] = [{ time: 0, value: 0 }]
-  const step = Math.min(duration / 32, 0.1 / Math.sqrt(stiffness / mass))
+  const step = Math.min(
+    duration / SPRING_MIN_INTERVALS,
+    1 / SPRING_SAMPLING_DENSITY / Math.sqrt(stiffness / mass),
+  )
 
   if (duration / step > SPRING_MAX_SAMPLES) {
     throw new Error('Spring exceeds easing sample cap')
