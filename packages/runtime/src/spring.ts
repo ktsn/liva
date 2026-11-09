@@ -62,10 +62,11 @@ function settlingTime(stiffness: number, damping: number, mass: number, cap: num
   throw new Error('Spring did not converge before duration cap')
 }
 
-export function sampleSpring(timing: Spring): {
+export function springParameters(timing: Spring): {
+  stiffness: number
+  damping: number
+  mass: number
   durationMs: number
-  easing: string
-  samples: readonly { time: number; value: number }[]
 } {
   let stiffness: number
   let damping: number
@@ -91,6 +92,17 @@ export function sampleSpring(timing: Spring): {
   ) {
     throw new Error('Invalid spring parameters')
   }
+
+  return { stiffness, damping, mass, durationMs: duration * 1000 }
+}
+
+export function sampleSpring(timing: Spring): {
+  durationMs: number
+  easing: string
+  samples: readonly { time: number; value: number }[]
+} {
+  const { stiffness, damping, mass, durationMs } = springParameters(timing)
+  const duration = durationMs / 1000
 
   const samples: { time: number; value: number }[] = [{ time: 0, value: 0 }]
   const step = Math.min(duration / 32, 0.1 / Math.sqrt(stiffness / mass))
