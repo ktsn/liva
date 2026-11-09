@@ -26,6 +26,7 @@ pub fn type_name(value: expression::Type) -> String {
         Type::Timing => "timing".into(),
         Type::Easing => "easing".into(),
         Type::Target => "target".into(),
+        Type::Event => "event".into(),
         Type::Controller(_) => "controller".into(),
         Type::Record(fields) => format!(
             "{{ {} }}",

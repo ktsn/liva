@@ -1,8 +1,9 @@
+import { createEventValue, type ReactiveNotification } from './events.ts'
 import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { LetBindingGraph } from './let-bindings.ts'
 import { propertyController } from './controllers.ts'
 import * as functions from './builtins/index.ts'
-import type { ReactiveSubscription, RuntimeValue } from './reactive-value.ts'
+import type { ReactiveCall, ReactiveSubscription, RuntimeValue } from './reactive-value.ts'
 import type { LetBinding, Target, Property } from './definition.ts'
 
 it('evaluates forward dependencies and keeps failed evaluations out of committed snapshots', () => {
@@ -454,3 +455,73 @@ it('resolves later declarations before invoking a shadowed function name', () =>
   expect(() => new LetBindingGraph(definitions, {})).toThrow('Value is not callable: drag')
   expect(invoke).not.toHaveBeenCalled()
 })
+
+it.each(['deliver', 'unbind'] as const)(
+  'serializes distinct occurrences published during commit and suppresses obsolete delivery: %s',
+  async (mode) => {
+    const event = createEventValue()
+    let value: RuntimeValue = { event, offset: 0 }
+    let publish: Parameters<ReactiveSubscription['bind']>[1] | undefined
+    const source: ReactiveCall = {
+      get value() {
+        return value
+      },
+      bind(_targets, update) {
+        publish = update
+        return () => {
+          publish = undefined
+        }
+      },
+      prepareUpdate(args) {
+        return {
+          value: { event, offset: args.offset },
+          discard() {},
+          commit() {
+            for (const offset of [1, 2]) {
+              value = { event, offset }
+              publish?.(value, { time: offset * 10, event, snapshots: new Map([[source, value]]) })
+            }
+          },
+        }
+      },
+      dispose() {},
+    }
+    vi.spyOn(functions, 'callBuiltin').mockReturnValue(source)
+    const graph = new LetBindingGraph(
+      [
+        {
+          name: 'source',
+          initializer: {
+            kind: 'call',
+            function: 'eventSource',
+            arguments: [{ name: 'offset', value: { kind: 'reference', path: ['offset'] } }],
+          },
+        },
+      ],
+      { offset: 0 },
+    )
+    const notifications: ReactiveNotification[] = []
+    const cleanups = graph.bind(new Map(), (notification) => {
+      if (notification) notifications.push(notification)
+    })
+
+    graph.evaluate({ offset: 1 })
+    expect(notifications).toEqual([])
+
+    if (mode === 'unbind') for (const cleanup of cleanups) cleanup()
+
+    await Promise.resolve()
+
+    expect(notifications.map((notification) => notification.snapshots.get(source))).toEqual(
+      mode === 'deliver'
+        ? [
+            { event, offset: 1 },
+            { event, offset: 2 },
+          ]
+        : [],
+    )
+
+    for (const cleanup of cleanups) cleanup()
+    graph.dispose()
+  },
+)

@@ -46,6 +46,7 @@ export class ReactiveCallStore {
   private disposed = false
   private notificationPending = false
   private notificationQueued = false
+  private readonly eventNotifications: ReactiveNotification[] = []
 
   private notify = (notification?: ReactiveNotification) => {
     if (!this.binding) return
@@ -57,10 +58,22 @@ export class ReactiveCallStore {
 
     // Binding and commit may publish synchronously. Reentry here would expose only
     // part of the candidate state, so wait until the store leaves the current phase.
-    this.notificationPending = true
+    if (notification?.event) this.eventNotifications.push(notification)
+    else this.notificationPending = true
   }
 
   private flushNotifications() {
+    // Event pulses carry distinct snapshots and must retain their order rather than
+    // coalescing like ordinary state changes. A replaced binding cannot receive them.
+    if (this.eventNotifications.length > 0) {
+      const pending = this.eventNotifications.splice(0)
+      const binding = this.binding
+      queueMicrotask(() => {
+        if (this.binding !== binding) return
+        for (const notification of pending) this.notify(notification)
+      })
+    }
+
     if (!this.notificationPending) return
 
     this.notificationPending = false

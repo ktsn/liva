@@ -30,7 +30,7 @@ fn scalar_vector_and_inline_controllers_are_typed_and_attached() {
       let widthAlias = widthControl
       let offset = link(input: input, component: "y", sensitivity: -1)
       let projected = offset.value.y + offset.velocity.y * 200
-      layer base { width: 240px; translate: 0 0; state closed initial {} state open {} transition closed -> open when signal.released && projected > 100 }
+      layer base { width: 240px; translate: 0 0; state closed initial {} state open {} on signal.release { transition closed -> open when projected > 100 } }
       let signal = drag(target: self)
       layer dragging when signal.active { width := widthAlias; translate := offset; rotate := link(input: input, sensitivity: .5) }
     }"#,

@@ -193,7 +193,7 @@ impl Parser<'_> {
                     break;
                 }
 
-                if depth == 2
+                if depth >= 2
                     && self.tokens[begin].text == "transition"
                     && header_words == 4
                     && self.at() == "when"
@@ -203,6 +203,16 @@ impl Parser<'_> {
                     self.expression_region(true);
                     self.end();
                     guarded_transition = true;
+                    break;
+                }
+
+                if self.tokens[begin].text == "on"
+                    && header_words == 1
+                    && !self.tokens[self.index].trivia
+                {
+                    self.start(Kind::Condition);
+                    self.expression_region(true);
+                    self.end();
                     break;
                 }
 
@@ -242,7 +252,14 @@ impl Parser<'_> {
                 self.gap();
             }
 
-            if guarded_transition && self.at() != "{" {
+            if (guarded_transition
+                || (self
+                    .tokens
+                    .get(begin)
+                    .is_some_and(|token| token.text == "transition")
+                    && header_words == 4))
+                && self.at() != "{"
+            {
                 self.builder
                     .start_node_at(checkpoint, Liva::kind_to_raw(Kind::Block));
                 self.end();
@@ -633,6 +650,8 @@ fn validate_headers(node: &impl AstNode, depth: usize, diagnostics: &mut Vec<Dia
                 ["layer", name, "when", ..] => is_name(name) && words.len() > 3,
                 _ => false,
             }
+        } else if crate::ast::OnBlock::cast(block.syntax().clone()).is_some() {
+            words.first() == Some(&"on") && words.len() > 1
         } else if State::cast(block.syntax().clone()).is_some() {
             match words.as_slice() {
                 ["state", name] => is_name(name),
@@ -645,7 +664,7 @@ fn validate_headers(node: &impl AstNode, depth: usize, diagnostics: &mut Vec<Dia
                 ["transition"] | ["enter"] | ["leave"] => true,
                 ["transition", from, "->", to] => is_name(from) && is_name(to),
                 ["transition", from, "->", to, "when", ..] => {
-                    depth == 2 && is_name(from) && is_name(to) && words.len() > 5
+                    (depth == 2 || depth == 3) && is_name(from) && is_name(to) && words.len() > 5
                 }
                 _ => false,
             }

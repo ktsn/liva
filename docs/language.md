@@ -798,7 +798,7 @@ Use the result in ordinary guarded transitions to return local feedback to idle.
 Vue continues to own asynchronous requests, their outcomes, and duplicate submission
 prevention. The async-submit playground demonstrates both success and failure.
 
-## Property controllers
+## Property controllers and release events
 
 `link(input: number)` returns a scalar controller. `link(input: {x, y})` returns a
 translate controller; scalar input with `component: "x"` or `"y"` also targets
@@ -816,8 +816,10 @@ layer position {
   translate: 0 0
   state closed initial {}
   state open { translate: 96px 0 }
-  transition closed -> open when pointer.released && projected > 48
-  transition open -> closed when pointer.released && projected <= 48
+  on pointer.release {
+    transition closed -> open when projected > 48
+    transition open -> closed when projected <= 48
+  }
 }
 layer dragging when pointer.active { translate := movement }
 ```
@@ -863,6 +865,23 @@ presentation until recovery. Invalid or non-finite inputs fail the transaction a
 retain committed state. Input-derived velocity can differ from displayed motion if
 external CSS constrains or overrides the controlled property.
 
+`drag().release` is an event capability for each successful pointer-up. Existing
+`.released` remains a persistent Boolean until the next gesture. Cancellation and
+lost capture do not emit release. `on eventExpression { ... }` belongs inside a
+stateful layer and contains only that layer's transitions; the guard is optional.
+Aliases of event values work. Booleans, nested event blocks, and arbitrary callbacks
+do not. Each occurrence evaluates outgoing candidates from the starting state once
+per layer. Event and ordinary candidates share source order; the last eligible
+candidate wins. Other layers receive the same occurrence and snapshot. Unmatched
+occurrences are never retried, and observations cannot replay a release.
+
+Terminal pointer-up input is applied to previously effective control before guards
+read frozen displayed position/velocity. Only then does ownership change and the
+selected spring begin. Distinct occurrences are queued in order, never recursively
+evaluated or coalesced. Mount, reconnection, target replacement, HMR, and disposal
+never replay historical events. The 200ms projection and 48px threshold above are
+application policy.
+
 ## Automatic spring momentum
 
 Endpoint-only springs inherit displayed velocity across direct updates, tweens,
@@ -898,4 +917,4 @@ or mathematical rest-time guarantee. Physics sampling retains the existing 10-se
 and 8192-sample limits. Mount, target replacement, and disposal reset motion history.
 Ordinary editor playback starts at rest; attachments show a frozen live snapshot and
 remain source-owned expressions. Captured gesture scenario playback is deferred to
-#116; scrubbing does not drive input.
+#116; scrubbing neither drives input nor emits release occurrences.

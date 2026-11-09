@@ -82,12 +82,19 @@ export class LivaInstance {
   private targets = new Map<string, HTMLElement>()
   private targetElements = new Map<string, HTMLElement[]>()
   private active: ActiveTrack[] = []
+  private bindingRevision = 0
   private readonly propertyMotion = new PropertyMotion()
   private readonly dirtyProperties = new Map<HTMLElement, Set<string>>()
   private referenceFrame?: number
   private readonly referenceRetargets = new Set<string>()
   private controllers = new Map<string, PropertyController>()
   private controllerInstances = new Set<PropertyController>()
+  private applyingVariables = false
+  private variableUpdateScheduled = false
+  private readonly queuedVariableUpdates: {
+    values: VariableValues
+    notification?: ReactiveNotification
+  }[] = []
   private enterSessions = new Set<LifecycleSession>()
   private leaveSessions = new Set<LifecycleSession>()
   private settledLifecycleSessions = new WeakSet<LifecycleSession>()
@@ -795,6 +802,8 @@ export class LivaInstance {
     if (unchanged) return
 
     this.endCompositionPreview()
+    this.bindingRevision++
+    this.queuedVariableUpdates.length = 0
 
     const previousInputs = JSON.stringify(this.values)
 
@@ -836,6 +845,8 @@ export class LivaInstance {
   replaceDefinition(definition: Definition) {
     if (this.disposed) return
     this.endCompositionPreview()
+    this.bindingRevision++
+    this.queuedVariableUpdates.length = 0
 
     const inputs = Object.fromEntries(
       (definition.parameters ?? [])
@@ -1063,15 +1074,53 @@ export class LivaInstance {
   }
 
   private applyVariableValues(values: VariableValues, notification?: ReactiveNotification) {
+    /* v8 ignore if -- @preserve: Public updates guard disposal; graph subscriptions and queued updates are cleared before disposal completes. */
+    if (this.disposed) return
+
+    if (this.applyingVariables) {
+      this.queuedVariableUpdates.push({ values, notification })
+      return
+    }
+
+    this.applyingVariables = true
+
+    try {
+      this.applyVariableTransaction(values, notification)
+    } finally {
+      this.applyingVariables = false
+
+      if (this.queuedVariableUpdates.length > 0 && !this.variableUpdateScheduled) {
+        this.variableUpdateScheduled = true
+        queueMicrotask(() => {
+          this.variableUpdateScheduled = false
+          const next = this.queuedVariableUpdates.shift()
+          if (next)
+            this.applyVariableValues(
+              next.notification ? this.values : next.values,
+              next.notification,
+            )
+        })
+      }
+    }
+  }
+
+  private applyVariableTransaction(values: VariableValues, notification?: ReactiveNotification) {
     this.endCompositionPreview()
     const previous = this.values
+    const revision = this.bindingRevision
 
     try {
       let resolution: LayerResolution | undefined
       values = this.letBindings.evaluate(
         values,
         (snapshot) => {
-          resolution = resolveLayers(this.definition, snapshot, this.layerResolution.states, true)
+          resolution = resolveLayers(
+            this.definition,
+            snapshot,
+            this.layerResolution.states,
+            true,
+            notification?.event,
+          )
 
           for (const event of this.definition.events ?? []) evaluate(event.when, snapshot)
         },
@@ -1079,7 +1128,7 @@ export class LivaInstance {
       )
       this.values = values
       this.evaluateEvents()
-      if (this.disposed) return
+      if (this.disposed || revision !== this.bindingRevision) return
 
       const time = notification?.time ?? performance.now()
 
@@ -1341,6 +1390,7 @@ export class LivaInstance {
 
   dispose() {
     if (this.disposed) return
+    this.queuedVariableUpdates.length = 0
     this.releaseControllers()
     this.leaveSessions.clear()
     for (const session of this.enterSessions) session.cancel('owner-teardown')

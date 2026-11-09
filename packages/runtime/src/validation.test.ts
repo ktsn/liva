@@ -95,8 +95,8 @@ describe('serialized definition validation', () => {
     )
   })
 
-  it('rejects malformed controller expressions', () => {
-    expect.assertions(2)
+  it('rejects malformed controller expressions and event selectors', () => {
+    expect.assertions(4)
     expectInvalidDefinition({
       ...valid,
       layers: [
@@ -116,6 +116,19 @@ describe('serialized definition validation', () => {
               ],
             },
           ],
+        },
+      ],
+    })
+    const layer = valid.layers[0]
+    expectInvalidDefinition({
+      ...valid,
+      layers: [
+        {
+          ...layer,
+          transitions: layer.transitions.map((transition) => ({
+            ...transition,
+            event: { kind: 'unknown' },
+          })),
         },
       ],
     })

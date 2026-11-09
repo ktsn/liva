@@ -13,6 +13,7 @@ module.exports = grammar({
         $.layer,
         $.state,
         $.transition,
+        $.event_block,
         $.property_track,
         $.selector_block,
         $.block,
@@ -61,11 +62,11 @@ module.exports = grammar({
           $.identifier,
           '->',
           $.identifier,
-          'when',
-          repeat1($._header_item),
+          optional(seq('when', repeat1($._header_item))),
           optional($.block),
         ),
       ),
+    event_block: ($) => prec.right(seq('on', repeat1($._header_item), $.block)),
     property_track: ($) =>
       prec(
         2,

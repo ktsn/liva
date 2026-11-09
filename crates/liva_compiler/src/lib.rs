@@ -1153,6 +1153,27 @@ impl Compiler {
                     let mut guarded = vec![];
 
                     for transition in layer.transitions() {
+                        let event = transition
+                            .event_block()
+                            .and_then(|block| block.event_expression())
+                            .and_then(|event| {
+                                match event.check(&scope).and_then(|ty| {
+                                    if ty == expression::Type::Event {
+                                        event.to_output()
+                                    } else {
+                                        Err(event.error("on requires an event-typed expression"))
+                                    }
+                                }) {
+                                    Ok(event) => Some(event),
+
+                                    Err(error) => {
+                                        self.expression_error(error);
+
+                                        None
+                                    }
+                                }
+                            });
+
                         let Some(syn::TransitionSelector::Directional { from, to }) =
                             transition.selector()
                         else {
@@ -1174,30 +1195,40 @@ impl Compiler {
                             }
                         }
 
-                        let Some(condition) = transition.condition() else {
+                        let when = if let Some(condition) = transition.condition() {
+                            let Some(parsed) = self.expression_view(&condition) else {
+                                continue;
+                            };
+
+                            match parsed.check(&scope).and_then(|ty| {
+                                if ty == expression::Type::Boolean {
+                                    parsed.to_output()
+                                } else {
+                                    Err(parsed.error("Transition guard must be Boolean"))
+                                }
+                            }) {
+                                Ok(when) => when,
+
+                                Err(error) => {
+                                    self.expression_error(error);
+
+                                    continue;
+                                }
+                            }
+                        } else if event.is_some() {
+                            expression::Expression {
+                                kind: expression::ExpressionKind::Boolean { value: true },
+                            }
+                        } else {
                             self.error(
                                 "semantic.layer-transition",
                                 "Layer transitions require a Boolean when guard",
                                 &transition,
                             );
+
                             continue;
                         };
-                        let Some(parsed) = self.expression_view(&condition) else {
-                            continue;
-                        };
-                        let when = match parsed.check(&scope).and_then(|ty| {
-                            if ty == expression::Type::Boolean {
-                                parsed.to_output()
-                            } else {
-                                Err(parsed.error("Transition guard must be Boolean"))
-                            }
-                        }) {
-                            Ok(when) => when,
-                            Err(error) => {
-                                self.expression_error(error);
-                                continue;
-                            }
-                        };
+
                         let path = format!("{layer_path}/transition/{}", guarded.len());
                         let animation = self.transition(&transition, &path, &scope);
 
@@ -1228,6 +1259,7 @@ impl Compiler {
                         }
 
                         guarded.push(GuardedTransition {
+                            event,
                             from,
                             to,
                             when,
@@ -1288,8 +1320,34 @@ impl Compiler {
         definition.let_bindings = bindings;
         self.diagnostics.extend(diagnostics);
 
+        self.validate_event_structure(node);
         self.validate(&definition, node);
         definition
+    }
+
+    fn validate_event_structure(&mut self, node: &syn::Motion) {
+        for event in node.syntax().descendants().filter_map(syn::OnBlock::cast) {
+            let layer = event.syntax().parent().and_then(syn::Layer::cast);
+            if layer.is_none_or(|layer| layer.states().next().is_none()) {
+                self.error(
+                    "semantic.event",
+                    "on blocks belong directly inside a stateful layer",
+                    &event,
+                );
+            }
+            if event
+                .syntax()
+                .children()
+                .any(|child| child.kind() != Kind::Header && syn::Transition::cast(child).is_none())
+                || event.decorators().next().is_some()
+            {
+                self.error(
+                    "semantic.event",
+                    "on blocks contain only layer transitions and accept no decorator",
+                    &event,
+                );
+            }
+        }
     }
 
     fn validate(&mut self, def: &Definition, node: &syn::Motion) {

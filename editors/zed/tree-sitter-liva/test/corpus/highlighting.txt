@@ -273,3 +273,91 @@ motion sample(enabled: boolean) {
               (property
                 (identifier))
               (number))))))))
+
+==================
+Controller attachment and typed event transitions
+==================
+motion swipe {
+  let pointer = drag(target: self)
+  let movement = link(input: pointer.offset.x, component: "x")
+  layer position {
+    state closed initial {}
+    state open {}
+    on pointer.release {
+      transition closed -> open when movement.value.x > 48
+      transition open -> closed
+    }
+  }
+  layer dragging when pointer.active {
+    translate := movement
+  }
+}
+
+---
+
+(source_file
+  (motion
+    (identifier)
+    (block
+      (keyword)
+      (identifier)
+      (operator)
+      (call
+        (identifier)
+        (parenthesized
+          (property
+            (identifier))
+          (identifier)))
+      (keyword)
+      (identifier)
+      (operator)
+      (call
+        (identifier)
+        (parenthesized
+          (property
+            (identifier))
+          (identifier)
+          (punctuation)
+          (identifier)
+          (punctuation)
+          (identifier)
+          (punctuation)
+          (property
+            (identifier))
+          (string)))
+      (layer
+        (identifier)
+        (block
+          (state
+            (identifier)
+            (block))
+          (state
+            (identifier)
+            (block))
+          (event_block
+            (identifier)
+            (punctuation)
+            (identifier)
+            (block
+              (transition
+                (identifier)
+                (identifier)
+                (identifier)
+                (punctuation)
+                (identifier)
+                (punctuation)
+                (identifier)
+                (operator)
+                (number))
+              (transition
+                (identifier)
+                (identifier))))))
+      (layer
+        (identifier)
+        (identifier)
+        (punctuation)
+        (identifier)
+        (block
+          (property
+            (identifier))
+          (identifier))))))

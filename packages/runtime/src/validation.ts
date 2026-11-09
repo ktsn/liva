@@ -236,6 +236,7 @@ function isLayer(value: unknown): value is Layer {
             typeof item.from === 'string' &&
             typeof item.to === 'string' &&
             isExpression(item.when) &&
+            (item.event === undefined || isExpression(item.event)) &&
             isTransition(item.transition),
         )))
   )
