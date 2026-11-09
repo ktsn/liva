@@ -5,40 +5,69 @@ export const SPRING_ERROR = 0.0005
 export const SPRING_MAX_SECONDS = 10
 export const SPRING_MAX_SAMPLES = 8192
 
-/** Analytic unit-step response; values remain scalar and may exceed one. */
+/**
+ * Samples one spring component from arbitrary start/end values and initial velocity.
+ * Stiffness, damping, and mass must be positive finite physical parameters; elapsed
+ * time is in seconds and incoming/returned velocities use value units per second.
+ * Covers under-, critical-, and over-damped motion without clamping or snapping.
+ */
+export function springState(
+  start: number,
+  end: number,
+  initialVelocity: number,
+  stiffness: number,
+  damping: number,
+  mass: number,
+  seconds: number,
+) {
+  const omega = Math.sqrt(stiffness / mass)
+  const decay = damping / (2 * mass)
+  const delta = omega * omega - decay * decay
+  const displacement = start - end
+  let value: number
+  let velocity: number
+
+  if (Math.abs(delta) < omega * omega * 1e-8) {
+    const coefficient = initialVelocity + decay * displacement
+    const exponential = Math.exp(-decay * seconds)
+    value = (displacement + coefficient * seconds) * exponential
+    velocity = (coefficient - decay * (displacement + coefficient * seconds)) * exponential
+  } else if (delta > 0) {
+    const frequency = Math.sqrt(delta)
+    const coefficient = (initialVelocity + decay * displacement) / frequency
+    const exponential = Math.exp(-decay * seconds)
+    const cosine = Math.cos(frequency * seconds)
+    const sine = Math.sin(frequency * seconds)
+    const basis = displacement * cosine + coefficient * sine
+    value = exponential * basis
+    velocity =
+      exponential *
+      (-decay * basis - displacement * frequency * sine + coefficient * frequency * cosine)
+  } else {
+    const root = Math.sqrt(-delta)
+    const slow = (-omega * omega) / (decay + root)
+    const fast = -decay - root
+    const a = (initialVelocity - fast * displacement) / (slow - fast)
+    const b = displacement - a
+    value = a * Math.exp(slow * seconds) + b * Math.exp(fast * seconds)
+    velocity = a * slow * Math.exp(slow * seconds) + b * fast * Math.exp(fast * seconds)
+  }
+
+  return { value: end + value, velocity }
+}
+
+/**
+ * Samples progress from 0 to 1 with zero initial velocity, using positive finite
+ * physical parameters and elapsed seconds. Velocity is progress per second;
+ * progress remains unclamped so the browser can preserve overshoot.
+ */
 export function springResponse(
   stiffness: number,
   damping: number,
   mass: number,
   seconds: number,
 ): { value: number; velocity: number } {
-  const omega = Math.sqrt(stiffness / mass)
-  const decay = damping / (2 * mass)
-  const delta = omega * omega - decay * decay
-  let displacement: number
-  let velocity: number
-
-  if (Math.abs(delta) < omega * omega * 1e-8) {
-    const exponential = Math.exp(-decay * seconds)
-    displacement = (1 + decay * seconds) * exponential
-    velocity = decay * decay * seconds * exponential
-  } else if (delta > 0) {
-    const frequency = Math.sqrt(delta)
-    const exponential = Math.exp(-decay * seconds)
-    displacement =
-      exponential *
-      (Math.cos(frequency * seconds) + (decay / frequency) * Math.sin(frequency * seconds))
-    velocity = exponential * ((omega * omega) / frequency) * Math.sin(frequency * seconds)
-  } else {
-    const root = Math.sqrt(-delta)
-    const slow = (-omega * omega) / (decay + root)
-    const fast = -decay - root
-    displacement =
-      (fast * Math.exp(slow * seconds) - slow * Math.exp(fast * seconds)) / (fast - slow)
-    velocity = (slow * fast * (Math.exp(fast * seconds) - Math.exp(slow * seconds))) / (fast - slow)
-  }
-
-  return { value: 1 - displacement, velocity }
+  return springState(0, 1, 0, stiffness, damping, mass, seconds)
 }
 
 function settlingTime(stiffness: number, damping: number, mass: number, cap: number): number {

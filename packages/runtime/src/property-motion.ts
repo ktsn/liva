@@ -1,6 +1,6 @@
 import { waapiProperty } from './animation.ts'
 import type { Timing } from './definition.ts'
-import { springParameters, SPRING_MAX_SECONDS, SPRING_MAX_SAMPLES } from './spring.ts'
+import { springState, springParameters, SPRING_MAX_SECONDS, SPRING_MAX_SAMPLES } from './spring.ts'
 import {
   decodeDestination,
   decodeProperty,
@@ -35,57 +35,6 @@ type PropertyHistory = {
 }
 
 /**
- * Samples one damped spring component at elapsed seconds using positive physical
- * parameters. Start/end use canonical component units; incoming/returned velocities
- * use units per millisecond, including under-, critical-, and over-damped motion.
- */
-function oscillator(
-  start: number,
-  end: number,
-  initialVelocity: number,
-  stiffness: number,
-  damping: number,
-  mass: number,
-  seconds: number,
-) {
-  const omega = Math.sqrt(stiffness / mass)
-  const decay = damping / (2 * mass)
-  const delta = omega * omega - decay * decay
-  const displacement = start - end
-  const incoming = initialVelocity * 1000
-  let value: number
-  let velocity: number
-
-  if (Math.abs(delta) < omega * omega * 1e-8) {
-    const coefficient = incoming + decay * displacement
-    const exponential = Math.exp(-decay * seconds)
-    value = (displacement + coefficient * seconds) * exponential
-    velocity = (coefficient - decay * (displacement + coefficient * seconds)) * exponential
-  } else if (delta > 0) {
-    const frequency = Math.sqrt(delta)
-    const coefficient = (incoming + decay * displacement) / frequency
-    const exponential = Math.exp(-decay * seconds)
-    const cosine = Math.cos(frequency * seconds)
-    const sine = Math.sin(frequency * seconds)
-    const basis = displacement * cosine + coefficient * sine
-    value = exponential * basis
-    velocity =
-      exponential *
-      (-decay * basis - displacement * frequency * sine + coefficient * frequency * cosine)
-  } else {
-    const root = Math.sqrt(-delta)
-    const slow = (-omega * omega) / (decay + root)
-    const fast = -decay - root
-    const a = (incoming - fast * displacement) / (slow - fast)
-    const b = displacement - a
-    value = a * Math.exp(slow * seconds) + b * Math.exp(fast * seconds)
-    velocity = a * slow * Math.exp(slow * seconds) + b * fast * Math.exp(fast * seconds)
-  }
-
-  return { value: end + value, velocity: velocity / 1000 }
-}
-
-/**
  * Builds a numeric spring trajectory for equally sized start/end/velocity vectors.
  * Velocities use canonical units per millisecond. Returns its duration, normalized
  * keyframe samples ending exactly at end, and a sampler taking elapsed milliseconds.
@@ -104,13 +53,23 @@ export function springMotion(
 
   /** Samples every component at the same elapsed time, retaining analytic velocity. */
   const sample = (milliseconds: number): MotionSample => {
+    // The shared physical solver uses seconds; Motion observations and velocities
+    // use milliseconds. Convert only at this boundary so handoff units stay stable.
     const components = start.map((value, index) =>
-      oscillator(value, end[index], velocity[index], stiffness, damping, mass, milliseconds / 1000),
+      springState(
+        value,
+        end[index],
+        velocity[index] * 1000,
+        stiffness,
+        damping,
+        mass,
+        milliseconds / 1000,
+      ),
     )
 
     return {
       value: components.map((component) => component.value),
-      velocity: components.map((component) => component.velocity),
+      velocity: components.map((component) => component.velocity / 1000),
     }
   }
 
