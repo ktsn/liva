@@ -8,20 +8,37 @@ import {
   type NumericProperty,
 } from './property-codec.ts'
 
+/** Freshness window for direct-write handoff velocity, in milliseconds. */
 export const DIRECT_SAMPLE_WINDOW_MS = 80
 
+/** Spring timing accepted by numeric trajectories; browser tween timing is handled elsewhere. */
 type SpringTiming = Exclude<Timing, { kind: 'tween' }>
+
+/** Canonical component values and matching velocities in component units per millisecond. */
 export type MotionSample = {
   readonly value: readonly number[]
   readonly velocity: readonly number[]
 }
+
+/** One direct-write observation with a performance.now()-compatible timestamp in milliseconds. */
 type Sample = { time: number; value: number }
+
+/**
+ * Observations for one target/component address. A registered animation takes
+ * precedence over direct samples; its optional trajectory supplies analytic velocity
+ * at effect-local milliseconds. The animation's creator owns cancellation.
+ */
 type PropertyHistory = {
   samples: Sample[]
   animation?: Animation
   trajectory?: (milliseconds: number) => number
 }
 
+/**
+ * Samples one damped spring component at elapsed seconds using positive physical
+ * parameters. Start/end use canonical component units; incoming/returned velocities
+ * use units per millisecond, including under-, critical-, and over-damped motion.
+ */
 function oscillator(
   start: number,
   end: number,
@@ -68,6 +85,12 @@ function oscillator(
   return { value: end + value, velocity: velocity / 1000 }
 }
 
+/**
+ * Builds a numeric spring trajectory for equally sized start/end/velocity vectors.
+ * Velocities use canonical units per millisecond. Returns its duration, normalized
+ * keyframe samples ending exactly at end, and a sampler taking elapsed milliseconds.
+ * Throws for invalid spring parameters or if settling exceeds timing/sampling limits.
+ */
 export function springMotion(
   timing: SpringTiming,
   start: readonly number[],
@@ -79,6 +102,7 @@ export function springMotion(
   const { mass } = parameters
   const amplitude = start.map((value, index) => Math.max(1, Math.abs(value - end[index])))
 
+  /** Samples every component at the same elapsed time, retaining analytic velocity. */
   const sample = (milliseconds: number): MotionSample => {
     const components = start.map((value, index) =>
       oscillator(value, end[index], velocity[index], stiffness, damping, mass, milliseconds / 1000),
@@ -89,6 +113,8 @@ export function springMotion(
       velocity: components.map((component) => component.velocity),
     }
   }
+
+  /** Tests position and velocity against displacement-relative settling tolerances. */
   const settled = (at: number) => {
     const current = sample(at)
 
@@ -132,14 +158,23 @@ export function springMotion(
   return { durationMs, samples, sample }
 }
 
-/** A Motion owns its histories, so target replacement/disposal never reuses an old session. */
+/**
+ * Tracks displayed values and handoff velocity for one Motion instance, keyed by
+ * element and canonical component address so CSS aliases share observations.
+ * Direct observations use performance.now()-compatible milliseconds; decoded values
+ * use canonical units and velocities use those units per millisecond. Unreadable or
+ * unsupported properties cannot supply samples or prepared springs.
+ * Animation creation/cancellation remains the caller's responsibility.
+ */
 export class PropertyMotion {
   private histories = new WeakMap<HTMLElement, Map<string, PropertyHistory>>()
 
+  /** Forgets all target histories and animation references without cancelling their effects. */
   reset() {
     this.histories = new WeakMap()
   }
 
+  /** Returns this instance's component history, creating an empty entry on first access. */
   private history(element: HTMLElement, address: string): PropertyHistory {
     let properties = this.histories.get(element)
 
@@ -158,6 +193,10 @@ export class PropertyMotion {
     return history
   }
 
+  /**
+   * Records displayed components at time while preserving registered animations
+   * that are still active, including paused effects. Unreadable values are ignored.
+   */
   observe(element: HTMLElement, property: string, time: number) {
     const decoded = decodeProperty(element, property)
     if (!decoded) return
@@ -172,6 +211,10 @@ export class PropertyMotion {
     this.recordValues(element, decoded, decoded.values, time, protectedAddresses)
   }
 
+  /**
+   * Starts a direct-control session from the current displayed value at time.
+   * Replaces prior velocity history and effect references; unreadable values are ignored.
+   */
   beginControl(element: HTMLElement, property: string, time: number) {
     const decoded = decodeProperty(element, property)
     if (!decoded) return
@@ -184,6 +227,10 @@ export class PropertyMotion {
     }
   }
 
+  /**
+   * Records the currently displayed value as direct observations. Protected canonical
+   * addresses retain their histories; other components stop following registered effects.
+   */
   record(
     element: HTMLElement,
     property: string,
@@ -196,6 +243,11 @@ export class PropertyMotion {
     this.recordValues(element, decoded, decoded.values, time, protectedAddresses)
   }
 
+  /**
+   * Commits supplied values in decoded.addresses order, replacing effect references
+   * for unprotected components. Time shares the observation clock; stale movement
+   * expires and same-time writes replace the previous observation.
+   */
   recordValues(
     element: HTMLElement,
     decoded: NumericProperty,
@@ -225,6 +277,12 @@ export class PropertyMotion {
     }
   }
 
+  /**
+   * Reads displayed values and their velocity without recording a new observation.
+   * Uses registered effect velocity when available, otherwise recent direct samples;
+   * missing, stale, nonforward, or completed motion contributes zero velocity.
+   * Returns undefined when the displayed value cannot be decoded.
+   */
   read(element: HTMLElement, property: string, time = performance.now()): MotionSample | undefined {
     const decoded = decodeProperty(element, property)
     if (!decoded) return undefined
@@ -261,6 +319,11 @@ export class PropertyMotion {
     return { value: decoded.values, velocity }
   }
 
+  /**
+   * Predicts direct-write velocity for supplied values at time without committing
+   * those observations. Values must follow the property's decoded component order.
+   * Returns undefined if the target cannot be decoded; missing/stale history yields zero.
+   */
   predict(
     element: HTMLElement,
     property: string,
@@ -288,6 +351,11 @@ export class PropertyMotion {
     return { value: values, velocity }
   }
 
+  /**
+   * Estimates displayed units/ms around a registered document-timeline effect's
+   * current time, including playbackRate. Restores its time and running state before
+   * returning; a time range with no sampling interval contributes zero velocity.
+   */
   private nativeVelocity(
     element: HTMLElement,
     property: string,
@@ -320,6 +388,12 @@ export class PropertyMotion {
     }
   }
 
+  /**
+   * Associates an effect with every canonical component of a readable property.
+   * An optional trajectory returns values/units-per-ms velocity at effect-local
+   * milliseconds; without it, read estimates velocity from native interpolation.
+   * The caller retains ownership of the effect and its cancellation.
+   */
   register(
     element: HTMLElement,
     property: string,
@@ -337,6 +411,13 @@ export class PropertyMotion {
     }
   }
 
+  /**
+   * Prepares endpoint-only WAAPI spring frames using displayed values and velocity.
+   * Returns undefined for non-endpoint tracks, incompatible numeric endpoints, or
+   * stationary non-opacity values without relative dependencies, allowing the caller's
+   * ordinary animation path. Relative endpoints and opacity may start at rest.
+   * Returned frames use bounded serialization; spring settling/sampling failures throw.
+   */
   prepareSpring(
     element: HTMLElement,
     property: string,

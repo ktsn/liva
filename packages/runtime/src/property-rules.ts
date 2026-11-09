@@ -1,10 +1,16 @@
-/** CSS context needed to resolve logical components; no DOM access is performed here. */
+/**
+ * Computed CSS writing-mode/direction strings used to resolve logical components.
+ * Can be supplied independently of the DOM; only direction='rtl' reverses inline flow.
+ */
 export interface WritingContext {
   readonly writingMode: string
   readonly direction: string
 }
 
+/** Physical dimension or side used as a canonical length address. */
 type PhysicalLength = 'width' | 'height' | 'top' | 'right' | 'bottom' | 'left'
+
+/** Semantic length component awaiting resolution in a writing context; not a CSS name. */
 type LogicalLength =
   | 'inlineSize'
   | 'blockSize'
@@ -12,6 +18,8 @@ type LogicalLength =
   | 'inlineEnd'
   | 'blockStart'
   | 'blockEnd'
+
+/** One independently owned numeric value, possibly awaiting logical-to-physical resolution. */
 type Component =
   | PhysicalLength
   | LogicalLength
@@ -24,6 +32,8 @@ type Component =
  * Components identify independent physical values after logical resolution. Longhands
  * name the authored CSS fields used to split a shorthand without resolving its units.
  * Clamps apply either to every serialization or only when bounded output is requested.
+ * Component/longhand ordering must agree so decoded values and expanded tracks refer
+ * to the same physical values. Units describe canonical output, not authored input.
  */
 export interface PropertyRule {
   readonly kind: 'length' | 'translate' | 'scale' | 'rotate' | 'opacity'
@@ -93,6 +103,10 @@ const rules: ReadonlyMap<string, PropertyRule> = new Map([
   ['inset-block-end', { ...length, components: ['blockEnd'] }],
 ])
 
+/**
+ * Physical axes and ordered [start, end] sides for a writing mode under LTR.
+ * Direction can reverse the inline pair; the block pair is independent of direction.
+ */
 type Flow = {
   readonly inlineSize: 'width' | 'height'
   readonly blockSize: 'width' | 'height'
@@ -124,13 +138,18 @@ const flows: ReadonlyMap<string, Flow> = new Map([
   ['sideways-lr', { ...verticalLeft, inline: ['bottom', 'top'] }],
 ])
 
-/** Returns the supported numeric rule, or undefined for an unrecognized property. */
+/**
+ * Returns shared, read-only numeric semantics for an exact CSS property name.
+ * Unrecognized names return undefined and remain outside numeric decoding.
+ */
 export function propertyRule(property: string): PropertyRule | undefined {
   return rules.get(property)
 }
 
 /**
  * Resolves a supported rule's components using writing mode and direction.
+ * Output order matches the rule, with logical lengths replaced by physical names;
+ * physical lengths and transform components retain their identities. No DOM is read.
  * Unknown modes retain the vertical fallback (right-to-left block flow for an rl
  * suffix); empty CSSOM context, such as a detached element, follows vertical-lr.
  */
