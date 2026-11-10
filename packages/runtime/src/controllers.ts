@@ -18,7 +18,7 @@ export interface ControllerAddress {
  * ownership. Configure one address before binding its reactive call, then acquire
  * when it becomes the effective owner. The host applies control() writes and records
  * them through the configured PropertyMotion, releasing when ownership ends.
- * Observation subscription cleanup belongs to the ReactiveCall's bind/dispose API.
+ * Receiving-element cleanup belongs to the ReactiveCall's bind/dispose API.
  */
 export interface PropertyController {
   /** Assigns the receiving address; a different target/property after configuration throws. */
@@ -27,10 +27,10 @@ export interface PropertyController {
   /** Captures a readable displayed origin at time in milliseconds; repeated acquisition is inert. */
   acquire(time: number): void
 
-  /** Ends direct ownership while allowing inactive observations to continue. */
-  release(): void
+  /** Ends direct ownership and hands fresh input velocity to motion history at time in ms. */
+  release(time?: number): void
 
-  /** Toggles frame-driven observation freezing for manual preview. */
+  /** Toggles on-demand snapshot freezing for manual preview. */
   setPreview(active: boolean): void
 
   /** Formats an attached compatible preview snapshot, or undefined for fallback observations. */

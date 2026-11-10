@@ -23,7 +23,7 @@ type Configuration = {
 /** Displayed origin and raw input captured when relative control starts or sensitivity rebases. */
 type Session = { readonly origin: readonly number[]; readonly input: readonly number[] }
 
-/** One mapped fallback component observed on the performance.now() millisecond clock. */
+/** One mapped input component sampled on the performance.now() millisecond clock. */
 type Sample = { readonly value: number; readonly time: number }
 
 /** Bounded per-component movement history; unchanged axes retain their own sampling times. */
@@ -84,16 +84,12 @@ function readable(values: readonly number[], vector: boolean): RuntimeValue {
   return vector ? Object.freeze({ x: values[0], y: values[1], z: values[2] }) : values[0]
 }
 
-/** Compares readable snapshot contents; capability identity is stored outside the record. */
-function equal(left: RuntimeValue, right: RuntimeValue): boolean {
-  return JSON.stringify(left) === JSON.stringify(right)
-}
-
 /**
- * Owns one link call's mapping, relative-control session, fallback history, and DOM
- * observation subscription. Prepared updates leave committed configuration intact
- * until accepted. The receiving owner applies control writes and records them in
- * PropertyMotion; this adapter observes and proposes values without writing styles.
+ * Owns one link call's mapping, relative-control session, and committed input history.
+ * Velocity is derived from input updates, never from frame polling or other owners'
+ * animations. Displayed positions are read on demand. Prepared updates leave live
+ * state intact until accepted. The receiving owner applies proposed CSS writes;
+ * release transfers input velocity to PropertyMotion for the next spring.
  */
 class Link implements ReactiveCall, PropertyController {
   private current: Configuration
@@ -181,20 +177,16 @@ class Link implements ReactiveCall, PropertyController {
     )
   }
 
-  /** Starts each fallback component at rest without retaining another source's movement. */
+  /** Starts each input component at rest without carrying movement across control sessions. */
   private restHistory(time: number): readonly History[] {
     return mapped(this.current).map((value) => ({ last: { value, time } }))
   }
 
-  /** Estimates mapped-input units/ms from fresh history; source/configuration resets start at rest. */
-  private fallbackVelocity(
-    value: readonly number[],
-    time: number,
-    reset: boolean,
-  ): readonly number[] {
+  /** Estimates mapped-input units/ms from fresh history; acquisition/configuration resets start at rest. */
+  private inputVelocity(value: readonly number[], time: number, reset: boolean): readonly number[] {
     if (reset) return value.map(() => 0)
 
-    // Like PropertyMotion.predict, each axis derives from its own last change.
+    // Each axis derives from its own last change.
     // A movement on Y must not shorten X's sampling interval or expire its hold.
     return value.map((entry, index) => {
       const { last, previous } = this.history[index]
@@ -212,8 +204,9 @@ class Link implements ReactiveCall, PropertyController {
 
   /**
    * Builds an immutable candidate observation without accepting configuration or
-   * session changes. Attached values use CSS px/deg and corresponding units/ms;
-   * unreadable targets expose mapped input and its recent fallback velocity.
+   * session changes. Attached positions use CSS px/deg; unreadable targets expose
+   * mapped input. Velocity always uses mapped input units per millisecond, with
+   * unmapped axes at rest, regardless of the currently displayed animation.
    */
   private capture(
     config: Configuration,
@@ -223,62 +216,21 @@ class Link implements ReactiveCall, PropertyController {
   ): RuntimeValue {
     const actual = this.actual()
     const projected = actual && projectInput ? this.projection(config, session) : undefined
-    const element = this.element
-    const address = this.address
-    const wasAttached = typeof this.published === 'object' && this.published.attached === true
-    let values = mapped(config)
-    let velocity = this.fallbackVelocity(
-      values,
+    const velocity = this.inputVelocity(
+      mapped(config),
       time,
-      wasAttached || config.sensitivity !== this.current.sensitivity,
+      config.sensitivity !== this.current.sensitivity,
     )
-    let attached = false
-
-    if (actual && element && address) {
-      const sample = projected
-        ? address.motion.predict(element, address.property, projected, time)
-        : address.motion.read(element, address.property, time)
-
-      /* v8 ignore else -- @preserve: actual() just decoded this same element/property synchronously, before any DOM write or callback. */
-      if (sample) {
-        values = sample.value
-        // A fresh acquisition supplies its own rest baseline, even before the
-        // observer publishes recovery. Preserve motion measured from that baseline.
-        velocity = wasAttached || session ? sample.velocity : sample.velocity.map(() => 0)
-        attached = true
-      }
-    }
+    const values = projected ?? actual?.values ?? mapped(config)
 
     return controllerSnapshot(
       this,
       Object.freeze({
         value: readable(values, config.vector),
         velocity: readable(velocity, config.vector),
-        attached,
+        attached: actual !== undefined,
       }),
     )
-  }
-
-  /** Accepts an observation and its source transition as one committed state change. */
-  private publish(value: RuntimeValue, time: number) {
-    if (
-      typeof value === 'object' &&
-      typeof this.published === 'object' &&
-      value.attached !== this.published.attached
-    ) {
-      this.history = this.restHistory(time)
-
-      // Argument commits can observe target absence before the next RAF. Retire
-      // the old origin here as well, so publishing fallback cannot mask that loss.
-      if (value.attached !== true) this.session = undefined
-
-      // Recovery may already have acquired a fresh session before publication.
-      // Otherwise discard stale direct samples without taking over registered motion.
-      if (!this.session && this.element && this.address)
-        this.address.motion.observe(this.element, this.address.property, time, { reset: true })
-    }
-
-    this.published = value
   }
 
   /** Reads at the supplied millisecond timestamp, or returns the published record during preview. */
@@ -289,7 +241,7 @@ class Link implements ReactiveCall, PropertyController {
   /**
    * Prepares a candidate snapshot on the observation clock. Invalid input, shape
    * changes, or invalid projected CSS throw before live state changes. Commit accepts
-   * the mapping/session/source together; discard leaves the active pose untouched.
+   * the mapping/session/history together; discard leaves the active pose untouched.
    */
   prepareUpdate(args: FunctionArguments, context = { time: performance.now() }): PreparedUpdate {
     const next = configuration(args)
@@ -336,8 +288,10 @@ class Link implements ReactiveCall, PropertyController {
         })
 
         this.current = next
-        this.session = session
-        this.publish(value, context.time)
+        // An unreadable target ends the old relative session only on acceptance.
+        // A discarded preparation must not lose the origin of live control.
+        this.session = typeof value === 'object' && value.attached === true ? session : undefined
+        this.published = value
       },
       discard() {},
     }
@@ -351,23 +305,31 @@ class Link implements ReactiveCall, PropertyController {
     if (!actual || !this.element || !this.address) return
 
     this.session = { origin: actual.values, input: this.current.input }
+    this.history = this.restHistory(time)
     this.address.motion.beginControl(this.element, this.address.property, time)
   }
 
-  /** Ends relative control while keeping inactive observation subscribed. */
-  release() {
+  /** Ends control, transferring fresh mapped-input velocity at the supplied millisecond time. */
+  release(time = performance.now()) {
+    if (this.session && this.element && this.address) {
+      this.address.motion.endControl(
+        this.element,
+        this.address.property,
+        this.inputVelocity(mapped(this.current), time, false),
+        time,
+      )
+    }
+
     this.session = undefined
   }
 
-  /** Freezes frame-driven observations; preview exit resets direct samples while retaining effects. */
+  /** Freezes on-demand snapshots during manual preview without advancing input history. */
   setPreview(active: boolean) {
     if (active === this.preview) return
 
     const time = performance.now()
 
-    if (active) this.publish(this.capture(this.current, time), time)
-    else if (this.element && this.address)
-      this.address.motion.observe(this.element, this.address.property, time, { reset: true })
+    if (active) this.published = this.capture(this.current, time)
 
     this.preview = active
   }
@@ -399,6 +361,7 @@ class Link implements ReactiveCall, PropertyController {
     this.diagnose()
     const actual = this.actual()
     const values = actual ? this.projection(this.current) : undefined
+    if (!actual) this.session = undefined
     if (!actual || !values || !this.element || !this.address) return undefined
     const value = actual.serialize(values)
 
@@ -406,25 +369,20 @@ class Link implements ReactiveCall, PropertyController {
   }
 
   /**
-   * Observes configured targets until cleanup/disposal or another bind. Notifications
-   * are synchronous and may themselves unbind/rebind this call. Cleanup is idempotent
-   * and retains the current input mapping as an unbound fallback observation. Initial
-   * binding failures release that binding's receiver and propagate to the caller.
+   * Binds the receiving element for on-demand reads without scheduling frames or
+   * notifications. Cleanup is idempotent and restores mapped fallback observations.
+   * Diagnostics may synchronously dispose/rebind; a failed bind releases its own
+   * receiver before propagating the error.
    */
-  bind(
-    targets: ReadonlyMap<string, HTMLElement>,
-    update: (value: RuntimeValue) => void,
-  ): () => void {
+  bind(targets: ReadonlyMap<string, HTMLElement>): () => void {
     this.cleanup?.()
 
     let active = true
-    let frame: number | undefined
 
     const cleanup = () => {
       if (!active) return
 
       active = false
-      if (frame !== undefined) cancelAnimationFrame(frame)
 
       this.element = undefined
       this.session = undefined
@@ -432,43 +390,13 @@ class Link implements ReactiveCall, PropertyController {
       this.published = this.capture(this.current, performance.now())
     }
 
-    // Initial diagnostics can dispose/rebind synchronously, before the first RAF.
-    // Publish cleanup ownership first so those callbacks can retire this binding.
+    // Install cleanup ownership before diagnostics, whose callback may rebind.
     this.cleanup = cleanup
-
-    const observe = () => {
-      if (this.preview) {
-        frame = requestAnimationFrame(observe)
-        return
-      }
-
-      const time = performance.now()
-      if (this.element && this.address)
-        this.address.motion.observe(this.element, this.address.property, time)
-
-      const next = this.capture(this.current, time)
-      this.diagnose()
-
-      // Reporting may dispose or replace this binding synchronously.
-      if (!active) return
-
-      if (!equal(next, this.published)) {
-        this.publish(next, time)
-
-        update(next)
-      }
-
-      // A notification can retire this observer or install a new one. Only the
-      // still-active binding owns the right to schedule its next frame.
-      if (active) frame = requestAnimationFrame(observe)
-    }
 
     try {
       this.element = this.address ? targets.get(this.address.target) : undefined
       this.published = this.capture(this.current, performance.now())
       this.diagnose()
-
-      if (active) frame = requestAnimationFrame(observe)
     } catch (error) {
       cleanup()
       throw error
@@ -477,7 +405,7 @@ class Link implements ReactiveCall, PropertyController {
     return cleanup
   }
 
-  /** Releases the observation subscription once; repeated disposal is harmless. */
+  /** Releases the receiving element once; repeated disposal is harmless. */
   dispose() {
     this.cleanup?.()
   }
@@ -487,8 +415,11 @@ class Link implements ReactiveCall, PropertyController {
  * Creates a reactive controller from finite scalar input or an exact {x, y} record.
  * Optional component='x'/'y' selects a translate axis for scalar input; shape/component
  * stay fixed, while finite sensitivity (default 1, including zero/negative values)
- * may change. Snapshots contain immutable value, velocity, and attached fields;
- * unbound values use mapped input and velocities use input units per millisecond.
+ * may change. Snapshots contain immutable value, velocity, and attached fields.
+ * Positions sample the receiver on evaluation, or mapped input when unavailable.
+ * Velocity comes only from committed input updates, in mapped units per millisecond;
+ * samples expire after DIRECT_SAMPLE_WINDOW_MS, including unchanged-input releases.
+ * No frames or notifications are scheduled for stationary input or running animations.
  *
  * The receiving owner validates compatibility: scalar adapters target numeric
  * dimensions/inset longhands or scalar rotate, and vector/component adapters target

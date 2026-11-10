@@ -97,10 +97,8 @@ describe('property motion ownership contracts', () => {
 
     expect(decodeProperty(element, 'translate')).toBeUndefined()
     expect(motion.read(element, 'translate')).toBeUndefined()
-    expect(motion.predict(element, 'translate', [10, 0, 0], 10)).toBeUndefined()
     expect(motion.prepareSpring(element, 'translate', '100px', physics, true)).toBeUndefined()
 
-    motion.observe(element, 'translate', 10)
     motion.beginControl(element, 'translate', 10)
     motion.record(element, 'translate', 10)
     const animation = new Animation()
@@ -110,54 +108,6 @@ describe('property motion ownership contracts', () => {
     document.body.append(element)
 
     expect(motion.read(element, 'translate', 20)?.velocity).toEqual([0, 0, 0])
-  })
-
-  it.each([false, true])(
-    'preserves native animation velocity during observation reset=%s',
-    (reset) => {
-      const element = target()
-      const motion = new PropertyMotion()
-      const animation = element.animate([{ translate: '0px' }, { translate: '100px' }], {
-        duration: 1000,
-        fill: 'both',
-      })
-      animation.pause()
-      animation.currentTime = 200
-      motion.register(element, 'translate', animation)
-
-      motion.observe(element, 'translate', 200, { reset })
-
-      expect(motion.read(element, 'translate', 200)?.velocity[0]).toBeCloseTo(0.1, 4)
-
-      animation.finish()
-      motion.observe(element, 'translate', 1000)
-
-      expect(motion.read(element, 'translate', 1000)?.velocity).toEqual([0, 0, 0])
-
-      animation.cancel()
-      motion.observe(element, 'translate', 1010)
-
-      expect(motion.read(element, 'translate', 1010)?.value).toEqual([0, 0, 0])
-    },
-  )
-
-  it('resets direct observation history without acquiring a control session', () => {
-    const element = target()
-    const motion = new PropertyMotion()
-    motion.observe(element, 'translate', 100)
-    element.style.translate = '20px 0px'
-    motion.observe(element, 'translate', 120)
-
-    expect(motion.read(element, 'translate', 120)?.velocity).toEqual([1, 0, 0])
-
-    motion.observe(element, 'translate', 130, { reset: true })
-
-    expect(motion.read(element, 'translate', 130)?.velocity).toEqual([0, 0, 0])
-
-    element.style.translate = '30px 0px'
-    motion.observe(element, 'translate', 140)
-
-    expect(motion.read(element, 'translate', 140)?.velocity).toEqual([1, 0, 0])
   })
 
   it('starts a direct-control session at rest and expires stationary observations', () => {
@@ -174,8 +124,8 @@ describe('property motion ownership contracts', () => {
     expect(motion.read(element, 'translate', 30)?.velocity).toEqual([0, 0, 0])
 
     element.style.translate = '30px 0px'
-    motion.observe(element, 'translate', 40)
-    motion.observe(element, 'translate', 130)
+    motion.record(element, 'translate', 40)
+    motion.record(element, 'translate', 130)
 
     expect(motion.read(element, 'translate', 130)?.velocity).toEqual([0, 0, 0])
   })
@@ -191,16 +141,6 @@ describe('property motion ownership contracts', () => {
     motion.record(element, 'translate', 120)
 
     expect(motion.read(element, 'translate', 120)?.velocity).toEqual([0, 0, 0])
-  })
-
-  it('predicts recent terminal changes without reusing expired or reversed-clock velocity', () => {
-    const element = target()
-    const motion = new PropertyMotion()
-    motion.record(element, 'translate', 10)
-
-    expect(motion.predict(element, 'translate', [20, 0, 0], 30)?.velocity).toEqual([1, 0, 0])
-    expect(motion.predict(element, 'translate', [20, 0, 0], 100)?.velocity).toEqual([0, 0, 0])
-    expect(motion.predict(element, 'translate', [20, 0, 0], 5)?.velocity).toEqual([0, 0, 0])
   })
 
   it('keeps analytic spring velocity until the native effect finishes', () => {
