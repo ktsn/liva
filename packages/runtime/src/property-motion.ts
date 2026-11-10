@@ -210,8 +210,10 @@ export class PropertyMotion {
   /**
    * Records displayed components at time while preserving registered animations
    * that are still active, including paused effects. Unreadable values are ignored.
+   * With reset, unprotected direct samples restart at rest; observing a source
+   * transition does not acquire control or replace another owner's active effect.
    */
-  observe(element: HTMLElement, property: string, time: number) {
+  observe(element: HTMLElement, property: string, time: number, options: { reset?: boolean } = {}) {
     const decoded = decodeProperty(element, property)
     if (!decoded) return
     const protectedAddresses = new Set(
@@ -221,6 +223,14 @@ export class PropertyMotion {
         return animation && animation.playState !== 'idle' && animation.playState !== 'finished'
       }),
     )
+
+    // Observation resets discard stale direct movement without taking ownership
+    // from an active/paused registered animation. beginControl performs that takeover.
+    if (options.reset) {
+      for (const address of decoded.addresses) {
+        if (!protectedAddresses.has(address)) this.history(element, address).samples = []
+      }
+    }
 
     this.recordValues(element, decoded, decoded.values, time, protectedAddresses)
   }
