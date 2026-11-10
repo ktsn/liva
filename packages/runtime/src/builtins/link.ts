@@ -9,7 +9,7 @@ import {
   type ControllerAddress,
   type PropertyController,
 } from '../controllers.ts'
-import { decodeProperty } from '../property-codec.ts'
+import { decodeProperty, encodeProperty } from '../property-codec.ts'
 import { DIRECT_SAMPLE_WINDOW_MS } from '../property-motion.ts'
 
 /** Validated input mapping; scalar/vector shape and selected component stay fixed per call. */
@@ -382,7 +382,7 @@ class Link implements ReactiveCall, PropertyController {
 
     const value = snapshot.value
 
-    if (typeof value === 'number') return `${value}${property === 'rotate' ? 'deg' : 'px'}`
+    if (typeof value === 'number') return encodeProperty(property, [value])
     /* v8 ignore else -- @preserve: readable() publishes only numeric scalars or X/Y/Z records; scalar case returned above. */
     if (
       typeof value === 'object' &&
@@ -390,7 +390,7 @@ class Link implements ReactiveCall, PropertyController {
       typeof value.y === 'number' &&
       typeof value.z === 'number'
     ) {
-      return `${value.x}px ${value.y}px ${value.z}px`
+      return encodeProperty(property, [value.x, value.y, value.z])
     } else return undefined
   }
 

@@ -120,15 +120,21 @@ afterEach(() => {
 })
 
 describe('link property adapters', () => {
-  it.each(['width', 'rotate'])('renders frozen scalar %s observations for previews', (property) => {
-    const binding = setup(property)
+  it.each([
+    ['width', '100px'],
+    ['inline-size', '100px'],
+    ['inset-inline-start', '10px'],
+    ['rotate', '30deg'],
+    ['translate', '100px 50px 7px'],
+  ])('renders frozen %s observations without a connected target', (property, expected) => {
+    const input = property === 'translate' ? { x: 0, y: 0 } : 0
+    const binding = setup(property, input)
 
     binding.controller.setPreview(true)
     binding.controller.setPreview(true)
+    binding.element.remove()
 
-    expect(binding.controller.render(property, binding.call.value)).toBe(
-      property === 'rotate' ? '30deg' : '100px',
-    )
+    expect(binding.controller.render(property, binding.call.value)).toBe(expected)
 
     binding.controller.setPreview(false)
   })

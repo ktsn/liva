@@ -1,5 +1,5 @@
 import { waapiProperty } from './animation.ts'
-import { propertyRule, resolvePropertyComponents } from './property-rules.ts'
+import { propertyRule, resolvePropertyComponents, type PropertyRule } from './property-rules.ts'
 
 /**
  * A displayed CSS value in canonical numeric space: px for lengths, deg for rotation,
@@ -14,6 +14,39 @@ export type NumericProperty = {
    * [0, 1]; bounded output additionally clamps dimensions to nonnegative values.
    */
   serialize(values: readonly number[], bounded?: boolean): string
+}
+
+/** Serializes canonical components using the rule's output unit and clamping policy. */
+function serialize(rule: PropertyRule, values: readonly number[], bounded: boolean): string {
+  const clamp = rule.clamp
+
+  return values
+    .map((value) => {
+      const result =
+        clamp && (!clamp.boundedOnly || bounded)
+          ? Math.max(clamp.minimum, Math.min(clamp.maximum, value))
+          : value
+
+      return `${result}${rule.unit}`
+    })
+    .join(' ')
+}
+
+/**
+ * Encodes finite canonical numeric components without reading the DOM. Values must
+ * follow the property's component order: px for lengths/translate, deg for rotate,
+ * and unitless values for scale/opacity. Opacity is always clamped to [0, 1]; bounded
+ * output additionally clamps dimensions to nonnegative values. Unsupported properties
+ * return undefined. Component count and finiteness are the caller's responsibility.
+ */
+export function encodeProperty(
+  property: string,
+  values: readonly number[],
+  bounded = false,
+): string | undefined {
+  const rule = propertyRule(property)
+
+  return rule ? serialize(rule, values, bounded) : undefined
 }
 
 /** Splits space-separated computed components while keeping CSS math expressions intact. */
@@ -203,18 +236,7 @@ export function decodeProperty(
     values: numbers,
     addresses,
     serialize(next, bounded = false) {
-      const clamp = rule.clamp
-
-      return next
-        .map((value) => {
-          const result =
-            clamp && (!clamp.boundedOnly || bounded)
-              ? Math.max(clamp.minimum, Math.min(clamp.maximum, value))
-              : value
-
-          return `${result}${rule.unit}`
-        })
-        .join(' ')
+      return serialize(rule, next, bounded)
     },
   }
 }
