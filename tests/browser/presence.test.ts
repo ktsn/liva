@@ -9,6 +9,7 @@ declare global {
     teardown(): void
     effects: Animation[]
     childExit: Animation
+    gestureTime: number
   }
 }
 
@@ -273,6 +274,111 @@ test('swipe rows retain independent snap state and animate opening and outside c
     )
     .toBe(96)
   await expect(page.getByTestId('item-count')).toHaveText('3 items')
+})
+
+for (const sample of [
+  { name: 'fast flick', releaseTime: 1020, destination: 96 },
+  { name: 'stationary release', releaseTime: 1100, destination: 0 },
+]) {
+  test(`swipe uses input history for ${sample.name}`, async ({ page }) => {
+    await page.goto(base + '/swipe')
+    const card = page.getByTestId('swipe-1')
+    await expect(card).toBeVisible()
+    await page.waitForFunction(() => document.getAnimations().length === 0)
+    const face = card.locator('.swipe-face')
+    const box = (await face.boundingBox())!
+    await page.evaluate(() => {
+      window.gestureTime = 1000
+      Object.defineProperty(performance, 'now', { value: () => window.gestureTime })
+    })
+
+    await page.mouse.move(box.x + 30, box.y + 30)
+    await page.mouse.down()
+    await page.evaluate(() => {
+      window.gestureTime = 1010
+    })
+    await page.mouse.move(box.x + 50, box.y + 30)
+    await page.evaluate((time) => {
+      window.gestureTime = time
+    }, sample.releaseTime)
+    await page.mouse.up()
+
+    const handoff = await face.evaluate((element) => {
+      const animation = element.getAnimations()[0]
+      if (!(animation?.effect instanceof KeyframeEffect)) throw new Error('Expected release spring')
+      animation.pause()
+      const frames = animation.effect.getKeyframes()
+      return {
+        start: parseFloat(String(frames[0].translate)),
+        end: parseFloat(String(frames.at(-1)?.translate)),
+      }
+    })
+
+    expect(handoff).toEqual({ start: 20, end: sample.destination })
+    await expect(page.getByTestId('item-count')).toHaveText('3 items')
+  })
+}
+
+test('swipe regrabs a moving spring without jumping and releases in the reverse direction', async ({
+  page,
+}) => {
+  await page.goto(base + '/swipe')
+  const face = page.getByTestId('swipe-1').locator('.swipe-face')
+  await expect(face).toBeVisible()
+  await page.waitForFunction(() => document.getAnimations().length === 0)
+  const box = (await face.boundingBox())!
+  await page.evaluate(() => {
+    window.gestureTime = 1000
+    Object.defineProperty(performance, 'now', { value: () => window.gestureTime })
+  })
+
+  await page.mouse.move(box.x + 30, box.y + 30)
+  await page.mouse.down()
+  await page.evaluate(() => {
+    window.gestureTime = 1010
+  })
+  await page.mouse.move(box.x + 50, box.y + 30)
+  await page.evaluate(() => {
+    window.gestureTime = 1020
+  })
+  await page.mouse.up()
+
+  const displayed = await face.evaluate((element) => {
+    const animation = element.getAnimations()[0]
+    if (!animation) throw new Error('Expected opening spring')
+    animation.pause()
+    animation.currentTime = 40
+    return parseFloat(getComputedStyle(element).translate)
+  })
+  const movingBox = (await face.boundingBox())!
+  await page.evaluate(() => {
+    window.gestureTime = 2000
+  })
+
+  await page.mouse.move(movingBox.x + 30, movingBox.y + 30)
+  await page.mouse.down()
+
+  expect(await face.evaluate((element) => parseFloat(getComputedStyle(element).translate))).toBe(
+    displayed,
+  )
+
+  await page.evaluate(() => {
+    window.gestureTime = 2010
+  })
+  await page.mouse.move(movingBox.x + 20, movingBox.y + 30)
+  await page.evaluate(() => {
+    window.gestureTime = 2020
+  })
+  await page.mouse.up()
+
+  const destination = await face.evaluate((element) => {
+    const animation = element.getAnimations()[0]
+    if (!(animation?.effect instanceof KeyframeEffect)) throw new Error('Expected closing spring')
+    animation.pause()
+    return parseFloat(String(animation.effect.getKeyframes().at(-1)?.translate))
+  })
+
+  expect(destination).toBe(0)
 })
 
 test('direct target loops, conditionals, visibility and Motion-root removal share lifecycle semantics', async ({

@@ -393,7 +393,7 @@ Application state changes immediately; it never waits for the leave animation.
 The [swipe playground](../playground/src/pages/swipe.vue) combines drag,
 events, velocity-aware release projection, a return spring, and leave animation.
 Each draggable list item has its own Motion instance. Projection selects the snap
-destination; automatic spring momentum preserves the displayed release velocity.
+destination; the return spring inherits the mapped-input release velocity.
 
 ## Vue presence support
 
