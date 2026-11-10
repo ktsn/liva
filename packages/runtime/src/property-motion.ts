@@ -53,8 +53,8 @@ export type MotionSample = {
   readonly velocity: readonly number[]
 }
 
-/** One direct-write observation with a performance.now()-compatible timestamp in milliseconds. */
-type Sample = { time: number; value: number }
+/** Direct observation on the millisecond clock, optionally carrying released input velocity in units/ms. */
+type Sample = { time: number; value: number; velocity?: number }
 
 /**
  * Observations for one target/component address. A registered animation takes
@@ -208,24 +208,6 @@ export class PropertyMotion {
   }
 
   /**
-   * Records displayed components at time while preserving registered animations
-   * that are still active, including paused effects. Unreadable values are ignored.
-   */
-  observe(element: HTMLElement, property: string, time: number) {
-    const decoded = decodeProperty(element, property)
-    if (!decoded) return
-    const protectedAddresses = new Set(
-      decoded.addresses.filter((address) => {
-        const animation = this.history(element, address).animation
-
-        return animation && animation.playState !== 'idle' && animation.playState !== 'finished'
-      }),
-    )
-
-    this.recordValues(element, decoded, decoded.values, time, protectedAddresses)
-  }
-
-  /**
    * Starts a direct-control session from the current displayed value at time.
    * Replaces prior velocity history and effect references; unreadable values are ignored.
    */
@@ -236,6 +218,24 @@ export class PropertyMotion {
     for (const [index, address] of decoded.addresses.entries()) {
       const history = this.history(element, address)
       history.samples = [{ time, value: decoded.values[index] }]
+      history.animation = undefined
+      history.trajectory = undefined
+    }
+  }
+
+  /**
+   * Ends direct control with a committed input derivative in canonical units/ms,
+   * ordered like the property's decoded components. Captures the displayed start
+   * position at time; unreadable targets are ignored. The supplied velocity takes
+   * precedence over DOM finite differences until stale or superseded by a write/effect.
+   */
+  endControl(element: HTMLElement, property: string, velocity: readonly number[], time: number) {
+    const decoded = decodeProperty(element, property)
+    if (!decoded) return
+
+    for (const [index, address] of decoded.addresses.entries()) {
+      const history = this.history(element, address)
+      history.samples = [{ time, value: decoded.values[index], velocity: velocity[index] }]
       history.animation = undefined
       history.trajectory = undefined
     }
@@ -319,6 +319,8 @@ export class PropertyMotion {
 
       const last = history.samples.at(-1)
       const before = history.samples.at(-2)
+      if (last?.velocity !== undefined)
+        return time >= last.time && time - last.time < DIRECT_SAMPLE_WINDOW_MS ? last.velocity : 0
       if (
         !last ||
         !before ||
@@ -331,38 +333,6 @@ export class PropertyMotion {
     })
 
     return { value: decoded.values, velocity }
-  }
-
-  /**
-   * Predicts direct-write velocity for supplied values at time without committing
-   * those observations. Values must follow the property's decoded component order.
-   * Returns undefined if the target cannot be decoded; missing/stale history yields zero.
-   */
-  predict(
-    element: HTMLElement,
-    property: string,
-    values: readonly number[],
-    time: number,
-  ): MotionSample | undefined {
-    const decoded = decodeProperty(element, property)
-    if (!decoded) return undefined
-    const velocity = decoded.addresses.map((address, index) => {
-      const history = this.history(element, address)
-      const last = history.samples.at(-1)
-      const before = history.samples.at(-2)
-
-      if (!last) return 0
-      if (values[index] !== last.value)
-        return time - last.time < DIRECT_SAMPLE_WINDOW_MS && time > last.time
-          ? (values[index] - last.value) / (time - last.time)
-          : 0
-      if (!before || time - last.time >= DIRECT_SAMPLE_WINDOW_MS || last.time <= before.time)
-        return 0
-
-      return (last.value - before.value) / (last.time - before.time)
-    })
-
-    return { value: values, velocity }
   }
 
   /**

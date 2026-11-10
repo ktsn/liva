@@ -1,9 +1,14 @@
+import type { ReactiveNotification } from './events.ts'
+
 export type Scalar = number | boolean | string
 export type RuntimeValue = Scalar | { readonly [name: string]: RuntimeValue }
 
 export interface ReactiveSubscription {
   readonly value: RuntimeValue
-  bind(targets: ReadonlyMap<string, HTMLElement>, update: (value: RuntimeValue) => void): () => void
+  bind(
+    targets: ReadonlyMap<string, HTMLElement>,
+    update: (value: RuntimeValue, notification?: ReactiveNotification) => void,
+  ): () => void
 }
 
 export type FunctionArguments = Readonly<Record<string, RuntimeValue>>
@@ -16,7 +21,21 @@ export interface PreparedUpdate {
 }
 
 export interface ReactiveCall extends ReactiveSubscription {
-  prepareUpdate(args: FunctionArguments): PreparedUpdate
+  /**
+   * Optionally reads a coherent observation at a performance.now()-compatible
+   * millisecond timestamp without committing argument changes. Implementations may
+   * return their frozen published snapshot during manual preview.
+   */
+  readSnapshot?(context: { readonly time: number }): RuntimeValue
+
+  /**
+   * Prepares a candidate value without changing committed call state. Optional time
+   * uses the observation's millisecond clock; implementations choose a current time
+   * when omitted. Validation failures throw before commit; see PreparedUpdate.
+   */
+  prepareUpdate(args: FunctionArguments, context?: { readonly time: number }): PreparedUpdate
+
+  /** Releases resources owned by this call; binding cleanup is also managed by its consumer. */
   dispose(): void
 }
 

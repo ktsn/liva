@@ -193,29 +193,11 @@ describe('per-property motion histories', () => {
     expect(motion.read(element, 'translate', 220)?.velocity).toEqual([0, 0, 0])
   })
 
-  it('predicts terminal stationary input from recent history and expires stale or reversed clocks', () => {
-    const element = target()
-    const motion = new PropertyMotion()
-    motion.record(element, 'translate', 0)
-    element.style.translate = '20px 0px'
-    motion.record(element, 'translate', 20)
-
-    expect(motion.predict(element, 'translate', [20, 0, 0], 30)?.velocity).toEqual([1, 0, 0])
-    expect(motion.predict(element, 'translate', [20, 0, 0], 120)?.velocity).toEqual([0, 0, 0])
-
-    element.style.translate = '10px 0px'
-    motion.record(element, 'translate', 10)
-
-    expect(motion.predict(element, 'translate', [10, 0, 0], 10)?.velocity).toEqual([0, 0, 0])
-  })
-
-  it('keeps unsupported values out of prediction and handoff and retains intermediate choreography', () => {
+  it('keeps unsupported values out of handoff and retains intermediate choreography', () => {
     const element = target()
     const motion = new PropertyMotion()
 
     expect(motion.read(element, 'background-color')).toBeUndefined()
-    expect(motion.predict(element, 'background-color', [10], 10)).toBeUndefined()
-    expect(motion.predict(element, 'translate', [10, 20, 0], 10)?.velocity).toEqual([0, 0, 0])
     expect(
       motion.prepareSpring(
         element,
@@ -316,6 +298,62 @@ describe('per-property motion histories', () => {
     expect(animation.currentTime).toBe(400)
 
     animation.cancel()
+  })
+
+  it('retains spring-to-spring momentum without any frame observations', () => {
+    const element = target()
+    const motion = new PropertyMotion()
+    const timing = { kind: 'spring-physics', stiffness: 300, damping: 25, mass: 1 } as const
+    motion.endControl(element, 'translate', [1, -0.5, 0], performance.now())
+    const first = motion.prepareSpring(element, 'translate', '100px 50px', timing, true)
+    if (!first) throw new Error('Expected input-to-spring handoff')
+
+    const animation = element.animate(first.frames, { duration: first.durationMs, fill: 'both' })
+    animation.pause()
+    animation.currentTime = 100
+    motion.register(element, 'translate', animation, first.sample)
+    const expected = first.sample(100)
+    const displayed = decodeProperty(element, 'translate')?.values
+    const second = motion.prepareSpring(element, 'translate', '-50px 20px', timing, true)
+    if (!second) throw new Error('Expected spring-to-spring handoff')
+
+    animation.cancel()
+
+    expect(second.sample(0).velocity[0]).toBeCloseTo(expected.velocity[0], 6)
+    expect(second.sample(0).velocity[1]).toBeCloseTo(expected.velocity[1], 6)
+    expect(second.sample(0).value).toEqual(displayed)
+  })
+
+  it('expires explicit control velocity without frame observations', () => {
+    const element = target()
+    const motion = new PropertyMotion()
+    motion.endControl(element, 'translate', [1, -2, 0], 100)
+
+    expect(motion.read(element, 'translate', 99)?.velocity).toEqual([0, 0, 0])
+    expect(motion.read(element, 'translate', 179)?.velocity).toEqual([1, -2, 0])
+    expect(motion.read(element, 'translate', 180)?.velocity).toEqual([0, 0, 0])
+  })
+
+  it('lets later direct writes replace explicit control velocity', () => {
+    const element = target()
+    const motion = new PropertyMotion()
+    motion.endControl(element, 'translate', [1, -2, 0], 100)
+
+    element.style.translate = '30px 0px'
+    motion.record(element, 'translate', 110)
+
+    expect(motion.read(element, 'translate', 110)?.velocity).toEqual([3, -2, 0])
+  })
+
+  it('ignores input handoff to an unreadable target', () => {
+    const element = target()
+    const motion = new PropertyMotion()
+    motion.endControl(element, 'translate', [1, -2, 0], 100)
+    element.style.display = 'none'
+    motion.endControl(element, 'translate', [100, 100, 0], 120)
+    element.style.display = 'block'
+
+    expect(motion.read(element, 'translate', 120)?.velocity).toEqual([1, -2, 0])
   })
 
   it('inherits internal opacity momentum while serializing bounded display values', () => {
