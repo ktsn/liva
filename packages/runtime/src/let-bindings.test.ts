@@ -582,3 +582,81 @@ it.each(['deliver', 'rebind', 'dispose'] as const)(
     binding.dispose()
   },
 )
+
+it.each([
+  'initial bind',
+  'evaluation',
+  'evaluation with pending event',
+  'rebind with pending event',
+] as const)('discards events from failed subscription work during %s', async (phase) => {
+  const event = createEventValue()
+  const failure = new Error('Rejected candidate binding')
+  let bindingAttempt = 0
+  let publishOrdinary: (() => void) | undefined
+  vi.spyOn(functions, 'callBuiltin').mockImplementation((name, args) => {
+    const revision = Number(args.revision)
+    const value = { event, revision }
+    const source: ReactiveSubscription = {
+      value,
+      bind(_targets, publish) {
+        if (name === 'first') bindingAttempt++
+
+        if (name === 'first' && revision === 0 && bindingAttempt === 1) {
+          publishOrdinary = () => publish(value)
+        }
+
+        if (
+          name === 'second' &&
+          (revision === 1 || (phase === 'rebind with pending event' && bindingAttempt === 2))
+        )
+          throw failure
+
+        if (name === 'first' && (revision === 1 || phase.includes('pending event'))) {
+          publish(value, {
+            time: (bindingAttempt - 1 + revision) * 10,
+            event,
+            snapshots: new Map([[source, value]]),
+          })
+        }
+
+        return () => {}
+      },
+    }
+    return source
+  })
+  const definitions: LetBinding[] = ['first', 'second'].map((name) => ({
+    name: `observed${name}`,
+    initializer: {
+      kind: 'call',
+      function: name,
+      arguments: [{ name: 'revision', value: { kind: 'reference', path: ['revision'] } }],
+    },
+  }))
+  const graph = new LetBindingGraph(definitions, { revision: phase === 'initial bind' ? 1 : 0 })
+  const received: ReactiveNotification[] = []
+  let ordinaryUpdates = 0
+  const observe = (notification?: ReactiveNotification) => {
+    if (notification) received.push(notification)
+    else ordinaryUpdates++
+  }
+
+  if (phase !== 'initial bind') graph.bind(new Map(), observe)
+  if (phase.includes('pending event')) publishOrdinary?.()
+
+  const attempt =
+    phase === 'initial bind' || phase === 'rebind with pending event'
+      ? () => graph.bind(new Map(), observe)
+      : () => graph.evaluate({ revision: 1 })
+
+  expect(attempt).toThrow(failure)
+
+  await Promise.resolve()
+  await Promise.resolve()
+
+  const expectedTimes = phase.includes('pending event') ? [0] : []
+
+  expect(received.map((notification) => notification.time)).toEqual(expectedTimes)
+  expect(ordinaryUpdates).toBe(phase.includes('pending event') ? 1 : 0)
+
+  graph.dispose()
+})

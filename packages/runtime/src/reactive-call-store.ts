@@ -138,6 +138,8 @@ export class ReactiveCallStore {
     // Isolate candidate caches and snapshots while the callback evaluates and validates
     // the whole graph. Notifications cannot reenter until this transaction finishes.
     this.evaluating = true
+    const pendingEvents = this.eventNotifications.length
+    const pendingNotification = this.notificationPending
     const evaluation = new PreparedCalls(this.calls, this.initializing, notification)
     let committed = false
 
@@ -167,7 +169,8 @@ export class ReactiveCallStore {
         // Prepared updates have not changed live calls. Release only resources created
         // by this attempt and suppress notifications from its unsuccessful binding work.
         evaluation.discard()
-        this.notificationPending = false
+        this.notificationPending = pendingNotification
+        this.eventNotifications.length = pendingEvents
       }
 
       this.evaluating = false
@@ -262,16 +265,29 @@ export class ReactiveCallStore {
     targets: ReadonlyMap<string, HTMLElement>,
     update: (notification?: ReactiveNotification) => void,
   ): (() => void)[] {
+    const previous = this.binding
+    const pendingEvents = this.eventNotifications.length
+    const pendingNotification = this.notificationPending
     const binding = { targets, update, cleanups: new Map<ReactiveSubscription, () => void>() }
     this.binding = binding
 
     // Initial DOM reads may notify immediately. Use the evaluation guard until every
     // subscription has bound so the consumer cannot observe a partially bound store.
     this.evaluating = true
+    let bound = false
 
     try {
       this.updateSubscriptions(callResults(this.calls))
+      bound = true
     } finally {
+      if (!bound) {
+        // Added subscriptions were cleaned by updateSubscriptions. Discard their
+        // publications too, without erasing occurrences accepted before this bind.
+        this.eventNotifications.length = pendingEvents
+        this.notificationPending = pendingNotification
+        this.binding = previous
+      }
+
       this.evaluating = false
       this.flushNotifications()
     }
