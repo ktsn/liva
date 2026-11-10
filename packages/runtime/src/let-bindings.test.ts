@@ -456,72 +456,129 @@ it('resolves later declarations before invoking a shadowed function name', () =>
   expect(invoke).not.toHaveBeenCalled()
 })
 
+function eventGraphWithCommitNotifications() {
+  const event = createEventValue()
+  let value: RuntimeValue = { event, offset: 0 }
+  let publish: Parameters<ReactiveSubscription['bind']>[1] | undefined
+  const source: ReactiveCall = {
+    get value() {
+      return value
+    },
+    bind(_targets, update) {
+      publish = update
+
+      return () => {
+        publish = undefined
+      }
+    },
+    prepareUpdate(args) {
+      return {
+        value: { event, offset: args.offset },
+        discard() {},
+        commit() {
+          for (const offset of [1, 2]) {
+            value = { event, offset }
+            publish?.(value, { time: offset * 10, event, snapshots: new Map([[source, value]]) })
+          }
+        },
+      }
+    },
+    dispose() {},
+  }
+  vi.spyOn(functions, 'callBuiltin').mockReturnValue(source)
+  const graph = new LetBindingGraph(
+    [
+      {
+        name: 'source',
+        initializer: {
+          kind: 'call',
+          function: 'eventSource',
+          arguments: [{ name: 'offset', value: { kind: 'reference', path: ['offset'] } }],
+        },
+      },
+    ],
+    { offset: 0 },
+  )
+  const notifications: ReactiveNotification[] = []
+  const observe = (notification?: ReactiveNotification) => {
+    if (notification) notifications.push(notification)
+  }
+  let cleanups = graph.bind(new Map(), observe)
+
+  function unbind() {
+    for (const cleanup of cleanups) cleanup()
+
+    cleanups = []
+  }
+
+  return {
+    graph,
+    event,
+    source,
+    notifications,
+    unbind,
+    rebind() {
+      unbind()
+      cleanups = graph.bind(new Map(), observe)
+    },
+    publish(offset: number) {
+      value = { event, offset }
+      publish?.(value, { time: offset * 10, event, snapshots: new Map([[source, value]]) })
+    },
+    dispose() {
+      unbind()
+      graph.dispose()
+    },
+  }
+}
+
+function eventSnapshots(binding: ReturnType<typeof eventGraphWithCommitNotifications>) {
+  return binding.notifications.map((notification) => notification.snapshots.get(binding.source))
+}
+
 it.each(['deliver', 'unbind'] as const)(
   'serializes distinct occurrences published during commit and suppresses obsolete delivery: %s',
   async (mode) => {
-    const event = createEventValue()
-    let value: RuntimeValue = { event, offset: 0 }
-    let publish: Parameters<ReactiveSubscription['bind']>[1] | undefined
-    const source: ReactiveCall = {
-      get value() {
-        return value
-      },
-      bind(_targets, update) {
-        publish = update
-        return () => {
-          publish = undefined
-        }
-      },
-      prepareUpdate(args) {
-        return {
-          value: { event, offset: args.offset },
-          discard() {},
-          commit() {
-            for (const offset of [1, 2]) {
-              value = { event, offset }
-              publish?.(value, { time: offset * 10, event, snapshots: new Map([[source, value]]) })
-            }
-          },
-        }
-      },
-      dispose() {},
-    }
-    vi.spyOn(functions, 'callBuiltin').mockReturnValue(source)
-    const graph = new LetBindingGraph(
-      [
-        {
-          name: 'source',
-          initializer: {
-            kind: 'call',
-            function: 'eventSource',
-            arguments: [{ name: 'offset', value: { kind: 'reference', path: ['offset'] } }],
-          },
-        },
-      ],
-      { offset: 0 },
-    )
-    const notifications: ReactiveNotification[] = []
-    const cleanups = graph.bind(new Map(), (notification) => {
-      if (notification) notifications.push(notification)
-    })
+    const binding = eventGraphWithCommitNotifications()
 
-    graph.evaluate({ offset: 1 })
-    expect(notifications).toEqual([])
+    binding.graph.evaluate({ offset: 1 })
 
-    if (mode === 'unbind') for (const cleanup of cleanups) cleanup()
+    expect(binding.notifications).toEqual([])
+
+    if (mode === 'unbind') binding.unbind()
 
     await Promise.resolve()
 
-    expect(notifications.map((notification) => notification.snapshots.get(source))).toEqual(
-      mode === 'deliver'
-        ? [
-            { event, offset: 1 },
-            { event, offset: 2 },
-          ]
-        : [],
+    const offsets = mode === 'deliver' ? [1, 2] : []
+
+    expect(eventSnapshots(binding)).toEqual(
+      offsets.map((offset) => ({ event: binding.event, offset })),
     )
 
-    for (const cleanup of cleanups) cleanup()
-    graph.dispose()
+    binding.dispose()
+  },
+)
+
+it.each(['deliver', 'rebind', 'dispose'] as const)(
+  'keeps later occurrences behind commit-time events with binding lifecycle=%s',
+  async (mode) => {
+    const binding = eventGraphWithCommitNotifications()
+    binding.graph.evaluate({ offset: 1 })
+
+    if (mode === 'rebind') binding.rebind()
+    if (mode === 'dispose') binding.dispose()
+
+    binding.publish(3)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const offsets = mode === 'deliver' ? [1, 2, 3] : mode === 'rebind' ? [3] : []
+
+    expect(eventSnapshots(binding)).toEqual(
+      offsets.map((offset) => ({ event: binding.event, offset })),
+    )
+
+    binding.dispose()
   },
 )

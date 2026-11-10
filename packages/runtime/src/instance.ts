@@ -1077,11 +1077,16 @@ export class LivaInstance {
     /* v8 ignore if -- @preserve: Public updates guard disposal; graph subscriptions and queued updates are cleared before disposal completes. */
     if (this.disposed) return
 
-    if (this.applyingVariables) {
+    if (this.applyingVariables || this.variableUpdateScheduled) {
       this.queuedVariableUpdates.push({ values, notification })
       return
     }
 
+    this.runVariableUpdate(values, notification)
+  }
+
+  /** Runs one accepted update; later arrivals join the pending queue until it drains. */
+  private runVariableUpdate(values: VariableValues, notification?: ReactiveNotification) {
     this.applyingVariables = true
 
     try {
@@ -1095,10 +1100,7 @@ export class LivaInstance {
           this.variableUpdateScheduled = false
           const next = this.queuedVariableUpdates.shift()
           if (next)
-            this.applyVariableValues(
-              next.notification ? this.values : next.values,
-              next.notification,
-            )
+            this.runVariableUpdate(next.notification ? this.values : next.values, next.notification)
         })
       }
     }

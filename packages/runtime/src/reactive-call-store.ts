@@ -19,6 +19,13 @@ type CallSite = {
 
 type CallSites = Map<string, Map<number, CallSite>>
 
+/** One subscription session; identity separates queued occurrences from later bindings. */
+type SubscriptionBinding = {
+  targets: ReadonlyMap<string, HTMLElement>
+  update: (notification?: ReactiveNotification) => void
+  cleanups: Map<ReactiveSubscription, () => void>
+}
+
 /**
  * Reads call results within one synchronous evaluation. Binding names and call-site
  * indices must identify the same expression across evaluations. Do not retain this
@@ -46,31 +53,44 @@ export class ReactiveCallStore {
   private disposed = false
   private notificationPending = false
   private notificationQueued = false
-  private readonly eventNotifications: ReactiveNotification[] = []
+  private eventNotificationQueued = false
+  private readonly eventNotifications: {
+    binding: SubscriptionBinding
+    notification: ReactiveNotification
+  }[] = []
 
   private notify = (notification?: ReactiveNotification) => {
     if (!this.binding) return
 
-    if (!this.evaluating) {
+    if (!this.evaluating && !this.eventNotificationQueued) {
       this.binding.update(notification)
       return
     }
 
     // Binding and commit may publish synchronously. Reentry here would expose only
     // part of the candidate state, so wait until the store leaves the current phase.
-    if (notification?.event) this.eventNotifications.push(notification)
+    if (notification?.event) this.eventNotifications.push({ binding: this.binding, notification })
     else this.notificationPending = true
   }
 
   private flushNotifications() {
     // Event pulses carry distinct snapshots and must retain their order rather than
     // coalescing like ordinary state changes. A replaced binding cannot receive them.
-    if (this.eventNotifications.length > 0) {
+    if (this.eventNotifications.length > 0 && !this.eventNotificationQueued) {
       const pending = this.eventNotifications.splice(0)
-      const binding = this.binding
+      this.eventNotificationQueued = true
+
       queueMicrotask(() => {
-        if (this.binding !== binding) return
-        for (const notification of pending) this.notify(notification)
+        try {
+          // Keep the queue owned through delivery. Synchronous publications made
+          // after scheduling or during a callback must follow this entire batch.
+          for (const { binding, notification } of pending) {
+            if (this.binding === binding) binding.update(notification)
+          }
+        } finally {
+          this.eventNotificationQueued = false
+          this.flushNotifications()
+        }
       })
     }
 
@@ -88,11 +108,7 @@ export class ReactiveCallStore {
     })
   }
 
-  private binding?: {
-    targets: ReadonlyMap<string, HTMLElement>
-    update: (notification?: ReactiveNotification) => void
-    cleanups: Map<ReactiveSubscription, () => void>
-  }
+  private binding?: SubscriptionBinding
 
   /**
    * Borrows caches for retainedBindings from previous. The caller must establish

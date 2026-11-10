@@ -21,7 +21,7 @@ const reference = (...path: string[]): Expression => ({ kind: 'reference', path 
 const instances: LivaInstance[] = []
 const elements: HTMLElement[] = []
 
-function setup() {
+function setup(transform: (definition: Definition) => Definition = (definition) => definition) {
   const release = createEventValue()
   let current: RuntimeValue = { active: false, offset: 0, release }
   let notify: ((value: RuntimeValue, notification?: ReactiveNotification) => void) | undefined
@@ -129,7 +129,7 @@ function setup() {
   document.body.append(element)
   elements.push(element)
   const errors: RuntimeDiagnostic[] = []
-  const instance = new LivaInstance(definition, {}, (error) => errors.push(error))
+  const instance = new LivaInstance(transform(definition), {}, (error) => errors.push(error))
   instances.push(instance)
   instance.bind([['self', element]])
 
@@ -152,6 +152,60 @@ afterEach(() => {
 })
 
 describe('event snapshot transactions', () => {
+  it('keeps newer synchronous occurrences behind already deferred occurrences', async () => {
+    const { instance, update, errors } = setup((definition) => {
+      const position = definition.layers[0]
+
+      if (!position.states || !position.transitions) throw new Error('Expected a stateful layer')
+
+      return {
+        ...definition,
+        layers: [
+          {
+            ...position,
+            states: [...position.states, { name: 'other', targets: [] }],
+            transitions: [
+              position.transitions[0],
+              {
+                ...position.transitions[1],
+                when: {
+                  kind: 'binary',
+                  operator: '==',
+                  left: reference('pointer', 'offset'),
+                  right: { kind: 'number', value: 0 },
+                },
+              },
+              {
+                ...position.transitions[1],
+                to: 'other',
+                when: {
+                  kind: 'binary',
+                  operator: '>=',
+                  left: reference('pointer', 'offset'),
+                  right: { kind: 'number', value: 80 },
+                },
+              },
+            ],
+          },
+          ...definition.layers.slice(1),
+        ],
+      }
+    })
+    instance.onEvent = () => update(false, 0, true)
+    update(true, 0)
+
+    update(false, 100, true)
+    update(false, 100, true)
+
+    expect(instance.composition.states.position).toBe('open')
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(instance.composition.states.position).toBe('next')
+    expect(errors).toEqual([])
+  })
+
   it('discards occurrences queued before a later synchronous disposal', async () => {
     const { instance, element, update, errors } = setup()
     instance.onEvent = () => update(false, 0, true)
