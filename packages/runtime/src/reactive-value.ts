@@ -21,8 +21,21 @@ export interface PreparedUpdate {
 }
 
 export interface ReactiveCall extends ReactiveSubscription {
+  /**
+   * Optionally reads a coherent observation at a performance.now()-compatible
+   * millisecond timestamp without committing argument changes. Implementations may
+   * return their frozen published snapshot during manual preview.
+   */
   readSnapshot?(context: { readonly time: number }): RuntimeValue
+
+  /**
+   * Prepares a candidate value without changing committed call state. Optional time
+   * uses the observation's millisecond clock; implementations choose a current time
+   * when omitted. Validation failures throw before commit; see PreparedUpdate.
+   */
   prepareUpdate(args: FunctionArguments, context?: { readonly time: number }): PreparedUpdate
+
+  /** Releases resources owned by this call; binding cleanup is also managed by its consumer. */
   dispose(): void
 }
 
