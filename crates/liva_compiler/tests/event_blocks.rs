@@ -75,3 +75,23 @@ fn empty_event_blocks_accept_typed_event_aliases() {
         "motion example { let pointer = drag(target: self); let release = pointer.release; layer base { state idle initial {} on release {} } }",
     );
 }
+
+#[test]
+fn targets_named_on_remain_valid_in_style_and_animation_scopes() {
+    for body in [
+        "layer base { on { opacity: 1 } }",
+        "layer base { state idle initial { on { opacity: 1 } } }",
+        "layer base { on { opacity: 1 } } @tween() enter { on { opacity: 0 } } @tween() leave { on { opacity: 0 } }",
+        "layer base { on { opacity: 1 } state idle initial {} state open {} @tween() transition idle -> open when true { on { opacity: 0 } } }",
+    ] {
+        let result = valid(&format!("motion example {{ {body} }}"));
+
+        assert!(
+            result
+                .mappings
+                .as_ref()
+                .is_some_and(|mappings| mappings.keys().any(|path| path.contains("/target/on"))),
+            "{body}"
+        );
+    }
+}

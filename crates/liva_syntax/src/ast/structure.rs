@@ -43,7 +43,11 @@ node!(State, |n: &SyntaxNode| keyword(n, "state")
     && (block_depth(n) == 1
         || n.parent()
             .is_some_and(|parent| Layer::cast(parent).is_some())));
-node!(OnBlock, |n: &SyntaxNode| keyword(n, "on"));
+// A bare `on { ... }` remains a named target; an event header has a parsed condition.
+node!(OnBlock, |n: &SyntaxNode| keyword(n, "on")
+    && n.child::<Header>().is_some_and(|header| header
+        .child::<Condition>()
+        .is_some()));
 node!(Transition, |n: &SyntaxNode| (block_depth(n) == 1
     || n.parent().is_some_and(|parent| Layer::cast(
         parent.clone()

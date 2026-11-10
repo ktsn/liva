@@ -304,3 +304,47 @@ fn incomplete_controller_and_event_syntax_recovers_losslessly_at_every_boundary(
         }
     }
 }
+
+#[test]
+fn event_headers_distinguish_named_targets_from_event_expressions() {
+    let source = "motion demo { layer base { on { opacity: 1 } state idle initial { on { opacity: 0 } } on pointer.release { transition idle -> idle } } enter { on { opacity: 0 } } }";
+    let parsed = parse(source);
+
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    assert_eq!(parsed.root.text(), source);
+
+    let motion = parsed.root.motions().next().unwrap();
+    let layer = motion.layers().next().unwrap();
+    let event = layer.event_blocks().next().unwrap();
+
+    assert_eq!(layer.event_blocks().count(), 1);
+    assert_eq!(event.event_expression().unwrap().text(), "pointer.release");
+    assert_eq!(
+        layer.targets().next().unwrap().header().as_deref(),
+        Some("on")
+    );
+    assert_eq!(
+        layer
+            .states()
+            .next()
+            .unwrap()
+            .targets()
+            .next()
+            .unwrap()
+            .header()
+            .as_deref(),
+        Some("on")
+    );
+    assert_eq!(
+        motion
+            .enters()
+            .next()
+            .unwrap()
+            .targets()
+            .next()
+            .unwrap()
+            .header()
+            .as_deref(),
+        Some("on")
+    );
+}
