@@ -50,3 +50,28 @@ fn event_blocks_reject_invalid_input_scope_and_bodies() {
         assert!(!result.diagnostics.is_empty(), "{body}");
     }
 }
+
+#[test]
+fn empty_event_blocks_validate_their_expression_without_transitions() {
+    for event in ["true", "unknown", "1", "pointer.offset"] {
+        let source = format!(
+            "motion example {{ let pointer = drag(target: self); layer base {{ state idle initial {{}} on {event} {{}} }} }}"
+        );
+        let result = compile(&source, true);
+
+        assert!(result.definitions.is_empty(), "{event}");
+        let diagnostic = result
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "semantic.expression")
+            .expect("Expected an invalid event expression");
+        assert_eq!(&source[diagnostic.range.start..diagnostic.range.end], event);
+    }
+}
+
+#[test]
+fn empty_event_blocks_accept_typed_event_aliases() {
+    valid(
+        "motion example { let pointer = drag(target: self); let release = pointer.release; layer base { state idle initial {} on release {} } }",
+    );
+}

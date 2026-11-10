@@ -1150,29 +1150,32 @@ impl Compiler {
                         }
                     }
 
+                    // Check each header even when its block contains no transitions.
+                    // Reuse the result so several transitions do not duplicate diagnostics.
+                    let events: BTreeMap<_, _> = layer.event_blocks().filter_map(|block| {
+                        let event = block.event_expression()?;
+                        match event.check(&scope).and_then(|ty| {
+                            if ty == expression::Type::Event {
+                                event.to_output()
+                            } else {
+                                Err(event.error("on requires an event-typed expression"))
+                            }
+                        }) {
+                            Ok(event) => Some((block.range().start, event)),
+
+                            Err(error) => {
+                                self.expression_error(error);
+
+                                None
+                            }
+                        }
+                    }).collect();
                     let mut guarded = vec![];
 
                     for transition in layer.transitions() {
                         let event = transition
                             .event_block()
-                            .and_then(|block| block.event_expression())
-                            .and_then(|event| {
-                                match event.check(&scope).and_then(|ty| {
-                                    if ty == expression::Type::Event {
-                                        event.to_output()
-                                    } else {
-                                        Err(event.error("on requires an event-typed expression"))
-                                    }
-                                }) {
-                                    Ok(event) => Some(event),
-
-                                    Err(error) => {
-                                        self.expression_error(error);
-
-                                        None
-                                    }
-                                }
-                            });
+                            .and_then(|block| events.get(&block.range().start).cloned());
 
                         let Some(syn::TransitionSelector::Directional { from, to }) =
                             transition.selector()
