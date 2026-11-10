@@ -188,6 +188,27 @@ describe('link property adapters', () => {
     })
   })
 
+  it('does not overwrite a later animation when control is released repeatedly', () => {
+    const binding = setup('width')
+    binding.update(20, 20)
+    binding.controller.release(binding.time + 20)
+    const animation = binding.element.animate([{ width: '120px' }, { width: '200px' }], {
+      duration: 100,
+      fill: 'both',
+    })
+    cleanups.push(() => animation.cancel())
+    animation.pause()
+    animation.currentTime = 10
+    binding.motion.register(binding.element, 'width', animation, () => ({
+      value: [128],
+      velocity: [3],
+    }))
+
+    binding.controller.release(binding.time + 30)
+
+    expect(binding.motion.read(binding.element, 'width', binding.time + 30)?.velocity).toEqual([3])
+  })
+
   it('keeps the same controller capability across snapshots and aliases', () => {
     const binding = setup('translate', 0, { component: 'y' })
     const alias = binding.call.value

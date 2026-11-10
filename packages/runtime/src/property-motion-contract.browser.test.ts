@@ -130,6 +130,22 @@ describe('property motion ownership contracts', () => {
     expect(motion.read(element, 'translate', 130)?.velocity).toEqual([0, 0, 0])
   })
 
+  it('preserves protected effects when recording direct writes to other owned properties', () => {
+    const element = target()
+    const motion = new PropertyMotion()
+    const animation = element.animate([{ translate: '0px' }, { translate: '100px' }], {
+      duration: 1000,
+      fill: 'both',
+    })
+    animation.pause()
+    animation.currentTime = 200
+    motion.register(element, 'translate', animation)
+
+    motion.record(element, 'translate', 200, new Set(propertyAddresses(element, 'translate')))
+
+    expect(motion.read(element, 'translate', 200)?.velocity[0]).toBeCloseTo(0.1, 4)
+  })
+
   it('starts fresh after a changed value arrives beyond the direct sample window', () => {
     const element = target()
     const motion = new PropertyMotion()
