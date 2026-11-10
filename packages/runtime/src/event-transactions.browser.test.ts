@@ -3,6 +3,7 @@ import type { Definition, Expression } from './definition.ts'
 import type { ReactiveSubscription, RuntimeValue } from './reactive-value.ts'
 import { createEventValue, type ReactiveNotification } from './events.ts'
 import { LivaInstance, type RuntimeDiagnostic } from './instance.ts'
+import { springMotion } from './property-motion.ts'
 const sourceState = vi.hoisted<{ source?: ReactiveSubscription }>(() => ({}))
 
 vi.mock('./builtins/index.ts', async (importOriginal) => {
@@ -18,6 +19,36 @@ vi.mock('./builtins/index.ts', async (importOriginal) => {
 })
 
 const reference = (...path: string[]): Expression => ({ kind: 'reference', path })
+const withReleaseProjection: (definition: Definition) => Definition = (definition) => ({
+  ...definition,
+  layers: definition.layers.map((layer) => ({
+    ...layer,
+    transitions: layer.transitions?.map((transition, index) =>
+      index === 0
+        ? {
+            ...transition,
+            when: {
+              kind: 'binary',
+              operator: '>=',
+              left: {
+                kind: 'binary',
+                operator: '+',
+                left: reference('movement', 'value', 'x'),
+                right: {
+                  kind: 'binary',
+                  operator: '*',
+                  left: reference('movement', 'velocity', 'x'),
+                  right: { kind: 'number', value: 200 },
+                },
+              },
+              right: { kind: 'number', value: 80 },
+            },
+          }
+        : transition,
+    ),
+  })),
+})
+
 const instances: LivaInstance[] = []
 const elements: HTMLElement[] = []
 
@@ -279,6 +310,191 @@ describe('event snapshot transactions', () => {
 
     expect(instance.composition.states.position).toBe('next')
     expect(errors).toEqual([])
+  })
+
+  it.each([
+    { name: 'fast flick', moves: [[110, 20]], time: 120, input: 20, state: 'open' },
+    { name: 'stationary hold', moves: [[110, 20]], time: 200, input: 20, state: 'closed' },
+    { name: 'terminal displacement', moves: [[110, 20]], time: 120, input: 70, state: 'open' },
+    {
+      name: 'direction reversal',
+      moves: [
+        [110, 20],
+        [120, 15],
+      ],
+      time: 130,
+      input: 15,
+      state: 'closed',
+    },
+    { name: 'same-time movement', moves: [[100, 20]], time: 100, input: 20, state: 'closed' },
+  ])('routes release using input history for $name without frame samples', (sample) => {
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(100)
+    const { instance, errors, update } = setup(withReleaseProjection)
+    update(true, 0)
+
+    for (const [time, input] of sample.moves) {
+      clock.mockReturnValue(time)
+      update(true, input)
+    }
+
+    clock.mockReturnValue(sample.time)
+    update(false, sample.input, true)
+
+    expect(instance.composition.states.position).toBe(sample.state)
+    expect(errors).toEqual([])
+
+    clock.mockRestore()
+  })
+
+  it('starts the release spring with the input derivative without any frame samples', () => {
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(100)
+    const { instance, element, errors, update } = setup(withReleaseProjection)
+    update(true, 0)
+    clock.mockReturnValue(110)
+    update(true, 20)
+    clock.mockReturnValue(120)
+
+    update(false, 20, true)
+    const animation = instance.animations[0]
+    if (!(animation?.effect instanceof KeyframeEffect)) throw new Error('Expected momentum spring')
+    const expected = springMotion(
+      { kind: 'spring-physics', stiffness: 300, damping: 25, mass: 1 },
+      [20],
+      [120],
+      [2],
+    )
+    // Sample at an authored frame boundary, excluding WAAPI's linear approximation
+    // between frames from the assertion about the inherited initial velocity.
+    const sampleTime = animation.effect.getKeyframes()[1].computedOffset * expected.durationMs
+
+    animation.pause()
+    animation.currentTime = sampleTime
+
+    expect(parseFloat(getComputedStyle(element).translate)).toBeCloseTo(
+      expected.sample(sampleTime).value[0],
+      3,
+    )
+    expect(errors).toEqual([])
+
+    clock.mockRestore()
+  })
+
+  it.each([
+    { name: 'half', input: -10, releaseTime: 120, state: 'half' },
+    { name: 'expanded', input: -20, releaseTime: 120, state: 'expanded' },
+    { name: 'held near closed', input: -10, releaseTime: 200, state: 'closed' },
+  ])('routes a vertical bottom sheet to $state for $name', (sample) => {
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(100)
+    const { instance, errors, update } = setup((definition) => {
+      const projected: Expression = {
+        kind: 'binary',
+        operator: '+',
+        left: reference('movement', 'value', 'y'),
+        right: {
+          kind: 'binary',
+          operator: '*',
+          left: reference('movement', 'velocity', 'y'),
+          right: { kind: 'number', value: 200 },
+        },
+      }
+      const below = (value: number): Expression => ({
+        kind: 'binary',
+        operator: '<',
+        left: projected,
+        right: { kind: 'number', value },
+      })
+      const atLeast = (value: number): Expression => ({
+        kind: 'binary',
+        operator: '>=',
+        left: projected,
+        right: { kind: 'number', value },
+      })
+      const destinations = [
+        { to: 'expanded', when: below(100) },
+        {
+          to: 'half',
+          when: {
+            kind: 'binary',
+            operator: '&&',
+            left: atLeast(100),
+            right: below(300),
+          } as Expression,
+        },
+        { to: 'closed', when: atLeast(300) },
+      ]
+
+      return {
+        ...definition,
+        letBindings: definition.letBindings?.map((binding) => ({
+          ...binding,
+          initializer:
+            binding.name === 'movement'
+              ? {
+                  kind: 'call',
+                  function: 'link',
+                  attachment: { target: 'self', property: 'translate' },
+                  arguments: [
+                    { name: 'input', value: reference('pointer', 'offset') },
+                    { name: 'component', value: { kind: 'string', value: 'y' } },
+                  ],
+                }
+              : binding.initializer,
+        })),
+        layers: definition.layers.map((layer) =>
+          layer.name !== 'position'
+            ? layer
+            : {
+                ...layer,
+                targets: [
+                  {
+                    name: 'self',
+                    properties: [
+                      {
+                        name: 'translate',
+                        value: '0px 400px',
+                        timing: { kind: 'spring-physics', stiffness: 300, damping: 25, mass: 1 },
+                      },
+                    ],
+                  },
+                ],
+                states: [
+                  { name: 'closed', targets: [] },
+                  {
+                    name: 'half',
+                    targets: [
+                      { name: 'self', properties: [{ name: 'translate', value: '0px 200px' }] },
+                    ],
+                  },
+                  {
+                    name: 'expanded',
+                    targets: [
+                      { name: 'self', properties: [{ name: 'translate', value: '0px 0px' }] },
+                    ],
+                  },
+                ],
+                transitions: ['closed', 'half', 'expanded'].flatMap((from) =>
+                  destinations.map((destination) => ({
+                    from,
+                    ...destination,
+                    event: reference('pointer', 'release'),
+                    transition: { targets: [] },
+                  })),
+                ),
+              },
+        ),
+      }
+    })
+    update(true, 0)
+    clock.mockReturnValue(110)
+    update(true, sample.input)
+    clock.mockReturnValue(sample.releaseTime)
+
+    update(false, sample.input, true)
+
+    expect(instance.composition.states.position).toBe(sample.state)
+    expect(errors).toEqual([])
+
+    clock.mockRestore()
   })
 
   it('never retries an occurrence that matched no guard on later property updates', async () => {

@@ -593,4 +593,5 @@ applies terminal input to old owners, freezes observations, resolves all guards,
 commits composition and property effects. Publications during evaluation are queued;
 event occurrences have FIFO identity and are never collapsed into ordinary updates.
 Target/source replacement clears obsolete queued work. Inspection uses snapshot-only
-evaluation and preview suspends controller observation; it cannot advance input events.
+evaluation and preview freezes on-demand controller snapshots; it cannot advance
+input events.

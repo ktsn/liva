@@ -875,9 +875,10 @@ per layer. Event and ordinary candidates share source order; the last eligible
 candidate wins. Other layers receive the same occurrence and snapshot. Unmatched
 occurrences are never retried, and observations cannot replay a release.
 
-Terminal pointer-up input is applied to previously effective control before guards
-read frozen displayed position/velocity. Only then does ownership change and the
-selected spring begin. Distinct occurrences are queued in order, never recursively
+Terminal pointer-up input is incorporated into previously effective control before
+guards read frozen terminal position/input-velocity snapshots. Once transitions are
+selected, control release transfers that velocity to property motion history before
+the selected spring is prepared. Distinct occurrences are queued in order, never recursively
 evaluated or coalesced. Mount, reconnection, target replacement, HMR, and disposal
 never replay historical events. The 200ms projection and 48px threshold above are
 application policy.
