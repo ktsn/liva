@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vite-plus/test'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { link } from './link.ts'
 import { propertyController } from '../controllers.ts'
 import { PropertyMotion } from '../property-motion.ts'
@@ -7,9 +7,39 @@ import type { FunctionArguments, RuntimeValue } from '../reactive-value.ts'
 
 const cleanups: (() => void)[] = []
 
+function animationFrames() {
+  const queued = new Map<number, FrameRequestCallback>()
+  let sequence = 0
+
+  // Control scheduling to exercise synchronous teardown/rebind within one frame;
+  // property decoding and rendering still use the browser's actual CSSOM.
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+    const id = ++sequence
+    queued.set(id, callback)
+
+    return id
+  })
+  vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => {
+    queued.delete(id)
+  })
+
+  return {
+    flush(time = performance.now()) {
+      const callbacks = [...queued.values()]
+      queued.clear()
+
+      for (const callback of callbacks) callback(time)
+    },
+    get pending() {
+      return queued.size
+    },
+  }
+}
+
 function setup(property: string, input: RuntimeValue = 0, extra: FunctionArguments = {}) {
   const parent = document.createElement('div')
   parent.style.cssText = 'position:relative;width:400px;height:300px;'
+
   const element = document.createElement('div')
   element.style.cssText =
     'position:absolute;box-sizing:border-box;width:100px;height:80px;left:10px;top:30px;translate:100px 50px 7px;rotate:30deg;'
@@ -17,26 +47,32 @@ function setup(property: string, input: RuntimeValue = 0, extra: FunctionArgumen
     element.style.cssText += 'left:auto;right:20px;'
   if (property.includes('bottom') || property === 'inset-block-end')
     element.style.cssText += 'top:auto;bottom:40px;'
+
   parent.append(element)
   document.body.append(parent)
   cleanups.push(() => parent.remove())
+
   const args = { input, ...extra }
   const call = link(args)
   const controller = propertyController(call.value)
   const motion = new PropertyMotion()
   const warnings: string[] = []
+
   controller.configure({
     target: 'self',
     property,
     motion,
     report: (message) => warnings.push(message),
   })
+
   let notifications = 0
+
   cleanups.push(
     call.bind(new Map([['self', element]]), () => {
       notifications++
     }),
   )
+
   const time = performance.now()
   controller.acquire(time)
 
@@ -45,6 +81,7 @@ function setup(property: string, input: RuntimeValue = 0, extra: FunctionArgumen
       { ...args, input: nextInput, ...next },
       { time: time + elapsed },
     )
+
     prepared.commit()
     const controlled = controller.control()
 
@@ -60,6 +97,7 @@ function setup(property: string, input: RuntimeValue = 0, extra: FunctionArgumen
     element,
     call,
     controller,
+    motion,
     warnings,
     update,
     time,
@@ -77,6 +115,8 @@ async function frames() {
 
 afterEach(() => {
   for (const cleanup of cleanups.splice(0).toReversed()) cleanup()
+
+  vi.restoreAllMocks()
 })
 
 describe('link property adapters', () => {
@@ -89,6 +129,7 @@ describe('link property adapters', () => {
     expect(binding.controller.render(property, binding.call.value)).toBe(
       property === 'rotate' ? '30deg' : '100px',
     )
+
     binding.controller.setPreview(false)
   })
 
@@ -96,6 +137,7 @@ describe('link property adapters', () => {
     const call = link({ input: 10, component: 'x' })
     const controller = propertyController(call.value)
     cleanups.push(call.bind(new Map(), () => {}))
+
     controller.setPreview(true)
     controller.setPreview(false)
 
@@ -156,6 +198,7 @@ describe('link property adapters', () => {
         report: () => {},
       }),
     ).toThrow('exactly one')
+
     expect(() =>
       binding.controller.configure({
         target: 'self',
@@ -192,6 +235,7 @@ describe('link property adapters', () => {
     await frames()
 
     binding.controller.acquire(performance.now())
+
     expect(binding.call.value).toMatchObject({
       value: { x: 100, y: 50, z: 7 },
       velocity: { x: 0, y: 0, z: 0 },
@@ -199,6 +243,104 @@ describe('link property adapters', () => {
     })
     expect(binding.controller.control()?.value).toBe('100px 50px 7px')
     expect(binding.warnings).toEqual([])
+  })
+
+  it.each([false, true])(
+    'rebases recovery after a hidden input commit with hidden observation=%s',
+    (observeHidden) => {
+      const scheduler = animationFrames()
+      const binding = setup('width')
+      binding.update(20, 20)
+
+      binding.element.style.display = 'none'
+      const hidden = binding.update(30, 30)
+
+      if (observeHidden) scheduler.flush(binding.time + 40)
+
+      expect(hidden).toMatchObject({ attached: false, velocity: 0 })
+      expect(binding.call.value).toMatchObject({ attached: false, velocity: 0 })
+
+      binding.element.style.display = 'block'
+      binding.controller.acquire(binding.time + 50)
+
+      expect(binding.controller.control()?.value).toBe('120px')
+
+      const recovered = binding.update(40, 60)
+
+      expect(recovered).toMatchObject({ attached: true, value: 130, velocity: 1 })
+      expect(binding.element.style.width).toBe('130px')
+    },
+  )
+
+  it('retires a hidden session when preview publishes fallback before an input commit', () => {
+    animationFrames()
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(100)
+    const binding = setup('width')
+    binding.update(20, 20)
+
+    binding.element.style.display = 'none'
+    clock.mockReturnValue(125)
+    binding.controller.setPreview(true)
+    binding.update(30, 30)
+    clock.mockReturnValue(140)
+    binding.controller.setPreview(false)
+
+    binding.element.style.display = 'block'
+    binding.controller.acquire(150)
+
+    expect(binding.controller.control()?.value).toBe('120px')
+    expect(binding.update(40, 60)).toMatchObject({ value: 130, velocity: 1, attached: true })
+  })
+
+  it.each(['source recovery', 'preview exit'] as const)(
+    "preserves another owner's registered motion during inactive %s",
+    (transition) => {
+      const scheduler = animationFrames()
+      const binding = setup('width')
+      binding.controller.release()
+
+      const animation = binding.element.animate([{ width: '100px' }, { width: '200px' }], {
+        duration: 1000,
+        fill: 'both',
+      })
+      cleanups.push(() => animation.cancel())
+      animation.pause()
+      animation.currentTime = 200
+      binding.motion.register(binding.element, 'width', animation, () => ({
+        value: [120],
+        velocity: [3],
+      }))
+
+      if (transition === 'source recovery') {
+        binding.element.style.display = 'none'
+        scheduler.flush()
+        binding.element.style.display = 'block'
+        scheduler.flush()
+      } else {
+        binding.controller.setPreview(true)
+        binding.controller.setPreview(false)
+      }
+
+      expect(binding.controller.control()).toBeUndefined()
+      expect(binding.motion.read(binding.element, 'width')?.velocity).toEqual([3])
+    },
+  )
+
+  it('preserves the current session when a hidden-target preparation is discarded', () => {
+    const scheduler = animationFrames()
+    const binding = setup('width')
+    binding.update(20, 20)
+
+    binding.element.style.display = 'none'
+    const abandoned = binding.call.prepareUpdate({ input: 30 }, { time: binding.time + 30 })
+    abandoned.discard()
+    binding.element.style.display = 'block'
+
+    binding.update(30, 40)
+    scheduler.flush(binding.time + 40)
+
+    expect(binding.element.style.width).toBe('130px')
+    expect(binding.controller.control()?.value).toBe('130px')
   })
 
   it('diagnoses unreadable values once, preserves normal styles, and recovers', async () => {
@@ -221,6 +363,7 @@ describe('link property adapters', () => {
 
   it('freezes observations during manual preview and resumes afterwards', async () => {
     const binding = setup('translate', 0, { component: 'x' })
+
     binding.controller.setPreview(true)
     binding.element.style.translate = '200px 50px 7px'
 
@@ -264,6 +407,7 @@ describe('link property adapters', () => {
 
   it('releases control and disposes observation resources idempotently', () => {
     const binding = setup('width')
+
     binding.update(20, 20)
 
     binding.controller.release()
@@ -275,6 +419,156 @@ describe('link property adapters', () => {
 
     expect(binding.call.value).toMatchObject({ value: 20, attached: false })
     expect(binding.controller.control()).toBeUndefined()
+  })
+
+  it.each(['cleanup', 'dispose'] as const)(
+    'retires the observer when notification triggers %s',
+    (action) => {
+      const scheduler = animationFrames()
+      const binding = setup('width')
+      const targets = new Map([['self', binding.element]])
+      const cleanup = binding.call.bind(targets, () => {
+        if (action === 'cleanup') cleanup()
+        else binding.call.dispose()
+      })
+      cleanups.push(cleanup)
+
+      binding.element.style.width = '120px'
+      scheduler.flush()
+
+      expect(scheduler.pending).toBe(0)
+    },
+  )
+
+  it('keeps only the new observer when notification rebinds the call', () => {
+    const scheduler = animationFrames()
+    const binding = setup('width')
+    const targets = new Map([['self', binding.element]])
+    let reboundNotifications = 0
+
+    cleanups.push(
+      binding.call.bind(targets, () => {
+        cleanups.push(
+          binding.call.bind(targets, () => {
+            reboundNotifications++
+          }),
+        )
+      }),
+    )
+
+    binding.element.style.width = '120px'
+    scheduler.flush()
+
+    expect(scheduler.pending).toBe(1)
+
+    binding.element.style.width = '130px'
+    scheduler.flush()
+
+    expect(reboundNotifications).toBe(1)
+    expect(scheduler.pending).toBe(1)
+  })
+
+  it('stops observation when a diagnostic callback disposes the call', () => {
+    const scheduler = animationFrames()
+    const binding = setup('rotate')
+    let diagnostics = 0
+
+    binding.controller.configure({
+      target: 'self',
+      property: 'rotate',
+      motion: binding.motion,
+      report: () => {
+        diagnostics++
+        binding.call.dispose()
+      },
+    })
+
+    binding.element.style.rotate = 'x 20deg'
+    scheduler.flush()
+
+    expect(diagnostics).toBe(1)
+    expect(binding.notifications).toBe(0)
+    expect(scheduler.pending).toBe(0)
+  })
+
+  it.each(['dispose', 'rebind'] as const)(
+    'honors %s from the first binding diagnostic',
+    (action) => {
+      const scheduler = animationFrames()
+      const element = document.createElement('div')
+      element.style.cssText = 'width:100px;height:50px;rotate:x 20deg;'
+      const replacement = document.createElement('div')
+      replacement.style.cssText = 'width:100px;height:50px;rotate:30deg;'
+      document.body.append(element, replacement)
+      cleanups.push(() => {
+        element.remove()
+        replacement.remove()
+      })
+
+      const call = link({ input: 0 })
+      const controller = propertyController(call.value)
+      let reboundCleanup: (() => void) | undefined
+      controller.configure({
+        target: 'self',
+        property: 'rotate',
+        motion: new PropertyMotion(),
+        report: () => {
+          if (action === 'dispose') call.dispose()
+          else {
+            reboundCleanup = call.bind(new Map([['self', replacement]]), () => {})
+            cleanups.push(reboundCleanup)
+          }
+        },
+      })
+
+      const cleanup = call.bind(new Map([['self', element]]), () => {})
+      cleanups.push(cleanup)
+
+      expect(scheduler.pending).toBe(action === 'dispose' ? 0 : 1)
+      expect(call.readSnapshot?.({ time: performance.now() })).toMatchObject({
+        attached: action === 'rebind',
+        value: action === 'dispose' ? 0 : 30,
+      })
+
+      cleanup()
+
+      expect(scheduler.pending).toBe(action === 'dispose' ? 0 : 1)
+
+      reboundCleanup?.()
+
+      expect(scheduler.pending).toBe(0)
+    },
+  )
+
+  it('releases a failed initial binding and propagates its diagnostic error', () => {
+    const scheduler = animationFrames()
+    const element = document.createElement('div')
+    element.style.cssText = 'width:100px;height:50px;rotate:x 20deg;'
+    document.body.append(element)
+    cleanups.push(() => element.remove())
+    const failure = new Error('Diagnostic failed')
+    const call = link({ input: 0 })
+    const controller = propertyController(call.value)
+    controller.configure({
+      target: 'self',
+      property: 'rotate',
+      motion: new PropertyMotion(),
+      report: () => {
+        throw failure
+      },
+    })
+
+    expect(() => call.bind(new Map([['self', element]]), () => {})).toThrow(failure)
+
+    element.style.rotate = '30deg'
+
+    expect(call.readSnapshot?.({ time: performance.now() })).toMatchObject({
+      attached: false,
+      value: 0,
+    })
+    expect(scheduler.pending).toBe(0)
+
+    call.dispose()
   })
 
   it('keeps an unbound controller inactive when acquisition is requested', () => {
