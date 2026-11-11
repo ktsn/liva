@@ -79,10 +79,16 @@ test('natural inner content updates expansion and interrupted collapse begins at
 
   const start = await shell.evaluate((element) => {
     const animation = element.getAnimations()[0]
-    if (!(animation?.effect instanceof KeyframeEffect))
-      throw new Error('Expected collapse animation')
+    if (!animation) throw new Error('Expected collapse animation')
 
-    return parseFloat(String(animation.effect.getKeyframes()[0].blockSize))
+    // Compare rendered heights so logical/physical property normalization does not
+    // affect the continuity check at the start of the interrupted transition.
+    animation.pause()
+    animation.currentTime = 0
+    const height = parseFloat(getComputedStyle(element).blockSize)
+    animation.play()
+
+    return height
   })
   expect(start).toBeCloseTo(midpoint, 1)
   await expect(shell).toHaveCSS('block-size', '0px')

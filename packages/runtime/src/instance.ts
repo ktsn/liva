@@ -1,3 +1,5 @@
+import { propertyReference, propertyAddresses, canonicalTracks } from './property-codec.ts'
+import { propertyRule } from './property-rules.ts'
 import {
   layerPropertyChanged,
   layerTargets,
@@ -24,6 +26,7 @@ import {
 } from './lifecycle.ts'
 import { sampleSpring } from './spring.ts'
 import { trackLayoutAnimation } from './layout-scheduler.ts'
+import { PropertyMotion, type MotionSample } from './property-motion.ts'
 
 export interface RuntimeDiagnostic {
   readonly code: string
@@ -53,7 +56,15 @@ function inlineDeclarations(element: HTMLElement): Map<string, InlineValue> {
   )
 }
 
-type ActiveTrack = { track: ResolvedTrack; element: HTMLElement; animation: Animation }
+type ActiveTrack = {
+  track: ResolvedTrack
+  element: HTMLElement
+  animation: Animation
+  sourceProperty: string
+  sourceDestination: string
+  reference?: string
+  trajectory?: (milliseconds: number) => MotionSample
+}
 
 const layerPropertyKey = (target: string, property: string) => `${target}\0${property}`
 
@@ -69,6 +80,10 @@ export class LivaInstance {
   private targets = new Map<string, HTMLElement>()
   private targetElements = new Map<string, HTMLElement[]>()
   private active: ActiveTrack[] = []
+  private readonly propertyMotion = new PropertyMotion()
+  private readonly dirtyProperties = new Map<HTMLElement, Set<string>>()
+  private referenceFrame?: number
+  private readonly referenceRetargets = new Set<string>()
   private enterSessions = new Set<LifecycleSession>()
   private leaveSessions = new Set<LifecycleSession>()
   private settledLifecycleSessions = new WeakSet<LifecycleSession>()
@@ -170,6 +185,68 @@ export class LivaInstance {
     return this.active.map((a) => a.animation)
   }
 
+  private orderedResolution(resolution: LayerResolution, definition: Definition): LayerResolution {
+    const priority = (
+      target: string,
+      property: LayerResolution['presentation']['targets'][number]['properties'][number],
+    ): readonly number[] => {
+      const layerIndex = definition.layers.findIndex((layer) => layer.name === property.owner)
+      // Presentation owners are emitted by resolveLayers from this definition.
+      const layer = definition.layers[layerIndex]
+      const state = layer.states?.find(
+        (candidate) => candidate.name === resolution.states.get(layer.name),
+      )
+      const stateProperty =
+        state?.targets
+          .find((candidate) => candidate.name === target)
+          ?.properties.findIndex((candidate) => candidate.name === property.name) ?? -1
+      const commonProperty =
+        layer.targets
+          .find((candidate) => candidate.name === target)
+          ?.properties.findIndex((candidate) => candidate.name === property.name) ?? -1
+
+      return [
+        layerIndex,
+        stateProperty >= 0 ? 1 : 0,
+        stateProperty >= 0 ? stateProperty : commonProperty,
+      ]
+    }
+
+    return {
+      ...resolution,
+      presentation: {
+        ...resolution.presentation,
+        targets: resolution.presentation.targets.map((target) => ({
+          ...target,
+          properties: target.properties.toSorted((left, right) => {
+            const a = priority(target.name, left)
+            const b = priority(target.name, right)
+
+            return a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
+          }),
+        })),
+      },
+    }
+  }
+
+  private ownsCanonicalProperty(
+    resolution: LayerResolution,
+    element: HTMLElement,
+    target: string,
+    sourceProperty: string,
+    canonicalProperty: string,
+  ): boolean {
+    if (!propertyAddresses(element, sourceProperty).includes(canonicalProperty)) return true
+    const declarations = resolution.presentation.targets
+      .filter((candidate) => candidate.name === target)
+      .flatMap((candidate) => candidate.properties)
+      .filter((property) => propertyAddresses(element, property.name).includes(canonicalProperty))
+    // The source declaration that produced this canonical track is itself a candidate.
+    const winner = declarations[declarations.length - 1]
+
+    return winner.name === sourceProperty
+  }
+
   private snapshotValues(definition: Definition): VariableValues {
     const graph = new LetBindingGraph(definition.letBindings ?? [], this.values, this.letBindings)
 
@@ -267,6 +344,50 @@ export class LivaInstance {
     }
   }
 
+  private clearReferenceFrame() {
+    if (this.referenceFrame !== undefined) cancelAnimationFrame(this.referenceFrame)
+    this.referenceFrame = undefined
+  }
+
+  private refreshReferences = () => {
+    this.clearReferenceFrame()
+    /* v8 ignore if -- @preserve: cancel() removes the RAF and active effects before disposal/preview; finished callbacks check active membership. */
+    if (this.disposed || this.compositionPreview) return
+
+    for (const entry of this.active) {
+      if (entry.reference === undefined || entry.animation.playState === 'paused') continue
+      const next = propertyReference(
+        entry.element,
+        entry.track.property,
+        entry.track.destinationValue,
+      )
+
+      if (next !== entry.reference)
+        this.referenceRetargets.add(layerPropertyKey(entry.track.target, entry.sourceProperty))
+    }
+
+    if (this.referenceRetargets.size > 0) {
+      try {
+        this.applyLayerResolution(this.layerResolution, this.layerResolution)
+      } catch (error) {
+        this.report({ code: 'runtime.animation', message: String(error), error })
+      } finally {
+        this.referenceRetargets.clear()
+      }
+    }
+
+    this.scheduleReferences()
+  }
+
+  private scheduleReferences() {
+    if (
+      this.referenceFrame !== undefined ||
+      !this.active.some((entry) => entry.reference !== undefined)
+    )
+      return
+    this.referenceFrame = requestAnimationFrame(this.refreshReferences)
+  }
+
   private motionChanged = () => {
     if (this.motion.matches && !this.manuallyPaused) {
       this.cancel()
@@ -276,6 +397,10 @@ export class LivaInstance {
 
   private cancel(cancelEnter = true) {
     this.compositionPreview = false
+    this.clearReferenceFrame()
+    this.referenceRetargets.clear()
+    this.propertyMotion.reset()
+    this.dirtyProperties.clear()
     if (cancelEnter) {
       for (const session of this.enterSessions) session.cancel('superseded')
       this.enterSessions.clear()
@@ -306,6 +431,11 @@ export class LivaInstance {
     }
 
     const beforeCss = element.style.cssText
+    if (propertyRule(property)?.kind === 'length') {
+      // Keep CSS logical/physical aliases in the same order as the resolved cascade.
+      element.style.removeProperty(property)
+    }
+
     element.style.setProperty(property, value)
     const after = inlineDeclarations(element)
 
@@ -340,12 +470,31 @@ export class LivaInstance {
         }
       }
     }
+    const dirty = this.dirtyProperties.get(element) ?? new Set<string>()
+    dirty.add(property)
+    this.dirtyProperties.set(element, dirty)
   }
 
   private lifecycleOwns(element: HTMLElement, property: string): boolean {
     return [...this.enterSessions, ...this.leaveSessions].some((session) =>
       session.owns(element, property),
     )
+  }
+
+  private flushMotionSamples(time = performance.now()) {
+    const pending = new Map(this.dirtyProperties)
+    this.dirtyProperties.clear()
+
+    for (const [element, properties] of pending) {
+      const protectedAddresses = new Set(
+        this.active
+          .filter((entry) => entry.element === element)
+          .flatMap((entry) => [...propertyAddresses(element, entry.track.property)]),
+      )
+
+      for (const property of properties)
+        this.propertyMotion.record(element, property, time, protectedAddresses)
+    }
   }
 
   private restore(preserveLifecycle = false) {
@@ -373,6 +522,10 @@ export class LivaInstance {
       : []
 
     for (const { element, original, originalCss, pending, written } of this.owned) {
+      const dirty = this.dirtyProperties.get(element) ?? new Set<string>()
+      for (const property of written.keys()) dirty.add(property)
+      this.dirtyProperties.set(element, dirty)
+
       const current = inlineDeclarations(element)
       const baseline = document.createElement('div')
       const external = document.createElement('div')
@@ -415,11 +568,16 @@ export class LivaInstance {
     if (!preserveLifecycle) this.owned = []
   }
 
-  private settle() {
+  /** Reconciles presentation, optionally restricting writes to one receiving element. */
+  private settle(receivingElement?: HTMLElement) {
     if (this.suspended || this.disposed) return
 
-    for (const target of this.layerResolution.presentation.targets) {
+    const resolution = this.orderedResolution(this.layerResolution, this.definition)
+
+    for (const target of resolution.presentation.targets) {
       for (const element of this.targetElements.get(target.name) ?? []) {
+        if (receivingElement && element !== receivingElement) continue
+
         for (const property of target.properties) {
           if (this.lifecycleOwns(element, property.name)) continue
 
@@ -427,6 +585,7 @@ export class LivaInstance {
         }
       }
     }
+    this.flushMotionSamples()
   }
 
   bind(entries: readonly (readonly [string, HTMLElement])[]) {
@@ -451,6 +610,8 @@ export class LivaInstance {
     const previousInputs = JSON.stringify(this.values)
 
     this.clearLetBindings()
+    this.propertyMotion.reset()
+    this.dirtyProperties.clear()
     this.cancel(false)
     this.restore(this.enterSessions.size > 0)
     this.targets = next
@@ -512,6 +673,8 @@ export class LivaInstance {
     this.letBindings = letBindings
     this.values = letBindings.evaluate(variables)
     this.definition = definition
+    this.propertyMotion.reset()
+    this.dirtyProperties.clear()
     this.eventValues.clear()
     this.evaluateEvents(false)
     this.layerResolution = resolveLayers(definition, this.values)
@@ -554,6 +717,8 @@ export class LivaInstance {
 
       this.cancel()
       this.restore()
+      this.propertyMotion.reset()
+      this.dirtyProperties.clear()
       this.compositionPreview = true
 
       const present = (resolution: LayerResolution) => {
@@ -613,7 +778,13 @@ export class LivaInstance {
               document.timeline,
             )
 
-            prepared.push({ track, element, animation })
+            prepared.push({
+              track,
+              element,
+              animation,
+              sourceProperty: track.property,
+              sourceDestination: track.destinationValue,
+            })
           }
         }
       }
@@ -705,8 +876,9 @@ export class LivaInstance {
   }
 
   private applyLayerResolution(previous: LayerResolution, next: LayerResolution) {
+    next = this.orderedResolution(next, this.definition)
     const prepared: ActiveTrack[] = []
-    const changed = new Set<string>()
+    const changed = new Set<string>(this.referenceRetargets)
     for (const entry of this.active) {
       if (
         entry.track.directionalOwner !== undefined &&
@@ -744,45 +916,86 @@ export class LivaInstance {
 
     for (const target of next.presentation.targets) {
       for (const property of target.properties) {
-        if (layerPropertyChanged(previous, target.name, property))
+        if (layerPropertyChanged(previous, target.name, property)) {
           changed.add(layerPropertyKey(target.name, property.name))
+
+          for (const element of this.targetElements.get(target.name) ?? []) {
+            for (const address of propertyAddresses(element, property.name))
+              changed.add(layerPropertyKey(target.name, address))
+          }
+        }
       }
     }
 
     try {
       if (!this.suspended && !this.motion.matches) {
-        for (const track of tracks) {
-          changed.add(layerPropertyKey(track.target, track.property))
+        for (const sourceTrack of tracks) {
+          changed.add(layerPropertyKey(sourceTrack.target, sourceTrack.property))
           const timing =
-            track.timing.kind === 'tween'
-              ? { durationMs: track.timing.durationMs, easing: 'linear' }
-              : sampleSpring(track.timing)
+            sourceTrack.timing.kind === 'tween'
+              ? { durationMs: sourceTrack.timing.durationMs, easing: 'linear' }
+              : sampleSpring(sourceTrack.timing)
 
           if (timing.durationMs === 0) continue
 
-          for (const element of this.targetElements.get(track.target) ?? []) {
-            if (this.lifecycleOwns(element, track.property)) continue
+          for (const element of this.targetElements.get(sourceTrack.target) ?? []) {
+            for (const track of canonicalTracks(element, sourceTrack)) {
+              if (
+                !this.ownsCanonicalProperty(
+                  next,
+                  element,
+                  sourceTrack.target,
+                  sourceTrack.property,
+                  track.property,
+                )
+              )
+                continue
+              changed.add(layerPropertyKey(track.target, track.property))
+              if (this.lifecycleOwns(element, track.property)) continue
 
-            const interrupted = this.active.some(
-              (entry) => entry.element === element && entry.track.property === track.property,
-            )
-            const frames = track.keyframes.map((frame, index) => ({
-              [waapiProperty(track.property)]:
-                index === 0 && (track.implicitStart || interrupted)
-                  ? getComputedStyle(element).getPropertyValue(track.property)
-                  : frame.value,
-              offset: frame.offset,
-              easing: frame.easing,
-            }))
-            const animation = new Animation(
-              new KeyframeEffect(element, frames, {
-                duration: timing.durationMs,
-                easing: timing.easing,
-                fill: 'both',
-              }),
-              document.timeline,
-            )
-            prepared.push({ track, element, animation })
+              const interrupted = this.active.some(
+                (entry) => entry.element === element && entry.track.property === track.property,
+              )
+              const frames = track.keyframes.map((frame, index) => ({
+                [waapiProperty(track.property)]:
+                  index === 0 && (track.implicitStart || interrupted)
+                    ? getComputedStyle(element).getPropertyValue(track.property)
+                    : frame.value,
+                offset: frame.offset,
+                easing: frame.easing,
+              }))
+              const handoff =
+                track.timing.kind !== 'tween'
+                  ? this.propertyMotion.prepareSpring(
+                      element,
+                      track.property,
+                      track.destinationValue,
+                      track.timing,
+                      track.keyframes.every((frame) => frame.offset === 0 || frame.offset === 1),
+                    )
+                  : undefined
+              const animation = new Animation(
+                new KeyframeEffect(element, handoff?.frames ?? frames, {
+                  duration: handoff?.durationMs ?? timing.durationMs,
+                  easing: handoff ? 'linear' : timing.easing,
+                  fill: 'both',
+                }),
+                document.timeline,
+              )
+              prepared.push({
+                track,
+                element,
+                animation,
+                trajectory: handoff?.sample,
+                sourceProperty: sourceTrack.property,
+                sourceDestination: sourceTrack.destinationValue,
+                reference: propertyReference(
+                  element,
+                  sourceTrack.property,
+                  sourceTrack.destinationValue,
+                ),
+              })
+            }
           }
         }
       }
@@ -793,7 +1006,8 @@ export class LivaInstance {
 
     const replaced = this.active.filter(
       (entry) =>
-        removedProperties.has(layerPropertyKey(entry.track.target, entry.track.property)) ||
+        removedProperties.has(layerPropertyKey(entry.track.target, entry.sourceProperty)) ||
+        changed.has(layerPropertyKey(entry.track.target, entry.sourceProperty)) ||
         changed.has(layerPropertyKey(entry.track.target, entry.track.property)),
     )
     this.active = this.active.filter((entry) => !replaced.includes(entry))
@@ -818,17 +1032,39 @@ export class LivaInstance {
     }
 
     this.active.push(...prepared)
+    this.flushMotionSamples()
 
     for (const entry of prepared) {
       entry.animation.play()
       trackLayoutAnimation(entry.element, entry.track.property, entry.animation)
+      this.propertyMotion.register(
+        entry.element,
+        entry.track.property,
+        entry.animation,
+        entry.trajectory,
+      )
       void entry.animation.finished
         .then(() => {
           if (!this.active.includes(entry)) return undefined
 
-          this.write(entry.element, entry.track.property, entry.track.destinationValue)
+          if (
+            entry.reference !== undefined &&
+            propertyReference(entry.element, entry.sourceProperty, entry.sourceDestination) !==
+              entry.reference
+          ) {
+            this.refreshReferences()
+            return undefined
+          }
+
+          this.write(entry.element, entry.sourceProperty, entry.sourceDestination)
           entry.animation.cancel()
           this.active = this.active.filter((item) => item !== entry)
+          // Cancelling a finished shorthand/logical effect can reveal another
+          // declaration, including opaque CSS shorthands outside numeric codecs.
+          // Restore the receiving element's complete cascade locally;
+          // unrelated receiving elements must not be rewritten for every track.
+          this.settle(entry.element)
+          this.propertyMotion.beginControl(entry.element, entry.track.property, performance.now())
           return undefined
         })
         .catch((error) => {
@@ -838,6 +1074,7 @@ export class LivaInstance {
           }
         })
     }
+    this.scheduleReferences()
   }
 
   private clearLetBindings() {
@@ -875,6 +1112,8 @@ export class LivaInstance {
     this.enterSessions.clear()
     this.clearLetBindings()
     this.letBindings.dispose()
+    this.propertyMotion.reset()
+    this.dirtyProperties.clear()
     this.cancel()
     this.restore()
     this.motion.removeEventListener('change', this.motionChanged)

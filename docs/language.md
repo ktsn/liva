@@ -166,7 +166,8 @@ a disabled element may still match `:hover`.
 Every motion requires at least one layer. Ordinary layers independently activate
 from Boolean conditions. Stateful layers retain one local state and advance through
 guarded transitions. Initial presentation settles without animation. Updates start
-from displayed values, including interrupted springs, without carrying velocity.
+from displayed values, including interrupted springs. Supported endpoint-only springs
+also inherit displayed velocity, as described under Automatic spring momentum.
 A dynamic property without timing follows input immediately; unrelated running effects
 continue. Timing and value ownership follow the layer cascade described below.
 
@@ -391,7 +392,8 @@ Application state changes immediately; it never waits for the leave animation.
 
 The [swipe playground](../playground/src/pages/swipe.vue) combines drag,
 events, a return spring, and leave animation. Each draggable list item has its
-own Motion instance. No velocity or inertia is calculated.
+own Motion instance. Release selection uses the persistent drag flag; endpoint
+springs inherit displayed velocity.
 
 ## Vue presence support
 
@@ -453,7 +455,7 @@ Standalone file imports, framework adapters other than Vue, SSR animation,
 component-root directive forwarding, Teleport targets and Shadow DOM target
 traversal are unsupported.
 
-Velocity input, inertia, state-change persistence events, scroll/orientation sources,
+Explicit authored velocity arguments, free-running inertia, state-change persistence events, scroll/orientation sources,
 user functions, custom CSS interpolation, and a standalone preview environment are
 unsupported. The editor edits resolved layer values, typed timing, existing transition
 frames, and motion-level lifecycles. Let bindings, guards, and new state-machine
@@ -795,3 +797,37 @@ let expired = timeout(when: status == "success" || status == "error", duration: 
 Use the result in ordinary guarded transitions to return local feedback to idle.
 Vue continues to own asynchronous requests, their outcomes, and duplicate submission
 prevention. The async-submit playground demonstrates both success and failure.
+
+## Automatic spring momentum
+
+Endpoint-only springs inherit displayed velocity across direct updates, tweens,
+and other springs, independently per component and across layer ownership changes.
+Supported properties are translate, scale, scalar rotate, opacity, numeric dimensions,
+and physical/logical insets. Inset shorthands resolve to independently owned physical
+longhands, preserving shorthand/longhand handoffs. Explicit intermediate keyframes
+retain their authored choreography without injected initial velocity.
+
+Lengths resolve to CSS pixels, scale/opacity to unitless numbers, and scalar rotation
+to CSS degrees. Rotation follows the numeric degree destination without implicit
+shortest-arc wrapping; 3D rotation falls back to ordinary browser interpolation.
+Compatible units, numeric calc(), and percentages resolve through browser computed
+styles. Translate percentages use the element's untransformed border box. Other
+length percentages use their CSS containing block. Relative destinations retarget
+from the displayed pose when reference sizes, relevant variables, fonts, or viewport
+change. Auto, discrete, and unreadable values retain ordinary animation.
+Authored units and expressions remain unchanged.
+
+Ordinary direct updates use recent displayed samples with an 80ms freshness window. Stationary holds expire
+movement; same-time updates never divide by zero. Native effects supply sampled derivatives;
+sampled springs retain analytic component velocity, including momentum beyond
+rendered opacity bounds. Opacity rendering clamps to [0,1], without resetting the
+internal spring. A nonzero incoming velocity animates even with equal endpoints,
+and may initially move away before reversing. Replaced effects cannot write later.
+
+Both physics and duration springs preserve initial velocity. Duration is a settling
+target: the solver adjusts natural frequency while retaining the requested bounce
+ratio, then pins the final sample to the destination. It is not an exact trajectory
+or mathematical rest-time guarantee. Physics sampling retains the existing 10-second
+and 8192-sample limits. Mount, target replacement, and disposal reset motion history.
+Ordinary editor playback starts at rest. Captured gesture scenario playback is deferred to
+#116; scrubbing does not drive input.
