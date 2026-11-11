@@ -1,3 +1,4 @@
+import type { Definition as PropertyIRDefinition } from '../../packages/runtime/src/definition.ts'
 import { test, expect } from '@playwright/test'
 import type * as Runtime from '../../packages/runtime/src/index.ts'
 
@@ -258,8 +259,10 @@ test('zero duration settles synchronously', async ({ page }) => {
               properties: [
                 {
                   name: 'opacity',
-                  value: '${mode}',
-                  template: [{ kind: 'reference', path: ['mode'] }],
+                  value: {
+                    kind: 'template',
+                    parts: [{ kind: 'reference', path: ['mode'] }],
+                  },
                 },
               ],
             },
@@ -294,8 +297,10 @@ test('WAAPI exceptions retain a usable instance', async ({ page }) => {
               properties: [
                 {
                   name: 'opacity',
-                  value: '${mode}',
-                  template: [{ kind: 'reference', path: ['mode'] }],
+                  value: {
+                    kind: 'template',
+                    parts: [{ kind: 'reference', path: ['mode'] }],
+                  },
                 },
               ],
             },
@@ -352,7 +357,10 @@ test('opaque CSS reaches the adapter', async ({ page }) => {
             name: 'track',
             properties: Object.keys(values).map((property) => ({
               name: property,
-              value: name === 'off' ? 'initial' : values[property],
+              value: {
+                kind: 'literal',
+                value: name === 'off' ? 'initial' : values[property],
+              },
             })),
           },
         ],
@@ -398,14 +406,16 @@ for (const [easing, expected] of [
               properties: [
                 {
                   name: 'opacity',
-                  value: name === 'off' ? '0' : '1',
-                  keyframes:
+                  value:
                     name === 'on'
-                      ? [
-                          { offset: 0.5, value: '0.5' },
-                          { offset: 1, value: '1' },
-                        ]
-                      : undefined,
+                      ? {
+                          kind: 'keyframes',
+                          frames: [
+                            { offset: 0.5, value: { kind: 'literal', value: '0.5' } },
+                            { offset: 1, value: { kind: 'literal', value: '1' } },
+                          ],
+                        }
+                      : { kind: 'literal', value: '0' },
                 },
               ],
             },
@@ -445,7 +455,20 @@ test('keyframe easing applies to the outgoing interval only', async ({ page }) =
       layers: [
         {
           name: 'base',
-          targets: [{ name: 'track', properties: [{ name: 'opacity', value: '0' }] }],
+          targets: [
+            {
+              name: 'track',
+              properties: [
+                {
+                  name: 'opacity',
+                  value: {
+                    kind: 'literal',
+                    value: '0',
+                  },
+                },
+              ],
+            },
+          ],
         },
         {
           name: 'active',
@@ -462,12 +485,33 @@ test('keyframe easing applies to the outgoing interval only', async ({ page }) =
               properties: [
                 {
                   name: 'opacity',
-                  value: '1',
-                  keyframes: [
-                    { offset: 0, value: '0', easing: 'step-start' },
-                    { offset: 0.5, value: '0.5' },
-                    { offset: 1, value: '1' },
-                  ],
+                  value: {
+                    kind: 'keyframes',
+                    frames: [
+                      {
+                        offset: 0,
+                        value: {
+                          kind: 'literal',
+                          value: '0',
+                        },
+                        easing: 'step-start',
+                      },
+                      {
+                        offset: 0.5,
+                        value: {
+                          kind: 'literal',
+                          value: '0.5',
+                        },
+                      },
+                      {
+                        offset: 1,
+                        value: {
+                          kind: 'literal',
+                          value: '1',
+                        },
+                      },
+                    ],
+                  },
                 },
               ],
             },
@@ -548,14 +592,26 @@ test('restores shorthand side effects and overlapping longhands with priorities'
             {
               name: 'box',
               properties: [
-                { name: 'margin', value: '10px' },
-                { name: 'margin-left', value: '20px' },
+                {
+                  name: 'margin',
+                  value: {
+                    kind: 'literal',
+                    value: '10px',
+                  },
+                },
+                {
+                  name: 'margin-left',
+                  value: {
+                    kind: 'literal',
+                    value: '20px',
+                  },
+                },
               ],
             },
           ],
         },
       ],
-    }
+    } satisfies PropertyIRDefinition
     const instance = new window.liva.LivaInstance(definition, {})
     instance.bind([['box', element]])
     instance.dispose()
@@ -582,9 +638,25 @@ test('restores variable shorthands without overwriting unrelated external edits'
     const definition = {
       name: 'a',
       layers: [
-        { name: 'on', targets: [{ name: 'box', properties: [{ name: 'margin', value: '10px' }] }] },
+        {
+          name: 'on',
+          targets: [
+            {
+              name: 'box',
+              properties: [
+                {
+                  name: 'margin',
+                  value: {
+                    kind: 'literal',
+                    value: '10px',
+                  },
+                },
+              ],
+            },
+          ],
+        },
       ],
-    }
+    } satisfies PropertyIRDefinition
     const instance = new window.liva.LivaInstance(definition, {})
     instance.bind([['box', element]])
     element.style.width = '20px'
@@ -608,10 +680,23 @@ test('tracks pending shorthand substitutions and retains external priority remov
       layers: [
         {
           name: 'on',
-          targets: [{ name: 'box', properties: [{ name: 'margin', value: 'var(--b)' }] }],
+          targets: [
+            {
+              name: 'box',
+              properties: [
+                {
+                  name: 'margin',
+                  value: {
+                    kind: 'literal',
+                    value: 'var(--b)',
+                  },
+                },
+              ],
+            },
+          ],
         },
       ],
-    }
+    } satisfies PropertyIRDefinition
     const instance = new window.liva.LivaInstance(definition, {})
     instance.bind([['box', element]])
     instance.dispose()

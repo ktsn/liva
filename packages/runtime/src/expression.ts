@@ -6,7 +6,16 @@ import {
   timingValue,
   easingCss,
 } from './timing-values.ts'
-import type { CallExpression, Expression, Property, Frame, Transition } from './definition.ts'
+import type {
+  CallExpression,
+  Expression,
+  Property,
+  CssValue,
+  Frame,
+  Transition,
+} from './definition.ts'
+
+import type { RenderedFrame, RenderedProperty } from './presentation.ts'
 
 import type { RuntimeValue, Scalar } from './reactive-value.ts'
 
@@ -121,21 +130,43 @@ function finite(value: number): number {
   return value
 }
 
-export function renderValue(
-  property: Pick<Property, 'value' | 'template'>,
-  values: VariableValues,
-): string {
-  return property.template
-    ? property.template
+/** Renders literal CSS unchanged or interpolates scalar expressions in template order. */
+export function renderValue(value: CssValue, values: VariableValues): string {
+  return value.kind === 'literal'
+    ? value.value
+    : value.parts
         .map((part) => (typeof part === 'string' ? part : String(evaluateScalar(part, values))))
         .join('')
-    : property.value
 }
 
-export function renderFrame(frame: Frame, values: VariableValues): Frame {
+/**
+ * Resolves a declaration into CSS presentation or a pending controller attachment.
+ * A binding keeps its expression and an empty placeholder until its controller supplies CSS.
+ * Throws if a style keyframe source is missing its required 100% destination.
+ */
+export function renderProperty(property: Property, values: VariableValues): RenderedProperty {
+  const source = property.value
+
+  if (source.kind === 'binding')
+    return { name: property.name, value: '', binding: source.expression }
+
+  if (source.kind === 'keyframes') {
+    const keyframes = source.frames.map((frame) => renderFrame(frame, values))
+    const destination = keyframes.find((frame) => frame.offset === 1)
+
+    if (!destination) throw new Error('Style keyframes require a 100% destination')
+
+    return { name: property.name, value: destination.value, keyframes }
+  }
+
+  return { name: property.name, value: renderValue(source, values) }
+}
+
+/** Evaluates an endpoint's CSS and easing against the same input snapshot. */
+export function renderFrame(frame: Frame, values: VariableValues): RenderedFrame {
   return {
-    ...frame,
-    value: renderValue(frame, values),
+    offset: frame.offset,
+    value: renderValue(frame.value, values),
     easing: frame.easingExpression
       ? easingCss(evaluate(frame.easingExpression, values))
       : frame.easing,
@@ -164,7 +195,12 @@ export function renderTransition(transition: Transition, values: VariableValues)
           timing: provider?.timingExpression
             ? timingValue(evaluate(provider.timingExpression, values))
             : provider?.timing,
-          keyframes: property.keyframes?.map((frame) => renderFrame(frame, values)),
+          keyframes: property.keyframes?.map((frame) => {
+            const rendered = renderFrame(frame, values)
+
+            // Keep captured transitions in IR form, with literals preventing later re-evaluation.
+            return { ...rendered, value: { kind: 'literal' as const, value: rendered.value } }
+          }),
         }
       }),
     })),

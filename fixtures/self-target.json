@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "definitions": [
     {
       "name": "rooted",
@@ -64,7 +64,10 @@
                 "keyframes": [
                   {
                     "offset": 0.0,
-                    "value": "0"
+                    "value": {
+                      "kind": "literal",
+                      "value": "0"
+                    }
                   }
                 ]
               },
@@ -73,7 +76,10 @@
                 "keyframes": [
                   {
                     "offset": 0.0,
-                    "value": ".8"
+                    "value": {
+                      "kind": "literal",
+                      "value": ".8"
+                    }
                   }
                 ]
               }
@@ -117,11 +123,17 @@
               "properties": [
                 {
                   "name": "opacity",
-                  "value": "1"
+                  "value": {
+                    "kind": "literal",
+                    "value": "1"
+                  }
                 },
                 {
                   "name": "translate",
-                  "value": "0 0"
+                  "value": {
+                    "kind": "literal",
+                    "value": "0 0"
+                  }
                 },
                 {
                   "timingExpression": {
@@ -138,7 +150,10 @@
                     ]
                   },
                   "name": "scale",
-                  "value": "1"
+                  "value": {
+                    "kind": "literal",
+                    "value": "1"
+                  }
                 }
               ]
             },
@@ -147,7 +162,10 @@
               "properties": [
                 {
                   "name": "rotate",
-                  "value": "0deg"
+                  "value": {
+                    "kind": "literal",
+                    "value": "0deg"
+                  }
                 }
               ]
             }
@@ -179,7 +197,10 @@
               "properties": [
                 {
                   "name": "scale",
-                  "value": "1.2"
+                  "value": {
+                    "kind": "literal",
+                    "value": "1.2"
+                  }
                 }
               ]
             }

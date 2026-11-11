@@ -3,10 +3,11 @@ import {
   resolveLayerTracks,
   type LayerResolution,
   type Definition,
-  type Frame,
+  type RenderedFrame,
   type Timing,
   type Transition,
-  type State,
+  renderFrame,
+  type RenderedState,
   resolveLifecycleTracks,
 } from '@liva/runtime'
 
@@ -22,8 +23,8 @@ export interface TimelineTrack {
   timing?: Timing
   duration: number
   diagnostic?: string
-  frames: readonly Frame[]
-  explicit: readonly Frame[]
+  frames: readonly RenderedFrame[]
+  explicit: readonly RenderedFrame[]
 }
 
 export function compositionTimelineTracks(
@@ -64,13 +65,12 @@ export function compositionTimelineTracks(
       } catch (error) {
         diagnostic = String(error)
       }
+      const transitionFrames = to.transitions
+        .get(property.owner)
+        ?.transition.targets.find((item) => item.name === target.name)
+        ?.properties.find((item) => item.name === property.name)?.keyframes
       const explicit =
-        to.transitions
-          .get(property.owner)
-          ?.transition.targets.find((item) => item.name === target.name)
-          ?.properties.find((item) => item.name === property.name)?.keyframes ??
-        property.keyframes ??
-        []
+        transitionFrames?.map((frame) => renderFrame(frame, {})) ?? property.keyframes ?? []
 
       return {
         target: target.name,
@@ -94,7 +94,7 @@ export function compositionTimelineTracks(
 export function compositionLifecycleTracks(
   name: string,
   phase: LifecyclePhase,
-  presentation: State,
+  presentation: RenderedState,
   transition: Transition | undefined,
 ): TimelineTrack[] {
   const resolved = resolveLifecycleTracks(
@@ -157,7 +157,7 @@ export function compositionLifecycleTracks(
       duration,
       diagnostic,
       frames,
-      explicit: local?.keyframes ?? [],
+      explicit: local?.keyframes?.map((frame) => renderFrame(frame, {})) ?? [],
       fromValue: frames.find((frame) => frame.offset === 0)?.value,
       toValue: phase === 'enter' ? value : frames.find((frame) => frame.offset === 1)?.value,
     }

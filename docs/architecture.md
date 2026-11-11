@@ -139,7 +139,7 @@ The following describes data contracts, not executable source:
 
 ```text
 DefinitionBundle {
-  schemaVersion: 1
+  schemaVersion: 2
   definitions: Definition[]
 }
 Definition {
@@ -173,11 +173,17 @@ Target<T> {
 }
 Property {
   name: string
-  value: string
-  template?: (string | Expression)[]
+  value: PropertyValue
   timingExpression?: Expression
-  keyframes?: Frame[]
 }
+PropertyValue =
+  { kind: "literal", value: string }
+  | { kind: "template", parts: (string | Expression)[] }
+  | { kind: "binding", expression: Expression }
+  | { kind: "keyframes", frames: Frame[] }
+CssValue =
+  { kind: "literal", value: string }
+  | { kind: "template", parts: (string | Expression)[] }
 Transition {
   timing?: Timing
   timingExpression?: Expression
@@ -191,8 +197,7 @@ PropertyTransition {
 }
 Frame {
   offset: number
-  value: string
-  template?: (string | Expression)[]
+  value: CssValue
   easing?: string
   easingExpression?: Expression
 }
@@ -207,16 +212,22 @@ type. It contains no runtime value. `LetBinding` represents a `let` binding and 
 initializer. Call expressions contain a function name and named argument expressions. Target variables use ordinary
 `{ kind: "reference", path: ["body"] }` expressions. `Expression` is a
 tagged scalar/reference/call/unary/binary tree, validated in Rust and evaluated without
-JavaScript code generation. CSS templates retain the original opaque `value` for
-inspection and expose text/expression segments for runtime rendering. The IR uses schema version 1. The compiler
-requires at least one layer and one initial state per stateful layer. Manual editor
-playback selects compositions without evaluating guards.
+JavaScript code generation. A property's `value.kind` selects exactly one declaration
+source. Templates retain only their text/expression segments; development source mappings
+provide the original authored text for inspection and editing. Keyframe sources contain
+an ordered array of frames, including a required 100% destination; the runtime derives
+the final CSS value from that frame instead of storing it twice. Frame values can be
+literals or templates, but cannot contain bindings or nested keyframes. Evaluated
+presentation values use separate runtime types containing CSS strings. The IR uses
+schema version 2 and rejects older serialized bundles. The compiler requires at least
+one layer and one initial state per stateful layer. Manual editor playback selects
+compositions without evaluating guards.
 
 Offsets normalize to `[0, 1]`; times normalize to milliseconds. CSS values and
 easing remain strings. Preserve definition/state/target/property source order for
-inspection and sort frame offsets semantically. `keyframes` absent means inherit;
-an empty array has no source-level override meaning and is not emitted. Timing
-arguments have already been validated and defaults applied within each atomic
+inspection and sort frame offsets semantically. Within `PropertyTransition`,
+`keyframes` absent means inherit; an empty array has no source-level override meaning
+and is not emitted. Timing arguments have already been validated and defaults applied within each atomic
 value. Ordinary transition inheritance and missing endpoints are resolved at runtime;
 motion-level lifecycle tracks are compiled as described below.
 

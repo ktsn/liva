@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "definitions": [
     {
       "name": "toggle",
@@ -53,7 +53,10 @@
                               "path": ["easeIn"]
                             },
                             "offset": 0.4,
-                            "value": "1.3 1"
+                            "value": {
+                              "kind": "literal",
+                              "value": "1.3 1"
+                            }
                           },
                           {
                             "easingExpression": {
@@ -61,7 +64,10 @@
                               "path": ["easeOut"]
                             },
                             "offset": 0.7,
-                            "value": "0.95 1"
+                            "value": {
+                              "kind": "literal",
+                              "value": "0.95 1"
+                            }
                           }
                         ]
                       }
@@ -118,7 +124,10 @@
                               "path": ["easeIn"]
                             },
                             "offset": 0.4,
-                            "value": "1.3 1"
+                            "value": {
+                              "kind": "literal",
+                              "value": "1.3 1"
+                            }
                           },
                           {
                             "easingExpression": {
@@ -126,7 +135,10 @@
                               "path": ["easeOut"]
                             },
                             "offset": 0.7,
-                            "value": "0.95 1"
+                            "value": {
+                              "kind": "literal",
+                              "value": "0.95 1"
+                            }
                           }
                         ]
                       }
@@ -150,7 +162,10 @@
                   "properties": [
                     {
                       "name": "background-color",
-                      "value": "#34b27b"
+                      "value": {
+                        "kind": "literal",
+                        "value": "#34b27b"
+                      }
                     }
                   ]
                 },
@@ -159,7 +174,10 @@
                   "properties": [
                     {
                       "name": "translate",
-                      "value": "24px 0"
+                      "value": {
+                        "kind": "literal",
+                        "value": "24px 0"
+                      }
                     }
                   ]
                 }
@@ -193,7 +211,10 @@
                     ]
                   },
                   "name": "background-color",
-                  "value": "#888"
+                  "value": {
+                    "kind": "literal",
+                    "value": "#888"
+                  }
                 }
               ]
             },
@@ -222,11 +243,17 @@
                     ]
                   },
                   "name": "translate",
-                  "value": "0 0"
+                  "value": {
+                    "kind": "literal",
+                    "value": "0 0"
+                  }
                 },
                 {
                   "name": "scale",
-                  "value": "1"
+                  "value": {
+                    "kind": "literal",
+                    "value": "1"
+                  }
                 }
               ]
             }

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "definitions": [
     {
       "name": "button",
@@ -30,7 +30,10 @@
               "properties": [
                 {
                   "name": "opacity",
-                  "value": "1"
+                  "value": {
+                    "kind": "literal",
+                    "value": "1"
+                  }
                 }
               ]
             }
@@ -48,7 +51,10 @@
               "properties": [
                 {
                   "name": "opacity",
-                  "value": ".9"
+                  "value": {
+                    "kind": "literal",
+                    "value": ".9"
+                  }
                 }
               ]
             }
@@ -66,7 +72,10 @@
               "properties": [
                 {
                   "name": "scale",
-                  "value": ".9"
+                  "value": {
+                    "kind": "literal",
+                    "value": ".9"
+                  }
                 }
               ]
             }
@@ -84,7 +93,10 @@
               "properties": [
                 {
                   "name": "outline-width",
-                  "value": "1px"
+                  "value": {
+                    "kind": "literal",
+                    "value": "1px"
+                  }
                 }
               ]
             }
@@ -102,7 +114,10 @@
               "properties": [
                 {
                   "name": "outline-width",
-                  "value": "2px"
+                  "value": {
+                    "kind": "literal",
+                    "value": "2px"
+                  }
                 }
               ]
             }
@@ -120,7 +135,10 @@
               "properties": [
                 {
                   "name": "outline-style",
-                  "value": "solid"
+                  "value": {
+                    "kind": "literal",
+                    "value": "solid"
+                  }
                 }
               ]
             }

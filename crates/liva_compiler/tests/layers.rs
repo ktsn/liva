@@ -1,3 +1,4 @@
+use liva_compiler::ir::PropertyValue;
 mod support;
 
 use liva_compiler::compile;
@@ -43,8 +44,16 @@ fn layer_values_preserve_css_and_lower_interpolation() {
     let result = layered_motion();
     let layers = &result.definitions[0].layers;
 
-    assert_eq!(layers[0].targets[0].properties[1].value, "0 2px");
-    assert!(layers[1].targets[0].properties[0].template.is_some());
+    assert_eq!(
+        layers[0].targets[0].properties[1].value,
+        PropertyValue::Literal {
+            value: "0 2px".into()
+        }
+    );
+    assert!(matches!(
+        layers[1].targets[0].properties[0].value,
+        PropertyValue::Template { .. }
+    ));
 }
 
 #[test]
@@ -105,9 +114,18 @@ fn stateful_layers_keep_common_styles_and_state_overrides_separate() {
     let layer = &result.definitions[0].layers[0];
 
     assert_eq!(layer.initial_state.as_deref(), Some("idle"));
-    assert_eq!(layer.targets[0].properties[0].value, "1");
-    assert_eq!(layer.states[1].value("button", "opacity"), Some(".5"));
-    assert_eq!(layer.states[0].value("spinner", "opacity"), Some("0"));
+    assert_eq!(
+        layer.targets[0].properties[0].value,
+        PropertyValue::Literal { value: "1".into() }
+    );
+    assert_eq!(
+        layer.states[1].value("button", "opacity"),
+        Some(&PropertyValue::Literal { value: ".5".into() })
+    );
+    assert_eq!(
+        layer.states[0].value("spinner", "opacity"),
+        Some(&PropertyValue::Literal { value: "0".into() })
+    );
 }
 
 #[test]

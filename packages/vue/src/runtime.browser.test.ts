@@ -172,7 +172,20 @@ describe('built-in self target', () => {
           layers: [
             {
               name: 'base',
-              targets: [{ name: 'self', properties: [{ name: 'opacity', value: '.4' }] }],
+              targets: [
+                {
+                  name: 'self',
+                  properties: [
+                    {
+                      name: 'opacity',
+                      value: {
+                        kind: 'literal',
+                        value: '.4',
+                      },
+                    },
+                  ],
+                },
+              ],
             },
           ],
         },

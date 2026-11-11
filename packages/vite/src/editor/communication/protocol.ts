@@ -1,4 +1,4 @@
-import { isArrayOf, isDefinition, isFrame, isRecord, type Definition } from '@liva/runtime'
+import { isArrayOf, isDefinition, isRecord, type Definition } from '@liva/runtime'
 
 export type Edit =
   | { op: 'easing'; path: string; value?: string }
@@ -52,7 +52,11 @@ function isEdit(value: unknown): value is Edit {
     case 'removeFrame':
       return true
     case 'addFrame':
-      return isFrame(value)
+      return (
+        typeof value.offset === 'number' &&
+        typeof value.value === 'string' &&
+        (value.easing === undefined || typeof value.easing === 'string')
+      )
     default:
       return false
   }

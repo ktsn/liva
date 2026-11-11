@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "definitions": [
     {
       "name": "panel",
@@ -43,7 +43,10 @@
                 "keyframes": [
                   {
                     "offset": 0.0,
-                    "value": "0"
+                    "value": {
+                      "kind": "literal",
+                      "value": "0"
+                    }
                   }
                 ]
               },
@@ -52,7 +55,10 @@
                 "keyframes": [
                   {
                     "offset": 0.0,
-                    "value": "0.8"
+                    "value": {
+                      "kind": "literal",
+                      "value": "0.8"
+                    }
                   }
                 ]
               },
@@ -60,15 +66,17 @@
                 "name": "translate",
                 "keyframes": [
                   {
-                    "template": [
-                      {
-                        "kind": "reference",
-                        "path": ["distance"]
-                      },
-                      "px 0"
-                    ],
                     "offset": 0.0,
-                    "value": "${distance}px 0"
+                    "value": {
+                      "kind": "template",
+                      "parts": [
+                        {
+                          "kind": "reference",
+                          "path": ["distance"]
+                        },
+                        "px 0"
+                      ]
+                    }
                   }
                 ]
               }
@@ -102,7 +110,10 @@
                 "keyframes": [
                   {
                     "offset": 0.0,
-                    "value": "0"
+                    "value": {
+                      "kind": "literal",
+                      "value": "0"
+                    }
                   }
                 ]
               }
@@ -140,7 +151,10 @@
                 "keyframes": [
                   {
                     "offset": 1.0,
-                    "value": "0"
+                    "value": {
+                      "kind": "literal",
+                      "value": "0"
+                    }
                   }
                 ]
               },
@@ -149,7 +163,10 @@
                 "keyframes": [
                   {
                     "offset": 1.0,
-                    "value": "1.2"
+                    "value": {
+                      "kind": "literal",
+                      "value": "1.2"
+                    }
                   }
                 ]
               },
@@ -157,15 +174,17 @@
                 "name": "translate",
                 "keyframes": [
                   {
-                    "template": [
-                      {
-                        "kind": "reference",
-                        "path": ["distance"]
-                      },
-                      "px 0"
-                    ],
                     "offset": 1.0,
-                    "value": "${distance}px 0"
+                    "value": {
+                      "kind": "template",
+                      "parts": [
+                        {
+                          "kind": "reference",
+                          "path": ["distance"]
+                        },
+                        "px 0"
+                      ]
+                    }
                   }
                 ]
               }
@@ -199,7 +218,10 @@
                 "keyframes": [
                   {
                     "offset": 1.0,
-                    "value": "0"
+                    "value": {
+                      "kind": "literal",
+                      "value": "0"
+                    }
                   }
                 ]
               }
@@ -216,19 +238,31 @@
               "properties": [
                 {
                   "name": "opacity",
-                  "value": "1"
+                  "value": {
+                    "kind": "literal",
+                    "value": "1"
+                  }
                 },
                 {
                   "name": "scale",
-                  "value": "0.9"
+                  "value": {
+                    "kind": "literal",
+                    "value": "0.9"
+                  }
                 },
                 {
                   "name": "translate",
-                  "value": "0px 0"
+                  "value": {
+                    "kind": "literal",
+                    "value": "0px 0"
+                  }
                 },
                 {
                   "name": "border-radius",
-                  "value": "0px"
+                  "value": {
+                    "kind": "literal",
+                    "value": "0px"
+                  }
                 }
               ]
             },
@@ -237,7 +271,10 @@
               "properties": [
                 {
                   "name": "opacity",
-                  "value": "1"
+                  "value": {
+                    "kind": "literal",
+                    "value": "1"
+                  }
                 }
               ]
             }
@@ -255,11 +292,17 @@
               "properties": [
                 {
                   "name": "scale",
-                  "value": "1"
+                  "value": {
+                    "kind": "literal",
+                    "value": "1"
+                  }
                 },
                 {
                   "name": "border-radius",
-                  "value": "20px"
+                  "value": {
+                    "kind": "literal",
+                    "value": "20px"
+                  }
                 }
               ]
             }

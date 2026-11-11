@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "definitions": [
     {
       "name": "card",
@@ -117,23 +117,28 @@
                   "properties": [
                     {
                       "name": "translate",
-                      "value": "${movement.offset.x}px ${movement.offset.y}px",
-                      "template": [
-                        {
-                          "kind": "reference",
-                          "path": ["movement", "offset", "x"]
-                        },
-                        "px ",
-                        {
-                          "kind": "reference",
-                          "path": ["movement", "offset", "y"]
-                        },
-                        "px"
-                      ]
+                      "value": {
+                        "kind": "template",
+                        "parts": [
+                          {
+                            "kind": "reference",
+                            "path": ["movement", "offset", "x"]
+                          },
+                          "px ",
+                          {
+                            "kind": "reference",
+                            "path": ["movement", "offset", "y"]
+                          },
+                          "px"
+                        ]
+                      }
                     },
                     {
                       "name": "scale",
-                      "value": "1.05"
+                      "value": {
+                        "kind": "literal",
+                        "value": "1.05"
+                      }
                     }
                   ]
                 }
@@ -147,7 +152,10 @@
               "properties": [
                 {
                   "name": "translate",
-                  "value": "0 0"
+                  "value": {
+                    "kind": "literal",
+                    "value": "0 0"
+                  }
                 },
                 {
                   "timingExpression": {
@@ -170,14 +178,19 @@
                       }
                     ]
                   },
-                  "keyframes": [
-                    {
-                      "offset": 1.0,
-                      "value": "1"
-                    }
-                  ],
                   "name": "scale",
-                  "value": "1"
+                  "value": {
+                    "kind": "keyframes",
+                    "frames": [
+                      {
+                        "offset": 1.0,
+                        "value": {
+                          "kind": "literal",
+                          "value": "1"
+                        }
+                      }
+                    ]
+                  }
                 }
               ]
             }

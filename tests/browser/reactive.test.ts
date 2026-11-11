@@ -271,15 +271,18 @@ test('dynamic errors retain the last valid value and inactive templates do not b
     const definition = structuredClone(original)
     const dynamic = definition.layers[0].states![1].targets[0].properties[0]
     Object.assign(dynamic, {
-      template: [
-        {
-          kind: 'binary',
-          operator: '/',
-          left: { kind: 'number', value: 100 },
-          right: { kind: 'reference', path: ['movement', 'offset', 'x'] },
-        },
-        'px 0',
-      ],
+      value: {
+        kind: 'template',
+        parts: [
+          {
+            kind: 'binary',
+            operator: '/',
+            left: { kind: 'number', value: 100 },
+            right: { kind: 'reference', path: ['movement', 'offset', 'x'] },
+          },
+          'px 0',
+        ],
+      },
     })
     const element = document.createElement('div')
     element.id = 'card'
@@ -343,13 +346,17 @@ test('typed parameter instances update CSS independently and retain values after
               properties: [
                 {
                   name: 'translate',
-                  value: '${progress}px 0',
-                  template: [{ kind: 'reference', path: ['progress'] }, 'px 0'],
+                  value: {
+                    kind: 'template',
+                    parts: [{ kind: 'reference', path: ['progress'] }, 'px 0'],
+                  },
                 },
                 {
                   name: '--label',
-                  value: '${label}',
-                  template: [{ kind: 'reference', path: ['label'] }],
+                  value: {
+                    kind: 'template',
+                    parts: [{ kind: 'reference', path: ['label'] }],
+                  },
                 },
               ],
             },

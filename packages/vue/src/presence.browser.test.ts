@@ -17,18 +17,66 @@ import { LivaPresenceBoundary, type PresenceEntry } from './presence.ts'
 const definition: Definition = {
   name: 'fade',
   layers: [
-    { name: 'idle', targets: [{ name: 'box', properties: [{ name: 'opacity', value: '1' }] }] },
+    {
+      name: 'idle',
+      targets: [
+        {
+          name: 'box',
+          properties: [
+            {
+              name: 'opacity',
+              value: {
+                kind: 'literal',
+                value: '1',
+              },
+            },
+          ],
+        },
+      ],
+    },
   ],
   enter: {
     timing: { kind: 'tween', durationMs: 50, easing: 'linear' },
     targets: [
-      { name: 'box', properties: [{ name: 'opacity', keyframes: [{ offset: 0, value: '0' }] }] },
+      {
+        name: 'box',
+        properties: [
+          {
+            name: 'opacity',
+            keyframes: [
+              {
+                offset: 0,
+                value: {
+                  kind: 'literal',
+                  value: '0',
+                },
+              },
+            ],
+          },
+        ],
+      },
     ],
   },
   leave: {
     timing: { kind: 'tween', durationMs: 50, easing: 'linear' },
     targets: [
-      { name: 'box', properties: [{ name: 'opacity', keyframes: [{ offset: 1, value: '0' }] }] },
+      {
+        name: 'box',
+        properties: [
+          {
+            name: 'opacity',
+            keyframes: [
+              {
+                offset: 1,
+                value: {
+                  kind: 'literal',
+                  value: '0',
+                },
+              },
+            ],
+          },
+        ],
+      },
     ],
   },
 }
@@ -360,8 +408,34 @@ it.each([false, true])(
         {
           name: 'base',
           targets: [
-            { name: 'self', properties: [{ name: 'opacity', value: '1' }] },
-            ...(alias ? [{ name: 'box', properties: [{ name: 'scale', value: '1' }] }] : []),
+            {
+              name: 'self',
+              properties: [
+                {
+                  name: 'opacity',
+                  value: {
+                    kind: 'literal',
+                    value: '1',
+                  },
+                },
+              ],
+            },
+            ...(alias
+              ? [
+                  {
+                    name: 'box',
+                    properties: [
+                      {
+                        name: 'scale',
+                        value: {
+                          kind: 'literal' as const,
+                          value: '1',
+                        },
+                      },
+                    ],
+                  },
+                ]
+              : []),
           ],
         },
       ],
@@ -370,13 +444,31 @@ it.each([false, true])(
         targets: [
           {
             name: 'self',
-            properties: [{ name: 'opacity', keyframes: [{ offset: 0, value: '0' }] }],
+            properties: [
+              {
+                name: 'opacity',
+                keyframes: [
+                  {
+                    offset: 0,
+                    value: {
+                      kind: 'literal',
+                      value: '0',
+                    },
+                  },
+                ],
+              },
+            ],
           },
           ...(alias
             ? [
                 {
                   name: 'box',
-                  properties: [{ name: 'scale', keyframes: [{ offset: 0, value: '.8' }] }],
+                  properties: [
+                    {
+                      name: 'scale',
+                      keyframes: [{ offset: 0, value: { kind: 'literal' as const, value: '.8' } }],
+                    },
+                  ],
                 },
               ]
             : []),
@@ -387,13 +479,31 @@ it.each([false, true])(
         targets: [
           {
             name: 'self',
-            properties: [{ name: 'opacity', keyframes: [{ offset: 1, value: '0' }] }],
+            properties: [
+              {
+                name: 'opacity',
+                keyframes: [
+                  {
+                    offset: 1,
+                    value: {
+                      kind: 'literal',
+                      value: '0',
+                    },
+                  },
+                ],
+              },
+            ],
           },
           ...(alias
             ? [
                 {
                   name: 'box',
-                  properties: [{ name: 'scale', keyframes: [{ offset: 1, value: '.8' }] }],
+                  properties: [
+                    {
+                      name: 'scale',
+                      keyframes: [{ offset: 1, value: { kind: 'literal' as const, value: '.8' } }],
+                    },
+                  ],
                 },
               ]
             : []),

@@ -19,7 +19,7 @@ export interface Mapping {
   range: SourceRange
 }
 export interface Compilation {
-  schemaVersion: 1
+  schemaVersion: 2
   definitions: Definition[]
   diagnostics: Diagnostic[]
   mappings?: Record<string, Mapping>
@@ -125,7 +125,7 @@ function isMapping(value: unknown): value is Mapping {
 function isCompilation(value: unknown): value is Compilation {
   return (
     isRecord(value) &&
-    value.schemaVersion === 1 &&
+    value.schemaVersion === 2 &&
     isArrayOf(value.definitions, isDefinition) &&
     isArrayOf(value.diagnostics, isDiagnostic) &&
     (value.mappings === undefined ||

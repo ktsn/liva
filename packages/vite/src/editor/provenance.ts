@@ -69,7 +69,7 @@ function scopePath(motion: string, source: TimingSource | PropertySource) {
 }
 
 function valuePath(motion: string, source: PropertySource) {
-  return `${scopePath(motion, source)}${source.property.keyframes ? '/frame/1/value' : '/value'}`
+  return `${scopePath(motion, source)}${source.property.value.kind === 'keyframes' ? '/frame/1/value' : '/value'}`
 }
 
 export function trackProvenance(

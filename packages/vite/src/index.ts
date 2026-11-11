@@ -78,7 +78,7 @@ export default function liva(): Plugin {
       blocks.set(file, { source: code, result })
     }
 
-    const bundle = JSON.stringify({ schemaVersion: 1, definitions: result.definitions })
+    const bundle = JSON.stringify({ schemaVersion: 2, definitions: result.definitions })
       .replace(/\u2028/g, '\\u2028')
       .replace(/\u2029/g, '\\u2029')
     const association = editor

@@ -1,4 +1,5 @@
 use liva_compiler::compile;
+use liva_compiler::ir::PropertyValue;
 
 fn errors(source: &str) -> Vec<String> {
     compile(source, true)
@@ -101,7 +102,9 @@ fn raw_css_and_byte_mappings() {
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     assert_eq!(
         result.definitions[0].layers[0].targets[0].properties[1].value,
-        "imaginary !important"
+        PropertyValue::Literal {
+            value: "imaginary !important".into()
+        }
     );
 
     let range = &result.mappings.unwrap()["a/layer/on/timing"].range;

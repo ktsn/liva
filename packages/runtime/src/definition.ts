@@ -10,11 +10,11 @@ export type Timing =
       readonly mass: number
     }
 
+/** One endpoint at a normalized offset in [0, 1]; its CSS value cannot be a binding or track. */
 export interface Frame {
   readonly easingExpression?: Expression
-  readonly template?: readonly (string | Expression)[]
   readonly offset: number
-  readonly value: string
+  readonly value: CssValue
   readonly easing?: string
 }
 
@@ -48,13 +48,30 @@ export interface LetBinding {
   readonly initializer: Expression
 }
 
+/**
+ * One CSS endpoint: opaque text or ordered text/scalar-expression interpolation parts.
+ * Templates retain their surrounding quotes and CSS text in the parts themselves;
+ * the original source spelling is available separately through development mappings.
+ */
+export type CssValue =
+  | { readonly kind: 'literal'; readonly value: string }
+  | { readonly kind: 'template'; readonly parts: readonly (string | Expression)[] }
+
+/**
+ * Exclusive declaration source. Bindings identify property controllers, not CSS text.
+ * Style keyframe arrays are sorted by offset and include a 100% destination, from
+ * which the runtime derives the settled value. Nested tracks are not supported.
+ */
+export type PropertyValue =
+  | CssValue
+  | { readonly kind: 'binding'; readonly expression: Expression }
+  | { readonly kind: 'keyframes'; readonly frames: readonly Frame[] }
+
 export interface Property {
   readonly timingExpression?: Expression
   readonly timing?: Timing
-  readonly keyframes?: readonly Frame[]
-  readonly template?: readonly (string | Expression)[]
   readonly name: string
-  readonly value: string
+  readonly value: PropertyValue
 }
 
 export interface Target<T> {
@@ -115,7 +132,7 @@ export interface Definition {
 }
 
 export interface DefinitionBundle {
-  readonly schemaVersion: 1
+  readonly schemaVersion: 2
   readonly definitions: readonly Definition[]
 }
 
@@ -137,11 +154,11 @@ export function decodeBundle(json: string): DefinitionBundle {
 
   if (
     !isRecord(bundle) ||
-    bundle.schemaVersion !== 1 ||
+    bundle.schemaVersion !== 2 ||
     !isArrayOf(bundle.definitions, isDefinition)
   ) {
     throw new Error('Unsupported Liva Definition IR schema')
   }
 
-  return freezeDefinition({ schemaVersion: 1 as const, definitions: bundle.definitions })
+  return freezeDefinition({ schemaVersion: 2 as const, definitions: bundle.definitions })
 }

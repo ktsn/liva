@@ -170,6 +170,15 @@ impl Compiler {
         }
     }
 
+    fn css_value(&mut self, node: &impl HasValue, scope: &expression::Scope) -> CssValue {
+        match self.css_template(node, scope) {
+            Some(parts) => CssValue::Template { parts },
+            None => CssValue::Literal {
+                value: node.value_text().unwrap_or_default(),
+            },
+        }
+    }
+
     fn css_template(
         &mut self,
         node: &impl HasValue,
@@ -465,9 +474,8 @@ impl Compiler {
                         keyframes: Some(vec![Frame {
                             easing_expression: None,
                             offset,
-                            value,
+                            value: self.css_value(&property, scope),
                             easing: None,
-                            template: self.css_template(&property, scope),
                         }]),
                     });
                     continue;
@@ -518,15 +526,13 @@ impl Compiler {
                 }
 
                 self.mapping(&format!("{frame_path}/value"), &value_node, "value");
-                let template = self.css_template(&frame, scope);
                 let easing_expression =
                     self.decorator_expression(&frame, scope, expression::Type::Easing);
 
                 frames.push(Frame {
                     easing_expression: easing_expression.clone(),
-                    template,
                     offset,
-                    value,
+                    value: self.css_value(&frame, scope),
                     easing: None,
                 });
             }
@@ -577,14 +583,12 @@ impl Compiler {
 
                     properties.push(Property {
                         name,
-                        value: property.value_text().unwrap_or_default(),
-                        template: self.css_template(&property, scope),
+                        value: self.css_value(&property, scope).into(),
                         timing_expression: self.decorator_expression(
                             &property,
                             scope,
                             expression::Type::Timing,
                         ),
-                        keyframes: None,
                     });
                 }
                 syn::AnimationProperty::Keyframes(track) => {
@@ -657,25 +661,22 @@ impl Compiler {
 
                         frames.push(Frame {
                             offset,
-                            value,
-                            template: self.css_template(&frame, scope),
+                            value: self.css_value(&frame, scope),
                             easing_expression,
                             easing: None,
                         });
                     }
 
                     frames.sort_by(|a, b| a.offset.total_cmp(&b.offset));
-                    let Some(destination) = frames.iter().find(|frame| frame.offset == 1.0) else {
+                    if !frames.iter().any(|frame| frame.offset == 1.0) {
                         self.error("semantic.endpoint", "A style keyframe track requires a 100% destination; use a transition track for implicit destinations", &track);
                         continue;
                     };
 
                     properties.push(Property {
                         name,
-                        value: destination.value.clone(),
-                        template: destination.template.clone(),
+                        value: PropertyValue::Keyframes { frames },
                         timing_expression,
-                        keyframes: Some(frames),
                     });
                 }
             }
@@ -1348,7 +1349,7 @@ pub fn compile(source: &str, development: bool) -> Compilation {
 
     definitions.retain(|d| !duplicates.contains(&d.name));
     Compilation {
-        schema_version: 1,
+        schema_version: 2,
         definitions,
         diagnostics: compiler.diagnostics,
         mappings: development.then_some(compiler.mappings),

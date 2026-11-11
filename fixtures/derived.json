@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "definitions": [
     {
       "name": "derived",
@@ -84,14 +84,16 @@
               "properties": [
                 {
                   "name": "translate",
-                  "value": "${translated}px 0",
-                  "template": [
-                    {
-                      "kind": "reference",
-                      "path": ["translated"]
-                    },
-                    "px 0"
-                  ]
+                  "value": {
+                    "kind": "template",
+                    "parts": [
+                      {
+                        "kind": "reference",
+                        "path": ["translated"]
+                      },
+                      "px 0"
+                    ]
+                  }
                 }
               ]
             }
@@ -109,14 +111,16 @@
               "properties": [
                 {
                   "name": "translate",
-                  "value": "${translated}px 0",
-                  "template": [
-                    {
-                      "kind": "reference",
-                      "path": ["translated"]
-                    },
-                    "px 0"
-                  ]
+                  "value": {
+                    "kind": "template",
+                    "parts": [
+                      {
+                        "kind": "reference",
+                        "path": ["translated"]
+                      },
+                      "px 0"
+                    ]
+                  }
                 }
               ]
             }

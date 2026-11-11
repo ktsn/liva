@@ -1,3 +1,4 @@
+use liva_compiler::ir::PropertyValue;
 #[path = "support/declarations.rs"]
 mod declarations;
 mod support;
@@ -139,16 +140,16 @@ fn drag_release_conditions_and_shared_layer_styles_compile_together() {
             .properties
             .iter()
             .find(|property| property.name == "opacity")
-            .map(|property| property.value.as_str()),
-        Some("1")
+            .map(|property| &property.value),
+        Some(&PropertyValue::Literal { value: "1".into() })
     );
     assert_eq!(
         definition.layers[0].targets[1]
             .properties
             .iter()
             .find(|property| property.name == "opacity")
-            .map(|property| property.value.as_str()),
-        Some("1")
+            .map(|property| &property.value),
+        Some(&PropertyValue::Literal { value: "1".into() })
     );
 }
 

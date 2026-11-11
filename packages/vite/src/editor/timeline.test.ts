@@ -124,7 +124,20 @@ describe('composition lifecycle timeline', () => {
         targets: [
           {
             name: 'body',
-            properties: [{ name: 'opacity', keyframes: [{ offset: 0, value: '0' }] }],
+            properties: [
+              {
+                name: 'opacity',
+                keyframes: [
+                  {
+                    offset: 0,
+                    value: {
+                      kind: 'literal',
+                      value: '0',
+                    },
+                  },
+                ],
+              },
+            ],
           },
         ],
       })
@@ -157,7 +170,6 @@ describe('composition timeline rows', () => {
   it('includes unchanged and untimed properties and resolves owning transition frames', () => {
     const source: Definition = {
       name: 'layers',
-
       layers: [
         {
           name: 'base',
@@ -167,10 +179,19 @@ describe('composition timeline rows', () => {
               properties: [
                 {
                   name: 'scale',
-                  value: '1',
+                  value: {
+                    kind: 'literal',
+                    value: '1',
+                  },
                   timing: { kind: 'tween', durationMs: 100, easing: 'linear' },
                 },
-                { name: 'opacity', value: '1' },
+                {
+                  name: 'opacity',
+                  value: {
+                    kind: 'literal',
+                    value: '1',
+                  },
+                },
               ],
             },
           ],
@@ -182,7 +203,20 @@ describe('composition timeline rows', () => {
           states: [
             {
               name: 'idle',
-              targets: [{ name: 'body', properties: [{ name: 'scale', value: '1' }] }],
+              targets: [
+                {
+                  name: 'body',
+                  properties: [
+                    {
+                      name: 'scale',
+                      value: {
+                        kind: 'literal',
+                        value: '1',
+                      },
+                    },
+                  ],
+                },
+              ],
             },
           ],
           transitions: [
@@ -194,7 +228,20 @@ describe('composition timeline rows', () => {
                 targets: [
                   {
                     name: 'body',
-                    properties: [{ name: 'scale', keyframes: [{ offset: 0.5, value: '2' }] }],
+                    properties: [
+                      {
+                        name: 'scale',
+                        keyframes: [
+                          {
+                            offset: 0.5,
+                            value: {
+                              kind: 'literal',
+                              value: '2',
+                            },
+                          },
+                        ],
+                      },
+                    ],
                   },
                 ],
               },
@@ -228,11 +275,24 @@ describe('composition timeline rows', () => {
   ])('represents spring durations and diagnostics: $timing.kind', ({ timing, expected }) => {
     const source: Definition = {
       name: 'layers',
-
       layers: [
         {
           name: 'base',
-          targets: [{ name: 'body', properties: [{ name: 'scale', value: '1', timing }] }],
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'scale',
+                  value: {
+                    kind: 'literal',
+                    value: '1',
+                  },
+                  timing,
+                },
+              ],
+            },
+          ],
         },
       ],
     }
@@ -271,11 +331,11 @@ describe('composition lifecycle resolved endpoints', () => {
   it.each(['enter', 'leave'] as const)(
     'distinguishes explicit %s endpoints from the completion baseline',
     (phase) => {
-      const presentation = {
+      const presentation: import('@liva/runtime').RenderedState = {
         name: 'baseline',
         targets: [{ name: 'body', properties: [{ name: 'opacity', value: '1' }] }],
       }
-      const transition = {
+      const transition: import('@liva/runtime').Transition = {
         timing: { kind: 'tween' as const, durationMs: 200, easing: 'linear' },
         targets: [
           {
@@ -284,8 +344,20 @@ describe('composition lifecycle resolved endpoints', () => {
               {
                 name: 'opacity',
                 keyframes: [
-                  { offset: 0, value: '0.2' },
-                  { offset: 1, value: '0.6' },
+                  {
+                    offset: 0,
+                    value: {
+                      kind: 'literal',
+                      value: '0.2',
+                    },
+                  },
+                  {
+                    offset: 1,
+                    value: {
+                      kind: 'literal',
+                      value: '0.6',
+                    },
+                  },
                 ],
               },
             ],
@@ -302,7 +374,7 @@ describe('composition lifecycle resolved endpoints', () => {
   )
 
   it.each(['enter', 'leave'] as const)('uses implicit baseline endpoints for %s', (phase) => {
-    const presentation = {
+    const presentation: import('@liva/runtime').RenderedState = {
       name: 'baseline',
       targets: [{ name: 'body', properties: [{ name: 'opacity', value: '0.8' }] }],
     }

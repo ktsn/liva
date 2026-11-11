@@ -40,7 +40,10 @@ async function expectCapturedStart(page: Page, value: string) {
         }),
       ),
     )
-    .toEqual([value, value])
+    .toEqual([
+      { kind: 'literal', value },
+      { kind: 'literal', value },
+    ])
 }
 
 for (const phase of ['enter', 'leave']) {

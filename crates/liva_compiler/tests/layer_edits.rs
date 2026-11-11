@@ -1,4 +1,5 @@
 use liva_compiler::edits::{Edit, apply_edits};
+use liva_compiler::ir::{CssValue, PropertyValue};
 
 const SOURCE: &str = "// 日本語😀\r\nmotion sample(amount: number) {\r\n let quick = tween(duration: 200)\r\n @quick layer base {\r\n body {\r\n // keep this comment\r\n opacity: ${amount};\r\n scale: 1 @spring(duration: 400, bounce: 0.25)\r\n }\r\n }\r\n}";
 const OPACITY: &str = "sample/layer/base/target/body/property/opacity";
@@ -55,7 +56,7 @@ fn removing_a_local_override_restores_inheritance_without_rewriting_values() {
     let property = &restored.compilation.definitions[0].layers[0].targets[0].properties[0];
 
     assert!(property.timing_expression.is_none());
-    assert!(property.template.is_some());
+    assert!(matches!(property.value, PropertyValue::Template { .. }));
     assert!(restored.source.contains("@quick layer base"));
     assert!(!restored.source.contains("spring(duration: 300)"));
 }
@@ -73,11 +74,13 @@ fn adding_a_style_keyframe_preserves_the_original_expression_at_one_hundred_perc
     )
     .unwrap();
     let property = &result.compilation.definitions[0].layers[0].targets[0].properties[0];
-    let frames = property.keyframes.as_ref().unwrap();
+    let PropertyValue::Keyframes { frames } = &property.value else {
+        panic!("Expected a style track")
+    };
 
     assert_eq!(frames[0].offset, 0.5);
     assert!(frames[0].easing_expression.is_some());
-    assert_eq!(frames[1].value, "${amount}");
+    assert!(matches!(&frames[1].value, CssValue::Template { parts } if parts.len() == 1));
     assert!(result.source.contains("// keep this comment\r\n"));
 }
 
@@ -195,7 +198,7 @@ fn ordinary_track_conversion_retains_cross_layer_timing_inheritance() {
     let property = &result.compilation.definitions[0].layers[1].targets[0].properties[0];
 
     assert!(property.timing_expression.is_none());
-    assert_eq!(property.keyframes.as_ref().unwrap().len(), 2);
+    assert!(matches!(&property.value, PropertyValue::Keyframes { frames } if frames.len() == 2));
     assert!(result.source.contains("@tween(duration: 200) layer base"));
 }
 

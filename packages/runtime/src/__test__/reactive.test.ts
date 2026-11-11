@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vite-plus/test'
 import cardFixture from '../../../../fixtures/card.json'
 import toggleFixture from '../../../../fixtures/reactive-toggle.json'
 import { decodeBundle, type Definition, type Expression } from '../definition.ts'
-import { evaluate, renderValue } from '../expression.ts'
+import { evaluate, renderProperty, renderValue } from '../expression.ts'
 import { resolveLayers } from '../layers.ts'
 import { parameterValues } from '../let-bindings.ts'
 
@@ -41,8 +41,11 @@ describe('reactive selection and CSS templates', () => {
     const values = { movement: { active: true, offset: { x: 32, y: -14 } } }
     // The card fixture declares a dragging state with an interpolated translate value.
     const property = card.layers[0].states![1].targets[0].properties[0]
-    expect(renderValue(property, values)).toBe('32px -14px')
-    expect(renderValue({ ...property, template: [property.template![0]] }, values)).toBe('32')
+    expect(renderProperty(property, values).value).toBe('32px -14px')
+
+    if (property.value.kind !== 'template') throw new Error('Expected a CSS template')
+
+    expect(renderValue({ kind: 'template', parts: [property.value.parts[0]] }, values)).toBe('32')
   })
 
   it('short circuits logical expressions and rejects non-finite arithmetic', () => {
@@ -145,7 +148,7 @@ describe('typed motion parameters', () => {
       { parameters: [{ name: 'checked' }] },
     ]) {
       expect(() =>
-        decodeBundle(JSON.stringify({ schemaVersion: 1, definitions: [{ ...toggle, ...fields }] })),
+        decodeBundle(JSON.stringify({ schemaVersion: 2, definitions: [{ ...toggle, ...fields }] })),
       ).toThrow('schema')
     }
   })

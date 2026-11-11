@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "definitions": [
     {
       "name": "swipe",
@@ -103,7 +103,10 @@
                 "keyframes": [
                   {
                     "offset": 0.0,
-                    "value": "0"
+                    "value": {
+                      "kind": "literal",
+                      "value": "0"
+                    }
                   }
                 ]
               },
@@ -112,7 +115,10 @@
                 "keyframes": [
                   {
                     "offset": 0.0,
-                    "value": "0 -20px"
+                    "value": {
+                      "kind": "literal",
+                      "value": "0 -20px"
+                    }
                   }
                 ]
               }
@@ -146,7 +152,10 @@
                 "keyframes": [
                   {
                     "offset": 0.0,
-                    "value": "0"
+                    "value": {
+                      "kind": "literal",
+                      "value": "0"
+                    }
                   }
                 ]
               }
@@ -184,7 +193,10 @@
                 "keyframes": [
                   {
                     "offset": 1.0,
-                    "value": "0"
+                    "value": {
+                      "kind": "literal",
+                      "value": "0"
+                    }
                   }
                 ]
               },
@@ -193,7 +205,10 @@
                 "keyframes": [
                   {
                     "offset": 1.0,
-                    "value": "500px 0"
+                    "value": {
+                      "kind": "literal",
+                      "value": "500px 0"
+                    }
                   }
                 ]
               }
@@ -220,7 +235,10 @@
                 "keyframes": [
                   {
                     "offset": 1.0,
-                    "value": "0"
+                    "value": {
+                      "kind": "literal",
+                      "value": "0"
+                    }
                   }
                 ]
               }
@@ -301,14 +319,16 @@
                   "properties": [
                     {
                       "name": "translate",
-                      "value": "${movement.offset.x}px 0",
-                      "template": [
-                        {
-                          "kind": "reference",
-                          "path": ["movement", "offset", "x"]
-                        },
-                        "px 0"
-                      ]
+                      "value": {
+                        "kind": "template",
+                        "parts": [
+                          {
+                            "kind": "reference",
+                            "path": ["movement", "offset", "x"]
+                          },
+                          "px 0"
+                        ]
+                      }
                     }
                   ]
                 }
@@ -322,11 +342,17 @@
               "properties": [
                 {
                   "name": "translate",
-                  "value": "0 0"
+                  "value": {
+                    "kind": "literal",
+                    "value": "0 0"
+                  }
                 },
                 {
                   "name": "opacity",
-                  "value": "1"
+                  "value": {
+                    "kind": "literal",
+                    "value": "1"
+                  }
                 }
               ]
             },
@@ -335,7 +361,10 @@
               "properties": [
                 {
                   "name": "opacity",
-                  "value": "1"
+                  "value": {
+                    "kind": "literal",
+                    "value": "1"
+                  }
                 }
               ]
             }

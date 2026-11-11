@@ -6,7 +6,6 @@ const definition: Definition = {
   name: 'event',
   parameters: [{ name: 'ready', type: 'boolean' }],
   layers: [{ name: 'idle', targets: [] }],
-
   events: [{ name: 'dismiss', when: { kind: 'reference', path: ['ready'] } }],
 }
 const instances: LivaInstance[] = []

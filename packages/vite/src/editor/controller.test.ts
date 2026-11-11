@@ -12,7 +12,10 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-const definition: Definition = { name: 'motion', layers: [{ name: 'base', targets: [] }] }
+const definition: Definition = {
+  name: 'motion',
+  layers: [{ name: 'base', targets: [] }],
+}
 const from = { layers: { base: true }, states: {} }
 const to = { layers: { base: false }, states: {} }
 const reply = { hash: 'original', definition, fields: [] } satisfies EditorReply
