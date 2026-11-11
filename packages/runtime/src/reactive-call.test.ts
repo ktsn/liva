@@ -81,6 +81,31 @@ describe('stable reactive calls', () => {
     expect(counter.commits).toEqual([2])
   })
 
+  it('captures an on-demand call once at the notifying source timestamp', () => {
+    const counter = installCounter()
+    const graph = new LetBindingGraph([...bindings, { ...bindings[0], name: 'observer' }], {
+      input: 1,
+    })
+    const observer = counter.instances[1]
+    if (!observer) throw new Error('Expected a second call')
+    const read = vi.fn<(context: { readonly time: number }) => RuntimeValue>(({ time }) =>
+      Object.freeze({ input: time }),
+    )
+    observer.readSnapshot = read
+    let observed: RuntimeValue | undefined
+    graph.bind(new Map(), (notification) => {
+      observed = graph.evaluate({ input: 1 }, undefined, notification).observer
+    })
+    vi.spyOn(performance, 'now').mockReturnValue(130)
+
+    counter.publishers[0]?.()
+
+    expect(observed).toEqual({ input: 130 })
+    expect(read).toHaveBeenCalledExactlyOnceWith({ time: 130 })
+
+    graph.dispose()
+  })
+
   it('discards prepared updates when a later expression fails', () => {
     const counter = installCounter()
     const graph = new LetBindingGraph(

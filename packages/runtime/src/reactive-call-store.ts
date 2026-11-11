@@ -1,3 +1,4 @@
+import type { ReactiveNotification } from './events.ts'
 import { callBuiltin } from './builtins/index.ts'
 import {
   isReactiveSubscription,
@@ -46,11 +47,11 @@ export class ReactiveCallStore {
   private notificationPending = false
   private notificationQueued = false
 
-  private notify = () => {
+  private notify = (notification?: ReactiveNotification) => {
     if (!this.binding) return
 
     if (!this.evaluating) {
-      this.binding.update()
+      this.binding.update(notification)
       return
     }
 
@@ -76,7 +77,7 @@ export class ReactiveCallStore {
 
   private binding?: {
     targets: ReadonlyMap<string, HTMLElement>
-    update: () => void
+    update: (notification?: ReactiveNotification) => void
     cleanups: Map<ReactiveSubscription, () => void>
   }
 
@@ -98,14 +99,17 @@ export class ReactiveCallStore {
    * and releasing candidate resources. Disposed or recursive evaluation throws.
    * Notifications emitted during evaluation are deferred until it finishes.
    */
-  evaluate<T>(read: (evaluation: ReactiveCallEvaluation) => T): T {
+  evaluate<T>(
+    read: (evaluation: ReactiveCallEvaluation) => T,
+    notification?: ReactiveNotification,
+  ): T {
     if (this.disposed) throw new Error('Cannot evaluate a disposed let graph')
     if (this.evaluating) throw new Error('Cannot reenter a let evaluation')
 
     // Isolate candidate caches and snapshots while the callback evaluates and validates
     // the whole graph. Notifications cannot reenter until this transaction finishes.
     this.evaluating = true
-    const evaluation = new PreparedCalls(this.calls, this.initializing)
+    const evaluation = new PreparedCalls(this.calls, this.initializing, notification)
     let committed = false
 
     try {
@@ -172,10 +176,31 @@ export class ReactiveCallStore {
       for (const subscription of active) {
         if (!binding.cleanups.has(subscription)) {
           let subscribed = true
-          const cleanup = subscription.bind(binding.targets, () => {
-            // Some sources retain callbacks after cleanup; neither removed subscriptions
-            // nor an older binding may notify the current consumer.
-            if (subscribed && this.binding === binding) this.notify()
+          const cleanup = subscription.bind(binding.targets, (value, notification) => {
+            // Ignore callbacks retained by a removed subscription or an older binding.
+            if (!subscribed || this.binding !== binding) return
+
+            const snapshots = new Map<ReactiveSubscription, RuntimeValue>(notification?.snapshots)
+            const time = notification?.time ?? performance.now()
+
+            // Capture all committed calls at one time before notifying the graph, so
+            // event handling and dependent controllers consume the same input sample.
+            for (const result of callResults(this.calls)) {
+              if (isReactiveSubscription(result) && !snapshots.has(result))
+                snapshots.set(
+                  result,
+                  isReactiveCall(result) && result.readSnapshot
+                    ? result.readSnapshot({ time })
+                    : result.value,
+                )
+            }
+
+            snapshots.set(subscription, value)
+            this.notify({
+              ...notification,
+              time: notification?.time ?? performance.now(),
+              snapshots,
+            })
           })
           added.set(subscription, () => {
             subscribed = false
@@ -204,7 +229,10 @@ export class ReactiveCallStore {
    * Returns cleanup callbacks that stop this binding while retaining cached call values.
    * Synchronous bind-time notifications are deferred; subscription errors propagate.
    */
-  bind(targets: ReadonlyMap<string, HTMLElement>, update: () => void): (() => void)[] {
+  bind(
+    targets: ReadonlyMap<string, HTMLElement>,
+    update: (notification?: ReactiveNotification) => void,
+  ): (() => void)[] {
     const binding = { targets, update, cleanups: new Map<ReactiveSubscription, () => void>() }
     this.binding = binding
 
@@ -238,13 +266,16 @@ class PreparedCalls implements ReactiveCallEvaluation {
   readonly calls: CallSites = new Map()
   private readonly prepared: PreparedUpdate[] = []
   private readonly created = new Set<ReactiveCall>()
-  private readonly snapshots = new Map<FunctionResult, RuntimeValue>()
+  private readonly snapshots: Map<FunctionResult, RuntimeValue>
+  private readonly context: { readonly time: number }
   private readonly previous: CallSites
   private readonly initializing: boolean
 
-  constructor(previous: CallSites, initializing: boolean) {
+  constructor(previous: CallSites, initializing: boolean, notification?: ReactiveNotification) {
     this.previous = previous
     this.initializing = initializing
+    this.snapshots = new Map(notification?.snapshots)
+    this.context = { time: notification?.time ?? performance.now() }
   }
 
   invoke(binding: string, id: number, name: string, args: FunctionArguments): RuntimeValue {
@@ -263,7 +294,7 @@ class PreparedCalls implements ReactiveCallEvaluation {
     } else if (sameFunction && !this.initializing && isReactiveCall(retained.result)) {
       // Dependent expressions need the updated value before validation, but the live
       // instance must stay unchanged until the entire evaluation is accepted.
-      const update = retained.result.prepareUpdate(args)
+      const update = retained.result.prepareUpdate(args, this.context)
       this.prepared.push(update)
       this.snapshots.set(retained.result, update.value)
       site = { name, args, result: retained.result }
@@ -291,7 +322,13 @@ class PreparedCalls implements ReactiveCallEvaluation {
     // Repeated reads of a shared result use one snapshot, even if its live getter
     // changes. A prepared snapshot above takes precedence over the committed value.
     if (!isReactiveSubscription(site.result)) return site.result
-    if (!this.snapshots.has(site.result)) this.snapshots.set(site.result, site.result.value)
+    if (!this.snapshots.has(site.result))
+      this.snapshots.set(
+        site.result,
+        isReactiveCall(site.result) && site.result.readSnapshot
+          ? site.result.readSnapshot(this.context)
+          : site.result.value,
+      )
 
     return this.snapshots.get(site.result)!
   }
