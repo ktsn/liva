@@ -7,7 +7,7 @@
   (#eq? @variable.builtin "self"))
 (property name: (identifier) @property)
 (property_track name: (_) @property)
-"~>" @operator
+["~>" ":="] @operator
 (call function: (identifier) @function)
 (selector_block name: (_) @type @selector.class)
 (number) @number

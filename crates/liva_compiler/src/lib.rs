@@ -1,5 +1,6 @@
 pub mod analysis;
 pub mod builtins;
+mod controller_bindings;
 mod diagnostic_source;
 pub mod edits;
 pub mod expression;
@@ -7,6 +8,7 @@ pub mod ir;
 pub mod scope;
 mod target;
 
+use controller_bindings::{ControllerBindings, ControllerScope};
 use diagnostic_source::{header_range, name_range, significant_range};
 use expression::ExprExt;
 use ir::*;
@@ -421,7 +423,7 @@ impl Compiler {
         };
         self.mapping(path, node, "block");
         let timing_expression = self.decorator_expression(node, scope, expression::Type::Timing);
-        let targets = self.compile_targets(node, path, scope, |compiler, target, path, seen| {
+        let targets = self.compile_targets(node, path, scope, |compiler, target, path, _, seen| {
             compiler.transition_properties(target, path, scope, seen, endpoint)
         });
 
@@ -446,6 +448,15 @@ impl Compiler {
             let property = match item {
                 syn::AnimationProperty::Keyframes(property) => property,
                 syn::AnimationProperty::Shorthand(property) => {
+                    if property.is_attachment() {
+                        self.error(
+                            "semantic.controller",
+                            "Controller attachments belong to layer/state styles",
+                            &property,
+                        );
+                        continue;
+                    }
+
                     let offset = endpoint;
                     let name = property.header().unwrap_or_default();
                     self.unique(property_names, &name, &property);
@@ -500,6 +511,7 @@ impl Compiler {
             }
 
             for frame in property.keyframes() {
+                let invalid_attachment = self.reject_frame_attachment(&frame);
                 let raw = frame.header().unwrap();
                 let offset = raw.trim_end_matches('%').parse::<f64>().unwrap_or(f64::NAN) / 100.0;
                 if !offset.is_finite() || !(0.0..=1.0).contains(&offset) {
@@ -529,6 +541,10 @@ impl Compiler {
                 let easing_expression =
                     self.decorator_expression(&frame, scope, expression::Type::Easing);
 
+                if invalid_attachment {
+                    continue;
+                }
+
                 frames.push(Frame {
                     easing_expression: easing_expression.clone(),
                     offset,
@@ -553,12 +569,32 @@ impl Compiler {
         properties
     }
 
+    fn reject_frame_attachment(&mut self, frame: &syn::Keyframe) -> bool {
+        // Keyframe is a specialized view of the same Declaration node as Property.
+        let property =
+            syn::Property::cast(frame.syntax().clone()).expect("keyframe is a declaration");
+
+        if !property.is_attachment() {
+            return false;
+        }
+
+        self.error(
+            "semantic.controller",
+            "Controller attachments belong to layer/state styles",
+            frame,
+        );
+
+        true
+    }
+
     fn style_properties(
         &mut self,
         target: &syn::Block,
         path: &str,
         scope: &expression::Scope,
         seen: &mut BTreeMap<String, Range>,
+        target_name: &str,
+        controllers: &mut ControllerScope<'_>,
     ) -> Vec<Property> {
         let mut properties = vec![];
         for item in syn::animation_properties(target) {
@@ -581,14 +617,48 @@ impl Compiler {
                         }
                     }
 
+                    let binding = property
+                        .attachment()
+                        .and_then(|expression| {
+                            match expression.check(scope).and_then(|value_type| {
+                                if matches!(value_type, expression::Type::Controller(_)) {
+                                    expression.to_output()
+                                } else {
+                                    Err(expression.error(":= requires a property controller"))
+                                }
+                            }) {
+                                Ok(output) => Some(output),
+                                Err(error) => {
+                                    self.expression_error(error);
+                                    None
+                                }
+                            }
+                        })
+                        .and_then(|binding| {
+                            match controllers.bind(binding, target_name, &name, property.range()) {
+                                Ok(binding) => Some(binding),
+                                Err(diagnostic) => {
+                                    self.diagnostics.push(diagnostic);
+                                    None
+                                }
+                            }
+                        });
+
+                    let value = if property.is_attachment() {
+                        binding.map(|expression| PropertyValue::Binding { expression })
+                    } else {
+                        Some(self.css_value(&property, scope).into())
+                    };
+                    let timing_expression =
+                        self.decorator_expression(&property, scope, expression::Type::Timing);
+
+                    // Invalid attachments omit IR, but must not suppress independent diagnostics.
+                    let Some(value) = value else { continue };
+
                     properties.push(Property {
                         name,
-                        value: self.css_value(&property, scope).into(),
-                        timing_expression: self.decorator_expression(
-                            &property,
-                            scope,
-                            expression::Type::Timing,
-                        ),
+                        value,
+                        timing_expression,
                     });
                 }
                 syn::AnimationProperty::Keyframes(track) => {
@@ -620,6 +690,7 @@ impl Compiler {
                     let mut offsets = BTreeMap::new();
 
                     for frame in track.keyframes() {
+                        let invalid_attachment = self.reject_frame_attachment(&frame);
                         let offset = frame
                             .header()
                             .unwrap_or_default()
@@ -659,6 +730,10 @@ impl Compiler {
                         let easing_expression =
                             self.decorator_expression(&frame, scope, expression::Type::Easing);
 
+                        if invalid_attachment {
+                            continue;
+                        }
+
                         frames.push(Frame {
                             offset,
                             value: self.css_value(&frame, scope),
@@ -671,7 +746,7 @@ impl Compiler {
                     if !frames.iter().any(|frame| frame.offset == 1.0) {
                         self.error("semantic.endpoint", "A style keyframe track requires a 100% destination; use a transition track for implicit destinations", &track);
                         continue;
-                    };
+                    }
 
                     properties.push(Property {
                         name,
@@ -799,9 +874,10 @@ impl Compiler {
         node: &impl AstNode,
         path: &str,
         scope: &expression::Scope,
+        controllers: &mut ControllerScope<'_>,
     ) -> Vec<Target<Property>> {
-        self.compile_targets(node, path, scope, |compiler, target, path, seen| {
-            compiler.style_properties(target, path, scope, seen)
+        self.compile_targets(node, path, scope, |compiler, target, path, name, seen| {
+            compiler.style_properties(target, path, scope, seen, name, controllers)
         })
     }
 
@@ -813,6 +889,7 @@ impl Compiler {
         mut compile_properties: impl FnMut(
             &mut Self,
             &syn::Block,
+            &str,
             &str,
             &mut BTreeMap<String, Range>,
         ) -> Vec<P>,
@@ -878,7 +955,7 @@ impl Compiler {
             } else {
                 &mut named_properties
             };
-            let properties = compile_properties(self, &source, &target_path, seen);
+            let properties = compile_properties(self, &source, &target_path, name, seen);
             let timing_properties = if id == TargetId::Root && timing.is_some() {
                 Some(
                     syn::animation_properties(&source)
@@ -922,18 +999,29 @@ impl Compiler {
         let bindings = self.let_bindings(node);
         let parameters = self.parameters(node);
         let scope = self.motion_scope(node, &parameters, &bindings);
+        let mut controllers = ControllerBindings::default();
+
+        for binding in bindings {
+            let value_type = scope.get(&binding.name).and_then(scope::Symbol::value_type);
+            let range = binding.initializer.range();
+            let initializer = binding
+                .initializer
+                .to_output()
+                .expect("syntax-checked initializer");
+
+            controllers.declare(
+                LetBinding {
+                    name: binding.name,
+                    initializer,
+                },
+                value_type,
+                range,
+            );
+        }
+
         let mut definition = Definition {
             name: name.clone(),
-            let_bindings: bindings
-                .into_iter()
-                .map(|binding| LetBinding {
-                    name: binding.name,
-                    initializer: binding
-                        .initializer
-                        .to_output()
-                        .expect("syntax-checked initializer"),
-                })
-                .collect(),
+            let_bindings: vec![],
             parameters,
             events: vec![],
             enter: None,
@@ -980,7 +1068,13 @@ impl Compiler {
                     let layer_path = format!("{name}/layer/{layer_name}");
                     self.mapping(&layer_path, &layer, "block");
 
-                    let targets = self.style_targets(&layer, &layer_path, &scope);
+                    let layer_index = definition.layers.len();
+                    let targets = self.style_targets(
+                        &layer,
+                        &layer_path,
+                        &scope,
+                        &mut controllers.scope(layer_index, 0),
+                    );
 
                     let condition = layer.condition();
                     let when = condition.and_then(|condition| {
@@ -1011,7 +1105,6 @@ impl Compiler {
                         let state_path = format!("{layer_path}/state/{state_name}");
                         self.mapping(&state_path, &state, "block");
 
-
                         if state.condition().is_some() {
                             self.error(
                                 "semantic.layer-state",
@@ -1024,10 +1117,18 @@ impl Compiler {
                             initial_states.push(state_name.clone());
                         }
 
+                        let timing_expression = self.decorator_expression(&state, &scope, expression::Type::Timing);
+                        let targets = self.style_targets(
+                            &state,
+                            &state_path,
+                            &scope,
+                            &mut controllers.scope(layer_index, layer_states.len() + 1),
+                        );
+
                         layer_states.push(State {
-                            timing_expression: self.decorator_expression(&state, &scope, expression::Type::Timing),
+                            timing_expression,
                             name: state_name,
-                            targets: self.style_targets(&state, &state_path, &scope),
+                            targets,
                         });
                     }
 
@@ -1182,6 +1283,10 @@ impl Compiler {
                 }
             }
         }
+
+        let (bindings, diagnostics) = controllers.finish();
+        definition.let_bindings = bindings;
+        self.diagnostics.extend(diagnostics);
 
         self.validate(&definition, node);
         definition

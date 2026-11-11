@@ -141,12 +141,32 @@ export function trackProvenance(
 
   return {
     timingBindings: timingBindings(inspection.definition),
-    fromDeclarationPath: fromSource ? valuePath(definition.name, fromSource) : undefined,
-    toDeclarationPath: owner ? valuePath(definition.name, owner) : undefined,
+    fromDeclarationPath:
+      fromSource && fromSource.property.value.kind !== 'binding'
+        ? valuePath(definition.name, fromSource)
+        : undefined,
+    toDeclarationPath:
+      owner && owner.property.value.kind !== 'binding'
+        ? valuePath(definition.name, owner)
+        : undefined,
     frameDeclarationPath: transitionPath ?? declaredStylePath,
     transition,
-    from: fromSource ? field(fields, valuePath(definition.name, fromSource)) : undefined,
-    to: owner ? field(fields, valuePath(definition.name, owner)) : undefined,
+    from:
+      fromSource && fromSource.property.value.kind !== 'binding'
+        ? field(fields, valuePath(definition.name, fromSource))
+        : undefined,
+    to:
+      owner && owner.property.value.kind !== 'binding'
+        ? field(fields, valuePath(definition.name, owner))
+        : undefined,
+    fromDescription:
+      fromSource?.property.value.kind === 'binding'
+        ? 'Controller attachment: edit := in source. Preview uses a frozen live snapshot.'
+        : undefined,
+    toDescription:
+      owner?.property.value.kind === 'binding'
+        ? 'Controller attachment: edit := in source. Preview uses a frozen live snapshot.'
+        : undefined,
     sharedValue:
       !!fromSource &&
       !!owner &&
@@ -157,14 +177,21 @@ export function trackProvenance(
       return source ? [source] : []
     }),
     timingSource,
-    timingDestination: stateMasksCommon ? undefined : timingDestination,
-    timingUnavailable: stateMasksCommon
-      ? 'Destination-state timing overrides this common declaration. Select an existing transition to create an effective local override.'
-      : undefined,
-    frameDestination,
-    framesUnavailable: !frameDestination
-      ? 'Select an existing transition in the animation owner to edit keyframes. State style tracks are not chosen automatically.'
-      : undefined,
+    timingDestination:
+      stateMasksCommon || owner?.property.value.kind === 'binding' ? undefined : timingDestination,
+    timingUnavailable:
+      owner?.property.value.kind === 'binding'
+        ? 'Controllers apply direct input without animation timing.'
+        : stateMasksCommon
+          ? 'Destination-state timing overrides this common declaration. Select an existing transition to create an effective local override.'
+          : undefined,
+    frameDestination: owner?.property.value.kind === 'binding' ? undefined : frameDestination,
+    framesUnavailable:
+      owner?.property.value.kind === 'binding'
+        ? 'Controller attachments have no editable keyframes.'
+        : !frameDestination
+          ? 'Select an existing transition in the animation owner to edit keyframes. State style tracks are not chosen automatically.'
+          : undefined,
     localTiming,
     fields,
   }

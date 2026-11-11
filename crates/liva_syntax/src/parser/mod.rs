@@ -172,7 +172,7 @@ impl Parser<'_> {
             let mut guarded_transition = false;
 
             while !self.at().is_empty()
-                && !matches!(self.at(), "{" | "}" | ";" | "~>")
+                && !matches!(self.at(), "{" | "}" | ";" | "~>" | ":=")
                 && !(nesting_depth == 0 && self.at() == ":")
             {
                 if nesting_depth == 0 && matches!(self.at(), "\n" | "\r") {
@@ -249,7 +249,7 @@ impl Parser<'_> {
                 continue;
             }
 
-            if self.at() == ":" {
+            if matches!(self.at(), ":" | ":=") {
                 if has_prefix {
                     self.error("Value decorators must follow the value");
                 }
@@ -275,9 +275,15 @@ impl Parser<'_> {
                 {
                     self.error("Expected a property name");
                 }
+                let attachment = self.at() == ":=";
                 self.bump();
                 self.start(Kind::Value);
-                self.raw();
+
+                if attachment {
+                    self.expression_region(false);
+                } else {
+                    self.raw();
+                }
                 self.end();
                 self.end();
             } else if self.at() == "{" {

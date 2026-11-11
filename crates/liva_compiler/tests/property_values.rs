@@ -8,26 +8,17 @@ use support::valid;
 fn declaration_sources_serialize_as_four_exclusive_variants() {
     let result = valid(
         r#"motion sample(distance: number) {
+          let controller = link(input: distance)
           @tween(duration: 100)
           layer base {
             opacity: 1
             translate: ${distance}px 0
+            width := controller
             scale ~> { 50%: .5; 100%: ${distance} }
           }
         }"#,
     );
-    let mut properties: Vec<_> = result.definitions[0].layers[0].targets[0]
-        .properties
-        .iter()
-        .map(|property| property.value.clone())
-        .collect();
-    properties.insert(
-        2,
-        serde_json::from_value(json!({
-            "kind": "binding", "expression": {"kind": "reference", "path": ["controller"]}
-        }))
-        .unwrap(),
-    );
+    let properties = &result.definitions[0].layers[0].targets[0].properties;
     let expected = [
         json!({"kind": "literal", "value": "1"}),
         json!({"kind": "template", "parts": [{"kind": "reference", "path": ["distance"]}, "px 0"]}),
@@ -41,12 +32,12 @@ fn declaration_sources_serialize_as_four_exclusive_variants() {
     assert_eq!(properties.len(), expected.len());
 
     for (property, expected) in properties.iter().zip(expected) {
-        let serialized = serde_json::to_value(property).unwrap();
+        let serialized = serde_json::to_value(&property.value).unwrap();
 
         assert_eq!(serialized, expected);
         assert_eq!(
-            &serde_json::from_value::<PropertyValue>(serialized).unwrap(),
-            property
+            serde_json::from_value::<PropertyValue>(serialized).unwrap(),
+            property.value
         );
     }
 }

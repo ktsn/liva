@@ -86,7 +86,10 @@ module.exports = grammar({
     type: () => choice('number', 'boolean', 'string', 'timing', 'easing'),
     boolean: () => choice('true', 'false'),
     property: ($) =>
-      prec(1, seq(field('name', choice($.identifier, alias($.type, $.identifier))), ':')),
+      prec(
+        1,
+        seq(field('name', choice($.identifier, alias($.type, $.identifier))), choice(':', ':=')),
+      ),
     identifier: () => /[A-Za-z_][A-Za-z0-9_-]*/,
     number: () => /([0-9]+(\.[0-9]+)?|\.[0-9]+)(ms|s|px|deg|%)?/,
     string: () => choice(/"([^"\\]|\\.)*"/, /'([^'\\]|\\.)*'/),
@@ -95,6 +98,7 @@ module.exports = grammar({
       choice(
         '->',
         '~>',
+        ':=',
         '===',
         '!==',
         '==',

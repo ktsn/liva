@@ -1,5 +1,6 @@
 mod drag;
 mod interaction;
+mod link;
 mod measure;
 mod timeout;
 mod timing;
@@ -36,6 +37,7 @@ pub fn functions() -> impl Iterator<Item = &'static Function> {
         &measure::MEASURE,
         &timeout::TIMEOUT,
         &drag::DRAG,
+        &link::LINK,
         &interaction::INTERACTION,
         &timing::TWEEN,
         &timing::SPRING,

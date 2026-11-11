@@ -257,3 +257,45 @@ fn lifecycle_accessors_retain_duplicate_and_malformed_declarations() {
 
     assert_eq!(motion.states().count(), 1);
 }
+
+#[test]
+fn controller_attachments_preserve_typed_ranges() {
+    let source = "motion demo { let pointer = drag(target: self); layer position { translate := link(input: pointer.offset); } }";
+    let parsed = parse(source);
+
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    assert_eq!(parsed.root.text(), source);
+    let layer = parsed
+        .root
+        .motions()
+        .next()
+        .unwrap()
+        .layers()
+        .next()
+        .unwrap();
+    let property = layer.properties().next().unwrap();
+    let attachment = property.attachment().unwrap();
+
+    assert_eq!(attachment.text(), "link(input: pointer.offset)");
+    assert_eq!(
+        &source[attachment.range().start..attachment.range().end],
+        attachment.text()
+    );
+}
+
+#[test]
+fn incomplete_controller_syntax_recovers_losslessly_at_every_boundary() {
+    let complete = "// 😀\nmotion demo { let p = drag(target: self); layer position { width := link(input: p.offset.x); } }";
+
+    for end in (0..=complete.len()).filter(|end| complete.is_char_boundary(*end)) {
+        let source = &complete[..end];
+        let parsed = parse(source);
+
+        assert_eq!(parsed.root.text(), source);
+
+        for diagnostic in parsed.diagnostics {
+            assert!(diagnostic.range.start <= diagnostic.range.end);
+            assert!(diagnostic.range.end <= source.len());
+        }
+    }
+}

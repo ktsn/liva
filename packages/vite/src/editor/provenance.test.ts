@@ -42,6 +42,29 @@ const from = { layers: { base: true, hover: false }, states: { machine: 'idle' }
 const to = { layers: { base: true, hover: true }, states: { machine: 'active' } }
 
 describe('composition source provenance', () => {
+  it('keeps controller expressions source-owned on both sides of an editor selection', () => {
+    const info = inspection(
+      'motion sample(enabled: boolean) { let c = link(input: 1); layer base { width: 100px } layer active when enabled { width := c } }',
+    )
+    const inactive = { layers: { base: true, active: false }, states: {} }
+    const active = { layers: { base: true, active: true }, states: {} }
+
+    const entering = trackProvenance(info, inactive, active, undefined, 'self', 'width')
+    const leaving = trackProvenance(info, active, inactive, undefined, 'self', 'width')
+
+    expect(entering.toDeclarationPath).toBeUndefined()
+    expect(entering.to).toBeUndefined()
+    expect(entering.toDescription).toContain('frozen live snapshot')
+    expect(entering.timingDestination).toBeUndefined()
+    expect(entering.frameDestination).toBeUndefined()
+    expect(entering.framesUnavailable).toContain('no editable keyframes')
+    expect(entering.timingUnavailable).toContain('direct input')
+    expect(leaving.fromDeclarationPath).toBeUndefined()
+    expect(leaving.from).toBeUndefined()
+    expect(leaving.fromDescription).toContain('edit := in source')
+    expect(leaving.toDeclarationPath).toContain('/property/width/value')
+  })
+
   it('reports self block timing only for the properties inside that block', () => {
     const info = inspection(
       'motion sample { @tween(duration: 100) layer base { opacity: 1; @spring() self { scale: 1 } } @tween(duration: 400) enter { opacity: 0; @tween(duration: 200) self { scale: .8 } } }',
