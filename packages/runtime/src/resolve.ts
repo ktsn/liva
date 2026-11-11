@@ -1,4 +1,5 @@
-import type { Frame, Timing } from './definition.ts'
+import type { Timing } from './definition.ts'
+import type { RenderedFrame } from './presentation.ts'
 
 export interface ResolvedTrack {
   readonly directionalOwner?: string
@@ -7,16 +8,16 @@ export interface ResolvedTrack {
   readonly target: string
   readonly property: string
   readonly timing: Timing
-  readonly keyframes: readonly Frame[]
+  readonly keyframes: readonly RenderedFrame[]
   readonly destinationValue: string
 }
 
 export function normalizeFrames(
   source: string,
   destination: string,
-  explicitFrames: readonly Frame[] | undefined,
+  explicitFrames: readonly RenderedFrame[] | undefined,
   timing: Timing,
-): Frame[] {
+): RenderedFrame[] {
   const frames = (explicitFrames ?? [])
     .map((frame) => ({ ...frame }))
     .toSorted((a, b) => a.offset - b.offset)

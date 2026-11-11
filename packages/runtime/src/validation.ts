@@ -5,6 +5,8 @@ import type {
   Expression,
   LetBinding,
   Frame,
+  CssValue,
+  PropertyValue,
   PropertyTransition,
   State,
   Target,
@@ -39,14 +41,53 @@ function isTiming(value: unknown): value is Timing {
   }
 }
 
+function hasOnlyFields(value: Record<string, unknown>, fields: readonly string[]): boolean {
+  return Object.keys(value).every((name) => fields.includes(name))
+}
+
+function isCssValue(value: unknown): value is CssValue {
+  if (!isRecord(value)) return false
+
+  switch (value.kind) {
+    case 'literal':
+      return hasOnlyFields(value, ['kind', 'value']) && typeof value.value === 'string'
+    case 'template':
+      return (
+        hasOnlyFields(value, ['kind', 'parts']) &&
+        Array.isArray(value.parts) &&
+        value.parts.every((part: unknown) => typeof part === 'string' || isExpression(part))
+      )
+    default:
+      return false
+  }
+}
+
+function isPropertyValue(value: unknown): value is PropertyValue {
+  if (!isRecord(value)) return false
+
+  switch (value.kind) {
+    case 'literal':
+    case 'template':
+      return isCssValue(value)
+    case 'binding':
+      return hasOnlyFields(value, ['kind', 'expression']) && isExpression(value.expression)
+    case 'keyframes':
+      return (
+        hasOnlyFields(value, ['kind', 'frames']) &&
+        isArrayOf(value.frames, isFrame) &&
+        value.frames.some((frame) => frame.offset === 1)
+      )
+    default:
+      return false
+  }
+}
+
 export function isFrame(value: unknown): value is Frame {
   return (
     isRecord(value) &&
+    hasOnlyFields(value, ['offset', 'value', 'easing', 'easingExpression']) &&
     typeof value.offset === 'number' &&
-    typeof value.value === 'string' &&
-    (value.template === undefined ||
-      (Array.isArray(value.template) &&
-        value.template.every((part: unknown) => typeof part === 'string' || isExpression(part)))) &&
+    isCssValue(value.value) &&
     (value.easingExpression === undefined || isExpression(value.easingExpression)) &&
     (value.easing === undefined || typeof value.easing === 'string')
   )
@@ -170,15 +211,11 @@ function isStyleScope(value: unknown): value is State {
         target.properties.every(
           (property: unknown) =>
             isRecord(property) &&
+            hasOnlyFields(property, ['name', 'value', 'timing', 'timingExpression']) &&
             typeof property.name === 'string' &&
-            typeof property.value === 'string' &&
-            (property.timingExpression === undefined || isExpression(property.timingExpression)) &&
-            (property.keyframes === undefined || isArrayOf(property.keyframes, isFrame)) &&
-            (property.template === undefined ||
-              (Array.isArray(property.template) &&
-                property.template.every(
-                  (part: unknown) => typeof part === 'string' || isExpression(part),
-                ))),
+            isPropertyValue(property.value) &&
+            (property.timing === undefined || isTiming(property.timing)) &&
+            (property.timingExpression === undefined || isExpression(property.timingExpression)),
         ),
     )
   )

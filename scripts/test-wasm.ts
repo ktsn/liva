@@ -8,7 +8,7 @@ import {
   parameterValues,
   targetValues,
 } from '../packages/runtime/src/let-bindings.ts'
-import { renderValue } from '../packages/runtime/src/expression.ts'
+import { renderProperty } from '../packages/runtime/src/expression.ts'
 
 for (const name of [
   'toggle',
@@ -30,7 +30,7 @@ for (const name of [
   assert.equal(Object.isFrozen(bundle.definitions[0].layers), true)
   assert.equal('mappings' in bundle, false)
 }
-assert.throws(() => decodeBundle('{"schemaVersion":2,"definitions":[]}'), /Unsupported/)
+assert.throws(() => decodeBundle('{"schemaVersion":1,"definitions":[]}'), /Unsupported/)
 
 const unicode = '// 😀\r\nmotion a { @tween(duration: 1000) layer on {} }'
 const development: Compilation = JSON.parse(compile(unicode, true))
@@ -59,7 +59,9 @@ const shadowInputs = parameterValues(shadowed.parameters, targetValues(shadowed)
 const shadowValues = new LetBindingGraph(shadowed.letBindings, shadowInputs).evaluate(shadowInputs)
 
 assert.deepEqual(
-  shadowed.layers[0].targets[0].properties.map((property) => renderValue(property, shadowValues)),
+  shadowed.layers[0].targets[0].properties.map(
+    (property) => renderProperty(property, shadowValues).value,
+  ),
   ['6', '3'],
 )
 

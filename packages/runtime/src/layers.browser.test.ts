@@ -7,19 +7,45 @@ import { decodeBundle, type Definition, type Expression } from './definition.ts'
 const ref = (name: string): Expression => ({ kind: 'reference', path: [name] })
 const definition: Definition = {
   name: 'button',
-
   parameters: [
     { name: 'hover', type: 'boolean' },
     { name: 'press', type: 'boolean' },
     { name: 'size', type: 'number' },
   ],
   layers: [
-    { name: 'base', targets: [{ name: 'body', properties: [{ name: 'scale', value: '1' }] }] },
+    {
+      name: 'base',
+      targets: [
+        {
+          name: 'body',
+          properties: [
+            {
+              name: 'scale',
+              value: {
+                kind: 'literal',
+                value: '1',
+              },
+            },
+          ],
+        },
+      ],
+    },
     {
       name: 'hover',
       when: ref('hover'),
       targets: [
-        { name: 'body', properties: [{ name: 'scale', value: '', template: [ref('size')] }] },
+        {
+          name: 'body',
+          properties: [
+            {
+              name: 'scale',
+              value: {
+                kind: 'template',
+                parts: [ref('size')],
+              },
+            },
+          ],
+        },
       ],
     },
     {
@@ -29,8 +55,20 @@ const definition: Definition = {
         {
           name: 'body',
           properties: [
-            { name: 'scale', value: '.9' },
-            { name: 'opacity', value: '.5' },
+            {
+              name: 'scale',
+              value: {
+                kind: 'literal',
+                value: '.9',
+              },
+            },
+            {
+              name: 'opacity',
+              value: {
+                kind: 'literal',
+                value: '.5',
+              },
+            },
           ],
         },
       ],
@@ -57,7 +95,19 @@ function timedDefinition(duration = 300): Definition {
         ? {
             ...layer,
             targets: [
-              { name: 'body', properties: [{ name: 'scale', value: '1', timingExpression }] },
+              {
+                name: 'body',
+                properties: [
+                  {
+                    name: 'scale',
+                    value: {
+                      kind: 'literal',
+                      value: '1',
+                    },
+                    timingExpression,
+                  },
+                ],
+              },
             ],
           }
         : layer,
@@ -69,7 +119,23 @@ function instantTrackDefinition(): Definition {
   return {
     ...definition,
     layers: [
-      { name: 'base', targets: [{ name: 'body', properties: [{ name: 'scale', value: '1' }] }] },
+      {
+        name: 'base',
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'scale',
+                value: {
+                  kind: 'literal',
+                  value: '1',
+                },
+              },
+            ],
+          },
+        ],
+      },
       {
         name: 'hover',
         when: ref('hover'),
@@ -79,13 +145,33 @@ function instantTrackDefinition(): Definition {
             properties: [
               {
                 name: 'scale',
-                value: '2',
+                value: {
+                  kind: 'keyframes',
+                  frames: [
+                    {
+                      offset: 0,
+                      value: {
+                        kind: 'literal',
+                        value: '1',
+                      },
+                    },
+                    {
+                      offset: 0.5,
+                      value: {
+                        kind: 'literal',
+                        value: '5',
+                      },
+                    },
+                    {
+                      offset: 1,
+                      value: {
+                        kind: 'literal',
+                        value: '2',
+                      },
+                    },
+                  ],
+                },
                 timingExpression: ref('instant'),
-                keyframes: [
-                  { offset: 0, value: '1' },
-                  { offset: 0.5, value: '5' },
-                  { offset: 1, value: '2' },
-                ],
               },
             ],
           },
@@ -116,7 +202,7 @@ function setup(
   const element = document.createElement('div')
   element.style.color = 'red'
   document.body.append(element)
-  const decoded = decodeBundle(JSON.stringify({ schemaVersion: 1, definitions: [source] }))
+  const decoded = decodeBundle(JSON.stringify({ schemaVersion: 2, definitions: [source] }))
     .definitions[0]
   const instance = new LivaInstance(decoded, inputs, (error) => errors.push(error))
   instance.bind([['body', element]])
@@ -148,8 +234,20 @@ describe('reactive layer instances', () => {
               {
                 name: 'body',
                 properties: [
-                  { name: 'scale', value: '1' },
-                  { name: 'opacity', value: '1' },
+                  {
+                    name: 'scale',
+                    value: {
+                      kind: 'literal',
+                      value: '1',
+                    },
+                  },
+                  {
+                    name: 'opacity',
+                    value: {
+                      kind: 'literal',
+                      value: '1',
+                    },
+                  },
                 ],
               },
             ],
@@ -161,8 +259,20 @@ describe('reactive layer instances', () => {
               {
                 name: 'body',
                 properties: [
-                  { name: 'scale', value: '1.2' },
-                  { name: 'opacity', value: '.5' },
+                  {
+                    name: 'scale',
+                    value: {
+                      kind: 'literal',
+                      value: '1.2',
+                    },
+                  },
+                  {
+                    name: 'opacity',
+                    value: {
+                      kind: 'literal',
+                      value: '.5',
+                    },
+                  },
                 ],
               },
             ],
@@ -176,8 +286,10 @@ describe('reactive layer instances', () => {
                 properties: [
                   {
                     name: 'scale',
-                    value: '',
-                    template: [ref('size')],
+                    value: {
+                      kind: 'template',
+                      parts: [ref('size')],
+                    },
                     timingExpression: ref('instant'),
                   },
                 ],
@@ -325,12 +437,38 @@ describe('reactive layer instances', () => {
       layers: [
         {
           name: 'base',
-          targets: [{ name: 'body', properties: [{ name: 'opacity', value: '1' }] }],
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'opacity',
+                  value: {
+                    kind: 'literal',
+                    value: '1',
+                  },
+                },
+              ],
+            },
+          ],
         },
         {
           name: 'drag',
           when: { kind: 'reference', path: ['dragging', 'active'] },
-          targets: [{ name: 'body', properties: [{ name: 'opacity', value: '.5' }] }],
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'opacity',
+                  value: {
+                    kind: 'literal',
+                    value: '.5',
+                  },
+                },
+              ],
+            },
+          ],
         },
       ],
     }
@@ -371,7 +509,19 @@ describe('reactive layer instances', () => {
           ? {
               ...layer,
               targets: [
-                { name: 'body', properties: [{ name: 'scale', value: '1', timingExpression }] },
+                {
+                  name: 'body',
+                  properties: [
+                    {
+                      name: 'scale',
+                      value: {
+                        kind: 'literal',
+                        value: '1',
+                      },
+                      timingExpression,
+                    },
+                  ],
+                },
               ],
             }
           : layer,
@@ -415,11 +565,25 @@ describe('reactive layer instances', () => {
               properties: [
                 {
                   name: 'scale',
-                  value: '1',
-                  keyframes: [
-                    { offset: 0, value: '.8' },
-                    { offset: 1, value: '1' },
-                  ],
+                  value: {
+                    kind: 'keyframes',
+                    frames: [
+                      {
+                        offset: 0,
+                        value: {
+                          kind: 'literal',
+                          value: '.8',
+                        },
+                      },
+                      {
+                        offset: 1,
+                        value: {
+                          kind: 'literal',
+                          value: '1',
+                        },
+                      },
+                    ],
+                  },
                 },
               ],
             },
@@ -453,7 +617,10 @@ describe('reactive layer instances', () => {
                   properties: [
                     {
                       name: 'scale',
-                      value: '1',
+                      value: {
+                        kind: 'literal',
+                        value: '1',
+                      },
                       timingExpression: { kind: 'call', function: 'spring', arguments: [] },
                     },
                   ],
@@ -534,12 +701,18 @@ describe('reactive layer instances', () => {
               properties: [
                 {
                   name: 'scale',
-                  value: '1',
+                  value: {
+                    kind: 'literal',
+                    value: '1',
+                  },
                   timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
                 },
                 {
                   name: 'opacity',
-                  value: '1',
+                  value: {
+                    kind: 'literal',
+                    value: '1',
+                  },
                   timing: { kind: 'tween', durationMs: 200, easing: 'not-an-easing' },
                 },
               ],
@@ -553,8 +726,20 @@ describe('reactive layer instances', () => {
             {
               name: 'body',
               properties: [
-                { name: 'scale', value: '1.4' },
-                { name: 'opacity', value: '.5' },
+                {
+                  name: 'scale',
+                  value: {
+                    kind: 'literal',
+                    value: '1.4',
+                  },
+                },
+                {
+                  name: 'opacity',
+                  value: {
+                    kind: 'literal',
+                    value: '.5',
+                  },
+                },
               ],
             },
           ],
@@ -587,8 +772,22 @@ describe('reactive layer instances', () => {
             {
               name: 'body',
               properties: [
-                { name: 'opacity', value: '', template: [ref('size')], timingExpression },
-                { name: 'scale', value: '1', timingExpression },
+                {
+                  name: 'opacity',
+                  value: {
+                    kind: 'template',
+                    parts: [ref('size')],
+                  },
+                  timingExpression,
+                },
+                {
+                  name: 'scale',
+                  value: {
+                    kind: 'literal',
+                    value: '1',
+                  },
+                  timingExpression,
+                },
               ],
             },
           ],
@@ -596,7 +795,20 @@ describe('reactive layer instances', () => {
             { name: 'idle', targets: [] },
             {
               name: 'open',
-              targets: [{ name: 'body', properties: [{ name: 'scale', value: '1.2' }] }],
+              targets: [
+                {
+                  name: 'body',
+                  properties: [
+                    {
+                      name: 'scale',
+                      value: {
+                        kind: 'literal',
+                        value: '1.2',
+                      },
+                    },
+                  ],
+                },
+              ],
             },
           ],
           transitions: [
@@ -627,7 +839,19 @@ describe('reactive layer instances', () => {
           name: 'machine',
           initialState: 'closed',
           targets: [
-            { name: 'body', properties: [{ name: 'scale', value: '1.1', timingExpression }] },
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'scale',
+                  value: {
+                    kind: 'literal',
+                    value: '1.1',
+                  },
+                  timingExpression,
+                },
+              ],
+            },
           ],
           states: [
             { name: 'closed', targets: [] },
@@ -642,7 +866,20 @@ describe('reactive layer instances', () => {
                 targets: [
                   {
                     name: 'body',
-                    properties: [{ name: 'scale', keyframes: [{ offset: 0, value: '.8' }] }],
+                    properties: [
+                      {
+                        name: 'scale',
+                        keyframes: [
+                          {
+                            offset: 0,
+                            value: {
+                              kind: 'literal',
+                              value: '.8',
+                            },
+                          },
+                        ],
+                      },
+                    ],
                   },
                 ],
               },
@@ -681,13 +918,38 @@ describe('reactive layer instances', () => {
           name: 'machine',
           initialState: 'closed',
           targets: [
-            { name: 'body', properties: [{ name: 'scale', value: '1', timingExpression }] },
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'scale',
+                  value: {
+                    kind: 'literal',
+                    value: '1',
+                  },
+                  timingExpression,
+                },
+              ],
+            },
           ],
           states: [
             { name: 'closed', targets: [] },
             {
               name: 'open',
-              targets: [{ name: 'body', properties: [{ name: 'scale', value: '1.1' }] }],
+              targets: [
+                {
+                  name: 'body',
+                  properties: [
+                    {
+                      name: 'scale',
+                      value: {
+                        kind: 'literal',
+                        value: '1.1',
+                      },
+                    },
+                  ],
+                },
+              ],
             },
           ],
           transitions: [
@@ -699,7 +961,20 @@ describe('reactive layer instances', () => {
                 targets: [
                   {
                     name: 'body',
-                    properties: [{ name: 'scale', keyframes: [{ offset: 1, value: '2' }] }],
+                    properties: [
+                      {
+                        name: 'scale',
+                        keyframes: [
+                          {
+                            offset: 1,
+                            value: {
+                              kind: 'literal',
+                              value: '2',
+                            },
+                          },
+                        ],
+                      },
+                    ],
                   },
                 ],
               },
@@ -730,14 +1005,36 @@ describe('reactive layer instances', () => {
           targets: [
             {
               name: 'body',
-              properties: [{ name: 'scale', value: '.9', timingExpression: timing(200) }],
+              properties: [
+                {
+                  name: 'scale',
+                  value: {
+                    kind: 'literal',
+                    value: '.9',
+                  },
+                  timingExpression: timing(200),
+                },
+              ],
             },
           ],
           states: [
             { name: 'closed', targets: [] },
             {
               name: 'open',
-              targets: [{ name: 'body', properties: [{ name: 'scale', value: '1.1' }] }],
+              targets: [
+                {
+                  name: 'body',
+                  properties: [
+                    {
+                      name: 'scale',
+                      value: {
+                        kind: 'literal',
+                        value: '1.1',
+                      },
+                    },
+                  ],
+                },
+              ],
             },
           ],
           transitions: [
@@ -753,7 +1050,15 @@ describe('reactive layer instances', () => {
                       {
                         name: 'scale',
                         timingExpression: timing(225),
-                        keyframes: [{ offset: 0.7, value: '1.2' }],
+                        keyframes: [
+                          {
+                            offset: 0.7,
+                            value: {
+                              kind: 'literal',
+                              value: '1.2',
+                            },
+                          },
+                        ],
                       },
                     ],
                   },
@@ -826,11 +1131,37 @@ describe('reactive layer instances', () => {
           states: [
             {
               name: 'idle',
-              targets: [{ name: 'body', properties: [{ name: 'opacity', value: '1' }] }],
+              targets: [
+                {
+                  name: 'body',
+                  properties: [
+                    {
+                      name: 'opacity',
+                      value: {
+                        kind: 'literal',
+                        value: '1',
+                      },
+                    },
+                  ],
+                },
+              ],
             },
             {
               name: 'active',
-              targets: [{ name: 'body', properties: [{ name: 'opacity', value: '.5' }] }],
+              targets: [
+                {
+                  name: 'body',
+                  properties: [
+                    {
+                      name: 'opacity',
+                      value: {
+                        kind: 'literal',
+                        value: '.5',
+                      },
+                    },
+                  ],
+                },
+              ],
             },
           ],
           transitions: [
@@ -875,10 +1206,26 @@ function start(phase: 'enter' | 'leave', instance: LivaInstance, element: HTMLEl
 }
 
 describe('layer lifecycle snapshots', () => {
-  const lifecycle = {
+  const lifecycle: import('./definition.ts').Transition = {
     timing: { kind: 'tween', durationMs: 1000, easing: 'linear' } as const,
     targets: [
-      { name: 'body', properties: [{ name: 'scale', keyframes: [{ offset: 0, value: '.5' }] }] },
+      {
+        name: 'body',
+        properties: [
+          {
+            name: 'scale',
+            keyframes: [
+              {
+                offset: 0,
+                value: {
+                  kind: 'literal',
+                  value: '.5',
+                },
+              },
+            ],
+          },
+        ],
+      },
     ],
   }
 
@@ -968,10 +1315,26 @@ describe('layer lifecycle snapshots', () => {
     document.head.append(stylesheet)
     cleanup.push(() => stylesheet.remove())
 
-    const enter = {
+    const enter: import('./definition.ts').Transition = {
       ...lifecycle,
       targets: [
-        { name: 'body', properties: [{ name: 'opacity', keyframes: [{ offset: 0, value: '0' }] }] },
+        {
+          name: 'body',
+          properties: [
+            {
+              name: 'opacity',
+              keyframes: [
+                {
+                  offset: 0,
+                  value: {
+                    kind: 'literal',
+                    value: '0',
+                  },
+                },
+              ],
+            },
+          ],
+        },
       ],
     }
     const { instance, element } = setup({ ...timedDefinition(), enter })
@@ -1081,10 +1444,26 @@ describe('layer lifecycle snapshots', () => {
   )
 
   it('keeps a leave snapshot while layers change and permits unrelated updates', async () => {
-    const leave = {
+    const leave: import('./definition.ts').Transition = {
       ...lifecycle,
       targets: [
-        { name: 'body', properties: [{ name: 'scale', keyframes: [{ offset: 1, value: '.5' }] }] },
+        {
+          name: 'body',
+          properties: [
+            {
+              name: 'scale',
+              keyframes: [
+                {
+                  offset: 1,
+                  value: {
+                    kind: 'literal',
+                    value: '.5',
+                  },
+                },
+              ],
+            },
+          ],
+        },
       ],
     }
     const { instance, element } = setup({ ...timedDefinition(), leave })
@@ -1138,11 +1517,27 @@ describe('composition preview sessions', () => {
     const first = setup(timedDefinition())
     const second = setup(timedDefinition())
     const original = first.instance.definition
-    const candidate = {
+    const candidate: Definition = {
       ...original,
       layers: original.layers?.map((layer) =>
         layer.name === 'hover'
-          ? { ...layer, targets: [{ name: 'body', properties: [{ name: 'scale', value: '2' }] }] }
+          ? {
+              ...layer,
+              targets: [
+                {
+                  name: 'body',
+                  properties: [
+                    {
+                      name: 'scale',
+                      value: {
+                        kind: 'literal',
+                        value: '2',
+                      },
+                    },
+                  ],
+                },
+              ],
+            }
           : layer,
       ),
     }
@@ -1189,11 +1584,37 @@ describe('composition preview sessions', () => {
             states: [
               {
                 name: 'idle',
-                targets: [{ name: 'body', properties: [{ name: 'scale', value: '1' }] }],
+                targets: [
+                  {
+                    name: 'body',
+                    properties: [
+                      {
+                        name: 'scale',
+                        value: {
+                          kind: 'literal',
+                          value: '1',
+                        },
+                      },
+                    ],
+                  },
+                ],
               },
               {
                 name: 'done',
-                targets: [{ name: 'body', properties: [{ name: 'scale', value: '2' }] }],
+                targets: [
+                  {
+                    name: 'body',
+                    properties: [
+                      {
+                        name: 'scale',
+                        value: {
+                          kind: 'literal',
+                          value: '2',
+                        },
+                      },
+                    ],
+                  },
+                ],
               },
             ],
             transitions: [
@@ -1263,7 +1684,10 @@ describe('composition preview sessions', () => {
                   properties: [
                     {
                       name: 'scale',
-                      value: '1',
+                      value: {
+                        kind: 'literal',
+                        value: '1',
+                      },
                       timing: { kind: 'spring-duration', durationMs: 400, bounce: 0.2 },
                     },
                   ],
@@ -1318,12 +1742,26 @@ describe('composition preview sessions', () => {
               properties: [
                 {
                   name: 'scale',
-                  value: '1',
+                  value: {
+                    kind: 'keyframes',
+                    frames: [
+                      {
+                        offset: 0.5,
+                        value: {
+                          kind: 'literal',
+                          value: '2',
+                        },
+                      },
+                      {
+                        offset: 1,
+                        value: {
+                          kind: 'literal',
+                          value: '1',
+                        },
+                      },
+                    ],
+                  },
                   timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
-                  keyframes: [
-                    { offset: 0.5, value: '2' },
-                    { offset: 1, value: '1' },
-                  ],
                 },
               ],
             },
@@ -1358,7 +1796,10 @@ describe('composition preview sessions', () => {
                   properties: [
                     {
                       name: 'scale',
-                      value: '1',
+                      value: {
+                        kind: 'literal',
+                        value: '1',
+                      },
                       timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
                     },
                   ],
@@ -1375,7 +1816,20 @@ describe('composition preview sessions', () => {
                 targets: [
                   {
                     name: 'body',
-                    properties: [{ name: 'scale', keyframes: [{ offset: 1, value: '2' }] }],
+                    properties: [
+                      {
+                        name: 'scale',
+                        keyframes: [
+                          {
+                            offset: 1,
+                            value: {
+                              kind: 'literal',
+                              value: '2',
+                            },
+                          },
+                        ],
+                      },
+                    ],
                   },
                 ],
               },
@@ -1400,7 +1854,20 @@ describe('composition preview sessions', () => {
         ...(source.layers ?? []),
         {
           name: 'optional',
-          targets: [{ name: 'absent', properties: [{ name: 'opacity', value: '1' }] }],
+          targets: [
+            {
+              name: 'absent',
+              properties: [
+                {
+                  name: 'opacity',
+                  value: {
+                    kind: 'literal',
+                    value: '1',
+                  },
+                },
+              ],
+            },
+          ],
         },
       ],
     })
@@ -1430,12 +1897,18 @@ describe('composition preview sessions', () => {
                   properties: [
                     {
                       name: 'scale',
-                      value: '1',
+                      value: {
+                        kind: 'literal',
+                        value: '1',
+                      },
                       timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
                     },
                     {
                       name: 'opacity',
-                      value: '1',
+                      value: {
+                        kind: 'literal',
+                        value: '1',
+                      },
                       timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
                     },
                   ],
@@ -1523,7 +1996,6 @@ describe('typed timing playback', () => {
           { name: 'amount', type: 'number' },
           { name: 'count', type: 'number' },
         ],
-
         layers: [
           {
             name: 'base',
@@ -1533,8 +2005,10 @@ describe('typed timing playback', () => {
                 properties: [
                   {
                     name: 'opacity',
-                    value: '',
-                    template: [ref('amount')],
+                    value: {
+                      kind: 'template',
+                      parts: [ref('amount')],
+                    },
                     timingExpression: {
                       kind: 'call',
                       function: 'tween',
@@ -1585,7 +2059,6 @@ describe('typed timing playback', () => {
         { name: 'duration', type: 'number' },
         { name: 'bounce', type: 'number' },
       ],
-
       layers: [
         {
           name: 'machine',
@@ -1594,11 +2067,37 @@ describe('typed timing playback', () => {
           states: [
             {
               name: 'idle',
-              targets: [{ name: 'body', properties: [{ name: 'opacity', value: '0' }] }],
+              targets: [
+                {
+                  name: 'body',
+                  properties: [
+                    {
+                      name: 'opacity',
+                      value: {
+                        kind: 'literal',
+                        value: '0',
+                      },
+                    },
+                  ],
+                },
+              ],
             },
             {
               name: 'active',
-              targets: [{ name: 'body', properties: [{ name: 'opacity', value: '1' }] }],
+              targets: [
+                {
+                  name: 'body',
+                  properties: [
+                    {
+                      name: 'opacity',
+                      value: {
+                        kind: 'literal',
+                        value: '1',
+                      },
+                    },
+                  ],
+                },
+              ],
             },
           ],
           transitions: [
@@ -1652,10 +2151,39 @@ describe('composition lifecycle previews', () => {
       leave: {
         timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
         targets: [
-          { name: 'body', properties: [{ name: 'scale', keyframes: [{ offset: 1, value: '0' }] }] },
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'scale',
+                keyframes: [
+                  {
+                    offset: 1,
+                    value: {
+                      kind: 'literal',
+                      value: '0',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
           {
             name: 'badge',
-            properties: [{ name: 'opacity', keyframes: [{ offset: 1, value: '0' }] }],
+            properties: [
+              {
+                name: 'opacity',
+                keyframes: [
+                  {
+                    offset: 1,
+                    value: {
+                      kind: 'literal',
+                      value: '0',
+                    },
+                  },
+                ],
+              },
+            ],
           },
         ],
       },
@@ -1704,7 +2232,12 @@ describe('composition lifecycle previews', () => {
             {
               name: 'body',
               properties: [
-                { name: 'scale', keyframes: [{ offset: phase === 'enter' ? 0 : 1, value: '0' }] },
+                {
+                  name: 'scale',
+                  keyframes: [
+                    { offset: phase === 'enter' ? 0 : 1, value: { kind: 'literal', value: '0' } },
+                  ],
+                },
               ],
             },
           ],

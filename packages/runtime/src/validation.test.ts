@@ -10,11 +10,117 @@ const valid = fixture.definitions[0]
 function expectInvalidDefinition(definition: unknown) {
   expect(isDefinition(definition)).toBe(false)
   expect(() =>
-    decodeBundle(JSON.stringify({ schemaVersion: 1, definitions: [definition] })),
+    decodeBundle(JSON.stringify({ schemaVersion: 2, definitions: [definition] })),
   ).toThrow('schema')
 }
 
 describe('serialized definition validation', () => {
+  const reference = { kind: 'reference', path: ['distance'] }
+  const endpoint = { offset: 1, value: { kind: 'literal', value: '1' } }
+
+  const withPropertyValue = (value: unknown) => ({
+    ...valid,
+    layers: [{ name: 'base', targets: [{ name: 'self', properties: [{ name: 'scale', value }] }] }],
+  })
+
+  it.each([
+    { kind: 'literal', value: '1' },
+    { kind: 'template', parts: [reference, 'px'] },
+    { kind: 'binding', expression: reference },
+    {
+      kind: 'keyframes',
+      frames: [
+        { offset: 0.5, value: { kind: 'template', parts: [reference] }, easing: 'linear' },
+        endpoint,
+      ],
+    },
+  ])('accepts and freezes the exclusive $kind declaration source', (value) => {
+    const bundle = decodeBundle(
+      JSON.stringify({ schemaVersion: 2, definitions: [withPropertyValue(value)] }),
+    )
+    const decoded = bundle.definitions[0].layers[0].targets[0].properties[0].value
+
+    expect(decoded).toEqual(value)
+    expect(Object.isFrozen(decoded)).toBe(true)
+  })
+
+  it.each([
+    '1',
+    null,
+    {},
+    { kind: 'unknown' },
+    { kind: 'literal' },
+    { kind: 'literal', value: 1 },
+    { kind: 'literal', value: '1', expression: reference },
+    { kind: 'template', parts: 'invalid' },
+    { kind: 'template', parts: [null] },
+    { kind: 'template', parts: [reference], value: '${distance}' },
+    { kind: 'binding', expression: {} },
+    { kind: 'binding', expression: reference, frames: [endpoint] },
+    { kind: 'keyframes', frames: [] },
+    { kind: 'keyframes', frames: [null] },
+    { kind: 'keyframes', frames: [{ ...endpoint, easing: 1 }] },
+    { kind: 'keyframes', frames: [{ ...endpoint, offset: 0.5 }] },
+    { kind: 'keyframes', frames: [endpoint], value: '1' },
+    {
+      kind: 'keyframes',
+      frames: [{ ...endpoint, value: { kind: 'binding', expression: reference } }],
+    },
+    {
+      kind: 'keyframes',
+      frames: [{ ...endpoint, value: { kind: 'keyframes', frames: [endpoint] } }],
+    },
+    { kind: 'keyframes', frames: [{ ...endpoint, template: [reference] }] },
+  ])('rejects malformed, overlapping or nested declaration sources: %j', (value) => {
+    expect.assertions(2)
+    expectInvalidDefinition(withPropertyValue(value))
+  })
+
+  it.each(['template', 'binding', 'keyframes'])(
+    'rejects a legacy sibling %s field beside the source variant',
+    (field) => {
+      expect.assertions(2)
+
+      const definition = withPropertyValue({ kind: 'literal', value: '1' })
+
+      Object.assign(definition.layers[0].targets[0].properties[0], { [field]: [] })
+
+      expectInvalidDefinition(definition)
+    },
+  )
+
+  it('rejects the previous schema even if its definitions are otherwise valid', () => {
+    expect(() => decodeBundle(JSON.stringify({ schemaVersion: 1, definitions: [valid] }))).toThrow(
+      'schema',
+    )
+  })
+
+  it('rejects malformed controller expressions', () => {
+    expect.assertions(2)
+    expectInvalidDefinition({
+      ...valid,
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'self',
+              properties: [
+                {
+                  name: 'width',
+                  value: {
+                    kind: 'binding',
+                    expression: { kind: 'unknown' },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+  })
+
   it.each(['invalid', [1]])(
     'rejects malformed target timing property sets: %j',
     (timingProperties) => {
@@ -47,7 +153,7 @@ describe('serialized definition validation', () => {
     }
 
     expect(
-      decodeBundle(JSON.stringify({ schemaVersion: 1, definitions: [definition] })).definitions[0]
+      decodeBundle(JSON.stringify({ schemaVersion: 2, definitions: [definition] })).definitions[0]
         .enter,
     ).toEqual(definition.enter)
   })
@@ -71,24 +177,38 @@ describe('serialized definition validation', () => {
     const timingExpression = { kind: 'call', function: 'tween', arguments: [] }
     const frame = {
       offset: 1,
-      value: '1',
+      value: { kind: 'literal', value: '1' },
       easingExpression: { kind: 'reference', path: ['easeOut'] },
     }
-    const property = { name: 'opacity', value: '1', timingExpression, keyframes: [frame] }
+    const property = {
+      name: 'opacity',
+      value: { kind: 'keyframes', frames: [frame] },
+      timingExpression,
+    }
+    const transitionProperty = { name: 'opacity', keyframes: [frame], timingExpression }
     const definition = {
       ...valid,
       layers: [{ name: 'idle', targets: [{ name: 'body', properties: [property] }] }],
-      enter: { targets: [{ name: 'body', properties: [property] }] },
+      enter: { targets: [{ name: 'body', properties: [transitionProperty] }] },
     }
 
     expect(
-      decodeBundle(JSON.stringify({ schemaVersion: 1, definitions: [definition] })).definitions[0],
+      decodeBundle(JSON.stringify({ schemaVersion: 2, definitions: [definition] })).definitions[0],
     ).toEqual(definition)
 
-    for (const changed of [
-      { ...property, timingExpression: {} },
-      { ...property, keyframes: 'invalid' },
-      { ...property, keyframes: [{ ...frame, easingExpression: {} }] },
+    for (const [changed, changedTransition] of [
+      [
+        { ...property, timingExpression: {} },
+        { ...transitionProperty, timingExpression: {} },
+      ],
+      [
+        { ...property, value: { kind: 'keyframes', frames: 'invalid' } },
+        { ...transitionProperty, keyframes: 'invalid' },
+      ],
+      [
+        { ...property, value: { kind: 'keyframes', frames: [{ ...frame, easingExpression: {} }] } },
+        { ...transitionProperty, keyframes: [{ ...frame, easingExpression: {} }] },
+      ],
     ]) {
       expectInvalidDefinition({
         ...definition,
@@ -96,7 +216,7 @@ describe('serialized definition validation', () => {
       })
       expectInvalidDefinition({
         ...definition,
-        enter: { targets: [{ name: 'body', properties: [changed] }] },
+        enter: { targets: [{ name: 'body', properties: [changedTransition] }] },
       })
     }
   })

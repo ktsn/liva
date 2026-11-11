@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vite-plus/test'
-import { evaluate, evaluateScalar, renderValue, renderTransition } from './expression.ts'
+import {
+  evaluate,
+  evaluateScalar,
+  renderValue,
+  renderProperty,
+  renderTransition,
+} from './expression.ts'
 import { resolveComposition, resolveLayerTracks } from './layers.ts'
-import type { Definition, Expression } from './definition.ts'
+import type { Definition, Expression, Property } from './definition.ts'
 
 const number = (value: number): Expression => ({ kind: 'number', value })
 
@@ -85,8 +91,10 @@ describe('expression evaluation', () => {
             properties: [
               {
                 name: 'translate',
-                value: '0px',
-                template: [{ kind: 'reference', path: ['x'] }, 'px'],
+                value: {
+                  kind: 'template',
+                  parts: [{ kind: 'reference', path: ['x'] }, 'px'],
+                },
               },
             ],
           },
@@ -101,8 +109,19 @@ describe('expression evaluation', () => {
 
     expect(rendered.composition.layers).toEqual({ off: false, on: true })
     expect(rendered.presentation.targets[0].properties[0].value).toBe('12px')
-    expect(definition.layers[1].targets[0].properties[0].value).toBe('0px')
-    expect(renderValue({ value: 'auto' }, {})).toBe('auto')
+    expect(definition.layers[1].targets[0].properties[0].value).toEqual({
+      kind: 'template',
+      parts: [{ kind: 'reference', path: ['x'] }, 'px'],
+    })
+    expect(
+      renderValue(
+        {
+          kind: 'literal',
+          value: 'auto',
+        },
+        {},
+      ),
+    ).toBe('auto')
   })
   it('resolves decorated property timing and frame easing from current values', () => {
     const quick: Expression = {
@@ -113,7 +132,23 @@ describe('expression evaluation', () => {
     const definition: Definition = {
       name: 'fade',
       layers: [
-        { name: 'off', targets: [{ name: 'body', properties: [{ name: 'opacity', value: '0' }] }] },
+        {
+          name: 'off',
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'opacity',
+                  value: {
+                    kind: 'literal',
+                    value: '0',
+                  },
+                },
+              ],
+            },
+          ],
+        },
         {
           name: 'on',
           targets: [
@@ -122,15 +157,21 @@ describe('expression evaluation', () => {
               properties: [
                 {
                   name: 'opacity',
-                  value: '1',
+                  value: {
+                    kind: 'keyframes',
+                    frames: [
+                      {
+                        offset: 0.5,
+                        value: {
+                          kind: 'literal',
+                          value: '.7',
+                        },
+                        easingExpression: { kind: 'reference', path: ['easeOut'] },
+                      },
+                      { offset: 1, value: { kind: 'literal', value: '1' } },
+                    ],
+                  },
                   timingExpression: quick,
-                  keyframes: [
-                    {
-                      offset: 0.5,
-                      value: '.7',
-                      easingExpression: { kind: 'reference', path: ['easeOut'] },
-                    },
-                  ],
                 },
               ],
             },
@@ -156,6 +197,54 @@ describe('expression evaluation', () => {
     expect(track.destinationValue).toBe('1')
   })
 
+  it('preserves a binding as a pending controller expression without evaluating it as CSS', () => {
+    const expression: Expression = { kind: 'reference', path: ['movement'] }
+    const property: Property = { name: 'translate', value: { kind: 'binding', expression } }
+
+    const rendered = renderProperty(property, {})
+
+    expect(rendered).toEqual({ name: 'translate', value: '', binding: expression })
+    expect(rendered.binding).toBe(expression)
+  })
+
+  it('derives each keyframe destination from its structured endpoint without mutating the source', () => {
+    const property: Property = {
+      name: 'translate',
+      value: {
+        kind: 'keyframes',
+        frames: [
+          { offset: 0, value: { kind: 'literal', value: '0px' } },
+          {
+            offset: 1,
+            value: { kind: 'template', parts: [{ kind: 'reference', path: ['x'] }, 'px'] },
+          },
+        ],
+      },
+    }
+    const original = structuredClone(property)
+
+    const first = renderProperty(property, { x: 12 })
+    const second = renderProperty(property, { x: 20 })
+
+    expect(first.value).toBe('12px')
+    expect(first.keyframes?.map((frame) => frame.value)).toEqual(['0px', '12px'])
+    expect(second.value).toBe('20px')
+    expect(second.keyframes?.at(-1)?.value).toBe('20px')
+    expect(property).toEqual(original)
+  })
+
+  it('rejects a direct style keyframe source without a destination', () => {
+    const property: Property = {
+      name: 'scale',
+      value: {
+        kind: 'keyframes',
+        frames: [{ offset: 0.5, value: { kind: 'literal', value: '.5' } }],
+      },
+    }
+
+    expect(() => renderProperty(property, {})).toThrow('100% destination')
+  })
+
   it('renders transition timing, interpolation and easing as one immutable snapshot', () => {
     const source = {
       targets: [
@@ -168,8 +257,10 @@ describe('expression evaluation', () => {
               keyframes: [
                 {
                   offset: 1,
-                  value: '',
-                  template: [{ kind: 'reference', path: ['x'] } as Expression, 'px'],
+                  value: {
+                    kind: 'template' as const,
+                    parts: [{ kind: 'reference', path: ['x'] } as Expression, 'px'],
+                  },
                   easingExpression: { kind: 'reference', path: ['easeIn'] } as Expression,
                 },
               ],
@@ -183,10 +274,16 @@ describe('expression evaluation', () => {
     const second = renderTransition(source, { x: 20 })
 
     expect(first.targets[0].properties[0].keyframes?.[0]).toMatchObject({
-      value: '10px',
+      value: { kind: 'literal', value: '10px' },
       easing: 'ease-in',
     })
-    expect(second.targets[0].properties[0].keyframes?.[0].value).toBe('20px')
-    expect(source.targets[0].properties[0].keyframes[0].value).toBe('')
+    expect(second.targets[0].properties[0].keyframes?.[0].value).toEqual({
+      kind: 'literal',
+      value: '20px',
+    })
+    expect(source.targets[0].properties[0].keyframes[0].value).toEqual({
+      kind: 'template',
+      parts: [{ kind: 'reference', path: ['x'] }, 'px'],
+    })
   })
 })

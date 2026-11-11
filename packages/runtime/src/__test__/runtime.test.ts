@@ -105,7 +105,20 @@ describe('transition resolution', () => {
       targets: [
         {
           name: 'thumb',
-          properties: [{ name: 'scale', keyframes: [{ offset: 0.6, value: '2' }] }],
+          properties: [
+            {
+              name: 'scale',
+              keyframes: [
+                {
+                  offset: 0.6,
+                  value: {
+                    kind: 'literal',
+                    value: '2',
+                  },
+                },
+              ],
+            },
+          ],
         },
       ],
     })
@@ -124,8 +137,21 @@ describe('transition resolution', () => {
             {
               name: 'scale',
               keyframes: [
-                { offset: 0, value: '2', easing: 'steps(2)' },
-                { offset: 1, value: '3' },
+                {
+                  offset: 0,
+                  value: {
+                    kind: 'literal',
+                    value: '2',
+                  },
+                  easing: 'steps(2)',
+                },
+                {
+                  offset: 1,
+                  value: {
+                    kind: 'literal',
+                    value: '3',
+                  },
+                },
               ],
             },
           ],

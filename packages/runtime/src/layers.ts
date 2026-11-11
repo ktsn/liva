@@ -7,16 +7,18 @@ import {
 } from './layer-cascade.ts'
 import { timingValue } from './timing-values.ts'
 import { normalizeFrames, type ResolvedTrack } from './resolve.ts'
-import type { Definition, GuardedTransition, Property, State, Target } from './definition.ts'
+import type { Definition, GuardedTransition, Property, Target } from './definition.ts'
 import {
   evaluate,
-  renderValue,
+  renderProperty,
   renderFrame,
   renderTransition,
   type VariableValues,
 } from './expression.ts'
 
-interface LayerProperty extends Property {
+import type { RenderedProperty, RenderedState } from './presentation.ts'
+
+interface LayerProperty extends RenderedProperty {
   readonly owner: string
 }
 
@@ -34,7 +36,7 @@ export interface LayerResolution {
   readonly composition: Composition
   readonly states: ReadonlyMap<string, string>
   readonly transitions: ReadonlyMap<string, GuardedTransition>
-  readonly presentation: Omit<State, 'targets'> & {
+  readonly presentation: Omit<RenderedState, 'targets'> & {
     readonly targets: readonly Target<LayerProperty>[]
   }
 }
@@ -115,10 +117,8 @@ function resolveLayerSelection(
   const targets = resolveLayerCascade(
     selectLayers(),
     ({ layer, property }) => ({
-      ...property,
+      ...renderProperty(property, values),
       owner: layer.name,
-      value: renderValue(property, values),
-      keyframes: property.keyframes?.map((frame) => renderFrame(frame, values)),
     }),
     // The cascade invokes mapTiming only for a declaration with a timing expression or value.
     ({ declaration }) =>
@@ -288,10 +288,11 @@ export function resolveLayerTracks(
         transitionPropertySources(rendered, target.name, property.name).timing?.timing ??
         property.timing
 
-      if (!timing) continue
+      if (!timing || property.binding) continue
 
-      const explicit = override?.keyframes ?? property.keyframes
-      const endpoint = override?.keyframes?.find((frame) => frame.offset === 1)
+      const explicit =
+        override?.keyframes?.map((frame) => renderFrame(frame, values)) ?? property.keyframes
+      const endpoint = explicit?.find((frame) => frame.offset === 1)
 
       if (endpoint && endpoint.value !== property.value) {
         warn(

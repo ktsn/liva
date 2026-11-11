@@ -1,3 +1,4 @@
+use liva_compiler::ir::CssValue;
 mod support;
 use liva_compiler::compile;
 use support::valid;
@@ -176,7 +177,22 @@ fn quoted_and_nested_at_characters_remain_css_values() {
             .as_ref()
             .unwrap();
 
-        assert_eq!(frames[0].value, value);
+        if value == "'${\"@\"}'" {
+            assert_eq!(
+                serde_json::to_value(&frames[0].value).unwrap(),
+                serde_json::json!({
+                    "kind": "template",
+                    "parts": ["'", {"kind": "string", "value": "@"}, "'"]
+                })
+            );
+        } else {
+            assert_eq!(
+                frames[0].value,
+                CssValue::Literal {
+                    value: value.into()
+                }
+            );
+        }
         assert!(frames[0].easing_expression.is_none());
     }
 }

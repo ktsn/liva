@@ -1,11 +1,11 @@
 import { expect, it } from 'vite-plus/test'
-import type { State, Transition } from './definition.ts'
+import type { Transition } from './definition.ts'
 import fixture from '../../../fixtures/lifecycle.json'
 import { resolveLayers } from './layers.ts'
 import { decodeBundle } from './definition.ts'
 import { captureLifecycleDefinition, hasLifecycle, resolveLifecycleTracks } from './lifecycle.ts'
 
-const state: State = {
+const state: import('./presentation.ts').RenderedState = {
   name: 'idle',
   targets: [{ name: 'body', properties: [{ name: 'opacity', value: '1' }] }],
 }
@@ -13,7 +13,23 @@ it('resolves disconnected enter endpoints from the active state without style sa
   const transition: Transition = {
     timing: { kind: 'tween', durationMs: 200, easing: 'ease-out' },
     targets: [
-      { name: 'body', properties: [{ name: 'opacity', keyframes: [{ offset: 0, value: '0' }] }] },
+      {
+        name: 'body',
+        properties: [
+          {
+            name: 'opacity',
+            keyframes: [
+              {
+                offset: 0,
+                value: {
+                  kind: 'literal',
+                  value: '0',
+                },
+              },
+            ],
+          },
+        ],
+      },
     ],
   }
 
@@ -36,7 +52,15 @@ it('samples the leave presentation and resolves per-property overrides', () => {
           {
             name: 'opacity',
             timing: { kind: 'spring-physics', stiffness: 300, damping: 20, mass: 1 },
-            keyframes: [{ offset: 1, value: '0' }],
+            keyframes: [
+              {
+                offset: 1,
+                value: {
+                  kind: 'literal',
+                  value: '0',
+                },
+              },
+            ],
           },
         ],
       },
@@ -63,8 +87,21 @@ it.each(['enter', 'leave'] as const)(
             {
               name: 'opacity',
               keyframes: [
-                { offset: 0, value: '0.2', easing: 'ease-in' },
-                { offset: 1, value: '0.8' },
+                {
+                  offset: 0,
+                  value: {
+                    kind: 'literal',
+                    value: '0.2',
+                  },
+                  easing: 'ease-in',
+                },
+                {
+                  offset: 1,
+                  value: {
+                    kind: 'literal',
+                    value: '0.8',
+                  },
+                },
               ],
             },
           ],
@@ -101,7 +138,23 @@ it('resolves only registered targets and keeps their independent property timing
   const transition: Transition = {
     timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
     targets: [
-      { name: 'body', properties: [{ name: 'opacity', keyframes: [{ offset: 1, value: '0' }] }] },
+      {
+        name: 'body',
+        properties: [
+          {
+            name: 'opacity',
+            keyframes: [
+              {
+                offset: 1,
+                value: {
+                  kind: 'literal',
+                  value: '0',
+                },
+              },
+            ],
+          },
+        ],
+      },
       {
         name: 'badge',
         properties: [
@@ -141,10 +194,16 @@ it.each(['enter', 'leave'] as const)('captures %s expression values once', (phas
       .find((target) => target.name === 'content')!
       .properties.find((property) => property.name === name)!
 
-  expect(capturedProperty('translate').keyframes?.[0].value).toBe('40px 0')
+  expect(capturedProperty('translate').keyframes?.[0].value).toEqual({
+    kind: 'literal',
+    value: '40px 0',
+  })
   expect(capturedProperty('scale').keyframes).toHaveLength(1)
-  expect(capturedProperty('scale').keyframes?.[0].value).toBe(phase === 'enter' ? '0.8' : '1.2')
-  expect(capturedProperty('opacity').keyframes?.[0].value).toBe('0')
+  expect(capturedProperty('scale').keyframes?.[0].value).toEqual({
+    kind: 'literal',
+    value: phase === 'enter' ? '0.8' : '1.2',
+  })
+  expect(capturedProperty('opacity').keyframes?.[0].value).toEqual({ kind: 'literal', value: '0' })
   expect(captured.targets.some((target) => target.name === 'badge')).toBe(true)
 
   const selected = resolveLayers(definition, { open: true, distance: 40 }).presentation

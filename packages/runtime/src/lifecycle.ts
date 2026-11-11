@@ -1,6 +1,7 @@
 import { trackLayoutAnimation } from './layout-scheduler.ts'
-import type { Definition, State, Transition } from './definition.ts'
-import { renderTransition, type VariableValues } from './expression.ts'
+import type { Definition, Transition } from './definition.ts'
+import type { RenderedState } from './presentation.ts'
+import { renderFrame, renderTransition, type VariableValues } from './expression.ts'
 import type { ResolvedTrack } from './resolve.ts'
 import { sampleSpring } from './spring.ts'
 import { waapiProperty } from './animation.ts'
@@ -47,7 +48,7 @@ export type LifecycleResult = 'completed' | 'superseded' | 'owner-teardown' | 'f
 export function resolveLifecycle(
   phase: 'enter' | 'leave',
   transition: Transition | undefined,
-  state: State,
+  state: RenderedState,
   targets: ReadonlyMap<string, HTMLElement>,
 ): LifecycleWork[] {
   const tracks = resolveLifecycleTracks(phase, transition, state, (target, property) => {
@@ -61,11 +62,14 @@ export function resolveLifecycle(
   return tracks.map((track) => ({ element: targets.get(track.target)!, track }))
 }
 
-/** Undefined presentation means the target is absent; an empty value may use State CSS. */
+/**
+ * Resolves a captured transition, whose frame expressions have already become literals.
+ * Undefined presentation means the target is absent; an empty value may use State CSS.
+ */
 export function resolveLifecycleTracks(
   phase: 'enter' | 'leave',
   transition: Transition | undefined,
-  state: State,
+  state: RenderedState,
   presentation: (target: string, property: string) => string | undefined,
 ): ResolvedTrack[] {
   const tracks: ResolvedTrack[] = []
@@ -80,7 +84,7 @@ export function resolveLifecycleTracks(
       const stateValue = state.targets
         .find((item) => item.name === target.name)
         ?.properties.find((item) => item.name === property.name)?.value
-      const frames = (property.keyframes ?? []).map((frame) => ({ ...frame }))
+      const frames = (property.keyframes ?? []).map((frame) => renderFrame(frame, {}))
       const baseline = stateValue ?? displayed
 
       if (frames[0]?.offset !== 0) {

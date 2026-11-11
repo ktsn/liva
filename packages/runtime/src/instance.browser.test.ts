@@ -1,3 +1,4 @@
+import type { Definition as PropertyIRDefinition } from './definition.ts'
 import { afterEach, describe, expect, it } from 'vite-plus/test'
 import { cdp, userEvent } from 'vite-plus/test/browser'
 import type { CDPSession } from '@vitest/browser-playwright'
@@ -106,10 +107,23 @@ describe('browser animation execution', () => {
       layers: [
         {
           name: 'base',
-          targets: [{ name: 'body', properties: [{ name: 'opacity', value: '1' }] }],
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'opacity',
+                  value: {
+                    kind: 'literal',
+                    value: '1',
+                  },
+                },
+              ],
+            },
+          ],
         },
       ],
-    }
+    } satisfies PropertyIRDefinition
     const { instance, targets } = setup(source)
 
     instance.bind([])
@@ -260,16 +274,18 @@ it('updates template values in place and recovers from non-finite expressions', 
             properties: [
               {
                 name: 'width',
-                value: '0px',
-                template: [
-                  {
-                    kind: 'binary',
-                    operator: '/',
-                    left: { kind: 'number', value: 100 },
-                    right: { kind: 'reference', path: ['x'] },
-                  },
-                  'px',
-                ],
+                value: {
+                  kind: 'template',
+                  parts: [
+                    {
+                      kind: 'binary',
+                      operator: '/',
+                      left: { kind: 'number', value: 100 },
+                      right: { kind: 'reference', path: ['x'] },
+                    },
+                    'px',
+                  ],
+                },
               },
             ],
           },
@@ -311,10 +327,23 @@ it('restores variable shorthands and preserves external priority changes', () =>
     layers: [
       {
         name: 'on',
-        targets: [{ name: 'box', properties: [{ name: 'margin', value: 'var(--b)' }] }],
+        targets: [
+          {
+            name: 'box',
+            properties: [
+              {
+                name: 'margin',
+                value: {
+                  kind: 'literal',
+                  value: 'var(--b)',
+                },
+              },
+            ],
+          },
+        ],
       },
     ],
-  }
+  } satisfies PropertyIRDefinition
   const element = document.createElement('div')
 
   element.style.cssText = 'margin: var(--a); width: 12px !important; color: red'
@@ -359,10 +388,18 @@ it('skips zero-duration layer effects', () => {
       },
       timing: { kind: 'tween' as const, durationMs: 0, easing: 'linear' },
       targets: [
-        { name: 'box', properties: [{ name: 'opacity', value: name === 'off' ? '0' : '1' }] },
+        {
+          name: 'box',
+          properties: [
+            {
+              name: 'opacity',
+              value: { kind: 'literal', value: name === 'off' ? '0' : '1' },
+            },
+          ],
+        },
       ],
     })),
-  }
+  } satisfies PropertyIRDefinition
   const { instance, targets } = setup(base)
 
   updateMode(instance, 'on')
@@ -587,7 +624,6 @@ it('replaces only an animated template property when its value changes within a 
       { name: 'checked', type: 'boolean' },
       { name: 'x', type: 'number' },
     ] as const,
-
     layers: [
       {
         name: 'off',
@@ -596,11 +632,34 @@ it('replaces only an animated template property when its value changes within a 
           {
             name: 'box',
             properties: [
-              { name: 'width', value: '0px' },
-              { name: 'opacity', value: '0' },
+              {
+                name: 'width',
+                value: {
+                  kind: 'literal',
+                  value: '0px',
+                },
+              },
+              {
+                name: 'opacity',
+                value: {
+                  kind: 'literal',
+                  value: '0',
+                },
+              },
             ],
           },
-          { name: 'badge', properties: [{ name: 'opacity', value: '0' }] },
+          {
+            name: 'badge',
+            properties: [
+              {
+                name: 'opacity',
+                value: {
+                  kind: 'literal',
+                  value: '0',
+                },
+              },
+            ],
+          },
         ],
       },
       {
@@ -613,17 +672,36 @@ it('replaces only an animated template property when its value changes within a 
             properties: [
               {
                 name: 'width',
-                value: '10px',
-                template: [{ kind: 'reference', path: ['x'] } as const, 'px'],
+                value: {
+                  kind: 'template',
+                  parts: [{ kind: 'reference', path: ['x'] } as const, 'px'],
+                },
               },
-              { name: 'opacity', value: '1' },
+              {
+                name: 'opacity',
+                value: {
+                  kind: 'literal',
+                  value: '1',
+                },
+              },
             ],
           },
-          { name: 'badge', properties: [{ name: 'opacity', value: '1' }] },
+          {
+            name: 'badge',
+            properties: [
+              {
+                name: 'opacity',
+                value: {
+                  kind: 'literal',
+                  value: '1',
+                },
+              },
+            ],
+          },
         ],
       },
     ],
-  }
+  } satisfies PropertyIRDefinition
   const { instance, targets } = setup(def, { checked: false, x: 10 })
 
   expect(instance.captureLifecycle('enter', ['box'])).toEqual([])
@@ -657,14 +735,26 @@ it('restores removed owned declarations but preserves external removals', () => 
           {
             name: 'box',
             properties: [
-              { name: 'width', value: '' },
-              { name: 'height', value: '20px' },
+              {
+                name: 'width',
+                value: {
+                  kind: 'literal',
+                  value: '',
+                },
+              },
+              {
+                name: 'height',
+                value: {
+                  kind: 'literal',
+                  value: '20px',
+                },
+              },
             ],
           },
         ],
       },
     ],
-  }
+  } satisfies PropertyIRDefinition
   const instance = new LivaInstance(def)
 
   instances.push(instance)
@@ -705,7 +795,6 @@ it('updates template snapshots while lifecycle targets are absent', () => {
   const def = {
     name: 'missing',
     parameters: [{ name: 'x', type: 'number' } as const],
-
     enter: { targets: [] },
     layers: [
       {
@@ -716,15 +805,17 @@ it('updates template snapshots while lifecycle targets are absent', () => {
             properties: [
               {
                 name: 'width',
-                value: '0px',
-                template: [{ kind: 'reference', path: ['x'] } as const, 'px'],
+                value: {
+                  kind: 'template',
+                  parts: [{ kind: 'reference', path: ['x'] } as const, 'px'],
+                },
               },
             ],
           },
         ],
       },
     ],
-  }
+  } satisfies PropertyIRDefinition
   const { instance, errors } = setup(def, { x: 1 })
 
   instance.bind([])
@@ -775,10 +866,22 @@ it.each(['enter', 'leave'] as const)(
       layers: [
         {
           name: 'idle',
-          targets: [{ name: 'body', properties: [{ name: 'opacity', value: '1' }] }],
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'opacity',
+                  value: {
+                    kind: 'literal',
+                    value: '1',
+                  },
+                },
+              ],
+            },
+          ],
         },
       ],
-
       [phase]: {
         timing: { kind: 'tween' as const, durationMs: 200, easing: 'linear' },
         targets: [
@@ -790,8 +893,10 @@ it.each(['enter', 'leave'] as const)(
                 keyframes: [
                   {
                     offset: phase === 'enter' ? 0 : 1,
-                    value: '${opacity}',
-                    template: [{ kind: 'reference' as const, path: ['opacity'] }],
+                    value: {
+                      kind: 'template' as const,
+                      parts: [{ kind: 'reference' as const, path: ['opacity'] }],
+                    },
                   },
                 ],
               },
@@ -799,7 +904,7 @@ it.each(['enter', 'leave'] as const)(
           },
         ],
       },
-    }
+    } satisfies PropertyIRDefinition
     const { instance, targets, errors } = setup(def, { opacity: 0.2 })
     const second = document.createElement('div')
     document.body.append(second)
@@ -840,31 +945,62 @@ it('keeps lifecycle preview preparation atomic on invalid easing and supports sp
           {
             name: 'body',
             properties: [
-              { name: 'opacity', value: '1' },
-              { name: 'scale', value: '1' },
+              {
+                name: 'opacity',
+                value: {
+                  kind: 'literal',
+                  value: '1',
+                },
+              },
+              {
+                name: 'scale',
+                value: {
+                  kind: 'literal',
+                  value: '1',
+                },
+              },
             ],
           },
         ],
       },
     ],
-
     leave: {
       timing: { kind: 'spring-duration' as const, durationMs: 200, bounce: 0.2 },
       targets: [
         {
           name: 'body',
           properties: [
-            { name: 'opacity', keyframes: [{ offset: 1, value: '0' }] },
+            {
+              name: 'opacity',
+              keyframes: [
+                {
+                  offset: 1,
+                  value: {
+                    kind: 'literal',
+                    value: '0',
+                  },
+                },
+              ],
+            },
             {
               name: 'scale',
               timing: { kind: 'tween' as const, durationMs: 200, easing: 'invalid' },
-              keyframes: [{ offset: 1, value: '0.5', easing: 'invalid' }],
+              keyframes: [
+                {
+                  offset: 1,
+                  value: {
+                    kind: 'literal',
+                    value: '0.5',
+                  },
+                  easing: 'invalid',
+                },
+              ],
             },
           ],
         },
       ],
     },
-  }
+  } satisfies PropertyIRDefinition
   const { instance, targets, errors } = setup(def)
 
   expect(() => instance.previewLifecycle('leave')).toThrow('Could not prepare composition preview')

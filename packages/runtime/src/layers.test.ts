@@ -1,7 +1,7 @@
 import selfFixture from '../../../fixtures/self-target.json'
 import { decodeBundle } from './definition.ts'
 import { describe, expect, it } from 'vite-plus/test'
-import type { Definition, Expression, Layer } from './definition.ts'
+import type { Definition, Expression, Layer, Property, Target } from './definition.ts'
 import {
   layerTargets,
   resolveLayers,
@@ -11,10 +11,13 @@ import {
 } from './layers.ts'
 
 const ref = (name: string): Expression => ({ kind: 'reference', path: [name] })
-const targets = (properties: Record<string, string>) => [
+const targets = (properties: Record<string, string>): Target<Property>[] => [
   {
     name: 'body',
-    properties: Object.entries(properties).map(([name, value]) => ({ name, value })),
+    properties: Object.entries(properties).map(([name, value]) => ({
+      name,
+      value: { kind: 'literal', value },
+    })),
   },
 ]
 const definition = (layers: readonly Layer[]): Definition => ({
@@ -106,7 +109,15 @@ describe('layer cascade', () => {
         targets: [
           {
             name: 'body',
-            properties: [{ name: 'translate', value: '', template: [ref('x'), 'px 0'] }],
+            properties: [
+              {
+                name: 'translate',
+                value: {
+                  kind: 'template',
+                  parts: [ref('x'), 'px 0'],
+                },
+              },
+            ],
           },
         ],
       },
@@ -187,8 +198,22 @@ describe('layer animation ownership', () => {
       {
         name: 'body',
         properties: [
-          { name: 'scale', value: '1', timingExpression: tween },
-          { name: 'opacity', value: '1', timingExpression: tween },
+          {
+            name: 'scale',
+            value: {
+              kind: 'literal',
+              value: '1',
+            },
+            timingExpression: tween,
+          },
+          {
+            name: 'opacity',
+            value: {
+              kind: 'literal',
+              value: '1',
+            },
+            timingExpression: tween,
+          },
         ],
       },
     ],
@@ -210,7 +235,20 @@ describe('layer animation ownership', () => {
           targets: [
             {
               name: 'body',
-              properties: [{ name: 'scale', keyframes: [{ offset: 0.7, value: '1.2' }] }],
+              properties: [
+                {
+                  name: 'scale',
+                  keyframes: [
+                    {
+                      offset: 0.7,
+                      value: {
+                        kind: 'literal',
+                        value: '1.2',
+                      },
+                    },
+                  ],
+                },
+              ],
             },
           ],
         },
@@ -273,7 +311,20 @@ describe('layer animation ownership', () => {
               targets: [
                 {
                   name: 'body',
-                  properties: [{ name: 'scale', keyframes: [{ offset: 1, value: '2' }] }],
+                  properties: [
+                    {
+                      name: 'scale',
+                      keyframes: [
+                        {
+                          offset: 1,
+                          value: {
+                            kind: 'literal',
+                            value: '2',
+                          },
+                        },
+                      ],
+                    },
+                  ],
                 },
               ],
             },
@@ -309,11 +360,25 @@ describe('layer animation ownership', () => {
             properties: [
               {
                 name: 'scale',
-                value: '1',
-                keyframes: [
-                  { offset: 0, value: '.8' },
-                  { offset: 1, value: '1' },
-                ],
+                value: {
+                  kind: 'keyframes',
+                  frames: [
+                    {
+                      offset: 0,
+                      value: {
+                        kind: 'literal',
+                        value: '.8',
+                      },
+                    },
+                    {
+                      offset: 1,
+                      value: {
+                        kind: 'literal',
+                        value: '1',
+                      },
+                    },
+                  ],
+                },
               },
             ],
           },
@@ -461,7 +526,21 @@ describe('composition animation ownership', () => {
   const source = definition([
     {
       name: 'base',
-      targets: [{ name: 'body', properties: [{ name: 'scale', value: '1', timing }] }],
+      targets: [
+        {
+          name: 'body',
+          properties: [
+            {
+              name: 'scale',
+              value: {
+                kind: 'literal',
+                value: '1',
+              },
+              timing,
+            },
+          ],
+        },
+      ],
     },
     {
       name: 'machine',
@@ -480,7 +559,20 @@ describe('composition animation ownership', () => {
             targets: [
               {
                 name: 'body',
-                properties: [{ name: 'scale', keyframes: [{ offset: 0.5, value: '1.5' }] }],
+                properties: [
+                  {
+                    name: 'scale',
+                    keyframes: [
+                      {
+                        offset: 0.5,
+                        value: {
+                          kind: 'literal',
+                          value: '1.5',
+                        },
+                      },
+                    ],
+                  },
+                ],
               },
             ],
           },
@@ -533,7 +625,16 @@ function hierarchicalDefinition(enabled: readonly number[]): Definition {
         {
           name: 'body',
           timingExpression: timingExpression(7),
-          properties: [{ name: 'scale', value: '1', timingExpression: timingExpression(6) }],
+          properties: [
+            {
+              name: 'scale',
+              value: {
+                kind: 'literal',
+                value: '1',
+              },
+              timingExpression: timingExpression(6),
+            },
+          ],
         },
       ],
       states: [
@@ -545,7 +646,16 @@ function hierarchicalDefinition(enabled: readonly number[]): Definition {
             {
               name: 'body',
               timingExpression: timingExpression(4),
-              properties: [{ name: 'scale', value: '2', timingExpression: timingExpression(3) }],
+              properties: [
+                {
+                  name: 'scale',
+                  value: {
+                    kind: 'literal',
+                    value: '2',
+                  },
+                  timingExpression: timingExpression(3),
+                },
+              ],
             },
           ],
         },

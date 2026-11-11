@@ -70,15 +70,41 @@ pub struct Target<T> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Property {
     #[serde(rename = "timingExpression", skip_serializing_if = "Option::is_none")]
     pub timing_expression: Option<Expression>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub keyframes: Option<Vec<Frame>>,
     pub name: String,
-    pub value: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub template: Option<Vec<TemplatePart>>,
+    pub value: PropertyValue,
+}
+
+/// One CSS endpoint: opaque text or structured text/expression interpolation parts.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum CssValue {
+    Literal { value: String },
+    Template { parts: Vec<TemplatePart> },
+}
+
+/// Mutually exclusive declaration sources, with no duplicate raw template or endpoint text.
+/// Keyframe arrays are sorted by offset and include a required 100% destination.
+/// Frame values support only literal CSS and interpolation, excluding controllers and tracks.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum PropertyValue {
+    Literal { value: String },
+    Template { parts: Vec<TemplatePart> },
+    Binding { expression: Expression },
+    Keyframes { frames: Vec<Frame> },
+}
+
+impl From<CssValue> for PropertyValue {
+    fn from(value: CssValue) -> Self {
+        match value {
+            CssValue::Literal { value } => Self::Literal { value },
+            CssValue::Template { parts } => Self::Template { parts },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -102,13 +128,12 @@ pub struct PropertyTransition {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Frame {
     #[serde(rename = "easingExpression", skip_serializing_if = "Option::is_none")]
     pub easing_expression: Option<Expression>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub template: Option<Vec<TemplatePart>>,
     pub offset: f64,
-    pub value: String,
+    pub value: CssValue,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub easing: Option<String>,
 }
@@ -148,7 +173,8 @@ impl Transition {
 }
 
 impl State {
-    pub fn value(&self, target: &str, property: &str) -> Option<&str> {
+    /// Returns the authored declaration source, without evaluating expressions or tracks.
+    pub fn value(&self, target: &str, property: &str) -> Option<&PropertyValue> {
         Some(
             &self
                 .targets

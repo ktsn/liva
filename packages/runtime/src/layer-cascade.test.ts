@@ -1,3 +1,4 @@
+import { renderProperty } from './expression.ts'
 import { describe, expect, it, vi } from 'vite-plus/test'
 import type { Definition, Expression, Layer, Property, State, Timing } from './definition.ts'
 import {
@@ -14,7 +15,10 @@ import {
 const tween: Timing = { kind: 'tween', durationMs: 200, easing: 'linear' }
 const dynamic: Expression = { kind: 'reference', path: ['duration'] }
 const identity = <T>(value: T) => value
-const property = (name: string, value: string): Property => ({ name, value })
+const property = (name: string, value: string): Property => ({
+  name,
+  value: { kind: 'literal', value },
+})
 const layer = (name: string, properties: readonly Property[]): Layer => ({
   name,
   targets: [{ name: 'body', properties }],
@@ -57,7 +61,16 @@ function scopedSelection(enabled: readonly boolean[], kind: 'value' | 'expressio
       {
         name: 'body',
         ...declarations[1],
-        properties: [{ name: 'opacity', value: '0.5', ...declarations[0] }],
+        properties: [
+          {
+            name: 'opacity',
+            value: {
+              kind: 'literal',
+              value: '0.5',
+            },
+            ...declarations[0],
+          },
+        ],
       },
     ],
   }
@@ -69,7 +82,16 @@ function scopedSelection(enabled: readonly boolean[], kind: 'value' | 'expressio
       {
         name: 'body',
         ...declarations[4],
-        properties: [{ name: 'opacity', value: '1', ...declarations[3] }],
+        properties: [
+          {
+            name: 'opacity',
+            value: {
+              kind: 'literal',
+              value: '1',
+            },
+            ...declarations[3],
+          },
+        ],
       },
     ],
   }
@@ -178,12 +200,16 @@ describe('resolveLayerCascade', () => {
     const [target] = resolveSources([{ layer: base }, { layer: upper, state }])
     const [opacity, scale] = target.properties
 
-    expect(opacity.source).toMatchObject({ layer: upper, state, property: { value: '0.5' } })
+    expect(opacity.source).toMatchObject({
+      layer: upper,
+      state,
+      property: { value: { kind: 'literal', value: '0.5' } },
+    })
     expect(
       opacity.declarations.map((source) => [
         source.layer.name,
         source.state?.name,
-        source.property.value,
+        renderProperty(source.property, {}).value,
       ]),
     ).toEqual([
       ['base', undefined, '1'],
@@ -215,7 +241,10 @@ describe('resolveLayerCascade', () => {
     expect(
       result.map((target) => [
         target.name,
-        target.properties.map((item) => [item.name, item.source.property.value]),
+        target.properties.map((item) => [
+          item.name,
+          renderProperty(item.source.property, {}).value,
+        ]),
       ]),
     ).toEqual([
       [
@@ -357,8 +386,8 @@ describe('resolveLayerCascade', () => {
     const [target] = resolveLayerCascade(
       [{ layer: first, state }, { layer: last }],
       (source) => {
-        events.push(`value:${source.layer.name}:${source.property.value}`)
-        return Number(source.property.value)
+        events.push(`value:${source.layer.name}:${renderProperty(source.property, {}).value}`)
+        return Number(renderProperty(source.property, {}).value)
       },
       (source) => {
         events.push(`timing:${source.layer.name}`)

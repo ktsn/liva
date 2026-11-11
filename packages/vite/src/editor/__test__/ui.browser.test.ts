@@ -212,7 +212,23 @@ it('does not repeat zero-duration previews with loop enabled', async () => {
   await setupEditor(undefined, {
     name: 'instant',
     layers: [
-      { name: 'base', targets: [{ name: 'body', properties: [{ name: 'opacity', value: '1' }] }] },
+      {
+        name: 'base',
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'opacity',
+                value: {
+                  kind: 'literal',
+                  value: '1',
+                },
+              },
+            ],
+          },
+        ],
+      },
     ],
   })
 
@@ -391,9 +407,25 @@ it('creates a typed timing override for an ordinary layer property', async () =>
   const definition = {
     name: 'single',
     layers: [
-      { name: 'base', targets: [{ name: 'box', properties: [{ name: 'opacity', value: '1' }] }] },
+      {
+        name: 'base',
+        targets: [
+          {
+            name: 'box',
+            properties: [
+              {
+                name: 'opacity',
+                value: {
+                  kind: 'literal',
+                  value: '1',
+                },
+              },
+            ],
+          },
+        ],
+      },
     ],
-  }
+  } satisfies Definition
   const { controller } = await setupEditor(undefined, definition, {}, [
     { path: 'single/layer/base/target/box/property/opacity', kind: 'block', value: '' },
     { path: 'single/layer/base/target/box/property/opacity/value', kind: 'value', value: '1' },
@@ -526,9 +558,25 @@ it.each(['enter', 'leave'] as const)(
     const definition = {
       name: 'single',
       layers: [
-        { name: 'base', targets: [{ name: 'box', properties: [{ name: 'opacity', value: '1' }] }] },
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'box',
+              properties: [
+                {
+                  name: 'opacity',
+                  value: {
+                    kind: 'literal',
+                    value: '1',
+                  },
+                },
+              ],
+            },
+          ],
+        },
       ],
-    }
+    } satisfies Definition
     const { controller } = await setupEditor(undefined, definition)
 
     await click('Motion editor')
@@ -704,7 +752,6 @@ it('pans the timeline only after a primary pointer drag on its background', asyn
 
 const compositionDefinition = {
   name: 'layered',
-
   layers: [
     {
       name: 'base',
@@ -712,10 +759,19 @@ const compositionDefinition = {
         {
           name: 'body',
           properties: [
-            { name: 'opacity', value: '1' },
+            {
+              name: 'opacity',
+              value: {
+                kind: 'literal',
+                value: '1',
+              },
+            },
             {
               name: 'scale',
-              value: '1',
+              value: {
+                kind: 'literal',
+                value: '1',
+              },
               timing: { kind: 'tween' as const, durationMs: 200, easing: 'linear' },
             },
           ],
@@ -725,17 +781,59 @@ const compositionDefinition = {
     {
       name: 'hover',
       when: { kind: 'boolean' as const, value: false },
-      targets: [{ name: 'body', properties: [{ name: 'scale', value: '1.1' }] }],
+      targets: [
+        {
+          name: 'body',
+          properties: [
+            {
+              name: 'scale',
+              value: {
+                kind: 'literal',
+                value: '1.1',
+              },
+            },
+          ],
+        },
+      ],
     },
     {
       name: 'machine',
       targets: [],
       initialState: 'idle',
       states: [
-        { name: 'idle', targets: [{ name: 'body', properties: [{ name: 'scale', value: '1' }] }] },
+        {
+          name: 'idle',
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'scale',
+                  value: {
+                    kind: 'literal',
+                    value: '1',
+                  },
+                },
+              ],
+            },
+          ],
+        },
         {
           name: 'active',
-          targets: [{ name: 'body', properties: [{ name: 'scale', value: '1.2' }] }],
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'scale',
+                  value: {
+                    kind: 'literal',
+                    value: '1.2',
+                  },
+                },
+              ],
+            },
+          ],
         },
       ],
       transitions: [1.5, 1.7].map((value) => ({
@@ -746,14 +844,19 @@ const compositionDefinition = {
           targets: [
             {
               name: 'body',
-              properties: [{ name: 'scale', keyframes: [{ offset: 0.5, value: String(value) }] }],
+              properties: [
+                {
+                  name: 'scale',
+                  keyframes: [{ offset: 0.5, value: { kind: 'literal', value: String(value) } }],
+                },
+              ],
             },
           ],
         },
       })),
     },
   ],
-}
+} satisfies Definition
 
 it('initializes independent composition selectors and swaps complete selections', async () => {
   await setupEditor(undefined, compositionDefinition)
@@ -886,7 +989,10 @@ it('reports invalid selected timing and recovers when the invalid layer is disab
             properties: [
               {
                 name: 'scale',
-                value: '2',
+                value: {
+                  kind: 'literal',
+                  value: '2',
+                },
                 timingExpression: {
                   kind: 'call',
                   function: 'tween',
@@ -963,7 +1069,20 @@ it('ignores invalid transition instructions hidden by the effective owner', asyn
       ),
       {
         name: 'cover',
-        targets: [{ name: 'body', properties: [{ name: 'scale', value: '2' }] }],
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'scale',
+                value: {
+                  kind: 'literal',
+                  value: '2',
+                },
+              },
+            ],
+          },
+        ],
       },
     ],
   }
@@ -996,8 +1115,10 @@ it('inspects the replacement instance and reinitializes its current composition 
                 properties: [
                   {
                     name: 'opacity',
-                    value: '',
-                    template: [{ kind: 'reference', path: ['amount'] }],
+                    value: {
+                      kind: 'template',
+                      parts: [{ kind: 'reference', path: ['amount'] }],
+                    },
                     timingExpression: {
                       kind: 'call',
                       function: 'tween',
@@ -1068,7 +1189,7 @@ function compositionSourceReply(request: EditorRequest): EditorReply {
     }
   }
 
-  definition.layers[0].targets[0].properties[0].value = value
+  definition.layers[0].targets[0].properties[0].value = { kind: 'literal', value }
 
   return {
     hash: 'original',
@@ -1167,7 +1288,6 @@ it('preserves unapplied composition source input across timeline zoom renders', 
 async function setupCompositionFrames() {
   const definition = {
     name: 'frames',
-
     layers: [
       {
         name: 'base',
@@ -1177,19 +1297,33 @@ async function setupCompositionFrames() {
             properties: [
               {
                 name: 'opacity',
-                value: '1',
+                value: {
+                  kind: 'keyframes',
+                  frames: [
+                    {
+                      offset: 0.5,
+                      value: {
+                        kind: 'literal',
+                        value: '0.5',
+                      },
+                    },
+                    {
+                      offset: 1,
+                      value: {
+                        kind: 'literal',
+                        value: '1',
+                      },
+                    },
+                  ],
+                },
                 timing: { kind: 'tween' as const, durationMs: 200, easing: 'linear' },
-                keyframes: [
-                  { offset: 0.5, value: '0.5' },
-                  { offset: 1, value: '1' },
-                ],
               },
             ],
           },
         ],
       },
     ],
-  }
+  } satisfies Definition
   const path = 'frames/layer/base/target/body/property/opacity'
   const { controller } = await setupEditor(async (request) => {
     const candidate = structuredClone(definition)
@@ -1197,18 +1331,21 @@ async function setupCompositionFrames() {
 
     for (const edit of request.edits ?? []) {
       if (edit.op === 'addFrame')
-        property.keyframes.push({ offset: (edit.offset * 100) / 100, value: edit.value })
+        property.value.frames.push({
+          offset: (edit.offset * 100) / 100,
+          value: { kind: 'literal', value: edit.value },
+        })
       else if (edit.op === 'removeFrame')
-        property.keyframes = property.keyframes.filter(
+        property.value.frames = property.value.frames.filter(
           (frame) => `${path}/frame/${frame.offset}` !== edit.path,
         )
       else if (edit.op === 'set') {
-        const frame = property.keyframes.find((candidateFrame) =>
+        const frame = property.value.frames.find((candidateFrame) =>
           edit.path.startsWith(`${path}/frame/${candidateFrame.offset}/`),
         )
 
         if (frame && edit.path.endsWith('/offset')) frame.offset = parseFloat(edit.value) / 100
-        else if (frame) frame.value = edit.value
+        else if (frame) frame.value = { kind: 'literal', value: edit.value }
       }
     }
 
@@ -1218,10 +1355,10 @@ async function setupCompositionFrames() {
       definition: candidate,
       fields: [
         { path, kind: 'block' as const, value: '' },
-        ...property.keyframes.map((frame) => ({
+        ...property.value.frames.map((frame) => ({
           path: `${path}/frame/${frame.offset}/value`,
           kind: 'value' as const,
-          value: frame.value,
+          value: frame.value.value,
         })),
       ],
     }
@@ -1256,12 +1393,18 @@ it.each([0, 100])('does not add a frame beyond a %s ms track duration', async (d
             properties: [
               {
                 name: 'opacity',
-                value: '1',
+                value: {
+                  kind: 'literal',
+                  value: '1',
+                },
                 timing: { kind: 'tween', durationMs, easing: 'linear' },
               },
               {
                 name: 'scale',
-                value: '1',
+                value: {
+                  kind: 'literal',
+                  value: '1',
+                },
                 timing: { kind: 'tween', durationMs: 500, easing: 'linear' },
               },
             ],
@@ -1365,8 +1508,30 @@ it('uses one composition baseline for lifecycle rows and isolated scrub-ready pl
         {
           name: 'body',
           properties: [
-            { name: 'opacity', keyframes: [{ offset: 0, value: '0' }] },
-            { name: 'color', keyframes: [{ offset: 0, value: 'red' }] },
+            {
+              name: 'opacity',
+              keyframes: [
+                {
+                  offset: 0,
+                  value: {
+                    kind: 'literal',
+                    value: '0',
+                  },
+                },
+              ],
+            },
+            {
+              name: 'color',
+              keyframes: [
+                {
+                  offset: 0,
+                  value: {
+                    kind: 'literal',
+                    value: 'red',
+                  },
+                },
+              ],
+            },
           ],
         },
       ],
@@ -1427,8 +1592,8 @@ it.each(['enter', 'leave'] as const)(
               {
                 name: 'opacity',
                 keyframes: [
-                  { offset: 0, value: '0.2' },
-                  { offset: 1, value: '0.6' },
+                  { offset: 0, value: { kind: 'literal', value: '0.2' } },
+                  { offset: 1, value: { kind: 'literal', value: '0.6' } },
                 ],
               },
             ],

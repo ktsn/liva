@@ -1,3 +1,4 @@
+use liva_compiler::ir::{CssValue, PropertyValue};
 mod support;
 
 use liva_compiler::compile;
@@ -14,7 +15,10 @@ fn target_defaults_and_property_overrides_lower_timing_expressions() {
         properties[0].timing_expression,
         properties[1].timing_expression
     );
-    assert_eq!(properties[1].value, "1");
+    assert_eq!(
+        properties[1].value,
+        PropertyValue::Literal { value: "1".into() }
+    );
 }
 
 #[test]
@@ -23,10 +27,11 @@ fn style_tracks_lower_typed_easing_and_use_the_explicit_destination() {
         "motion button(amount: number) { layer idle { body { @tween(duration: 400) translate ~> { 0%: 0 20px; 50%: 0 5px @easeOut; 100%: ${amount}px 0 } } } }",
     );
     let property = &result.definitions[0].layers[0].targets[0].properties[0];
-    let frames = property.keyframes.as_ref().unwrap();
+    let PropertyValue::Keyframes { frames } = &property.value else {
+        panic!("Expected a style track")
+    };
 
-    assert_eq!(property.value, "${amount}px 0");
-    assert!(property.template.is_some());
+    assert!(matches!(frames[2].value, CssValue::Template { .. }));
     assert!(frames[1].easing_expression.is_some());
     assert!(frames[1].easing.is_none());
 }
