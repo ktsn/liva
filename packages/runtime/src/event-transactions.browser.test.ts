@@ -89,7 +89,6 @@ function setup(transform: (definition: Definition) => Definition = (definition) 
         initializer: {
           kind: 'call',
           function: 'link',
-          attachment: { target: 'self', property: 'translate' },
           arguments: [
             { name: 'input', value: reference('pointer', 'offset') },
             { name: 'component', value: { kind: 'string', value: 'x' } },
@@ -456,7 +455,6 @@ describe('event snapshot transactions', () => {
               ? {
                   kind: 'call',
                   function: 'link',
-                  attachment: { target: 'self', property: 'translate' },
                   arguments: [
                     { name: 'input', value: reference('pointer', 'offset') },
                     { name: 'component', value: { kind: 'string', value: 'y' } },
