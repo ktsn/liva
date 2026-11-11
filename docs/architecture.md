@@ -101,8 +101,8 @@ same symbol lookup. The generic call checker evaluates argument
 types through the expression checker and selects a matching overload. Required
 arguments and incompatible overload groups produce diagnostics.
 Let type inference follows dependencies and rejects cycles. Expression member checking
-follows the variable's inferred type. The syntax parser
-uses ordinary call/argument nodes without knowing any built-in function names.
+follows the variable's inferred type. The syntax parser uses ordinary call/argument
+nodes without knowing any built-in function names.
 
 `packages/runtime/src/builtins/` registers the implementations. `drag.ts` defines
 `drag`, its per-instance value, and Pointer Events handling. `interaction.ts` reads browser
@@ -267,7 +267,9 @@ Resolution order:
    and explicit tracks, including equal-value pulses.
 3. Complete omitted endpoints from displayed presentation and resolved destination.
    During interruption, replace the first frame with the displayed value. Retain
-   remaining frames and restart their full timeline without preserving velocity.
+   remaining authored intermediate frames and restart their full timeline. Supported
+   endpoint-only springs instead inherit displayed per-component velocity through
+   the property-motion sampler.
 4. Validate resolved track structure and timing, normalize interval easing, and pass
    tracks with destination values to the executor.
 
@@ -334,10 +336,12 @@ continue working. Initial mount never animates from an unspecified state.
 
 ## Spring execution
 
-[The scalar solver](../packages/runtime/src/spring.ts) computes progress for
+[The ordinary scalar progress solver](../packages/runtime/src/spring.ts) computes progress for
 `mass * x'' + damping * x' + stiffness * (x - 1) = 0`, with zero initial velocity.
-Analytic solutions cover underdamped, critical and overdamped responses. Sampled
-CSS `linear()` effect easing lets WAAPI interpolate raw CSS endpoints, including
+Analytic solutions cover underdamped, critical and overdamped responses.
+Endpoint-only property handoffs use the same analytic solutions with the incoming
+component velocity, as described under Property motion.
+Sampled CSS `linear()` effect easing lets WAAPI interpolate raw CSS endpoints, including
 overshoot. Tween tracks instead use linear effect easing and per-frame easing.
 
 `springState` is the shared scalar analytic solver for arbitrary start/end values
@@ -556,3 +560,11 @@ calls only for the same binding name, structurally identical initializer, and
 unchanged arguments. Changed or removed calls dispose; editor inspection uses an
 inactive graph and cannot update retained live calls. Binding cleanup cancels
 active resources; final graph disposal also releases the call instance.
+
+### Property motion
+
+Property codecs read and serialize canonical values separately from animation ownership.
+Per-element physical/component histories survive ordinary retargeting and reset at
+lifecycle boundaries. Registered trajectories supply spring-to-spring velocity at
+interruption time without polling. Endpoint-only springs preserve incoming velocity;
+tracks with authored intermediate keyframes retain their choreography.
