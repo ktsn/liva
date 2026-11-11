@@ -104,6 +104,15 @@ Let type inference follows dependencies and rejects cycles. Expression member ch
 follows the variable's inferred type. The syntax parser uses ordinary call/argument
 nodes without knowing any built-in function names.
 
+During definition lowering, a motion-local controller registry records inferred
+controller declarations and aliases alongside let IR. Style bindings resolve these
+origins through cached aliases and assign one target/property address directly to
+the originating call. Inline controllers acquire independent scope-based identities
+at the declaration site. At motion completion, only unmatched controller definitions
+need diagnostics; controller validation and attachment lowering do not rescan the
+complete syntax tree or IR. Property-specific value-shape compatibility is not
+checked by the compiler.
+
 `packages/runtime/src/builtins/` registers the implementations. `drag.ts` defines
 `drag`, its per-instance value, and Pointer Events handling. `interaction.ts` reads browser
 pseudo-class snapshots and coalesces event-triggered rechecks. A built-in subscription

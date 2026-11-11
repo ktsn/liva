@@ -21,6 +21,7 @@ pub enum Type {
     Timing,
     Easing,
     Target,
+    Controller(&'static [crate::builtins::Field]),
     Record(&'static [crate::builtins::Field]),
 }
 
@@ -175,7 +176,7 @@ impl ExprExt for Expr {
                             ),
                         )
                     };
-                    let Type::Record(fields) = value_type else {
+                    let (Type::Record(fields) | Type::Controller(fields)) = value_type else {
                         return Err(error());
                     };
                     value_type = fields
@@ -225,6 +226,7 @@ impl ExprExt for Expr {
                         .value()
                         .ok_or_else(|| self.error("Expected argument value"))?;
                     let actual = value.check(scope)?;
+
                     let parameters: Vec<_> = metadata
                         .signatures
                         .iter()

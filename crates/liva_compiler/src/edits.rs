@@ -334,6 +334,12 @@ fn edit_typed_timing(
     let current = compile(&prepared, true);
     let field = mapping(&current, path, "block")?;
     let node = property_syntax(&prepared, field)?;
+
+    if liva_syntax::ast::Property::cast(node.clone())
+        .is_some_and(|property| property.is_attachment())
+    {
+        return Err("Controller attachments are source-owned expressions".into());
+    }
     let mut result = prepared.clone();
 
     let decorator = node.decorators().next();
@@ -390,6 +396,12 @@ fn prepare_typed_track(source: &str, compiled: &Compilation, path: &str) -> Resu
     check(&current)?;
     let field = mapping(&current, path, "block")?;
     let node = property_syntax(&prepared, field)?;
+
+    if liva_syntax::ast::Property::cast(node.clone())
+        .is_some_and(|property| property.is_attachment())
+    {
+        return Err("Controller attachments are source-owned expressions".into());
+    }
 
     if node.kind() == liva_syntax::Kind::Block {
         return Ok(prepared);

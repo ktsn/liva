@@ -26,6 +26,7 @@ pub fn type_name(value: expression::Type) -> String {
         Type::Timing => "timing".into(),
         Type::Easing => "easing".into(),
         Type::Target => "target".into(),
+        Type::Controller(_) => "controller".into(),
         Type::Record(fields) => format!(
             "{{ {} }}",
             fields
@@ -79,7 +80,9 @@ pub fn completions(source: &str, offset: usize) -> Vec<Completion> {
         };
 
         for name in path {
-            let expression::Type::Record(fields) = value_type else {
+            let (expression::Type::Record(fields) | expression::Type::Controller(fields)) =
+                value_type
+            else {
                 return vec![];
             };
             let Some(field) = fields.iter().find(|field| field.name == name) else {
@@ -89,7 +92,7 @@ pub fn completions(source: &str, offset: usize) -> Vec<Completion> {
         }
 
         return match value_type {
-            expression::Type::Record(fields) => fields
+            expression::Type::Record(fields) | expression::Type::Controller(fields) => fields
                 .iter()
                 .filter(|field| field.name.starts_with(partial))
                 .map(|field| Completion {
@@ -314,7 +317,9 @@ fn expression_hovers(node: &impl AstNode, scope: &expression::Scope, result: &mu
                 });
 
                 for name in names {
-                    let expression::Type::Record(fields) = value_type else {
+                    let (expression::Type::Record(fields) | expression::Type::Controller(fields)) =
+                        value_type
+                    else {
                         break;
                     };
                     let Some(field) = fields.iter().find(|field| field.name == name.text()) else {

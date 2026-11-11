@@ -225,6 +225,20 @@ impl State {
     }
 }
 
+impl Property {
+    pub fn is_attachment(&self) -> bool {
+        self.syntax()
+            .children_with_tokens()
+            .any(|element| element.as_token().is_some_and(|token| token.text() == ":="))
+    }
+
+    pub fn attachment(&self) -> Option<expression::Expr> {
+        self.is_attachment()
+            .then(|| self.value_node()?.expression())
+            .flatten()
+    }
+}
+
 impl Transition {
     pub fn condition(&self) -> Option<Condition> {
         self.header_node()?.child()

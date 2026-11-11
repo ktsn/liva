@@ -21,6 +21,24 @@ describe('unbound link inputs', () => {
     expect(() => link(args)).toThrow(/link/)
   })
 
+  it.each([
+    { component: 'x', other: 'y', expected: { x: 20, y: 0, z: 0 } },
+    { component: 'y', other: 'x', expected: { x: 0, y: 20, z: 0 } },
+  ])('preserves the $component mapping after rejecting an axis change', (sample) => {
+    const call = link({ input: 10, component: sample.component })
+    const previous = call.value
+
+    expect(() => call.prepareUpdate({ input: 20, component: sample.other })).toThrow('fixed')
+    expect(call.value).toBe(previous)
+
+    const accepted = call.prepareUpdate({ input: 20, component: sample.component })
+    accepted.commit()
+
+    expect(call.value).toMatchObject({ value: sample.expected })
+
+    call.dispose()
+  })
+
   it('measures mapped fallback velocity without attachment or gesture knowledge', () => {
     const clock = vi.spyOn(performance, 'now').mockReturnValue(100)
     const call = link({ input: 10, sensitivity: -2 })

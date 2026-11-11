@@ -249,3 +249,34 @@ fn removed_paths_do_not_create_motion_level_declarations() {
         assert!(result.is_err(), "{path}");
     }
 }
+
+#[test]
+fn controller_attachments_preserve_source_expressions_and_reject_timeline_conversion() {
+    let source = "motion resize(value: number) { let size = link(input: value); layer base { width := size; height: 50px } }";
+    let path = "resize/layer/base/target/self/property/width";
+
+    for edit in [
+        timing(path, "tween(duration: 100)"),
+        Edit::AddFrame {
+            path: path.into(),
+            offset: 0.5,
+            value: "100px".into(),
+            easing: None,
+        },
+    ] {
+        let result = apply_edits(source, &[edit]);
+
+        assert!(result.unwrap_err().contains("source-owned"));
+    }
+
+    let result = apply_edits(
+        source,
+        &[set(
+            "resize/layer/base/target/self/property/height/value",
+            "75px",
+        )],
+    )
+    .unwrap();
+
+    assert_eq!(result.source, source.replace("50px", "75px"));
+}
