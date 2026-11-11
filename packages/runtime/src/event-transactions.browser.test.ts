@@ -106,7 +106,10 @@ function setup(transform: (definition: Definition) => Definition = (definition) 
             properties: [
               {
                 name: 'translate',
-                value: '0px 0px',
+                value: {
+                  kind: 'literal',
+                  value: '0px 0px',
+                },
                 timing: { kind: 'spring-physics', stiffness: 300, damping: 25, mass: 1 },
               },
             ],
@@ -117,7 +120,20 @@ function setup(transform: (definition: Definition) => Definition = (definition) 
           { name: 'closed', targets: [] },
           {
             name: 'open',
-            targets: [{ name: 'self', properties: [{ name: 'translate', value: '120px 0px' }] }],
+            targets: [
+              {
+                name: 'self',
+                properties: [
+                  {
+                    name: 'translate',
+                    value: {
+                      kind: 'literal',
+                      value: '120px 0px',
+                    },
+                  },
+                ],
+              },
+            ],
           },
           { name: 'next', targets: [] },
         ],
@@ -149,7 +165,15 @@ function setup(transform: (definition: Definition) => Definition = (definition) 
         targets: [
           {
             name: 'self',
-            properties: [{ name: 'translate', value: '', binding: reference('movement') }],
+            properties: [
+              {
+                name: 'translate',
+                value: {
+                  kind: 'binding',
+                  expression: reference('movement'),
+                },
+              },
+            ],
           },
         ],
       },
@@ -451,7 +475,10 @@ describe('event snapshot transactions', () => {
                     properties: [
                       {
                         name: 'translate',
-                        value: '0px 400px',
+                        value: {
+                          kind: 'literal',
+                          value: '0px 400px',
+                        },
                         timing: { kind: 'spring-physics', stiffness: 300, damping: 25, mass: 1 },
                       },
                     ],
@@ -462,13 +489,35 @@ describe('event snapshot transactions', () => {
                   {
                     name: 'half',
                     targets: [
-                      { name: 'self', properties: [{ name: 'translate', value: '0px 200px' }] },
+                      {
+                        name: 'self',
+                        properties: [
+                          {
+                            name: 'translate',
+                            value: {
+                              kind: 'literal',
+                              value: '0px 200px',
+                            },
+                          },
+                        ],
+                      },
                     ],
                   },
                   {
                     name: 'expanded',
                     targets: [
-                      { name: 'self', properties: [{ name: 'translate', value: '0px 0px' }] },
+                      {
+                        name: 'self',
+                        properties: [
+                          {
+                            name: 'translate',
+                            value: {
+                              kind: 'literal',
+                              value: '0px 0px',
+                            },
+                          },
+                        ],
+                      },
                     ],
                   },
                 ],
