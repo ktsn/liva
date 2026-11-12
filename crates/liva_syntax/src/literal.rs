@@ -36,3 +36,25 @@ pub(crate) fn quoted_end(text: &str) -> Option<usize> {
     }
     None
 }
+
+/// Encode a decoded value as a double-quoted Liva string spelling.
+/// Uses only escapes accepted by the decoder; other characters are preserved
+/// verbatim, including control characters for which Liva defines no escape syntax.
+pub fn quote_string(value: &str) -> String {
+    let mut result = String::from("\"");
+
+    for character in value.chars() {
+        match character {
+            '\n' => result.push_str("\\n"),
+            '\r' => result.push_str("\\r"),
+            '\t' => result.push_str("\\t"),
+            '\\' => result.push_str("\\\\"),
+            '"' => result.push_str("\\\""),
+            _ => result.push(character),
+        }
+    }
+
+    result.push('"');
+
+    result
+}

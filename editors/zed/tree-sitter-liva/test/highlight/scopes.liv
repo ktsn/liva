@@ -88,3 +88,11 @@ motion swipe {
 //            ^^ operator
   }
 }
+
+motion choices(axis: "x" | 'y', fixed: "") {
+//                    ^ string
+//                       ^ operator
+//                          ^ string
+//                                     ^ string
+  layer base {}
+}

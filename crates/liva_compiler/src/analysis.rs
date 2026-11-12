@@ -1,8 +1,10 @@
 //! Editor-facing type information, using the compiler's motion scope and checker.
+mod completion;
 use crate::{
     Compiler, expression,
     scope::{Symbol, SymbolKind},
 };
+pub use completion::{Completion, CompletionEdit, completions};
 use liva_syntax::ast::expression::{Expr, ExprView};
 use liva_syntax::ast::{AstNode, HasHeader, HasItems};
 use liva_syntax::{Range, parse};
@@ -21,84 +23,6 @@ pub fn type_name(value: &expression::Type) -> String {
     value.to_string()
 }
 
-#[derive(Debug, Clone)]
-pub struct Completion {
-    pub label: String,
-    pub detail: String,
-}
-
-/// Complete expression variables, record fields, and registered built-in functions.
-pub fn completions(source: &str, offset: usize) -> Vec<Completion> {
-    let Some(prefix) = source.get(..offset) else {
-        return vec![];
-    };
-    let typed = prefix
-        .rsplit(|c: char| !c.is_ascii_alphanumeric() && !matches!(c, '_' | '-' | '.'))
-        .next()
-        .unwrap_or_default();
-    let parsed = parse(source);
-    let mut compiler = Compiler {
-        diagnostics: vec![],
-        mappings: BTreeMap::new(),
-        sources: BTreeMap::new(),
-    };
-    let Some(motion) = parsed.root.motions().find(|motion| {
-        let range = motion.range();
-        range.start <= offset && offset <= range.end
-    }) else {
-        return vec![];
-    };
-    let parameters = compiler.parameters(&motion);
-    let bindings = compiler.let_bindings(&motion);
-    let scope = compiler.motion_scope(&motion, &parameters, &bindings);
-
-    if let Some((parent, partial)) = typed.rsplit_once('.') {
-        let mut path = parent.split('.');
-        let Some(mut value_type) = path
-            .next()
-            .and_then(|name| scope.get(name))
-            .and_then(Symbol::value_type)
-        else {
-            return vec![];
-        };
-
-        for name in path {
-            let (expression::Type::Record(fields) | expression::Type::Controller(fields)) =
-                value_type
-            else {
-                return vec![];
-            };
-            let Some(field) = fields.iter().find(|field| field.name == name) else {
-                return vec![];
-            };
-            value_type = &field.value_type;
-        }
-
-        return match value_type {
-            expression::Type::Record(fields) | expression::Type::Controller(fields) => fields
-                .iter()
-                .filter(|field| field.name.starts_with(partial))
-                .map(|field| Completion {
-                    label: field.name.into(),
-                    detail: type_name(&field.value_type),
-                })
-                .collect(),
-            _ => vec![],
-        };
-    }
-
-    scope
-        .iter()
-        .filter(|(name, _)| name.starts_with(typed))
-        .filter_map(|(name, symbol)| {
-            symbol_detail(symbol).map(|detail| Completion {
-                label: name.into(),
-                detail,
-            })
-        })
-        .collect()
-}
-
 fn symbol_detail(symbol: &Symbol) -> Option<String> {
     match &symbol.kind {
         SymbolKind::Value(value_type) => Some(type_name(value_type)),
@@ -115,10 +39,11 @@ fn symbol_detail(symbol: &Symbol) -> Option<String> {
                             .parameters
                             .iter()
                             .map(|parameter| format!(
-                                "{}{}: {}",
+                                "{}{}: {}{}",
                                 parameter.name,
                                 if parameter.optional { "?" } else { "" },
                                 type_name(&parameter.value_type),
+                                if parameter.fixed { " (fixed)" } else { "" },
                             ))
                             .collect::<Vec<_>>()
                             .join(", "),

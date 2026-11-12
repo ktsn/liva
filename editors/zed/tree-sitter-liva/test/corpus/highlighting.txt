@@ -361,3 +361,51 @@ motion swipe {
           (property
             (identifier))
           (identifier))))))
+
+==================
+String literal parameter types
+==================
+motion choices(axis: "x" | 'y', fixed: "", escaped: "a\\b" | 'a\'b') {
+  let alias = axis
+  layer base { content: ${alias} }
+  layer enabled when true || false {}
+}
+---
+
+(source_file
+  (motion
+    (identifier)
+    (parenthesized
+      (property
+        (identifier))
+      (string)
+      (operator)
+      (string)
+      (punctuation)
+      (property
+        (identifier))
+      (string)
+      (punctuation)
+      (property
+        (identifier))
+      (string)
+      (operator)
+      (string))
+    (block
+      (keyword)
+      (identifier)
+      (operator)
+      (identifier)
+      (layer
+        (identifier)
+        (block
+          (property
+            (identifier))
+          (interpolation
+            (identifier))))
+      (layer
+        (identifier)
+        (boolean)
+        (operator)
+        (boolean)
+        (block)))))
