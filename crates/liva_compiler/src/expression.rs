@@ -596,6 +596,7 @@ mod tests {
     fn invalid_argument_diagnostics_use_type_notation_and_expression_range() {
         let scope = scope_with_options();
         let expression = "choose(option: broad, amount: 1)";
+
         let error = parse_with_diagnostics(expression)
             .unwrap()
             .check(&scope)
@@ -612,6 +613,7 @@ mod tests {
     fn compatible_arguments_must_belong_to_one_overload() {
         let scope = scope_with_options();
         let expression = "choose(option: 'z', amount: 1)";
+
         let error = parse_with_diagnostics(expression)
             .unwrap()
             .check(&scope)

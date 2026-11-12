@@ -72,6 +72,7 @@ fn inference_preserves_decoded_literals_through_forward_aliases_and_parentheses(
         let later = ('日本語\n\'')
         layer base { content: ${alias} }
     }"#;
+
     let compiled = valid(source);
     let found = hovers(source);
 
@@ -110,6 +111,7 @@ fn strings_keep_comparison_and_interpolation_behavior_without_arithmetic() {
         "'x' == true",
     ] {
         let source = format!("motion sample {{ let value = {expression}; layer base {{}} }}");
+
         let result = liva_compiler::compile(&source, false);
 
         assert!(result.definitions.is_empty(), "{source}");
