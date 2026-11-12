@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test'
-import type { RuntimeValue } from '../reactive-value.ts'
+import type { RuntimeValue } from '../evaluation/reactive-value.ts'
 import { measure } from './measure.ts'
 
 describe('measure argument validation', () => {

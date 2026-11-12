@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { compile } from '../../packages/vite/wasm/liva_wasm.js'
-import { decodeBundle } from '../../packages/runtime/src/definition.ts'
-import type { RuntimeDiagnostic } from '../../packages/runtime/src/instance.ts'
+import { decodeBundle } from '../../packages/runtime/src/model/definition.ts'
+import type { RuntimeDiagnostic } from '../../packages/runtime/src/execution/instance.ts'
 import derivedFixture from '../../fixtures/derived.json' with { type: 'json' }
 import cardFixture from '../../fixtures/card.json' with { type: 'json' }
 import toggleFixture from '../../fixtures/reactive-toggle.json' with { type: 'json' }
@@ -9,7 +9,7 @@ import toggleFixture from '../../fixtures/reactive-toggle.json' with { type: 'js
 declare global {
   interface Window {
     dragScale: Animation
-    letInstances: import('../../packages/runtime/src/instance.ts').LivaInstance[]
+    letInstances: import('../../packages/runtime/src/execution/instance.ts').LivaInstance[]
   }
 }
 
@@ -463,7 +463,7 @@ test('typed parameter instances update CSS independently and retain values after
   await page.goto('/tests/browser/')
   await page.waitForFunction(() => !!window.liva)
   const result = await page.evaluate(() => {
-    const definition: import('../../packages/runtime/src/definition.ts').Definition = {
+    const definition: import('../../packages/runtime/src/model/definition.ts').Definition = {
       name: 'progress',
       parameters: [
         { name: 'progress', type: 'number' },

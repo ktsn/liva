@@ -1,4 +1,4 @@
-import type { FunctionArguments, ReactiveCall, RuntimeValue } from '../reactive-value.ts'
+import type { FunctionArguments, ReactiveCall, RuntimeValue } from '../evaluation/reactive-value.ts'
 
 function configuration(args: FunctionArguments) {
   const { when, duration } = args

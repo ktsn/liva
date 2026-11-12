@@ -82,7 +82,7 @@ compiler validation. Typed field and frame edits retain comment-preservation gua
 Layer composition editing uses source-mapped value, typed timing, and frame operations.
 The inspector separates effective declaration provenance from the local write destination.
 Runtime playback and editor provenance share `resolveLayerCascade` in
-`packages/runtime/src/layer-cascade.ts` for value ownership and independent timing
+`packages/runtime/src/composition/layer-cascade.ts` for value ownership and independent timing
 precedence. Playback evaluates each contribution; inspection retains declaration
 references without evaluating expressions. `compositionTransitions` validates
 explicit transition selections, and `transitionPropertySources` resolves their

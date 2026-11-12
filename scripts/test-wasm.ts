@@ -2,13 +2,16 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { compile } from '../packages/vite/wasm/liva_wasm.js'
 import type { Compilation } from '../packages/vite/src/compiler.ts'
-import { decodeBundle } from '../packages/runtime/src/definition.ts'
+import { decodeBundle } from '../packages/runtime/src/model/definition.ts'
 import {
   LetBindingGraph,
   parameterValues,
   targetValues,
-} from '../packages/runtime/src/let-bindings.ts'
-import { renderProperty, type VariableValues } from '../packages/runtime/src/expression.ts'
+} from '../packages/runtime/src/evaluation/let-bindings.ts'
+import {
+  renderProperty,
+  type VariableValues,
+} from '../packages/runtime/src/evaluation/expression.ts'
 
 for (const name of [
   'toggle',

@@ -1,9 +1,9 @@
 import { expect, it } from 'vite-plus/test'
 import { userEvent } from 'vite-plus/test/browser'
 import { drag } from './drag.ts'
-import type { ReactiveNotification } from '../events.ts'
-import { isEventValue } from '../events.ts'
-import type { RuntimeValue } from '../reactive-value.ts'
+import type { ReactiveNotification } from '../evaluation/events.ts'
+import { isEventValue } from '../evaluation/events.ts'
+import type { RuntimeValue } from '../evaluation/reactive-value.ts'
 
 it('tracks real pointer movement, release and cleanup independently for each target', async () => {
   const source = document.createElement('div')

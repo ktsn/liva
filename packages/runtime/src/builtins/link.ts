@@ -3,14 +3,14 @@ import type {
   PreparedUpdate,
   ReactiveCall,
   RuntimeValue,
-} from '../reactive-value.ts'
+} from '../evaluation/reactive-value.ts'
 import {
   controllerSnapshot,
   type ControllerAddress,
   type PropertyController,
-} from '../controllers.ts'
-import { decodeProperty, encodeProperty } from '../property-codec.ts'
-import { DIRECT_SAMPLE_WINDOW_MS } from '../property-motion.ts'
+} from '../motion/controllers.ts'
+import { decodeProperty, encodeProperty } from '../motion/property-codec.ts'
+import { DIRECT_SAMPLE_WINDOW_MS } from '../motion/property-motion.ts'
 
 /** Validated input mapping; scalar/vector shape and selected component stay fixed per call. */
 type Configuration = {

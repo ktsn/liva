@@ -32,7 +32,8 @@ for (const writingMode of writingModes) {
         const samples = await target.evaluate(async (element) => {
           if (!(element instanceof HTMLElement)) throw new Error('Expected an HTML target')
 
-          const { decodeProperty } = await import('../../packages/runtime/src/property-codec.ts')
+          const { decodeProperty } =
+            await import('../../packages/runtime/src/motion/property-codec.ts')
           const style = getComputedStyle(element)
           const properties = [
             ['inline-size', ['inline-size']],
@@ -63,7 +64,8 @@ for (const writingMode of writingModes) {
         const samples = await target.evaluate(async (element) => {
           if (!(element instanceof HTMLElement)) throw new Error('Expected an HTML target')
 
-          const { canonicalTracks } = await import('../../packages/runtime/src/property-codec.ts')
+          const { canonicalTracks } =
+            await import('../../packages/runtime/src/motion/property-codec.ts')
           const container = element.parentElement
           if (!container) throw new Error('Expected a writing context container')
           const physical = ['top', 'right', 'bottom', 'left']

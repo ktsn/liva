@@ -24,6 +24,24 @@ Rust has no Vue or DOM dependency. Mutable instance state and development source
 mappings stay outside Definition IR. The editor lives in `packages/vite/src/editor/`
 with separate server and client responsibilities.
 
+The runtime keeps its public entry point at `packages/runtime/src/index.ts` and
+groups implementation files and their tests by responsibility:
+
+| Runtime directory | Responsibility                                                                                  |
+| ----------------- | ----------------------------------------------------------------------------------------------- |
+| `model/`          | Definition IR, validation, evaluated presentation types, and target contracts                   |
+| `evaluation/`     | Expressions, timing values, let dependencies, reactive calls, and notifications                 |
+| `composition/`    | Layer selection, state transitions, cascade precedence, and resolved tracks                     |
+| `motion/`         | Numeric property rules/codecs, controllers, motion histories, springs, and WAAPI property names |
+| `layout/`         | Layout bounds and shared per-document measurement scheduling                                    |
+| `execution/`      | Instance ownership, DOM binding, playback, previews, and lifecycle sessions                     |
+| `builtins/`       | Language-callable functions and their registration                                              |
+
+Tests spanning evaluation, composition, and spring resolution remain in `src/__test__/`.
+These directories group responsibilities; they do not impose a one-way dependency
+hierarchy. For example, expression rendering uses cascade timing helpers, while
+composition resolution evaluates expressions.
+
 ## Rust syntax infrastructure
 
 The Rowan CST is the source of truth for syntax and UTF-8 byte ranges. Whole-block
@@ -345,7 +363,7 @@ continue working. Initial mount never animates from an unspecified state.
 
 ## Spring execution
 
-[The ordinary scalar progress solver](../packages/runtime/src/spring.ts) computes progress for
+[The ordinary scalar progress solver](../packages/runtime/src/motion/spring.ts) computes progress for
 `mass * x'' + damping * x' + stiffness * (x - 1) = 0`, with zero initial velocity.
 Analytic solutions cover underdamped, critical and overdamped responses.
 Endpoint-only property handoffs use the same analytic solutions with the incoming
@@ -422,7 +440,7 @@ Snapshots unused by that render patch are released in a microtask. Vue component
 unmount hooks and reactive-effect disposal retain their normal ordering; retained
 DOM does not keep the original Motion alive.
 
-`packages/runtime/src/lifecycle.ts` resolves lifecycle tracks from resolved layer
+`packages/runtime/src/execution/lifecycle.ts` resolves lifecycle tracks from resolved layer
 values and a presentation snapshot. A session owns only resolved tracks, element
 references, temporary inline presentations, and WAAPI handles. Completion joins
 all tracks. Supersession, owner teardown, cancellation/failure, and normal
