@@ -226,8 +226,9 @@ pub enum ParameterType {
     Constrained(StringConstraint),
 }
 
-/// Decoded candidate sets. The compiler emits nonempty, sorted unique members;
-/// runtime validation also accepts duplicate/reordered members as the same set.
+/// Finite sets of decoded candidate strings. Compiler-emitted sets are nonempty
+/// and sorted with duplicates removed; individual strings may be empty.
+/// Runtime validation also accepts duplicate/reordered members as the same set.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum StringConstraint {
