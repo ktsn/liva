@@ -292,6 +292,23 @@ export class LivaInstance {
     return winner.name === sourceProperty
   }
 
+  /**
+   * Resolves effective controller bindings into CSS values and, in live mode,
+   * reconciles controller ownership for the next presentation. Bindings obscured
+   * by other declarations are omitted. If a controller cannot supply a value, the
+   * same composition is resolved without bindings to recover a normal declaration;
+   * properties without a fallback are omitted.
+   *
+   * @param resolution - Layer selection and presentation resolved from definition.
+   * @param values - Expression values used to resolve bindings and fallback styles.
+   * @param time - Acquisition/release time in performance.now()-compatible milliseconds.
+   * @param definition - Source definition matching the resolution's layer owners.
+   * @param live - Acquires effective controllers and releases previous owners when
+   * true; false renders snapshots for inspection/preview without changing ownership.
+   * @returns A new resolution with properties in declaration order. The caller
+   * applies its CSS values to the DOM.
+   * @throws If expression evaluation fails or a binding lacks a controller capability.
+   */
   private controllerResolution(
     resolution: LayerResolution,
     values: VariableValues,
@@ -299,6 +316,8 @@ export class LivaInstance {
     definition = this.definition,
     live = true,
   ): LayerResolution {
+    // Declaration order determines ownership, including overlapping shorthand,
+    // longhand, and logical properties that address the same physical CSS property.
     resolution = this.orderedResolution(resolution, definition)
 
     if (
@@ -306,10 +325,14 @@ export class LivaInstance {
         target.properties.some((property) => property.binding),
       )
     ) {
+      // Without effective bindings, live control ends for every previous owner.
       if (live) this.releaseControllers(time)
+
       return this.orderedResolution(resolution, definition)
     }
 
+    // Re-resolve the selected composition without bindings so an unreadable
+    // controller can reveal the normal declaration hidden beneath it.
     const normal = resolveComposition(
       {
         ...definition,
@@ -331,12 +354,15 @@ export class LivaInstance {
       values,
       resolution.composition,
     )
+
     const controllers = new Map<string, PropertyController>()
     const targets = resolution.presentation.targets.map((target) => ({
       ...target,
       properties: target.properties.flatMap((property) => {
         if (!property.binding) return [property]
 
+        // A binding must own every physical property it affects on each receiver;
+        // otherwise omit it so it cannot overwrite a winning declaration.
         const elements = this.targetElements.get(target.name) ?? []
         const obscured = elements.some((element) =>
           propertyAddresses(element, property.name).some(
@@ -347,17 +373,23 @@ export class LivaInstance {
 
         if (obscured) return []
 
+        // Live control acquires from the displayed pose. Inspection and preview
+        // only format the supplied snapshot, leaving live ownership unchanged.
         const snapshot = evaluate(property.binding, values)
         const controller = propertyController(snapshot)
         const key = layerPropertyKey(target.name, property.name)
         controllers.set(key, controller)
+
         if (live) controller.acquire(time)
+
         const value = live
           ? controller.control()?.value
           : controller.render(property.name, snapshot)
 
         if (value !== undefined) return [{ ...property, value }]
 
+        // Missing controller output falls back to the same property's normal
+        // declaration; omit the property if no such declaration exists.
         const fallback = normal.presentation.targets
           .find((candidate) => candidate.name === target.name)
           ?.properties.find((candidate) => candidate.name === property.name)
@@ -366,6 +398,8 @@ export class LivaInstance {
       }),
     }))
 
+    // Release replaced or obscured owners before the caller prepares transitions,
+    // allowing their input velocity to be handed to the next spring.
     if (live) {
       for (const [key, controller] of this.controllers) {
         if (controllers.get(key) !== controller) controller.release(time)
@@ -374,6 +408,8 @@ export class LivaInstance {
       this.controllers = controllers
     }
 
+    // A fallback can belong to an earlier declaration, so restore cascade order
+    // before the caller applies styles or checks physical property ownership.
     return this.orderedResolution(
       { ...resolution, presentation: { ...resolution.presentation, targets } },
       definition,
