@@ -236,8 +236,9 @@ pub enum StringConstraint {
 
 impl ParameterType {
     /// Build an owned compile-time type from compiler-emitted parameter metadata.
-    /// Candidate strings are decoded, unique, and nonempty; copying their data lets
-    /// the scope own its type independently of the serialized output IR.
+    /// Candidate sets contain at least one unique decoded value; individual strings
+    /// may be empty. Copying their data lets the scope own its type independently
+    /// of the serialized output IR.
     pub(crate) fn expression_type(&self) -> crate::expression::Type {
         use crate::expression::Type;
 
