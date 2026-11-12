@@ -17,7 +17,7 @@
     "@types/node": "26.6.6",
     "@vitest/browser-playwright": "5.0.5",
     "@vitest/coverage-v8": "5.0.5",
-    "@vizejs/vite-plugin": "0.684.0",
+    "@vizejs/vite-plugin": "0.719.0",
     "typescript": "7.1.0-beta",
     "vite-plus": "1.4.0",
     "vize": "0.684.0"
