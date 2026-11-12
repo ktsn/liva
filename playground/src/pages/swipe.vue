@@ -30,10 +30,11 @@ function removeItem(id: number) {
 <template>
   <section class="demo">
     <h1>Swipe actions</h1>
-    <p
-    >Swipe right to reveal Delete. Release velocity chooses open or closed; a drag beyond 120 pixels dismisses immediately. Press outside a row to close it.</p>
+
     <button type="button" @click="resetItems">Reset cards</button>
+
     <p data-testid="item-count">{{ items.length }} items</p>
+
     <ul class="swipe-list">
       <li
         v-for="item in items"
@@ -48,7 +49,10 @@ function removeItem(id: number) {
           class="swipe-action"
           :aria-label="'Delete ' + item.title"
           @click="removeItem(item.id)"
-        >Delete</button>
+        >
+          Delete
+        </button>
+
         <div v-liva-target:body class="swipe-face">
           {{ item.title }}
           <button @pointerdown.stop @click="removeItem(item.id)">Dismiss</button>
@@ -108,7 +112,7 @@ motion swipeItem(outside: boolean) {
   let movement = link(input: pointer.offset.x, component: "x")
   let projectedX = movement.value.x + movement.velocity.x * 200
 
-  event dismiss when pointer.released && pointer.offset.x > 120
+  event dismiss when pointer.released && projectedX > 120
 
   @spring(stiffness: 300, damping: 25)
   layer position {
@@ -118,13 +122,10 @@ motion swipeItem(outside: boolean) {
 
     state closed initial {}
     state open { body { translate: 96px 0 } }
-    state dismissed { body { translate: 500px 0 } }
 
     on pointer.release {
-      transition closed -> open when pointer.offset.x <= 120 && projectedX >= 48
-      transition open -> closed when pointer.offset.x <= 120 && projectedX < 48
-      transition closed -> dismissed when pointer.offset.x > 120
-      transition open -> dismissed when pointer.offset.x > 120
+      transition closed -> open when projectedX >= 48 && projectedX <= 120
+      transition open -> closed when projectedX < 48
     }
 
     transition open -> closed when outside

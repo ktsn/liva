@@ -881,9 +881,10 @@ selected, control release transfers that velocity to property motion history bef
 the selected spring is prepared. Distinct occurrences are queued in order, never recursively
 evaluated or coalesced. Mount, reconnection, target replacement, HMR, and disposal
 never replay historical events. The 200ms projection and 48px threshold above are
-application policy. The swipe demo uses projection for snapping, a longer actual
-travel threshold for immediate application deletion, and Vue input for outside
-closure; every row owns independent local state.
+application policy. The swipe demo uses projected position for both snapping and
+immediate application deletion beyond 120px, and Vue input for outside closure.
+Every row owns independent open/closed state; removal runs the leave animation
+without a separate dismissed state.
 
 ## Automatic spring momentum
 
