@@ -6,7 +6,7 @@ use crate::{
     scope::{Scope, Symbol, SymbolKind},
 };
 use liva_syntax::ast::expression::{Argument, Expr, ExprView};
-use liva_syntax::ast::{AstNode, Decorator, HasValue, Motion};
+use liva_syntax::ast::{AstNode, Decorator, HasValue, Motion, Property};
 use liva_syntax::{Kind, Range, parse, parse_expression, quote_string};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -260,7 +260,7 @@ fn names_in(node: &impl AstNode, offset: usize) -> bool {
                     matches!(
                         parent.kind(),
                         Kind::Let | Kind::Argument | Kind::Interpolation
-                    )
+                    ) || Property::cast(parent).is_some_and(|property| property.is_attachment())
                 }));
         let range = syntax.text_range();
 

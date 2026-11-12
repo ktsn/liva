@@ -247,6 +247,9 @@ fn ordinary_empty_and_prefixed_expression_names_still_complete() {
         "motion a { let value = ¦; layer base {} }",
         "motion a { let value = ea¦; layer base {} }",
         "motion a { layer active when ¦ {} }",
+        "motion a { event changed when ¦\nlayer base {} }",
+        "motion a { layer base { state active when ¦ {} } }",
+        "motion a { layer base { state off initial {} state on {} transition off -> on when ¦ {} } }",
         "motion a { layer base { opacity: ${ea¦} } }",
         "motion a { layer base { opacity: ${¦} } }",
     ] {
@@ -255,6 +258,28 @@ fn ordinary_empty_and_prefixed_expression_names_still_complete() {
         assert!(
             found.iter().any(|item| item.label == "easeOut"),
             "{marked}: {found:?}"
+        );
+        assert!(literal_items(&found).is_empty());
+    }
+}
+
+#[test]
+fn attachment_values_offer_controller_names_while_css_values_stay_opaque() {
+    for (declaration, expected) in [
+        ("translate := ¦", true),
+        ("translate := move¦", true),
+        ("translate := (¦)", true),
+        ("translate: ¦", false),
+        ("translate := /* ¦ */", false),
+    ] {
+        let (_, found) = analyze(&format!(
+            "motion a {{ let movement = link(input: 1, component: 'x'); layer base {{ {declaration} }} }}"
+        ));
+
+        assert_eq!(
+            found.iter().any(|item| item.label == "movement"),
+            expected,
+            "{declaration}: {found:?}"
         );
         assert!(literal_items(&found).is_empty());
     }

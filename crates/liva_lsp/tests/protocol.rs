@@ -587,6 +587,58 @@ fn completion_triggers_ignore_nonexpression_locations() {
 }
 
 #[test]
+fn empty_attachments_offer_usable_controller_names_in_standalone_and_vue() {
+    with_server(|client| {
+        for (uri, prefix, suffix) in [
+            ("file:///attachment.liv", "// 日本😀\n", ""),
+            (
+                "file:///attachment.vue",
+                "<template>😀</template>\r\n<liva>",
+                "</liva>",
+            ),
+        ] {
+            let marked = format!(
+                "{prefix}motion a {{ let movement = link(input: 1, component: 'x'); layer base {{ translate := ¦ }} }}{suffix}"
+            );
+            let cursor = marked.find('¦').unwrap();
+            let source = marked.replace('¦', "");
+
+            notify(
+                client,
+                "textDocument/didOpen",
+                json!({"textDocument": {
+                    "uri": uri, "languageId": "liva", "version": 1, "text": source,
+                }}),
+            );
+
+            diagnostics(client);
+
+            let items = completion_at(client, uri, &source, cursor);
+            let item = items
+                .iter()
+                .find(|item| item["label"] == "movement")
+                .unwrap();
+
+            assert!(item["textEdit"].is_null());
+            assert!(items.iter().all(|item| item["textEdit"].is_null()));
+
+            let mut edited = source.clone();
+
+            edited.insert_str(cursor, item["label"].as_str().unwrap());
+            notify(
+                client,
+                "textDocument/didChange",
+                json!({
+                    "textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": edited}],
+                }),
+            );
+
+            assert_eq!(diagnostics(client)["diagnostics"], json!([]));
+        }
+    });
+}
+
+#[test]
 fn member_completion_survives_literal_context_detection() {
     with_server(|client| {
         let marked = "motion a { let ui = interaction(target: self); layer active when ui.fo¦ {} }";
