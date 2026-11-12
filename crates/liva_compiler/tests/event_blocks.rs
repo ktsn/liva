@@ -52,6 +52,68 @@ fn event_blocks_reject_invalid_input_scope_and_bodies() {
 }
 
 #[test]
+fn misplaced_event_blocks_are_rejected_in_compiled_and_skipped_scopes() {
+    for body in [
+        "on pointer.release {} layer base {}",
+        "unknown { on pointer.release {} } layer base {}",
+        "state idle { on pointer.release {} } layer base {}",
+        "transition { on pointer.release {} } layer base {}",
+        "transition idle -> idle when true { on pointer.release {} } layer base {}",
+        "layer base {} enter { on pointer.release {} }",
+        "layer base {} leave { self { on pointer.release {} } }",
+        "layer base { on pointer.release {} }",
+        "layer base { state idle initial { on pointer.release {} } }",
+        "layer base { self { on pointer.release {} } }",
+        "layer base { self { unknown { on pointer.release {} } } }",
+        "layer base { opacity ~> { on pointer.release {} } }",
+        "layer base { state idle initial {} transition idle -> idle when true { on pointer.release {} } }",
+        "layer base { state idle initial {} transition { on pointer.release {} } }",
+    ] {
+        let source = format!("motion example {{ let pointer = drag(target: self); {body} }}");
+        let result = compile(&source, true);
+
+        assert!(result.definitions.is_empty(), "{body}");
+        let diagnostic = result
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "semantic.event")
+            .unwrap_or_else(|| panic!("{body}: {:?}", result.diagnostics));
+
+        assert_eq!(
+            &source[diagnostic.range.start..diagnostic.range.end],
+            "on pointer.release",
+            "{body}"
+        );
+    }
+}
+
+#[test]
+fn event_blocks_reject_decorators_and_nontransition_bodies() {
+    for event in [
+        "@tween() on pointer.release {}",
+        "on pointer.release { self { opacity: 1 } }",
+        "on pointer.release { state other {} }",
+        "on pointer.release { on pointer.release {} }",
+    ] {
+        let source = format!(
+            "motion example {{ let pointer = drag(target: self); layer base {{ state idle initial {{}} {event} }} }}"
+        );
+        let result = compile(&source, true);
+
+        assert!(result.definitions.is_empty(), "{event}");
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "semantic.event"
+                    && diagnostic.message
+                        == "on blocks contain only layer transitions and accept no decorator"
+            }),
+            "{event}: {:?}",
+            result.diagnostics
+        );
+    }
+}
+
+#[test]
 fn empty_event_blocks_validate_their_expression_without_transitions() {
     for event in ["true", "unknown", "1", "pointer.offset"] {
         let source = format!(

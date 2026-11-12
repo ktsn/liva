@@ -1323,34 +1323,8 @@ impl Compiler {
         definition.let_bindings = bindings;
         self.diagnostics.extend(diagnostics);
 
-        self.validate_event_structure(node);
         self.validate(&definition, node);
         definition
-    }
-
-    fn validate_event_structure(&mut self, node: &syn::Motion) {
-        for event in node.syntax().descendants().filter_map(syn::OnBlock::cast) {
-            let layer = event.syntax().parent().and_then(syn::Layer::cast);
-            if layer.is_none_or(|layer| layer.states().next().is_none()) {
-                self.error(
-                    "semantic.event",
-                    "on blocks belong directly inside a stateful layer",
-                    &event,
-                );
-            }
-            if event
-                .syntax()
-                .children()
-                .any(|child| child.kind() != Kind::Header && syn::Transition::cast(child).is_none())
-                || event.decorators().next().is_some()
-            {
-                self.error(
-                    "semantic.event",
-                    "on blocks contain only layer transitions and accept no decorator",
-                    &event,
-                );
-            }
-        }
     }
 
     fn validate(&mut self, def: &Definition, node: &syn::Motion) {
@@ -1478,8 +1452,10 @@ pub fn compile(source: &str, development: bool) -> Compilation {
             .diagnostics
             .into_iter()
             .map(|mut diagnostic| {
-                if diagnostic.code == "syntax.expression" {
-                    diagnostic.code = "semantic.expression".into();
+                match diagnostic.code.as_str() {
+                    "syntax.expression" => diagnostic.code = "semantic.expression".into(),
+                    "syntax.event" => diagnostic.code = "semantic.event".into(),
+                    _ => {}
                 }
                 diagnostic
             })

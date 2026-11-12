@@ -1,3 +1,4 @@
+pub(crate) use liva_syntax::ast::significant_range;
 use liva_syntax::ast::{AstNode, Header, Layer, Motion, State};
 use liva_syntax::{Kind, Range};
 
@@ -31,24 +32,4 @@ pub(crate) fn name_range(node: &impl AstNode) -> Range {
     }
 
     significant_range(&header)
-}
-
-pub(crate) fn significant_range(node: &impl AstNode) -> Range {
-    let tokens: Vec<_> = node
-        .syntax()
-        .descendants_with_tokens()
-        .filter_map(|element| element.into_token())
-        .filter(|token| token.kind() != Kind::Trivia)
-        .collect();
-
-    match (tokens.first(), tokens.last()) {
-        (Some(first), Some(last)) => Range {
-            start: u32::from(first.text_range().start()) as usize,
-            end: u32::from(last.text_range().end()) as usize,
-        },
-        _ => Range {
-            start: node.range().start,
-            end: node.range().start,
-        },
-    }
 }
