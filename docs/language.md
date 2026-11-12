@@ -49,9 +49,27 @@ motion progressIndicator(
 
 The parameter list is optional; `motion card()` is also valid. Parameters require
 `name: type` annotations, separated by commas; a trailing comma is allowed.
-The primitive types are exactly `number`, `boolean`, and `string`. Type references
+The primitive types are `number`, `boolean`, and `string`. A parameter may also
+require one quoted string or a finite union of quoted strings:
+
+```liva
+motion sample(position: "start" | 'end', axis: "x") {
+  let selectedPosition = position
+  layer base { --position: ${selectedPosition}; --axis: ${axis} }
+}
+```
+
+String annotations use the same quote and escape rules as expression strings.
+Whitespace and comments may separate members and `|`. Values are compared after
+decoding, with no trimming, case folding, or coercion; duplicate members and order
+do not change compatibility. Empty strings and Unicode are allowed. Every union
+member must be a quoted string: mixed unions such as `string | "x"` and missing
+members are errors. A singleton parameter keeps its literal type; a multi-member
+parameter keeps its declared finite set through aliases and derived bindings.
+
+Type references
 are declaration-time metadata, separate from runtime expression nodes. Annotations
-are never function arguments or runtime values. User-defined functions and advanced parameter types are outside scope.
+are never function arguments or runtime values. User-defined functions and other parameter type forms are outside scope.
 
 Parameters, let bindings, and targets share one variable namespace throughout their
 motion, regardless of declaration order. Each target declared in a layer or local state
@@ -68,9 +86,19 @@ Motion parameters receive host application values. The object in
 from the immutable Definition IR. Updates reevaluate conditions and CSS templates.
 Every declared parameter is required; the object is a full parameter snapshot.
 Missing parameters are errors, including on updates; no implicit defaults are used.
-Explicit `0`, `false`, and `""` are valid values. Unknown names, wrong types, and
+Explicit `0`, `false`, and `""` are valid when permitted by the declared type. Unknown names, wrong types, and
 non-finite numbers are rejected without coercion. Invalid updates report a runtime diagnostic and retain the last
-valid values; invalid initial inputs reject instance creation.
+valid parameters, derived values, and presentation together; invalid initial inputs
+reject instance creation. Constrained string inputs must belong to their declared
+candidate set on creation, every update, and definition replacement. A valid value
+remains an ordinary JavaScript string.
+
+Serialized parameter metadata keeps the primitive descriptors (`"number"`,
+`"boolean"`, `"string"`). Literal and union annotations use
+`{ "kind": "stringUnion", "values": ["end", "start"] }` as the parameter's `type`;
+a singleton has one member. Compiler output sorts and deduplicates decoded members.
+Definition decoding requires a nonempty string array and preserves the set's exact
+values. Older runtimes reject this descriptor rather than treating it as broad string.
 
 A `let` declaration binds the value of an expression:
 
@@ -185,7 +213,7 @@ These rules do not add structural record compatibility or implicit conversions.
 String equality and ordering comparisons use the string primitive category, so
 distinct literals and broad strings may still be compared. All string types support
 CSS interpolation; none support arithmetic. Runtime values remain ordinary strings.
-Source parameter annotations currently accept only the primitive types above.
+Parameter annotations can declare these literal types and finite unions.
 
 Expressions support finite decimal numbers, Booleans, quoted strings, parameter and let identifiers,
 member access, parentheses, unary `!`, `+`, `-`, arithmetic `+ - * / %`, comparison

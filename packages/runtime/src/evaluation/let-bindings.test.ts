@@ -1,10 +1,10 @@
 import { createEventValue, type ReactiveNotification } from './events.ts'
 import { afterEach, expect, it, vi } from 'vite-plus/test'
-import { LetBindingGraph } from './let-bindings.ts'
+import { LetBindingGraph, parameterValues } from './let-bindings.ts'
 import { propertyController } from '../motion/controllers.ts'
 import * as functions from '../builtins/index.ts'
 import type { ReactiveCall, ReactiveSubscription, RuntimeValue } from './reactive-value.ts'
-import type { LetBinding, Target, Property } from '../model/definition.ts'
+import type { LetBinding, MotionParameter, Target, Property } from '../model/definition.ts'
 
 it('evaluates forward dependencies and keeps failed evaluations out of committed snapshots', () => {
   const definitions: LetBinding[] = [
@@ -659,4 +659,52 @@ it.each([
   expect(ordinaryUpdates).toBe(phase.includes('pending event') ? 1 : 0)
 
   graph.dispose()
+})
+
+it.each(['', '日本語😀', 'a"b', 'a\\b', ' x '])(
+  'preserves exact constrained parameter strings: %j',
+  (value) => {
+    const parameters: MotionParameter[] = [
+      { name: 'choice', type: { kind: 'stringUnion', values: ['other', value, value] } },
+    ]
+    const previous = { retained: 7 }
+
+    const values = parameterValues(parameters, previous, { choice: value })
+
+    expect(values).toEqual({ retained: 7, choice: value })
+    expect(previous).toEqual({ retained: 7 })
+    expect(typeof values.choice).toBe('string')
+  },
+)
+
+it.each(['middle', 'START', ' start ', 1, false, null, undefined])(
+  'rejects invalid constrained parameter values without coercion: %j',
+  (value) => {
+    const parameters: MotionParameter[] = [
+      { name: 'choice', type: { kind: 'stringUnion', values: ['start', 'end'] } },
+    ]
+
+    expect(() => parameterValues(parameters, {}, { choice: value })).toThrow(
+      'Motion parameter choice requires "start" | "end"',
+    )
+  },
+)
+
+it('requires full constrained snapshots and leaves earlier values unchanged on failure', () => {
+  const parameters: MotionParameter[] = [
+    { name: 'position', type: { kind: 'stringUnion', values: ['start', 'end'] } },
+    { name: 'axis', type: { kind: 'stringUnion', values: ['x'] } },
+  ]
+  const previous = parameterValues(parameters, {}, { position: 'end', axis: 'x' })
+
+  expect(() => parameterValues(parameters, previous, { position: 'start' })).toThrow(
+    'Missing motion parameter: axis',
+  )
+  expect(() =>
+    parameterValues(parameters, previous, { position: 'start', axis: 'x', other: true }),
+  ).toThrow('Unknown motion parameter: other')
+  expect(() => parameterValues(parameters, previous, { position: 'start', axis: 'y' })).toThrow(
+    'Motion parameter axis requires "x"',
+  )
+  expect(previous).toEqual({ position: 'end', axis: 'x' })
 })

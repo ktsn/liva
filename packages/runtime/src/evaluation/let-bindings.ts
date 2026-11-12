@@ -284,8 +284,19 @@ export function parameterValues(
 
     const value = inputs[parameter.name]
 
-    if (typeof value !== parameter.type || (typeof value === 'number' && !Number.isFinite(value))) {
-      throw new Error(`Motion parameter ${parameter.name} requires ${parameter.type}`)
+    const type = parameter.type
+    const valid =
+      typeof type === 'string'
+        ? typeof value === type && (typeof value !== 'number' || Number.isFinite(value))
+        : typeof value === 'string' && type.values.includes(value)
+
+    if (!valid) {
+      const expected =
+        typeof type === 'string'
+          ? type
+          : type.values.map((member) => JSON.stringify(member)).join(' | ')
+
+      throw new Error(`Motion parameter ${parameter.name} requires ${expected}`)
     }
 
     Object.defineProperty(next, parameter.name, {

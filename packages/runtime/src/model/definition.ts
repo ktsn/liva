@@ -40,7 +40,12 @@ export type Expression =
 
 export interface MotionParameter {
   readonly name: string
-  readonly type: 'number' | 'boolean' | 'string'
+  /** Primitive descriptor, or a nonempty set of exact decoded string values. */
+  readonly type:
+    | 'number'
+    | 'boolean'
+    | 'string'
+    | { readonly kind: 'stringUnion'; readonly values: readonly string[] }
 }
 
 export interface LetBinding {

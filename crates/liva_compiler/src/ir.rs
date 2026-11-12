@@ -206,7 +206,7 @@ impl LetBinding {
 pub struct MotionParameter {
     pub name: String,
     #[serde(rename = "type")]
-    pub value_type: PrimitiveType,
+    pub value_type: ParameterType,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -215,4 +215,50 @@ pub enum PrimitiveType {
     Number,
     Boolean,
     String,
+}
+
+/// Motion input descriptors retain primitive string encodings and add an explicit
+/// finite-string descriptor, which older runtimes reject rather than silently widen.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum ParameterType {
+    Primitive(PrimitiveType),
+    Constrained(StringConstraint),
+}
+
+/// Decoded candidate sets. The compiler emits nonempty, sorted unique members;
+/// runtime validation also accepts duplicate/reordered members as the same set.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum StringConstraint {
+    StringUnion { values: Vec<String> },
+}
+
+impl ParameterType {
+    /// Build an owned compile-time type from compiler-emitted parameter metadata.
+    /// Candidate strings are decoded, unique, and nonempty; copying their data lets
+    /// the scope own its type independently of the serialized output IR.
+    pub(crate) fn expression_type(&self) -> crate::expression::Type {
+        use crate::expression::Type;
+
+        match self {
+            Self::Primitive(PrimitiveType::Number) => Type::Number,
+            Self::Primitive(PrimitiveType::Boolean) => Type::Boolean,
+            Self::Primitive(PrimitiveType::String) => Type::String,
+            Self::Constrained(StringConstraint::StringUnion { values }) => {
+                if values.len() == 1 {
+                    Type::StringLiteral(values[0].clone().into())
+                } else {
+                    Type::StringUnion(
+                        values
+                            .iter()
+                            .cloned()
+                            .map(Into::into)
+                            .collect::<Vec<_>>()
+                            .into(),
+                    )
+                }
+            }
+        }
+    }
 }

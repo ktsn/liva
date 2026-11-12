@@ -14,6 +14,10 @@ fn errors(source: &str) -> Vec<String> {
 fn fixture_json_matches_the_public_compilation_schema() {
     for (source, expected) in [
         (
+            include_str!("../../../fixtures/constrained.liv"),
+            include_str!("../../../fixtures/constrained.json"),
+        ),
+        (
             include_str!("../../../fixtures/self-target.liv"),
             include_str!("../../../fixtures/self-target.json"),
         ),

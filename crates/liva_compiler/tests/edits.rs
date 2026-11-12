@@ -280,3 +280,26 @@ fn controller_attachments_preserve_source_expressions_and_reject_timeline_conver
 
     assert_eq!(result.source, source.replace("50px", "75px"));
 }
+
+#[test]
+fn source_edits_preserve_literal_annotations_and_recompiled_mappings() {
+    let original = include_str!("../../../fixtures/constrained.liv");
+    let source = format!("// 日本語😀\r\n{}", original.replace('\n', "\r\n"));
+    let path = "constrained/layer/base/target/thumb/property/opacity/value";
+
+    let result = apply_edits(&source, &[set(path, ".5")]).unwrap();
+    let before = liva_compiler::compile(&source, true);
+
+    assert_eq!(
+        result.source,
+        source.replacen("opacity: .25", "opacity: .5", 1)
+    );
+    assert_eq!(
+        result.compilation.definitions[0].parameters,
+        before.definitions[0].parameters
+    );
+
+    let range = &result.compilation.mappings.as_ref().unwrap()[path].range;
+
+    assert_eq!(&result.source[range.start..range.end], " .5");
+}

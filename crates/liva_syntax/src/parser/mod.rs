@@ -631,6 +631,19 @@ pub fn parse(source: &str) -> Parse {
     p.diagnostics = p.lexical_diagnostics;
     validate_blocks(&root, 0, &mut p.diagnostics);
 
+    for reference in root
+        .syntax()
+        .descendants()
+        .filter_map(crate::ast::TypeReference::cast)
+    {
+        // Missing annotations retain the compiler's existing semantic.type diagnostic.
+        if !reference.semantic_text().is_empty()
+            && let Err(error) = reference.annotation()
+        {
+            p.diagnostics.push(error);
+        }
+    }
+
     Parse {
         root,
         diagnostics: p.diagnostics,

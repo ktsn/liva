@@ -1,6 +1,9 @@
 //! Typed views sharing the lossless syntax tree. Casts classify syntax;
 //! semantic validity is checked separately so malformed input remains accessible.
 
+mod annotation;
+pub use annotation::TypeAnnotation;
+
 pub mod expression;
 mod structure;
 pub use structure::*;

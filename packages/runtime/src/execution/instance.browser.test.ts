@@ -2,6 +2,7 @@ import type { Definition as PropertyIRDefinition } from '../model/definition.ts'
 import { afterEach, describe, expect, it } from 'vite-plus/test'
 import { cdp, userEvent } from 'vite-plus/test/browser'
 import type { CDPSession } from '@vitest/browser-playwright'
+import constrainedFixture from '../../../../fixtures/constrained.json'
 import selfFixture from '../../../../fixtures/self-target.json'
 import fixture from '../../../../fixtures/toggle.json'
 import reactiveFixture from '../../../../fixtures/reactive-toggle.json'
@@ -235,6 +236,68 @@ describe('browser animation execution', () => {
     expect(thumb.style.getPropertyPriority('scale')).toBe('important')
     expect(thumb.style.color).toBe('blue')
     expect(thumb.style.margin).toBe('')
+  })
+
+  it('rejects invalid initial string choices before creating an instance', () => {
+    const source = decodeBundle(JSON.stringify(constrainedFixture)).definitions[0]
+
+    for (const position of ['middle', false]) {
+      expect(() => new LivaInstance(source, { position, axis: 'x' })).toThrow(
+        'Motion parameter position requires "end" | "start"',
+      )
+    }
+  })
+
+  it('commits constrained updates atomically and retains their derived presentation on failure', () => {
+    const source = decodeBundle(JSON.stringify(constrainedFixture)).definitions[0]
+    const { instance, targets, errors } = setup(source, { position: 'end', axis: 'x' })
+    const thumb = targets.get('thumb')
+
+    expect(thumb?.style.opacity).toBe('0.25')
+    expect(thumb?.style.getPropertyValue('--position')).toBe('end')
+
+    instance.updateParameters({ position: 'start', axis: 'x' })
+
+    expect(thumb?.style.opacity).toBe('1')
+    expect(thumb?.style.getPropertyValue('--position')).toBe('start')
+
+    instance.updateParameters({ position: 'end', axis: 'y' })
+    instance.replaceDefinition(structuredClone(source))
+
+    expect(errors.at(-1)?.code).toBe('runtime.parameter')
+    expect(thumb?.style.opacity).toBe('1')
+    expect(thumb?.style.getPropertyValue('--position')).toBe('start')
+    expect(thumb?.style.getPropertyValue('--axis')).toBe('x')
+
+    instance.updateParameters({ position: 'end', axis: 'x' })
+
+    expect(thumb?.style.opacity).toBe('0.25')
+    expect(thumb?.style.getPropertyValue('--position')).toBe('end')
+  })
+
+  it('rejects incompatible string constraints on replacement without changing the live definition', () => {
+    const source = decodeBundle(JSON.stringify(constrainedFixture)).definitions[0]
+    const { instance, targets } = setup(source, { position: 'start', axis: 'x' })
+    const replacement = {
+      ...source,
+      parameters: [
+        { name: 'position', type: { kind: 'stringUnion' as const, values: ['end'] } },
+        { name: 'axis', type: { kind: 'stringUnion' as const, values: ['x'] } },
+      ],
+    }
+    const thumb = targets.get('thumb')
+
+    expect(() => instance.replaceDefinition(replacement)).toThrow(
+      'Motion parameter position requires "end"',
+    )
+    expect(instance.definition).toBe(source)
+    expect(thumb?.style.getPropertyValue('--position')).toBe('start')
+    expect(thumb?.style.opacity).toBe('1')
+
+    instance.updateParameters({ position: 'end', axis: 'x' })
+
+    expect(thumb?.style.getPropertyValue('--position')).toBe('end')
+    expect(thumb?.style.opacity).toBe('0.25')
   })
 
   it('updates reactive parameters and retains them through definition replacement', () => {
