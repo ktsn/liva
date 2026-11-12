@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 declare global {
   interface Window {
@@ -9,10 +9,47 @@ declare global {
     teardown(): void
     effects: Animation[]
     childExit: Animation
+    gestureTime: number
   }
 }
 
 const base = 'http://127.0.0.1:4180'
+
+/** Release with CSS-pixel offsets from pointer-down and performance.now() times in milliseconds. */
+async function releaseTimedSwipe(
+  page: Page,
+  face: Locator,
+  moves: { time: number; offset: number }[],
+  releaseTime: number,
+) {
+  const box = await face.boundingBox()
+
+  if (!box) {
+    throw new Error('Expected a visible swipe face')
+  }
+
+  await page.evaluate(() => {
+    window.gestureTime = 1000
+    Object.defineProperty(performance, 'now', { value: () => window.gestureTime })
+  })
+
+  await page.mouse.move(box.x + 30, box.y + 30)
+  await page.mouse.down()
+
+  for (const move of moves) {
+    await page.evaluate((time) => {
+      window.gestureTime = time
+    }, move.time)
+
+    await page.mouse.move(box.x + 30 + move.offset, box.y + 30)
+  }
+
+  await page.evaluate((time) => {
+    window.gestureTime = time
+  }, releaseTime)
+
+  await page.mouse.up()
+}
 
 test('swipe removes application data immediately and retains the exiting element', async ({
   page,
@@ -47,6 +84,25 @@ test('swipe removes application data immediately and retains the exiting element
       }
     }),
   ).toEqual({ connected: true, count: 1, effects: 2 })
+  const midpoint = await page.evaluate(() => {
+    const effects = window.exiting.getAnimations({ subtree: true })
+    for (const animation of effects) {
+      animation.pause()
+      animation.currentTime = Number(animation.effect?.getComputedTiming().duration) / 2
+    }
+    return {
+      opacity: Number(getComputedStyle(window.exiting).opacity),
+      content: window.exiting.textContent,
+    }
+  })
+
+  expect(midpoint.opacity).toBeGreaterThan(0)
+  expect(midpoint.opacity).toBeLessThan(1)
+  expect(midpoint.content).toContain('Item A')
+  await page.evaluate(() => {
+    for (const animation of window.exiting.getAnimations({ subtree: true })) animation.finish()
+  })
+
   await expect(card).toHaveCount(0)
   await expect(page.getByTestId('swipe-2')).toBeVisible()
   expect(errors).toEqual([])
@@ -147,7 +203,7 @@ test('parent teardown cancels running sessions and releases every animation', as
   expect(errors).toEqual([])
 })
 
-test('below-threshold release returns to idle without dismissal and repeated removals clean up', async ({
+test('short swipes preserve data, outside interaction closes, and repeated removals clean up', async ({
   page,
 }) => {
   await page.goto(base + '/swipe')
@@ -158,22 +214,251 @@ test('below-threshold release returns to idle without dismissal and repeated rem
   await page.mouse.move(box.x + 30, box.y + 30)
   await page.mouse.down()
   await page.mouse.move(box.x + 100, box.y + 30)
+  await page.waitForTimeout(100)
   await page.mouse.up()
 
   await expect(page.getByTestId('item-count')).toHaveText('3 items')
+
+  await page.getByRole('heading', { name: 'Swipe actions' }).click()
   await expect
-    .poll(() => card.evaluate((element) => parseFloat(getComputedStyle(element).translate)))
+    .poll(() =>
+      card
+        .locator('.swipe-face')
+        .evaluate((element) => parseFloat(getComputedStyle(element).translate)),
+    )
     .toBe(0)
 
   await page.evaluate(() => {
     document
-      .querySelectorAll<HTMLButtonElement>('.swipe-card button')
+      .querySelectorAll<HTMLButtonElement>('.swipe-face button')
       .forEach((button) => button.click())
   })
 
   await expect(page.getByTestId('item-count')).toHaveText('0 items')
   await expect(page.locator('.swipe-card')).toHaveCount(0)
   expect(await page.evaluate(() => document.getAnimations().length)).toBe(0)
+})
+
+test('swipe rows retain independent snap state and animate opening and outside closure continuously', async ({
+  page,
+}) => {
+  await page.goto(base + '/swipe')
+  const first = page.getByTestId('swipe-1')
+  const second = page.getByTestId('swipe-2')
+  await expect(first).toBeVisible()
+  await page.waitForFunction(() => document.getAnimations().length === 0)
+  const firstBox = (await first.boundingBox())!
+  const firstFace = first.locator('.swipe-face')
+
+  await page.mouse.move(firstBox.x + 30, firstBox.y + 30)
+  await page.mouse.down()
+  await page.mouse.move(firstBox.x + 100, firstBox.y + 30)
+  await page.waitForTimeout(100)
+  await page.mouse.up()
+  const opening = await firstFace.evaluate((element) => {
+    const animation = element.getAnimations()[0]
+    if (!animation) throw new Error('Expected opening spring')
+    animation.pause()
+    animation.currentTime = 40
+    return {
+      position: parseFloat(getComputedStyle(element).translate),
+      height: element.getBoundingClientRect().height,
+    }
+  })
+
+  expect(opening.position).toBeGreaterThan(70)
+  expect(opening.position).toBeLessThan(96)
+  expect(opening.height).toBeCloseTo(firstBox.height)
+  await firstFace.evaluate((element) => {
+    for (const animation of element.getAnimations()) animation.finish()
+  })
+  await expect
+    .poll(() => firstFace.evaluate((element) => parseFloat(getComputedStyle(element).translate)))
+    .toBe(96)
+
+  const secondBox = (await second.boundingBox())!
+  await page.mouse.move(secondBox.x + 30, secondBox.y + 30)
+  await page.mouse.down()
+  await page.mouse.move(secondBox.x + 100, secondBox.y + 30)
+  await page.waitForTimeout(100)
+  const closing = await firstFace.evaluate((element) => {
+    const animation = element.getAnimations()[0]
+    if (!animation) throw new Error('Expected outside-close spring')
+    animation.pause()
+    animation.currentTime = 40
+    return {
+      position: parseFloat(getComputedStyle(element).translate),
+      height: element.getBoundingClientRect().height,
+    }
+  })
+
+  expect(closing.position).toBeGreaterThan(0)
+  expect(closing.position).toBeLessThan(96)
+  expect(closing.height).toBeCloseTo(firstBox.height)
+  await firstFace.evaluate((element) => {
+    for (const animation of element.getAnimations()) animation.finish()
+  })
+  await page.mouse.up()
+
+  await expect
+    .poll(() => firstFace.evaluate((element) => parseFloat(getComputedStyle(element).translate)))
+    .toBe(0)
+  await expect
+    .poll(() =>
+      second
+        .locator('.swipe-face')
+        .evaluate((element) => parseFloat(getComputedStyle(element).translate)),
+    )
+    .toBe(96)
+  await expect(page.getByTestId('item-count')).toHaveText('3 items')
+})
+
+for (const sample of [
+  {
+    name: 'short flick below the dismissal threshold',
+    moves: [{ time: 1010, offset: 5 }],
+    releaseTime: 1020,
+    destination: 96,
+  },
+  {
+    name: 'short flick beyond the dismissal threshold',
+    moves: [{ time: 1010, offset: 20 }],
+    releaseTime: 1020,
+    destination: 500,
+  },
+  {
+    name: 'stationary release',
+    moves: [{ time: 1010, offset: 20 }],
+    releaseTime: 1100,
+    destination: 0,
+  },
+  {
+    name: 'projection below the opening threshold',
+    moves: [{ time: 1040, offset: 7 }],
+    releaseTime: 1050,
+    destination: 0,
+  },
+  {
+    name: 'projection at the opening threshold',
+    moves: [{ time: 1040, offset: 8 }],
+    releaseTime: 1050,
+    destination: 96,
+  },
+  {
+    name: 'projection at the dismissal threshold',
+    moves: [{ time: 1040, offset: 20 }],
+    releaseTime: 1050,
+    destination: 96,
+  },
+  {
+    name: 'projection above the dismissal threshold',
+    moves: [{ time: 1040, offset: 21 }],
+    releaseTime: 1050,
+    destination: 500,
+  },
+  {
+    name: 'stationary release beyond the dismissal threshold',
+    moves: [{ time: 1010, offset: 121 }],
+    releaseTime: 1100,
+    destination: 500,
+  },
+  {
+    name: 'long swipe reversed before release',
+    moves: [
+      { time: 1010, offset: 140 },
+      { time: 1020, offset: 130 },
+    ],
+    releaseTime: 1030,
+    destination: 0,
+  },
+]) {
+  test(`swipe uses input history for ${sample.name}`, async ({ page }) => {
+    await page.goto(base + '/swipe')
+    const card = page.getByTestId('swipe-1')
+    await expect(card).toBeVisible()
+    await page.waitForFunction(() => document.getAnimations().length === 0)
+    const face = card.locator('.swipe-face')
+
+    await releaseTimedSwipe(page, face, sample.moves, sample.releaseTime)
+
+    const handoff = await face.evaluate((element) => {
+      const animation = element.getAnimations()[0]
+
+      if (!(animation?.effect instanceof KeyframeEffect)) {
+        throw new Error('Expected release animation')
+      }
+
+      animation.pause()
+      const frames = animation.effect.getKeyframes()
+
+      return {
+        start: parseFloat(String(frames[0].translate)),
+        end: parseFloat(String(frames.at(-1)?.translate)),
+      }
+    })
+
+    // Every case has at least one move; the last input is the handoff position.
+    expect(handoff).toEqual({ start: sample.moves.at(-1)!.offset, end: sample.destination })
+
+    const dismissed = sample.destination === 500
+    await expect(page.getByTestId('item-count')).toHaveText(dismissed ? '2 items' : '3 items')
+
+    if (dismissed) {
+      await card.evaluate((element) => {
+        for (const animation of element.getAnimations({ subtree: true })) animation.finish()
+      })
+
+      await expect(card).toHaveCount(0)
+    }
+  })
+}
+
+test('swipe regrabs a moving spring without jumping and releases in the reverse direction', async ({
+  page,
+}) => {
+  await page.goto(base + '/swipe')
+  const face = page.getByTestId('swipe-1').locator('.swipe-face')
+  await expect(face).toBeVisible()
+  await page.waitForFunction(() => document.getAnimations().length === 0)
+
+  await releaseTimedSwipe(page, face, [{ time: 1010, offset: 5 }], 1020)
+
+  const displayed = await face.evaluate((element) => {
+    const animation = element.getAnimations()[0]
+    if (!animation) throw new Error('Expected opening spring')
+    animation.pause()
+    animation.currentTime = 40
+    return parseFloat(getComputedStyle(element).translate)
+  })
+  const movingBox = (await face.boundingBox())!
+  await page.evaluate(() => {
+    window.gestureTime = 2000
+  })
+
+  await page.mouse.move(movingBox.x + 30, movingBox.y + 30)
+  await page.mouse.down()
+
+  expect(await face.evaluate((element) => parseFloat(getComputedStyle(element).translate))).toBe(
+    displayed,
+  )
+
+  await page.evaluate(() => {
+    window.gestureTime = 2010
+  })
+  await page.mouse.move(movingBox.x + 20, movingBox.y + 30)
+  await page.evaluate(() => {
+    window.gestureTime = 2020
+  })
+  await page.mouse.up()
+
+  const destination = await face.evaluate((element) => {
+    const animation = element.getAnimations()[0]
+    if (!(animation?.effect instanceof KeyframeEffect)) throw new Error('Expected closing spring')
+    animation.pause()
+    return parseFloat(String(animation.effect.getKeyframes().at(-1)?.translate))
+  })
+
+  expect(destination).toBe(0)
 })
 
 test('direct target loops, conditionals, visibility and Motion-root removal share lifecycle semantics', async ({
@@ -269,7 +554,7 @@ test('enter initializes before paint and cancelled WAAPI leave still completes r
 test('reduced motion completes lifecycle barriers without lingering effects', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto(base + '/swipe')
-  await page.getByTestId('swipe-1').getByRole('button').click()
+  await page.getByTestId('swipe-1').getByRole('button', { name: 'Dismiss', exact: true }).click()
 
   await expect(page.getByTestId('swipe-1')).toHaveCount(0)
   await expect(page.getByTestId('item-count')).toHaveText('2 items')
