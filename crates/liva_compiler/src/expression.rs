@@ -718,6 +718,7 @@ mod tests {
             assert_eq!(actual, Type::Boolean, "{expression}");
         }
     }
+
     #[test]
     fn configured_overloads_accept_their_fixed_and_dynamic_groups() {
         let scope = scope_with_options();
