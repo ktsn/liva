@@ -30,7 +30,7 @@ pub(crate) struct ControllerBindings {
 impl ControllerBindings {
     /// Keeps a lowered let and its inferred controller identity. The range identifies
     /// its initializer when an unmatched originating call must be diagnosed.
-    pub(crate) fn declare(&mut self, binding: LetBinding, value_type: Option<Type>, range: Range) {
+    pub(crate) fn declare(&mut self, binding: LetBinding, value_type: Option<&Type>, range: Range) {
         if matches!(value_type, Some(Type::Controller(_)))
             && !self.origins.contains_key(&binding.name)
         {

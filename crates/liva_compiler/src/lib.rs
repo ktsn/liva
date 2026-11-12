@@ -1002,10 +1002,7 @@ impl Compiler {
         let mut controllers = ControllerBindings::default();
 
         for binding in bindings {
-            let value_type = scope
-                .get(&binding.name)
-                .and_then(scope::Symbol::value_type)
-                .cloned();
+            let value_type = scope.get(&binding.name).and_then(scope::Symbol::value_type);
             let range = binding.initializer.range();
             let initializer = binding
                 .initializer
@@ -1412,9 +1409,13 @@ fn infer_let_type(
     bindings: &BTreeMap<String, &Expr>,
     scope: &mut expression::Scope,
     visiting: &mut BTreeSet<String>,
-) -> Result<expression::Type, expression::TypeError> {
-    if let Some(value_type) = scope.local(name).and_then(scope::Symbol::value_type) {
-        return Ok(value_type.clone());
+) -> Result<(), expression::TypeError> {
+    if scope
+        .local(name)
+        .and_then(scope::Symbol::value_type)
+        .is_some()
+    {
+        return Ok(());
     }
 
     visiting.insert(name.into());
@@ -1440,8 +1441,9 @@ fn infer_let_type(
         }
 
         let value_type = binding.check(scope)?;
-        scope.resolve(name, value_type.clone());
-        Ok(value_type)
+        scope.resolve(name, value_type);
+
+        Ok(())
     })();
     visiting.remove(name);
 
