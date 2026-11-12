@@ -1,6 +1,6 @@
-import type { ReactiveSubscription, RuntimeValue } from '../reactive-value.ts'
-import { readLayoutBounds, missingBounds } from '../layout-bounds.ts'
-import { registerLayoutRead } from '../layout-scheduler.ts'
+import type { ReactiveSubscription, RuntimeValue } from '../evaluation/reactive-value.ts'
+import { readLayoutBounds, missingBounds } from '../layout/layout-bounds.ts'
+import { registerLayoutRead } from '../layout/layout-scheduler.ts'
 
 function targetName(value: RuntimeValue | undefined): string {
   if (typeof value !== 'object' || typeof value.name !== 'string') {

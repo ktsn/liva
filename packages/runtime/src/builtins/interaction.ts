@@ -1,4 +1,4 @@
-import type { ReactiveSubscription, RuntimeValue } from '../reactive-value.ts'
+import type { ReactiveSubscription, RuntimeValue } from '../evaluation/reactive-value.ts'
 
 const selectors = {
   hover: ':hover',

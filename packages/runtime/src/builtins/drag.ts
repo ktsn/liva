@@ -1,5 +1,5 @@
-import { createEventValue } from '../events.ts'
-import type { ReactiveSubscription, RuntimeValue } from '../reactive-value.ts'
+import { createEventValue } from '../evaluation/events.ts'
+import type { ReactiveSubscription, RuntimeValue } from '../evaluation/reactive-value.ts'
 
 interface DragValue {
   readonly released: boolean

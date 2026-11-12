@@ -1,5 +1,5 @@
 import { resolveComposition, type Definition } from '@liva/runtime'
-import { renderTransition } from '../../../runtime/src/expression.ts'
+import { renderTransition } from '../../../runtime/src/evaluation/expression.ts'
 import { describe, expect, it } from 'vite-plus/test'
 import { compile } from '../compiler.ts'
 import { readFileSync } from 'node:fs'

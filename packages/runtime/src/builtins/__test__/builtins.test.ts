@@ -1,9 +1,9 @@
 import { expect, it } from 'vite-plus/test'
 import cardFixture from '../../../../../fixtures/card.json'
-import { decodeBundle } from '../../definition.ts'
-import { evaluate, evaluateScalar } from '../../expression.ts'
-import { LetBindingGraph, targetValues } from '../../let-bindings.ts'
-import { isReactiveSubscription } from '../../reactive-value.ts'
+import { decodeBundle } from '../../model/definition.ts'
+import { evaluate, evaluateScalar } from '../../evaluation/expression.ts'
+import { LetBindingGraph, targetValues } from '../../evaluation/let-bindings.ts'
+import { isReactiveSubscription } from '../../evaluation/reactive-value.ts'
 import { callBuiltin } from '../index.ts'
 
 it('dispatches call IR to independently initialized built-in subscriptions', () => {

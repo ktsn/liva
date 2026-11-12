@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vite-plus/test'
 import fixture from '../../../../fixtures/toggle.json'
-import { decodeBundle, type Definition, type Timing, type Transition } from '../definition.ts'
-import { normalizeFrames } from '../resolve.ts'
-import { resolveComposition, resolveLayerTracks } from '../layers.ts'
-import { sampleSpring, springResponse, springState, SPRING_ERROR } from '../spring.ts'
-import { waapiProperty } from '../instance.ts'
+import { decodeBundle, type Definition, type Timing, type Transition } from '../model/definition.ts'
+import { normalizeFrames } from '../composition/resolve.ts'
+import { resolveComposition, resolveLayerTracks } from '../composition/layers.ts'
+import { sampleSpring, springResponse, springState, SPRING_ERROR } from '../motion/spring.ts'
+import { waapiProperty } from '../execution/instance.ts'
 
 const definition = decodeBundle(JSON.stringify(fixture)).definitions[0]
 const tween = (durationMs: number): Timing => ({ kind: 'tween', durationMs, easing: 'linear' })

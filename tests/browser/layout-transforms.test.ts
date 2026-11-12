@@ -36,7 +36,7 @@ async function readTransformedFixture(page: Page, styles: Record<string, string>
   await page.goto('/tests/browser/')
 
   return page.evaluate(async (appliedStyles) => {
-    const { readLayoutBounds } = await import('../../packages/runtime/src/layout-bounds.ts')
+    const { readLayoutBounds } = await import('../../packages/runtime/src/layout/layout-bounds.ts')
     const root = document.createElement('div')
     root.style.cssText =
       'position:relative;box-sizing:border-box;width:320.5px;height:240.25px;border:3px solid;padding:16.5px;'

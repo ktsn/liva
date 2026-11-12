@@ -3,9 +3,9 @@ import { timeout } from './timeout.ts'
 import { link } from './link.ts'
 import { drag } from './drag.ts'
 import { interaction } from './interaction.ts'
-import type { FunctionResult, RuntimeValue } from '../reactive-value.ts'
+import type { FunctionResult, RuntimeValue } from '../evaluation/reactive-value.ts'
 
-export type { FunctionResult, RuntimeValue } from '../reactive-value.ts'
+export type { FunctionResult, RuntimeValue } from '../evaluation/reactive-value.ts'
 
 const functions: ReadonlyMap<
   string,

@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import fixture from '../../fixtures/interaction.json' with { type: 'json' }
-import type { ReactiveSubscription } from '../../packages/runtime/src/reactive-value.ts'
-import type { LivaInstance } from '../../packages/runtime/src/instance.ts'
+import type { ReactiveSubscription } from '../../packages/runtime/src/evaluation/reactive-value.ts'
+import type { LivaInstance } from '../../packages/runtime/src/execution/instance.ts'
 
 declare global {
   interface Window {

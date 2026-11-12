@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vite-plus/test'
 import cardFixture from '../../../../fixtures/card.json'
 import toggleFixture from '../../../../fixtures/reactive-toggle.json'
-import { decodeBundle, type Definition, type Expression } from '../definition.ts'
-import { evaluate, renderProperty, renderValue } from '../expression.ts'
-import { resolveLayers } from '../layers.ts'
-import { parameterValues } from '../let-bindings.ts'
+import { decodeBundle, type Definition, type Expression } from '../model/definition.ts'
+import { evaluate, renderProperty, renderValue } from '../evaluation/expression.ts'
+import { resolveLayers } from '../composition/layers.ts'
+import { parameterValues } from '../evaluation/let-bindings.ts'
 
 const toggle = decodeBundle(JSON.stringify(toggleFixture)).definitions[0]
 const card = decodeBundle(JSON.stringify(cardFixture)).definitions[0]
