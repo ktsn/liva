@@ -7,7 +7,7 @@ mod timing;
 
 use crate::{expression::Type, scope::SymbolKind, target::ROOT_TARGET};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Field {
     pub name: &'static str,
     pub value_type: Type,

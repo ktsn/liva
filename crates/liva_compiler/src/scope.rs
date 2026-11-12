@@ -3,7 +3,7 @@ use crate::{builtins, expression::Type};
 use liva_syntax::Range;
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum SymbolKind {
     Value(Type),
     Function(&'static builtins::Function),
@@ -23,8 +23,8 @@ impl Symbol {
     }
 
     pub fn value_type(&self) -> Option<Type> {
-        match self.kind {
-            SymbolKind::Value(value_type) => Some(value_type),
+        match &self.kind {
+            SymbolKind::Value(value_type) => Some(value_type.clone()),
             _ => None,
         }
     }

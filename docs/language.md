@@ -173,6 +173,20 @@ continue. Timing and value ownership follow the layer cascade described below.
 
 ## Expressions and CSS templates
 
+A quoted string expression has the literal type of its decoded value: `"x"`
+has type `"x"`. Parentheses, let bindings, aliases, and forward references preserve
+that type. A finite string union such as `"x" | "y"` represents a set of allowed
+decoded strings; duplicate members and member order do not affect compatibility.
+A literal is assignable to a union containing it and to `string`. A finite union
+is assignable to another union when every source member belongs to the destination,
+and to `string`. A broad `string` cannot be assigned to a literal or finite union.
+These rules do not add structural record compatibility or implicit conversions.
+
+String equality and ordering comparisons use the string primitive category, so
+distinct literals and broad strings may still be compared. All string types support
+CSS interpolation; none support arithmetic. Runtime values remain ordinary strings.
+Source parameter annotations currently accept only the primitive types above.
+
 Expressions support finite decimal numbers, Booleans, quoted strings, parameter and let identifiers,
 member access, parentheses, unary `!`, `+`, `-`, arithmetic `+ - * / %`, comparison
 `< <= > >=`, equality `== != === !==`, and logical `&& ||`. Operators use normal
