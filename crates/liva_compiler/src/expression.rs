@@ -249,7 +249,7 @@ impl ExprExt for Expr {
                     name_error(first, format!("Unknown variable: {}", first.text()))
                 })?;
                 let mut value_type = match &symbol.kind {
-                    SymbolKind::Value(value_type) => value_type.clone(),
+                    SymbolKind::Value(value_type) => value_type,
                     SymbolKind::Function(_) => {
                         return Err(name_error(first, "Functions cannot be used as values"));
                     }
@@ -274,14 +274,13 @@ impl ExprExt for Expr {
                     let (Type::Record(fields) | Type::Controller(fields)) = value_type else {
                         return Err(error());
                     };
-                    value_type = fields
+                    value_type = &fields
                         .iter()
                         .find(|field| field.name == member.text())
                         .ok_or_else(error)?
-                        .value_type
-                        .clone();
+                        .value_type;
                 }
-                Ok(value_type)
+                Ok(value_type.clone())
             }
             ExprView::Call => {
                 let function = self
@@ -407,11 +406,11 @@ impl ExprExt for Expr {
                 let a = left.check(scope)?;
                 let b = right.check(scope)?;
                 let expected = match operator.as_str() {
-                    "&&" | "||" => Type::Boolean,
-                    "+" | "-" | "*" | "/" | "%" => Type::Number,
-                    _ => a.clone(),
+                    "&&" | "||" => Some(PrimitiveCategory::Boolean),
+                    "+" | "-" | "*" | "/" | "%" => Some(PrimitiveCategory::Number),
+                    _ => a.primitive_category(),
                 };
-                if !a.is_scalar() || a.primitive_category() != expected.primitive_category() {
+                if !a.is_scalar() || a.primitive_category() != expected {
                     return Err(left.error("Incompatible expression operands"));
                 }
                 if a.primitive_category() != b.primitive_category() {

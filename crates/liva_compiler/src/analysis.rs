@@ -71,7 +71,7 @@ pub fn completions(source: &str, offset: usize) -> Vec<Completion> {
             let Some(field) = fields.iter().find(|field| field.name == name) else {
                 return vec![];
             };
-            value_type = field.value_type.clone();
+            value_type = &field.value_type;
         }
 
         return match value_type {
@@ -296,7 +296,7 @@ fn expression_hovers(node: &impl AstNode, scope: &expression::Scope, result: &mu
                 result.push(Hover {
                     builtin_target: scope.get(&path).is_some_and(Symbol::is_builtin_target),
                     range: first.range(),
-                    label: format!("{path}: {}", type_name(&value_type)),
+                    label: format!("{path}: {}", type_name(value_type)),
                 });
 
                 for name in names {
@@ -308,13 +308,13 @@ fn expression_hovers(node: &impl AstNode, scope: &expression::Scope, result: &mu
                     let Some(field) = fields.iter().find(|field| field.name == name.text()) else {
                         break;
                     };
-                    value_type = field.value_type.clone();
+                    value_type = &field.value_type;
                     path.push('.');
                     path.push_str(&name.text());
                     result.push(Hover {
                         builtin_target: false,
                         range: name.range(),
-                        label: format!("{path}: {}", type_name(&value_type)),
+                        label: format!("{path}: {}", type_name(value_type)),
                     });
                 }
             }
