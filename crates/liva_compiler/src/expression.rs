@@ -116,6 +116,24 @@ impl Type {
         self.primitive_category().is_some()
     }
 
+    /// A provable fixed decoded string value, without observing runtime state.
+    /// Duplicate union members do not change the proof. Broad strings, empty sets,
+    /// sets with distinct members, and non-string types have no singleton value.
+    pub fn singleton_string(&self) -> Option<&str> {
+        match self {
+            Self::StringLiteral(value) => Some(value.as_ref()),
+            Self::StringUnion(values) => {
+                let (first, remaining) = values.split_first()?;
+
+                remaining
+                    .iter()
+                    .all(|value| value == first)
+                    .then_some(first.as_ref())
+            }
+            _ => None,
+        }
+    }
+
     /// Whether every value represented by this source type is permitted by `destination`.
     /// String sets compare decoded values, ignoring duplicates and order. Other types
     /// retain exact compatibility, including the existing record/controller contracts.
@@ -349,10 +367,21 @@ impl ExprExt for Expr {
                         )));
                     }
 
+                    if !parameters
+                        .iter()
+                        .any(|parameter| parameter.accepts(&actual))
+                    {
+                        return Err(value.error(format!(
+                            "Argument for {}.{} must be a fixed string; got {}",
+                            function.text(),
+                            name.text(),
+                            actual
+                        )));
+                    }
+
                     candidates.retain(|signature| {
                         signature.parameters.iter().any(|parameter| {
-                            parameter.name == name.text()
-                                && actual.is_assignable_to(&parameter.value_type)
+                            parameter.name == name.text() && parameter.accepts(&actual)
                         })
                     });
                 }
@@ -518,6 +547,7 @@ mod tests {
             Signature {
                 parameters: &[
                     Parameter {
+                        fixed: false,
                         name: "option",
                         optional: false,
                         value_type: Type::StringUnion(Cow::Borrowed(&[
@@ -526,6 +556,7 @@ mod tests {
                         ])),
                     },
                     Parameter {
+                        fixed: false,
                         name: "amount",
                         optional: false,
                         value_type: Type::Number,
@@ -536,13 +567,55 @@ mod tests {
             Signature {
                 parameters: &[
                     Parameter {
+                        fixed: false,
                         name: "option",
                         optional: false,
                         value_type: Type::StringLiteral(Cow::Borrowed("z")),
                     },
                     Parameter {
+                        fixed: false,
                         name: "enabled",
                         optional: false,
+                        value_type: Type::Boolean,
+                    },
+                ],
+                return_type: Type::Boolean,
+            },
+        ],
+    };
+
+    static CONFIGURED: Function = Function {
+        name: "configured",
+        signatures: &[
+            Signature {
+                parameters: &[
+                    Parameter {
+                        fixed: true,
+                        optional: false,
+                        name: "option",
+                        value_type: Type::String,
+                    },
+                    Parameter {
+                        fixed: false,
+                        optional: false,
+                        name: "amount",
+                        value_type: Type::Number,
+                    },
+                ],
+                return_type: Type::Number,
+            },
+            Signature {
+                parameters: &[
+                    Parameter {
+                        fixed: false,
+                        optional: false,
+                        name: "option",
+                        value_type: Type::String,
+                    },
+                    Parameter {
+                        fixed: false,
+                        optional: false,
+                        name: "enabled",
                         value_type: Type::Boolean,
                     },
                 ],
@@ -556,6 +629,7 @@ mod tests {
 
         for (name, kind) in [
             ("choose", SymbolKind::Function(&CHOOSE)),
+            ("configured", SymbolKind::Function(&CONFIGURED)),
             ("broad", SymbolKind::Value(Type::String)),
             (
                 "subset",
@@ -643,5 +717,38 @@ mod tests {
 
             assert_eq!(actual, Type::Boolean, "{expression}");
         }
+    }
+    #[test]
+    fn configured_overloads_accept_their_fixed_and_dynamic_groups() {
+        let scope = scope_with_options();
+
+        for (expression, expected) in [
+            ("configured(option: 'x', amount: 1)", Type::Number),
+            ("configured(option: subset, enabled: true)", Type::Boolean),
+        ] {
+            let actual = parse_with_diagnostics(expression)
+                .unwrap()
+                .check(&scope)
+                .unwrap();
+
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn overload_filtering_rejects_nonfixed_values_in_a_fixed_group() {
+        let scope = scope_with_options();
+        let expression = "configured(option: subset, amount: 1)";
+
+        let error = parse_with_diagnostics(expression)
+            .unwrap()
+            .check(&scope)
+            .unwrap_err();
+
+        assert!(
+            error
+                .message
+                .starts_with("Incompatible argument groups for configured:")
+        );
     }
 }

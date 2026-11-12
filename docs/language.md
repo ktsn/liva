@@ -199,6 +199,44 @@ also inherit displayed velocity, as described under Automatic spring momentum.
 A dynamic property without timing follows input immediately; unrelated running effects
 continue. Timing and value ownership follow the layer cascade described below.
 
+## Property controller option types
+
+The compiler registers these `link` signatures:
+
+- `link(input: number, sensitivity: number = 1)` returns a scalar controller.
+- `link(input: number, component: "x" | "y", sensitivity: number = 1)` returns an
+  XYZ vector controller, placing the scalar input on the selected axis.
+- `link(input: { x: number, y: number }, sensitivity: number = 1)` returns an XYZ
+  vector controller. A component argument is not accepted for vector input.
+
+Omitting `component` preserves the scalar/vector input distinction. When supplied,
+its value must be both permitted and provably fixed for the call. Direct literals,
+parentheses, aliases (including forward bindings), and singleton-annotated host
+parameters establish this proof. Duplicate-only unions such as `"x" | 'x'` also
+have one possible decoded value. A parameter of type `"x" | "y"` has two permitted
+values and cannot establish a fixed component; broad `string`, unsupported strings
+such as `"z"`, and non-string inputs also fail compilation.
+
+```liva
+motion mapped(axis: "y", input: number) {
+  let selected = axis
+  let movement = link(input: input, component: (selected))
+  layer base { translate := movement }
+}
+```
+
+A controller must attach to one target/property address with `:=`; repeating the
+same address is allowed. Permitted components do not relax input-shape or attachment
+checks. These signatures describe the compiler contract; runtime attachment
+integration is tracked separately in [PR #131](https://github.com/ktsn/liva/pull/131).
+Direct runtime calls retain argument and fixed-component validation, including
+rollback when an update attempts to change a call's component.
+
+The component constraint tightens the previous broad-string contract. Replace a
+host `axis: string` parameter with a singleton such as `axis: "x"` for a fixed-axis
+call. A changeable `"x" | "y"` parameter does not provide a migration to dynamic
+component switching; that behavior is unsupported.
+
 ## Expressions and CSS templates
 
 A quoted string expression has the literal type of its decoded value: `"x"`
@@ -638,9 +676,9 @@ carry no implicit CSS units. The available signatures are:
 - `spring(duration: number, bounce: number = 0)`: duration is required, finite,
   and positive in milliseconds; bounce is finite and in `[0, 1)`. This overload
   cannot be mixed with stiffness, damping, or mass.
-- `steps(count: number, position: string = "end")`: count is a positive integer.
-  Position is `start`, `end`, `jump-start`, `jump-end`, `jump-none`, or `jump-both`;
-  `jump-none` requires at least two steps.
+- `steps(count: number, position: "start" | "end" | "jump-start" | "jump-end" | "jump-none" | "jump-both" = "end")`:
+  position is optional and defaults to `"end"`. Count is a positive integer;
+  `"jump-none"` requires at least two steps. Count constraints remain runtime checks.
 - `cubicBezier(x1: number, y1: number, x2: number, y2: number)`: all arguments are
   required and finite; x coordinates must be in `[0, 1]`. Y coordinates may overshoot.
 - Easing constants: `linear`, `ease`, `easeIn`, `easeOut`, `easeInOut`, `stepStart`, `stepEnd`.
@@ -650,6 +688,22 @@ Timing and easing values cannot be interpolated into CSS or used as Boolean guar
 Types are checked by the compiler; argument value errors from evaluated expressions
 are reported by the runtime. Use typed easing values, rather than CSS strings, as
 `tween` arguments. Animation configuration uses typed expressions exclusively.
+
+`steps.position` accepts permitted literals, parentheses, aliases, and parameters
+whose declared candidate set is a subset of the six choices. Unsupported strings,
+non-string values, and broad `string` parameters are compile errors. Runtime calls
+and untrusted definitions still validate positions and numeric count constraints.
+
+This tightens the previous broad-string contract. Migrate a host parameter from
+`position: string` to the choices the application actually supplies, for example:
+
+```liva
+motion stepped(position: "start" | "end", count: number) {
+  let selected = position
+  let curve = steps(count: count, position: selected)
+  layer base { opacity: 1 @tween(easing: curve) }
+}
+```
 
 ### Typed animation decorators
 

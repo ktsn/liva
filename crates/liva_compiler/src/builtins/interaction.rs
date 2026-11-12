@@ -4,6 +4,7 @@ pub const INTERACTION: Function = Function {
     name: "interaction",
     signatures: &[Signature {
         parameters: &[Parameter {
+            fixed: false,
             optional: false,
             name: "target",
             value_type: Type::Target,

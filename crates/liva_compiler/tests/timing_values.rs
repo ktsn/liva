@@ -136,24 +136,86 @@ fn step_easing_accepts_constants_calls_bindings_and_dynamic_arguments() {
         "steps(count: 3, position: 'jump-none')",
     ] {
         let source = format!(
-            "motion sample(n: number, position: string) {{ let curve = {easing}\nlayer base {{ body {{ @tween(duration: 100, easing: curve) opacity ~> {{ 0%: 0 @curve\n100%: 1 }} }} }} }}"
+            "motion sample(n: number, position: \"start\" | \"end\") {{ let curve = {easing}\nlayer base {{ body {{ @tween(duration: 100, easing: curve) opacity ~> {{ 0%: 0 @curve\n100%: 1 }} }} }} }}"
         );
         valid(&source);
     }
 }
 
 #[test]
-fn step_easing_type_checks_without_validating_argument_values() {
+fn step_easing_leaves_numeric_count_constraints_to_runtime() {
     for easing in [
-        "steps(count: 4, position: 'middle')",
-        "steps(count: 4, position: position)",
         "steps(count: 0)",
+        "steps(count: -1)",
+        "steps(count: 1.5)",
+        "steps(count: 1, position: 'jump-none')",
+    ] {
+        valid(&format!(
+            "motion sample {{ let curve = {easing}; layer base {{}} }}"
+        ));
+    }
+}
+
+#[test]
+fn step_positions_accept_all_options_aliases_and_subset_parameters() {
+    for position in [
+        "start",
+        "end",
+        "jump-start",
+        "jump-end",
+        "jump-none",
+        "jump-both",
+    ] {
+        for expression in [
+            format!("'{position}'"),
+            format!("('{position}')"),
+            "alias".into(),
+        ] {
+            valid(&format!(
+                "motion sample {{ let alias = later; let later = '{position}'; let curve = steps(count: 4, position: {expression}); layer base {{}} }}"
+            ));
+        }
+    }
+
+    for annotation in [
+        r#""start""#,
+        r#""end" | 'start' | "end""#,
+        r#""jump-none" | "jump-both""#,
+    ] {
+        valid(&format!(
+            "motion sample(position: {annotation}) {{ let alias = position; let curve = steps(count: 4, position: alias); layer base {{}} }}"
+        ));
+    }
+}
+
+#[test]
+fn step_positions_reject_unproved_or_unsupported_values_at_the_expression() {
+    for (parameters, expression) in [
+        ("", "'middle'"),
+        ("", "('middle')"),
+        ("", "true"),
+        ("", "1"),
+        ("position: string", "position"),
+        (r#"position: "start" | "middle""#, "position"),
     ] {
         let source = format!(
-            "motion sample {{ let position = 'middle'\nlet curve = {easing}\nlayer base {{ body {{ opacity: 1 @tween(easing: curve) }} }} }}"
+            "motion sample({parameters}) {{ let curve = steps(count: 4, position: {expression}); layer base {{}} }}"
         );
 
-        valid(&source);
+        let result = compile(&source, false);
+        let error = result
+            .diagnostics
+            .iter()
+            .find(|error| {
+                error
+                    .message
+                    .starts_with("Invalid argument type for steps.position:")
+            })
+            .unwrap();
+
+        assert!(result.definitions.is_empty());
+        assert_eq!(&source[error.range.start..error.range.end], expression);
+        assert!(error.message.contains(r#"expected "end" | "jump-both" | "jump-end" | "jump-none" | "jump-start" | "start""#), "{}", error.message);
     }
 }
 

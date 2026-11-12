@@ -5,11 +5,13 @@ pub const MEASURE: Function = Function {
     signatures: &[Signature {
         parameters: &[
             Parameter {
+                fixed: false,
                 optional: false,
                 name: "target",
                 value_type: Type::Target,
             },
             Parameter {
+                fixed: false,
                 optional: true,
                 name: "relativeTo",
                 value_type: Type::Target,

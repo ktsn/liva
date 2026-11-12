@@ -116,7 +116,7 @@ assert.deepEqual(
 
 const componentDefinition = decodeBundle(
   compile(
-    `motion mapped(axis: string, input: number) {
+    `motion mapped(axis: "x", input: number) {
   let selected = axis
   let movement = link(input: input, component: (selected))
   layer base { translate := movement }
@@ -134,6 +134,8 @@ function controllerValue(values: VariableValues) {
   return movement.value
 }
 
+// Direct graph callers bypass host descriptors, so retain runtime argument and
+// fixed-component rejection coverage even for otherwise constrained compiler output.
 assert.throws(
   () => new LetBindingGraph(componentBindings, { axis: 'z', input: 10 }),
   /link component must be x or y/,

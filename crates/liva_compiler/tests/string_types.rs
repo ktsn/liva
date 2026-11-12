@@ -123,3 +123,20 @@ fn strings_keep_comparison_and_interpolation_behavior_without_arithmetic() {
         );
     }
 }
+
+#[test]
+fn fixed_string_proofs_require_exactly_one_distinct_decoded_value() {
+    for (source, expected) in [
+        (literal("x"), Some("x")),
+        (literal(""), Some("")),
+        (union(&["x", "x"]), Some("x")),
+        (union(&["", ""]), Some("")),
+        (union(&["x", "y"]), None),
+        (union(&[]), None),
+        (Type::String, None),
+        (Type::Number, None),
+        (Type::Boolean, None),
+    ] {
+        assert_eq!(source.singleton_string(), expected, "{source:?}");
+    }
+}
