@@ -1,8 +1,9 @@
+import { createEventValue, type ReactiveNotification } from './events.ts'
 import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { LetBindingGraph } from './let-bindings.ts'
 import { propertyController } from './controllers.ts'
 import * as functions from './builtins/index.ts'
-import type { ReactiveSubscription, RuntimeValue } from './reactive-value.ts'
+import type { ReactiveCall, ReactiveSubscription, RuntimeValue } from './reactive-value.ts'
 import type { LetBinding, Target, Property } from './definition.ts'
 
 it('evaluates forward dependencies and keeps failed evaluations out of committed snapshots', () => {
@@ -453,4 +454,209 @@ it('resolves later declarations before invoking a shadowed function name', () =>
 
   expect(() => new LetBindingGraph(definitions, {})).toThrow('Value is not callable: drag')
   expect(invoke).not.toHaveBeenCalled()
+})
+
+function eventGraphWithCommitNotifications() {
+  const event = createEventValue()
+  let value: RuntimeValue = { event, offset: 0 }
+  let publish: Parameters<ReactiveSubscription['bind']>[1] | undefined
+  const source: ReactiveCall = {
+    get value() {
+      return value
+    },
+    bind(_targets, update) {
+      publish = update
+
+      return () => {
+        publish = undefined
+      }
+    },
+    prepareUpdate(args) {
+      return {
+        value: { event, offset: args.offset },
+        discard() {},
+        commit() {
+          for (const offset of [1, 2]) {
+            value = { event, offset }
+            publish?.(value, { time: offset * 10, event, snapshots: new Map([[source, value]]) })
+          }
+        },
+      }
+    },
+    dispose() {},
+  }
+  vi.spyOn(functions, 'callBuiltin').mockReturnValue(source)
+  const graph = new LetBindingGraph(
+    [
+      {
+        name: 'source',
+        initializer: {
+          kind: 'call',
+          function: 'eventSource',
+          arguments: [{ name: 'offset', value: { kind: 'reference', path: ['offset'] } }],
+        },
+      },
+    ],
+    { offset: 0 },
+  )
+  const notifications: ReactiveNotification[] = []
+  const observe = (notification?: ReactiveNotification) => {
+    if (notification) notifications.push(notification)
+  }
+  let cleanups = graph.bind(new Map(), observe)
+
+  function unbind() {
+    for (const cleanup of cleanups) cleanup()
+
+    cleanups = []
+  }
+
+  return {
+    graph,
+    event,
+    source,
+    notifications,
+    unbind,
+    rebind() {
+      unbind()
+      cleanups = graph.bind(new Map(), observe)
+    },
+    publish(offset: number) {
+      value = { event, offset }
+      publish?.(value, { time: offset * 10, event, snapshots: new Map([[source, value]]) })
+    },
+    dispose() {
+      unbind()
+      graph.dispose()
+    },
+  }
+}
+
+function eventSnapshots(binding: ReturnType<typeof eventGraphWithCommitNotifications>) {
+  return binding.notifications.map((notification) => notification.snapshots.get(binding.source))
+}
+
+it.each(['deliver', 'unbind'] as const)(
+  'serializes distinct occurrences published during commit and suppresses obsolete delivery: %s',
+  async (mode) => {
+    const binding = eventGraphWithCommitNotifications()
+
+    binding.graph.evaluate({ offset: 1 })
+
+    expect(binding.notifications).toEqual([])
+
+    if (mode === 'unbind') binding.unbind()
+
+    await Promise.resolve()
+
+    const offsets = mode === 'deliver' ? [1, 2] : []
+
+    expect(eventSnapshots(binding)).toEqual(
+      offsets.map((offset) => ({ event: binding.event, offset })),
+    )
+
+    binding.dispose()
+  },
+)
+
+it.each(['deliver', 'rebind', 'dispose'] as const)(
+  'keeps later occurrences behind commit-time events with binding lifecycle=%s',
+  async (mode) => {
+    const binding = eventGraphWithCommitNotifications()
+    binding.graph.evaluate({ offset: 1 })
+
+    if (mode === 'rebind') binding.rebind()
+    if (mode === 'dispose') binding.dispose()
+
+    binding.publish(3)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const offsets = mode === 'deliver' ? [1, 2, 3] : mode === 'rebind' ? [3] : []
+
+    expect(eventSnapshots(binding)).toEqual(
+      offsets.map((offset) => ({ event: binding.event, offset })),
+    )
+
+    binding.dispose()
+  },
+)
+
+it.each([
+  'initial bind',
+  'evaluation',
+  'evaluation with pending event',
+  'rebind with pending event',
+] as const)('discards events from failed subscription work during %s', async (phase) => {
+  const event = createEventValue()
+  const failure = new Error('Rejected candidate binding')
+  let bindingAttempt = 0
+  let publishOrdinary: (() => void) | undefined
+  vi.spyOn(functions, 'callBuiltin').mockImplementation((name, args) => {
+    const revision = Number(args.revision)
+    const value = { event, revision }
+    const source: ReactiveSubscription = {
+      value,
+      bind(_targets, publish) {
+        if (name === 'first') bindingAttempt++
+
+        if (name === 'first' && revision === 0 && bindingAttempt === 1) {
+          publishOrdinary = () => publish(value)
+        }
+
+        if (
+          name === 'second' &&
+          (revision === 1 || (phase === 'rebind with pending event' && bindingAttempt === 2))
+        )
+          throw failure
+
+        if (name === 'first' && (revision === 1 || phase.includes('pending event'))) {
+          publish(value, {
+            time: (bindingAttempt - 1 + revision) * 10,
+            event,
+            snapshots: new Map([[source, value]]),
+          })
+        }
+
+        return () => {}
+      },
+    }
+    return source
+  })
+  const definitions: LetBinding[] = ['first', 'second'].map((name) => ({
+    name: `observed${name}`,
+    initializer: {
+      kind: 'call',
+      function: name,
+      arguments: [{ name: 'revision', value: { kind: 'reference', path: ['revision'] } }],
+    },
+  }))
+  const graph = new LetBindingGraph(definitions, { revision: phase === 'initial bind' ? 1 : 0 })
+  const received: ReactiveNotification[] = []
+  let ordinaryUpdates = 0
+  const observe = (notification?: ReactiveNotification) => {
+    if (notification) received.push(notification)
+    else ordinaryUpdates++
+  }
+
+  if (phase !== 'initial bind') graph.bind(new Map(), observe)
+  if (phase.includes('pending event')) publishOrdinary?.()
+
+  const attempt =
+    phase === 'initial bind' || phase === 'rebind with pending event'
+      ? () => graph.bind(new Map(), observe)
+      : () => graph.evaluate({ revision: 1 })
+
+  expect(attempt).toThrow(failure)
+
+  await Promise.resolve()
+  await Promise.resolve()
+
+  const expectedTimes = phase.includes('pending event') ? [0] : []
+
+  expect(received.map((notification) => notification.time)).toEqual(expectedTimes)
+  expect(ordinaryUpdates).toBe(phase.includes('pending event') ? 1 : 0)
+
+  graph.dispose()
 })

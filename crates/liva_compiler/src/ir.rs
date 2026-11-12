@@ -44,6 +44,8 @@ pub struct Layer {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GuardedTransition {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<Expression>,
     pub from: String,
     pub to: String,
     pub when: Expression,

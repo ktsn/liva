@@ -8,8 +8,10 @@ motion controller {
     translate: 0 0
     state closed initial {}
     state open { translate: 96px 0 }
-    transition closed -> open when pointer.released && projected > 48
-    transition open -> closed when pointer.released && projected <= 48
+    on pointer.release {
+      transition closed -> open when projected > 48
+      transition open -> closed when projected <= 48
+    }
   }
 
   layer dragging when pointer.active {

@@ -19,6 +19,13 @@ type CallSite = {
 
 type CallSites = Map<string, Map<number, CallSite>>
 
+/** One subscription session; identity separates queued occurrences from later bindings. */
+type SubscriptionBinding = {
+  targets: ReadonlyMap<string, HTMLElement>
+  update: (notification?: ReactiveNotification) => void
+  cleanups: Map<ReactiveSubscription, () => void>
+}
+
 /**
  * Reads call results within one synchronous evaluation. Binding names and call-site
  * indices must identify the same expression across evaluations. Do not retain this
@@ -46,21 +53,47 @@ export class ReactiveCallStore {
   private disposed = false
   private notificationPending = false
   private notificationQueued = false
+  private eventNotificationQueued = false
+  private readonly eventNotifications: {
+    binding: SubscriptionBinding
+    notification: ReactiveNotification
+  }[] = []
 
   private notify = (notification?: ReactiveNotification) => {
     if (!this.binding) return
 
-    if (!this.evaluating) {
+    if (!this.evaluating && !this.eventNotificationQueued) {
       this.binding.update(notification)
       return
     }
 
     // Binding and commit may publish synchronously. Reentry here would expose only
     // part of the candidate state, so wait until the store leaves the current phase.
-    this.notificationPending = true
+    if (notification?.event) this.eventNotifications.push({ binding: this.binding, notification })
+    else this.notificationPending = true
   }
 
   private flushNotifications() {
+    // Event pulses carry distinct snapshots and must retain their order rather than
+    // coalescing like ordinary state changes. A replaced binding cannot receive them.
+    if (this.eventNotifications.length > 0 && !this.eventNotificationQueued) {
+      const pending = this.eventNotifications.splice(0)
+      this.eventNotificationQueued = true
+
+      queueMicrotask(() => {
+        try {
+          // Keep the queue owned through delivery. Synchronous publications made
+          // after scheduling or during a callback must follow this entire batch.
+          for (const { binding, notification } of pending) {
+            if (this.binding === binding) binding.update(notification)
+          }
+        } finally {
+          this.eventNotificationQueued = false
+          this.flushNotifications()
+        }
+      })
+    }
+
     if (!this.notificationPending) return
 
     this.notificationPending = false
@@ -75,11 +108,7 @@ export class ReactiveCallStore {
     })
   }
 
-  private binding?: {
-    targets: ReadonlyMap<string, HTMLElement>
-    update: (notification?: ReactiveNotification) => void
-    cleanups: Map<ReactiveSubscription, () => void>
-  }
+  private binding?: SubscriptionBinding
 
   /**
    * Borrows caches for retainedBindings from previous. The caller must establish
@@ -109,6 +138,8 @@ export class ReactiveCallStore {
     // Isolate candidate caches and snapshots while the callback evaluates and validates
     // the whole graph. Notifications cannot reenter until this transaction finishes.
     this.evaluating = true
+    const pendingEvents = this.eventNotifications.length
+    const pendingNotification = this.notificationPending
     const evaluation = new PreparedCalls(this.calls, this.initializing, notification)
     let committed = false
 
@@ -138,7 +169,8 @@ export class ReactiveCallStore {
         // Prepared updates have not changed live calls. Release only resources created
         // by this attempt and suppress notifications from its unsuccessful binding work.
         evaluation.discard()
-        this.notificationPending = false
+        this.notificationPending = pendingNotification
+        this.eventNotifications.length = pendingEvents
       }
 
       this.evaluating = false
@@ -233,16 +265,29 @@ export class ReactiveCallStore {
     targets: ReadonlyMap<string, HTMLElement>,
     update: (notification?: ReactiveNotification) => void,
   ): (() => void)[] {
+    const previous = this.binding
+    const pendingEvents = this.eventNotifications.length
+    const pendingNotification = this.notificationPending
     const binding = { targets, update, cleanups: new Map<ReactiveSubscription, () => void>() }
     this.binding = binding
 
     // Initial DOM reads may notify immediately. Use the evaluation guard until every
     // subscription has bound so the consumer cannot observe a partially bound store.
     this.evaluating = true
+    let bound = false
 
     try {
       this.updateSubscriptions(callResults(this.calls))
+      bound = true
     } finally {
+      if (!bound) {
+        // Added subscriptions were cleaned by updateSubscriptions. Discard their
+        // publications too, without erasing occurrences accepted before this bind.
+        this.eventNotifications.length = pendingEvents
+        this.notificationPending = pendingNotification
+        this.binding = previous
+      }
+
       this.evaluating = false
       this.flushNotifications()
     }

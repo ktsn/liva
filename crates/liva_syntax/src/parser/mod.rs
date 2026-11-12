@@ -2,7 +2,8 @@ pub(crate) mod expression;
 mod template;
 
 use crate::ast::{
-    AstNode, Block, Document, HasHeader, Layer, Motion, PropertyBlock, State, Target, Transition,
+    AstNode, Block, Document, HasHeader, Layer, Motion, OnBlock, PropertyBlock, State, Target,
+    Transition, significant_range,
 };
 use crate::lexer::{Token, TokenKind, lex};
 use crate::{Diagnostic, Kind, Liva, Parse, Range, SyntaxNode, is_name, is_property};
@@ -193,7 +194,7 @@ impl Parser<'_> {
                     break;
                 }
 
-                if depth == 2
+                if depth >= 2
                     && self.tokens[begin].text == "transition"
                     && header_words == 4
                     && self.at() == "when"
@@ -203,6 +204,16 @@ impl Parser<'_> {
                     self.expression_region(true);
                     self.end();
                     guarded_transition = true;
+                    break;
+                }
+
+                if self.tokens[begin].text == "on"
+                    && header_words == 1
+                    && !self.tokens[self.index].trivia
+                {
+                    self.start(Kind::Condition);
+                    self.expression_region(true);
+                    self.end();
                     break;
                 }
 
@@ -242,7 +253,14 @@ impl Parser<'_> {
                 self.gap();
             }
 
-            if guarded_transition && self.at() != "{" {
+            if (guarded_transition
+                || (self
+                    .tokens
+                    .get(begin)
+                    .is_some_and(|token| token.text == "transition")
+                    && header_words == 4))
+                && self.at() != "{"
+            {
                 self.builder
                     .start_node_at(checkpoint, Liva::kind_to_raw(Kind::Block));
                 self.end();
@@ -611,7 +629,7 @@ pub fn parse(source: &str) -> Parse {
     p.lexical_diagnostics.append(&mut p.diagnostics);
     p.lexical_diagnostics.append(&mut p.expression_diagnostics);
     p.diagnostics = p.lexical_diagnostics;
-    validate_headers(&root, 0, &mut p.diagnostics);
+    validate_blocks(&root, 0, &mut p.diagnostics);
 
     Parse {
         root,
@@ -619,8 +637,12 @@ pub fn parse(source: &str) -> Parse {
     }
 }
 
-fn validate_headers(node: &impl AstNode, depth: usize, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_blocks(node: &impl AstNode, depth: usize, diagnostics: &mut Vec<Diagnostic>) {
     for block in node.children::<Block>() {
+        if let Some(event) = OnBlock::cast(block.syntax().clone()) {
+            validate_event_structure(&event, diagnostics);
+        }
+
         let header = block.header().unwrap_or_default();
         let words: Vec<_> = header.split_whitespace().collect();
         let valid = if depth == 0 {
@@ -633,6 +655,8 @@ fn validate_headers(node: &impl AstNode, depth: usize, diagnostics: &mut Vec<Dia
                 ["layer", name, "when", ..] => is_name(name) && words.len() > 3,
                 _ => false,
             }
+        } else if OnBlock::cast(block.syntax().clone()).is_some() {
+            words.first() == Some(&"on") && words.len() > 1
         } else if State::cast(block.syntax().clone()).is_some() {
             match words.as_slice() {
                 ["state", name] => is_name(name),
@@ -645,7 +669,7 @@ fn validate_headers(node: &impl AstNode, depth: usize, diagnostics: &mut Vec<Dia
                 ["transition"] | ["enter"] | ["leave"] => true,
                 ["transition", from, "->", to] => is_name(from) && is_name(to),
                 ["transition", from, "->", to, "when", ..] => {
-                    depth == 2 && is_name(from) && is_name(to) && words.len() > 5
+                    (depth == 2 || depth == 3) && is_name(from) && is_name(to) && words.len() > 5
                 }
                 _ => false,
             }
@@ -684,6 +708,32 @@ fn validate_headers(node: &impl AstNode, depth: usize, diagnostics: &mut Vec<Dia
             ));
         }
 
-        validate_headers(&block, depth + 1, diagnostics);
+        validate_blocks(&block, depth + 1, diagnostics);
+    }
+}
+
+fn validate_event_structure(event: &OnBlock, diagnostics: &mut Vec<Diagnostic>) {
+    let layer = event.syntax().parent().and_then(Layer::cast);
+    let range = || significant_range(&event.header_node().expect("on block has a header"));
+
+    if layer.is_none_or(|layer| layer.states().next().is_none()) {
+        diagnostics.push(Diagnostic::error(
+            "syntax.event",
+            "on blocks belong directly inside a stateful layer",
+            range(),
+        ));
+    }
+
+    if event
+        .syntax()
+        .children()
+        .any(|child| child.kind() != Kind::Header && Transition::cast(child).is_none())
+        || event.decorators().next().is_some()
+    {
+        diagnostics.push(Diagnostic::error(
+            "syntax.event",
+            "on blocks contain only layer transitions and accept no decorator",
+            range(),
+        ));
     }
 }

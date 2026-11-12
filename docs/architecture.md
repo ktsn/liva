@@ -587,6 +587,11 @@ supply spring-to-spring velocity at interruption time, without polling. Property
 read/serialize canonical values separately from input mapping and effective ownership. Per-element physical/component histories
 survive ordinary retargeting and reset at lifecycle boundaries.
 
-Reactive notifications carry timestamped source snapshots so controller observations
-and dependent expressions use the same input sample. The store supplies that context
-to reactive calls without exposing it to expression evaluation.
+Reactive notifications can carry an occurrence and timestamped source snapshot map.
+The binding graph stages dependent expressions against that map. An instance first
+applies terminal input to old owners, freezes observations, resolves all guards, then
+commits composition and property effects. Publications during evaluation are queued;
+event occurrences have FIFO identity and are never collapsed into ordinary updates.
+Target/source replacement clears obsolete queued work. Inspection uses snapshot-only
+evaluation and preview freezes on-demand controller snapshots; it cannot advance
+input events.

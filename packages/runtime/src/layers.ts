@@ -1,3 +1,4 @@
+import type { RuntimeValue } from './reactive-value.ts'
 import {
   compositionLayerSelection,
   resolveLayerCascade,
@@ -53,8 +54,9 @@ export function resolveLayers(
   values: VariableValues,
   previous: ReadonlyMap<string, string> = new Map(),
   advance = true,
+  event?: RuntimeValue,
 ): LayerResolution {
-  return resolveLayerSelection(definition, values, previous, advance)
+  return resolveLayerSelection(definition, values, previous, advance, undefined, event)
 }
 
 function resolveLayerSelection(
@@ -63,6 +65,7 @@ function resolveLayerSelection(
   previous: ReadonlyMap<string, string>,
   advance: boolean,
   selection?: Composition,
+  event?: RuntimeValue,
 ): LayerResolution {
   const activeLayers: Record<string, boolean> = Object.create(null)
   const states = new Map<string, string>()
@@ -98,7 +101,10 @@ function resolveLayerSelection(
       const selected = advance
         ? layer.transitions?.findLast(
             (transition) =>
-              transition.from === current && evaluate(transition.when, values) === true,
+              transition.from === current &&
+              (!transition.event ||
+                (event !== undefined && evaluate(transition.event, values) === event)) &&
+              evaluate(transition.when, values) === true,
           )
         : undefined
       const next = selected?.to ?? current

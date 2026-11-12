@@ -91,6 +91,7 @@ export interface State {
 }
 
 export interface GuardedTransition {
+  readonly event?: Expression
   readonly from: string
   readonly to: string
   readonly when: Expression

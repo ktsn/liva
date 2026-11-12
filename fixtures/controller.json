@@ -91,26 +91,22 @@
           },
           "transitions": [
             {
+              "event": {
+                "kind": "reference",
+                "path": ["pointer", "release"]
+              },
               "from": "closed",
               "to": "open",
               "when": {
                 "kind": "binary",
-                "operator": "&&",
+                "operator": ">",
                 "left": {
                   "kind": "reference",
-                  "path": ["pointer", "released"]
+                  "path": ["projected"]
                 },
                 "right": {
-                  "kind": "binary",
-                  "operator": ">",
-                  "left": {
-                    "kind": "reference",
-                    "path": ["projected"]
-                  },
-                  "right": {
-                    "kind": "number",
-                    "value": 48
-                  }
+                  "kind": "number",
+                  "value": 48
                 }
               },
               "transition": {
@@ -118,26 +114,22 @@
               }
             },
             {
+              "event": {
+                "kind": "reference",
+                "path": ["pointer", "release"]
+              },
               "from": "open",
               "to": "closed",
               "when": {
                 "kind": "binary",
-                "operator": "&&",
+                "operator": "<=",
                 "left": {
                   "kind": "reference",
-                  "path": ["pointer", "released"]
+                  "path": ["projected"]
                 },
                 "right": {
-                  "kind": "binary",
-                  "operator": "<=",
-                  "left": {
-                    "kind": "reference",
-                    "path": ["projected"]
-                  },
-                  "right": {
-                    "kind": "number",
-                    "value": 48
-                  }
+                  "kind": "number",
+                  "value": 48
                 }
               },
               "transition": {
