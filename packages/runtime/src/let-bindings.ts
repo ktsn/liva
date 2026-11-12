@@ -1,3 +1,4 @@
+import type { ReactiveNotification } from './events.ts'
 import { ROOT_TARGET } from './targets.ts'
 import type {
   Definition,
@@ -5,6 +6,8 @@ import type {
   MotionParameter,
   LetBinding,
   CallExpression,
+  Property,
+  Target,
 } from './definition.ts'
 import { ReactiveCallStore } from './reactive-call-store.ts'
 import type { RuntimeValue } from './reactive-value.ts'
@@ -44,16 +47,23 @@ type LetBindingNode = {
  *
  * Construction evaluates the bindings and throws on dependency cycles or invalid
  * expressions. A replacement may reuse calls from a previous graph only for the
- * same binding name, structurally identical initializer, and unchanged arguments.
+ * same binding name, structurally identical initializer, unchanged arguments, and
+ * unchanged receiving addresses derived from the supplied layer/state targets.
  */
 export class LetBindingGraph {
   private readonly nodes: LetBindingNode[] = []
   private readonly calls: ReactiveCallStore
+  private readonly addresses: ReadonlyMap<string, string>
 
+  /**
+   * targets must include common styles and every state, including inactive states.
+   * Omit targets only for graphs with no property attachments.
+   */
   constructor(
     letBindings: readonly LetBinding[],
     values: VariableValues,
     previous?: LetBindingGraph,
+    targets: readonly Target<Property>[] = [],
   ) {
     const pending = new Map(letBindings.map((binding) => [binding.name, binding]))
     const visiting = new Set<string>()
@@ -72,15 +82,6 @@ export class LetBindingGraph {
       visiting.delete(name)
       pending.delete(name)
 
-      // Matching initializer structure keeps expression-local call indices meaningful
-      // across definitions; equal binding names alone cannot establish compatibility.
-      const retained = previous?.nodes.find(
-        (node) =>
-          node.definition.name === name &&
-          JSON.stringify(node.definition.initializer) === JSON.stringify(definition.initializer),
-      )
-      if (retained) retainedBindings.push(name)
-
       this.nodes.push({
         definition,
         callIds: new Map(collectCalls(definition.initializer).map((call, index) => [call, index])),
@@ -88,6 +89,22 @@ export class LetBindingGraph {
     }
 
     for (const binding of letBindings) visit(binding.name)
+
+    // Resolve property references only after dependency sorting has rejected cycles.
+    // Address changes must replace the call even when its authored arguments match.
+    this.addresses = controllerAddresses(this.nodes, targets)
+
+    for (const node of this.nodes) {
+      const retained = previous?.nodes.find(
+        (candidate) =>
+          candidate.definition.name === node.definition.name &&
+          JSON.stringify(candidate.definition.initializer) ===
+            JSON.stringify(node.definition.initializer) &&
+          previous.addresses.get(node.definition.name) === this.addresses.get(node.definition.name),
+      )
+
+      if (retained) retainedBindings.push(node.definition.name)
+    }
 
     // The candidate store borrows compatible caches for its first evaluation without
     // updating live calls. Acceptance or rejection later decides which graph keeps them.
@@ -105,6 +122,7 @@ export class LetBindingGraph {
   evaluate(
     variables: VariableValues,
     validate: (values: VariableValues) => void = () => {},
+    notification?: ReactiveNotification,
   ): VariableValues {
     return this.calls.evaluate((transaction) => {
       // Keep candidate variables local so a later failure cannot publish a partial
@@ -141,7 +159,7 @@ export class LetBindingGraph {
       validate(values)
 
       return values
-    })
+    }, notification)
   }
 
   /**
@@ -154,9 +172,58 @@ export class LetBindingGraph {
   }
 
   /** Activates call subscriptions for these targets and returns their cleanup callbacks. */
-  bind(targets: ReadonlyMap<string, HTMLElement>, update: () => void): (() => void)[] {
+  bind(
+    targets: ReadonlyMap<string, HTMLElement>,
+    update: (notification?: ReactiveNotification) => void,
+  ): (() => void)[] {
     return this.calls.bind(targets, update)
   }
+}
+
+/** Derives stable receiving-address keys for calls and their whole-value aliases. */
+function controllerAddresses(
+  nodes: readonly LetBindingNode[],
+  targets: readonly Target<Property>[],
+): ReadonlyMap<string, string> {
+  const addresses = new Map<string, Set<string>>()
+
+  const add = (name: string, address: string) => {
+    let entries = addresses.get(name)
+
+    if (!entries) {
+      entries = new Set()
+      addresses.set(name, entries)
+    }
+
+    entries.add(address)
+  }
+
+  // Include inactive states too: an attachment belongs to the call's lifetime,
+  // not just to the currently effective style. Duplicate declarations share a key.
+  for (const target of targets) {
+    for (const property of target.properties) {
+      if (property.value.kind !== 'binding') continue
+
+      const expression = property.value.expression
+
+      if (expression.kind === 'reference' && expression.path.length === 1)
+        add(expression.path[0], JSON.stringify([target.name, property.name]))
+    }
+  }
+
+  // Consumers precede dependencies in reverse topological order. Propagating here
+  // resolves forward aliases without evaluating calls or duplicating cycle checks.
+  for (const { definition } of nodes.toReversed()) {
+    const expression = definition.initializer
+
+    if (expression.kind === 'reference' && expression.path.length === 1) {
+      for (const address of addresses.get(definition.name) ?? []) add(expression.path[0], address)
+    }
+  }
+
+  return new Map(
+    [...addresses].map(([name, entries]) => [name, JSON.stringify([...entries].toSorted())]),
+  )
 }
 
 function collectCalls(expression: Expression): CallExpression[] {

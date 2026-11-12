@@ -421,9 +421,9 @@ class Link implements ReactiveCall, PropertyController {
  * samples expire after DIRECT_SAMPLE_WINDOW_MS, including unchanged-input releases.
  * No frames or notifications are scheduled for stationary input or running animations.
  *
- * The receiving owner validates compatibility: scalar adapters target numeric
- * dimensions/inset longhands or scalar rotate, and vector/component adapters target
- * translate. Configure before binding, acquire before controlling, then apply and
+ * The caller must pair scalar adapters with numeric dimensions/inset longhands
+ * or scalar rotate, and vector/component adapters with translate.
+ * Configure before binding, acquire before controlling, then apply and
  * record proposed writes through the address's PropertyMotion on the same clock.
  * Invalid inputs and updates throw; unreadable targets retain mapped fallback values.
  */

@@ -798,6 +798,71 @@ Use the result in ordinary guarded transitions to return local feedback to idle.
 Vue continues to own asynchronous requests, their outcomes, and duplicate submission
 prevention. The async-submit playground demonstrates both success and failure.
 
+## Property controllers
+
+`link(input: number)` returns a scalar controller. `link(input: {x, y})` returns a
+translate controller; scalar input with `component: "x"` or `"y"` also targets
+translate. The component selects the destination axis and accepts an ordinary string
+expression, including a let binding or motion parameter. `sensitivity` defaults to 1
+and can be negative. Attach with `:=`, keeping ordinary CSS destinations under `:`.
+
+```liva
+let pointer = drag(target: self)
+let movement = link(input: pointer.offset.x, component: "x")
+let projected = movement.value.x + movement.velocity.x * 200
+
+@spring(stiffness: 300, damping: 25)
+layer position {
+  translate: 0 0
+  state closed initial {}
+  state open { translate: 96px 0 }
+  transition closed -> open when pointer.released && projected > 48
+  transition open -> closed when pointer.released && projected <= 48
+}
+layer dragging when pointer.active { translate := movement }
+```
+
+Every declared controller must have one statically resolved target/property address,
+including unused controllers and aliases. Repeated declarations at that same address
+are allowed. Aliases share the original controller; inline calls have separate
+identities. Scalar adapters support width/height, inline/block-size,
+physical/logical inset longhands, and scalar rotate. Input delta 1 means 1 CSS pixel
+or 1 degree before sensitivity. Translate preserves captured Z and unmapped axes.
+Generic inputs have no pointer provenance: transform viewport input explicitly when
+local coordinates are needed. The runtime rejects component values other than `"x"`
+or `"y"` and rejects a change of component during a controller's lifetime, preserving
+the last committed state. These value constraints are not checked by the compiler.
+Unbound controllers, multiple addresses, and input feedback cycles are compile errors.
+The compiler checks that `:=` receives a controller, but does not check compatibility
+between its value shape and the receiving CSS property. Pair adapters with the supported
+property forms above; accepting a binding does not add runtime support for other properties
+or shapes.
+
+Control captures displayed property P0 and input I0 on activation, then writes
+`P0 + (input - I0) * sensitivity` immediately. Ordinary input changes preserve this
+baseline. Sensitivity changes rebase at the displayed pose. Losing and reacquiring
+ownership captures a new baseline; retaining the same effective controller does not.
+Underlying destination changes take effect when control ends. Resized application
+state must be committed by the application. Reduced motion keeps direct control
+responsive and settles subsequent animations immediately.
+
+Controller snapshots expose `.value`, `.velocity`, and `.attached` on input/application
+updates and explicit snapshot reads. They do not poll or notify on animation frames.
+`.value` reads the displayed property, or the proposed relative-control position when
+an input update is being evaluated. `.velocity` is derived only from committed input
+changes after sensitivity/component mapping, in canonical units per millisecond.
+It does not describe another owner's animation or the return spring. Unmapped
+translate components have zero input velocity. Control acquisition and sensitivity
+changes reset input history; expired movement reads as zero even when input is unchanged.
+
+Missing, detached, or non-rendered targets return mapped-input fallback positions
+with `attached: false`; availability changes alone do not publish updates. Input
+velocity continues independently of target availability. Undecodable visible values
+report a deduplicated diagnostic when binding/control is attempted and preserve normal
+presentation until recovery. Invalid or non-finite inputs fail the transaction and
+retain committed state. Input-derived velocity can differ from displayed motion if
+external CSS constrains or overrides the controlled property.
+
 ## Automatic spring momentum
 
 Endpoint-only springs inherit displayed velocity across direct updates, tweens,
@@ -814,10 +879,12 @@ Compatible units, numeric calc(), and percentages resolve through browser comput
 styles. Translate percentages use the element's untransformed border box. Other
 length percentages use their CSS containing block. Relative destinations retarget
 from the displayed pose when reference sizes, relevant variables, fonts, or viewport
-change. Auto, discrete, and unreadable values retain ordinary animation.
+change. Active direct-control sessions retain their captured pixel baseline during
+layout changes. Auto, discrete, and unreadable values retain ordinary animation.
 Authored units and expressions remain unchanged.
 
-Ordinary direct updates use recent displayed samples with an 80ms freshness window. Stationary holds expire
+Controller release supplies recent mapped-input velocity; ordinary direct updates use
+recent displayed samples. Both use an 80ms freshness window. Stationary holds expire
 movement; same-time updates never divide by zero. Native effects supply sampled derivatives;
 sampled springs retain analytic component velocity, including momentum beyond
 rendered opacity bounds. Opacity rendering clamps to [0,1], without resetting the
@@ -829,5 +896,6 @@ target: the solver adjusts natural frequency while retaining the requested bounc
 ratio, then pins the final sample to the destination. It is not an exact trajectory
 or mathematical rest-time guarantee. Physics sampling retains the existing 10-second
 and 8192-sample limits. Mount, target replacement, and disposal reset motion history.
-Ordinary editor playback starts at rest. Captured gesture scenario playback is deferred to
+Ordinary editor playback starts at rest; attachments show a frozen live snapshot and
+remain source-owned expressions. Captured gesture scenario playback is deferred to
 #116; scrubbing does not drive input.

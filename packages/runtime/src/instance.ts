@@ -1,5 +1,7 @@
 import { propertyReference, propertyAddresses, canonicalTracks } from './property-codec.ts'
 import { propertyRule } from './property-rules.ts'
+import { propertyController, type PropertyController } from './controllers.ts'
+import type { ReactiveNotification } from './events.ts'
 import {
   layerPropertyChanged,
   layerTargets,
@@ -84,6 +86,8 @@ export class LivaInstance {
   private readonly dirtyProperties = new Map<HTMLElement, Set<string>>()
   private referenceFrame?: number
   private readonly referenceRetargets = new Set<string>()
+  private controllers = new Map<string, PropertyController>()
+  private controllerInstances = new Set<PropertyController>()
   private enterSessions = new Set<LifecycleSession>()
   private leaveSessions = new Set<LifecycleSession>()
   private settledLifecycleSessions = new WeakSet<LifecycleSession>()
@@ -102,13 +106,19 @@ export class LivaInstance {
     inputs: Readonly<Record<string, unknown>> = {},
     report: (diagnostic: RuntimeDiagnostic) => void = console.warn,
   ) {
+    this.report = report
     const variables = parameterValues(definition.parameters ?? [], targetValues(definition), inputs)
-    this.letBindings = new LetBindingGraph(definition.letBindings ?? [], variables)
+    this.letBindings = new LetBindingGraph(
+      definition.letBindings ?? [],
+      variables,
+      undefined,
+      layerTargets(definition),
+    )
     this.values = this.letBindings.evaluate(variables)
     this.definition = definition
+    this.configureControllers(definition, this.values)
     this.evaluateEvents(false)
     this.layerResolution = resolveLayers(definition, this.values)
-    this.report = report
     this.motion = matchMedia('(prefers-reduced-motion: reduce)')
     this.motion.addEventListener('change', this.motionChanged)
   }
@@ -185,6 +195,37 @@ export class LivaInstance {
     return this.active.map((a) => a.animation)
   }
 
+  private configureControllers(definition: Definition, values: VariableValues) {
+    this.controllerInstances.clear()
+    for (const target of layerTargets(definition)) {
+      for (const property of target.properties) {
+        if (property.value.kind !== 'binding') continue
+
+        const controller = propertyController(evaluate(property.value.expression, values))
+        this.controllerInstances.add(controller)
+        controller.configure({
+          target: target.name,
+          property: property.name,
+          motion: this.propertyMotion,
+          report: (message) => this.report({ code: 'runtime.controller', message }),
+        })
+      }
+    }
+  }
+
+  private optionalControllerTargets(definition: Definition): ReadonlySet<string> {
+    return new Set(
+      layerTargets(definition)
+        .filter((target) => target.properties.some((property) => property.value.kind === 'binding'))
+        .map((target) => target.name),
+    )
+  }
+
+  private releaseControllers(time = performance.now()) {
+    for (const controller of this.controllers.values()) controller.release(time)
+    this.controllers.clear()
+  }
+
   private orderedResolution(resolution: LayerResolution, definition: Definition): LayerResolution {
     const priority = (
       target: string,
@@ -199,7 +240,11 @@ export class LivaInstance {
       const stateProperty =
         state?.targets
           .find((candidate) => candidate.name === target)
-          ?.properties.findIndex((candidate) => candidate.name === property.name) ?? -1
+          ?.properties.findIndex(
+            (candidate) =>
+              candidate.name === property.name &&
+              (candidate.value.kind !== 'binding' || property.binding !== undefined),
+          ) ?? -1
       const commonProperty =
         layer.targets
           .find((candidate) => candidate.name === target)
@@ -247,8 +292,137 @@ export class LivaInstance {
     return winner.name === sourceProperty
   }
 
+  /**
+   * Resolves effective controller bindings into CSS values and, in live mode,
+   * reconciles controller ownership for the next presentation. Bindings obscured
+   * by other declarations are omitted. If a controller cannot supply a value, the
+   * same composition is resolved without bindings to recover a normal declaration;
+   * properties without a fallback are omitted.
+   *
+   * @param resolution - Layer selection and presentation resolved from definition.
+   * @param values - Expression values used to resolve bindings and fallback styles.
+   * @param time - Acquisition/release time in performance.now()-compatible milliseconds.
+   * @param definition - Source definition matching the resolution's layer owners.
+   * @param live - Acquires effective controllers and releases previous owners when
+   * true; false renders snapshots for inspection/preview without changing ownership.
+   * @returns A new resolution with properties in declaration order. The caller
+   * applies its CSS values to the DOM.
+   * @throws If expression evaluation fails or a binding lacks a controller capability.
+   */
+  private controllerResolution(
+    resolution: LayerResolution,
+    values: VariableValues,
+    time: number,
+    definition = this.definition,
+    live = true,
+  ): LayerResolution {
+    // Declaration order determines ownership, including overlapping shorthand,
+    // longhand, and logical properties that address the same physical CSS property.
+    resolution = this.orderedResolution(resolution, definition)
+
+    if (
+      !resolution.presentation.targets.some((target) =>
+        target.properties.some((property) => property.binding),
+      )
+    ) {
+      // Without effective bindings, live control ends for every previous owner.
+      if (live) this.releaseControllers(time)
+
+      return this.orderedResolution(resolution, definition)
+    }
+
+    // Re-resolve the selected composition without bindings so an unreadable
+    // controller can reveal the normal declaration hidden beneath it.
+    const normal = resolveComposition(
+      {
+        ...definition,
+        layers: definition.layers.map((layer) => ({
+          ...layer,
+          targets: layer.targets.map((target) => ({
+            ...target,
+            properties: target.properties.filter((property) => property.value.kind !== 'binding'),
+          })),
+          states: layer.states?.map((state) => ({
+            ...state,
+            targets: state.targets.map((target) => ({
+              ...target,
+              properties: target.properties.filter((property) => property.value.kind !== 'binding'),
+            })),
+          })),
+        })),
+      },
+      values,
+      resolution.composition,
+    )
+
+    const controllers = new Map<string, PropertyController>()
+    const targets = resolution.presentation.targets.map((target) => ({
+      ...target,
+      properties: target.properties.flatMap((property) => {
+        if (!property.binding) return [property]
+
+        // A binding must own every physical property it affects on each receiver;
+        // otherwise omit it so it cannot overwrite a winning declaration.
+        const elements = this.targetElements.get(target.name) ?? []
+        const obscured = elements.some((element) =>
+          propertyAddresses(element, property.name).some(
+            (address) =>
+              !this.ownsCanonicalProperty(resolution, element, target.name, property.name, address),
+          ),
+        )
+
+        if (obscured) return []
+
+        // Live control acquires from the displayed pose. Inspection and preview
+        // only format the supplied snapshot, leaving live ownership unchanged.
+        const snapshot = evaluate(property.binding, values)
+        const controller = propertyController(snapshot)
+        const key = layerPropertyKey(target.name, property.name)
+        controllers.set(key, controller)
+
+        if (live) controller.acquire(time)
+
+        const value = live
+          ? controller.control()?.value
+          : controller.render(property.name, snapshot)
+
+        if (value !== undefined) return [{ ...property, value }]
+
+        // Missing controller output falls back to the same property's normal
+        // declaration; omit the property if no such declaration exists.
+        const fallback = normal.presentation.targets
+          .find((candidate) => candidate.name === target.name)
+          ?.properties.find((candidate) => candidate.name === property.name)
+
+        return fallback ? [fallback] : []
+      }),
+    }))
+
+    // Release replaced or obscured owners before the caller prepares transitions,
+    // allowing their input velocity to be handed to the next spring.
+    if (live) {
+      for (const [key, controller] of this.controllers) {
+        if (controllers.get(key) !== controller) controller.release(time)
+      }
+
+      this.controllers = controllers
+    }
+
+    // A fallback can belong to an earlier declaration, so restore cascade order
+    // before the caller applies styles or checks physical property ownership.
+    return this.orderedResolution(
+      { ...resolution, presentation: { ...resolution.presentation, targets } },
+      definition,
+    )
+  }
+
   private snapshotValues(definition: Definition): VariableValues {
-    const graph = new LetBindingGraph(definition.letBindings ?? [], this.values, this.letBindings)
+    const graph = new LetBindingGraph(
+      definition.letBindings ?? [],
+      this.values,
+      this.letBindings,
+      layerTargets(definition),
+    )
 
     try {
       return graph.evaluate(this.values)
@@ -265,7 +439,13 @@ export class LivaInstance {
     const values = this.snapshotValues(definition)
 
     return {
-      presentation: resolveComposition(definition, values, composition).presentation,
+      presentation: this.controllerResolution(
+        resolveComposition(definition, values, composition),
+        values,
+        performance.now(),
+        definition,
+        false,
+      ).presentation,
       transition: captureLifecycleDefinition(definition, phase, values),
     }
   }
@@ -279,7 +459,13 @@ export class LivaInstance {
     try {
       const values = this.snapshotValues(definition)
 
-      const resolution = resolveComposition(definition, values, composition, from, transitions)
+      const resolution = this.controllerResolution(
+        resolveComposition(definition, values, composition, from, transitions),
+        values,
+        performance.now(),
+        definition,
+        false,
+      )
 
       return {
         ...resolution,
@@ -395,10 +581,13 @@ export class LivaInstance {
     }
   }
 
-  private cancel(cancelEnter = true) {
+  private cancel(cancelEnter = true, preserveControllerSnapshot = false) {
     this.compositionPreview = false
     this.clearReferenceFrame()
     this.referenceRetargets.clear()
+    if (!preserveControllerSnapshot) {
+      for (const controller of this.controllerInstances) controller.setPreview(false)
+    }
     this.propertyMotion.reset()
     this.dirtyProperties.clear()
     if (cancelEnter) {
@@ -572,9 +761,7 @@ export class LivaInstance {
   private settle(receivingElement?: HTMLElement) {
     if (this.suspended || this.disposed) return
 
-    const resolution = this.orderedResolution(this.layerResolution, this.definition)
-
-    for (const target of resolution.presentation.targets) {
+    for (const target of this.layerResolution.presentation.targets) {
       for (const element of this.targetElements.get(target.name) ?? []) {
         if (receivingElement && element !== receivingElement) continue
 
@@ -593,8 +780,10 @@ export class LivaInstance {
 
     const next = new Map(entries)
     const duplicate = next.size !== entries.length && !hasLifecycle(this.definition)
+    const optional = this.optionalControllerTargets(this.definition)
     const missing = layerTargets(this.definition).some(
-      (target) => target.properties.length > 0 && !next.has(target.name),
+      (target) =>
+        target.properties.length > 0 && !optional.has(target.name) && !next.has(target.name),
     )
     const unchanged =
       !duplicate &&
@@ -609,6 +798,7 @@ export class LivaInstance {
 
     const previousInputs = JSON.stringify(this.values)
 
+    this.releaseControllers()
     this.clearLetBindings()
     this.propertyMotion.reset()
     this.dirtyProperties.clear()
@@ -663,8 +853,10 @@ export class LivaInstance {
       definition.letBindings ?? [],
       variables,
       this.letBindings,
+      layerTargets(definition),
     )
 
+    this.releaseControllers()
     this.clearLetBindings()
     this.cancel()
     this.restore()
@@ -675,13 +867,19 @@ export class LivaInstance {
     this.definition = definition
     this.propertyMotion.reset()
     this.dirtyProperties.clear()
+    this.configureControllers(definition, this.values)
     this.eventValues.clear()
     this.evaluateEvents(false)
     this.layerResolution = resolveLayers(definition, this.values)
     this.suspended =
       this.duplicateBindings ||
       (!hasLifecycle(definition) &&
-        layerTargets(definition).some((t) => t.properties.length > 0 && !this.targets.has(t.name)))
+        layerTargets(definition).some(
+          (t) =>
+            t.properties.length > 0 &&
+            !this.optionalControllerTargets(definition).has(t.name) &&
+            !this.targets.has(t.name),
+        ))
     if (!this.suspended) this.bindLetBindings()
     this.settle()
   }
@@ -711,11 +909,24 @@ export class LivaInstance {
 
     try {
       const values = this.snapshotValues(definition)
-      const previous = resolveComposition(definition, values, from)
-      const next = resolveComposition(definition, values, to, from, transitions)
+      const previous = this.controllerResolution(
+        resolveComposition(definition, values, from),
+        values,
+        performance.now(),
+        definition,
+        false,
+      )
+      const next = this.controllerResolution(
+        resolveComposition(definition, values, to, from, transitions),
+        values,
+        performance.now(),
+        definition,
+        false,
+      )
       const lifecycle = phase ? captureLifecycleDefinition(definition, phase, values) : undefined
 
-      this.cancel()
+      for (const controller of this.controllerInstances) controller.setPreview(true)
+      this.cancel(true, true)
       this.restore()
       this.propertyMotion.reset()
       this.dirtyProperties.clear()
@@ -851,23 +1062,40 @@ export class LivaInstance {
     for (const name of pending) this.onEvent?.(name)
   }
 
-  private applyVariableValues(values: VariableValues) {
+  private applyVariableValues(values: VariableValues, notification?: ReactiveNotification) {
     this.endCompositionPreview()
     const previous = this.values
 
     try {
       let resolution: LayerResolution | undefined
-      values = this.letBindings.evaluate(values, (snapshot) => {
-        resolution = resolveLayers(this.definition, snapshot, this.layerResolution.states)
+      values = this.letBindings.evaluate(
+        values,
+        (snapshot) => {
+          resolution = resolveLayers(this.definition, snapshot, this.layerResolution.states, true)
 
-        for (const event of this.definition.events ?? []) evaluate(event.when, snapshot)
-      })
+          for (const event of this.definition.events ?? []) evaluate(event.when, snapshot)
+        },
+        notification,
+      )
       this.values = values
       this.evaluateEvents()
       if (this.disposed) return
 
+      const time = notification?.time ?? performance.now()
+
+      const terminalControls = [...this.controllers.values()].map((controller) =>
+        controller.control(),
+      )
+
+      for (const controlled of terminalControls) {
+        if (controlled) this.write(controlled.element, controlled.property, controlled.value)
+      }
+
+      this.flushMotionSamples(time)
+
       // Validation above always resolves the complete presentation before committing calls.
-      this.applyLayerResolution(this.layerResolution, resolution!)
+      const next = this.controllerResolution(resolution!, values, time)
+      this.applyLayerResolution(this.layerResolution, next)
       this.onUpdate?.()
     } catch (error) {
       this.values = previous
@@ -876,7 +1104,6 @@ export class LivaInstance {
   }
 
   private applyLayerResolution(previous: LayerResolution, next: LayerResolution) {
-    next = this.orderedResolution(next, this.definition)
     const prepared: ActiveTrack[] = []
     const changed = new Set<string>(this.referenceRetargets)
     for (const entry of this.active) {
@@ -1091,7 +1318,9 @@ export class LivaInstance {
 
   private bindLetBindings() {
     this.letBindingCleanups.push(
-      ...this.letBindings.bind(this.targets, () => this.applyVariableValues(this.values)),
+      ...this.letBindings.bind(this.targets, (notification) =>
+        this.applyVariableValues(this.values, notification),
+      ),
     )
 
     // Inputs can initialize from the bound DOM, before the initial presentation settles.
@@ -1103,10 +1332,16 @@ export class LivaInstance {
       this.layerResolution.states,
       false,
     )
+    this.layerResolution = this.controllerResolution(
+      this.layerResolution,
+      this.values,
+      performance.now(),
+    )
   }
 
   dispose() {
     if (this.disposed) return
+    this.releaseControllers()
     this.leaveSessions.clear()
     for (const session of this.enterSessions) session.cancel('owner-teardown')
     this.enterSessions.clear()

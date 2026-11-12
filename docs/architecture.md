@@ -349,7 +349,7 @@ continue working. Initial mount never animates from an unspecified state.
 `mass * x'' + damping * x' + stiffness * (x - 1) = 0`, with zero initial velocity.
 Analytic solutions cover underdamped, critical and overdamped responses.
 Endpoint-only property handoffs use the same analytic solutions with the incoming
-component velocity, as described under Property motion.
+component velocity, as described under Property motion and event transactions.
 Sampled CSS `linear()` effect easing lets WAAPI interpolate raw CSS endpoints, including
 overshoot. Tween tracks instead use linear effect easing and per-frame easing.
 
@@ -570,10 +570,23 @@ unchanged arguments. Changed or removed calls dispose; editor inspection uses an
 inactive graph and cannot update retained live calls. Binding cleanup cancels
 active resources; final graph disposal also releases the call instance.
 
-### Property motion
+### Property motion and event transactions
 
-Property codecs read and serialize canonical values separately from animation ownership.
-Per-element physical/component histories survive ordinary retargeting and reset at
-lifecycle boundaries. Registered trajectories supply spring-to-spring velocity at
-interruption time without polling. Endpoint-only springs preserve incoming velocity;
-tracks with authored intermediate keyframes retain their choreography.
+Controller capability tokens live in a WeakMap keyed by immutable readable snapshots;
+the expression evaluator uses the same transactional reactive-call protocol as other
+builtins. HMR derives receiving addresses from property bindings and resolves whole-value aliases
+to their originating calls. A call is reusable only when both its initializer and
+receiving addresses match, so moving it to another address replaces it.
+Compiler-only address validation stays in `ControllerBindings`; call expressions
+carry no attachment metadata. Sessions and committed input histories
+are instance-local. Controllers schedule no observation frames or notifications. They
+sample displayed positions on demand and derive velocity only from input updates.
+Acquisition resets input history; release seeds property motion with the fresh input
+derivative before the next spring is prepared. Registered animation trajectories still
+supply spring-to-spring velocity at interruption time, without polling. Property codecs
+read/serialize canonical values separately from input mapping and effective ownership. Per-element physical/component histories
+survive ordinary retargeting and reset at lifecycle boundaries.
+
+Reactive notifications carry timestamped source snapshots so controller observations
+and dependent expressions use the same input sample. The store supplies that context
+to reactive calls without exposing it to expression evaluation.

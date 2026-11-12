@@ -1,8 +1,9 @@
 import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { LetBindingGraph } from './let-bindings.ts'
+import { propertyController } from './controllers.ts'
 import * as functions from './builtins/index.ts'
 import type { ReactiveSubscription, RuntimeValue } from './reactive-value.ts'
-import type { LetBinding } from './definition.ts'
+import type { LetBinding, Target, Property } from './definition.ts'
 
 it('evaluates forward dependencies and keeps failed evaluations out of committed snapshots', () => {
   const definitions: LetBinding[] = [
@@ -96,6 +97,89 @@ it('retains call handles for matching arguments and resolves changed target alia
 
   expect(retained.movement.offset).toBe(first.movement.offset)
   expect(changed.movement.offset).not.toBe(first.movement.offset)
+})
+
+function controllerTargets(
+  name = 'self',
+  property = 'width',
+  alias = 'movement',
+): Target<Property>[] {
+  return [
+    {
+      name,
+      properties: [
+        {
+          name: property,
+          value: { kind: 'binding', expression: { kind: 'reference', path: [alias] } },
+        },
+      ],
+    },
+  ]
+}
+
+const controllerDefinitions: LetBinding[] = [
+  { name: 'alias', initializer: { kind: 'reference', path: ['middle'] } },
+  { name: 'middle', initializer: { kind: 'reference', path: ['movement'] } },
+  { name: 'unused', initializer: { kind: 'reference', path: ['movement'] } },
+  {
+    name: 'movement',
+    initializer: {
+      kind: 'call',
+      function: 'link',
+      arguments: [{ name: 'input', value: { kind: 'number', value: 0 } }],
+    },
+  },
+]
+
+it.each([
+  ['target', controllerTargets('other')],
+  ['property', controllerTargets('self', 'height')],
+  ['removed binding', []],
+])('replaces a controller when its %s changes through forward aliases', (_name, targets) => {
+  const graph = new LetBindingGraph(
+    controllerDefinitions,
+    {},
+    undefined,
+    controllerTargets('self', 'width', 'alias'),
+  )
+  const initial = propertyController(graph.evaluate({}).movement)
+
+  const replacement = new LetBindingGraph(controllerDefinitions, {}, graph, targets)
+  graph.dispose(replacement)
+
+  expect(propertyController(replacement.evaluate({}).movement)).not.toBe(initial)
+
+  replacement.dispose()
+})
+
+it('replaces an unbound call when it acquires a receiving address', () => {
+  const graph = new LetBindingGraph(controllerDefinitions, {})
+  const initial = propertyController(graph.evaluate({}).movement)
+
+  const replacement = new LetBindingGraph(controllerDefinitions, {}, graph, controllerTargets())
+  graph.dispose(replacement)
+
+  expect(propertyController(replacement.evaluate({}).movement)).not.toBe(initial)
+
+  replacement.dispose()
+})
+
+it('retains a controller when aliases and duplicate bindings still select the same address', () => {
+  const graph = new LetBindingGraph(
+    controllerDefinitions,
+    {},
+    undefined,
+    controllerTargets('self', 'width', 'alias'),
+  )
+  const initial = propertyController(graph.evaluate({}).movement)
+  const targets = [...controllerTargets(), ...controllerTargets('self', 'width', 'middle')]
+
+  const replacement = new LetBindingGraph(controllerDefinitions, {}, graph, targets)
+  graph.dispose(replacement)
+
+  expect(propertyController(replacement.evaluate({}).movement)).toBe(initial)
+
+  replacement.dispose()
 })
 
 afterEach(() => vi.restoreAllMocks())

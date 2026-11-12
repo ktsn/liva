@@ -1,4 +1,7 @@
 import { test, expect } from '@playwright/test'
+import { compile } from '../../packages/vite/wasm/liva_wasm.js'
+import { decodeBundle } from '../../packages/runtime/src/definition.ts'
+import type { RuntimeDiagnostic } from '../../packages/runtime/src/instance.ts'
 import derivedFixture from '../../fixtures/derived.json' with { type: 'json' }
 import cardFixture from '../../fixtures/card.json' with { type: 'json' }
 import toggleFixture from '../../fixtures/reactive-toggle.json' with { type: 'json' }
@@ -11,6 +14,136 @@ declare global {
 }
 
 const base = 'http://127.0.0.1:4180'
+
+test('HMR derives an aliased controller address from inactive property bindings', async ({
+  page,
+}) => {
+  const definitions = ['width', 'height'].map(
+    (property) =>
+      decodeBundle(
+        compile(
+          `
+    motion mapped(input: number, active: boolean) {
+      let alias = movement
+      let movement = link(input: input)
+      layer base { width: 100px; height: 200px }
+      layer direct when active { ${property} := alias }
+    }
+  `,
+          false,
+        ),
+      ).definitions[0],
+  )
+
+  await page.goto('/tests/browser/')
+  await page.waitForFunction(() => !!window.liva)
+
+  const result = await page.evaluate(([before, after]) => {
+    const element = document.createElement('div')
+    document.body.append(element)
+    const errors: RuntimeDiagnostic[] = []
+    const inputs = { input: 0, active: false }
+    const instance = new window.liva.LivaInstance(before, inputs, (error) => errors.push(error))
+
+    try {
+      instance.bind([['self', element]])
+      instance.updateParameters({ ...inputs, active: true, input: 10 })
+      instance.updateParameters({ ...inputs, active: true, input: 30 })
+      const controlledWidth = getComputedStyle(element).width
+
+      instance.updateParameters({ ...inputs, input: 30 })
+      instance.replaceDefinition(after)
+      instance.updateParameters({ ...inputs, active: true, input: 30 })
+      instance.updateParameters({ ...inputs, active: true, input: 40 })
+
+      return {
+        controlledWidth,
+        width: getComputedStyle(element).width,
+        height: getComputedStyle(element).height,
+        errors,
+      }
+    } finally {
+      instance.dispose()
+      element.remove()
+    }
+  }, definitions)
+
+  expect(result).toEqual({ controlledWidth: '120px', width: '100px', height: '210px', errors: [] })
+})
+
+test('component expressions reject invalid updates without changing the controlled pose', async ({
+  page,
+}) => {
+  const compiledDefinition = decodeBundle(
+    compile(
+      `motion mapped(axis: string, input: number, active: boolean) {
+  let selected = axis
+  let movement = link(input: input, component: selected)
+  layer base { translate: 100px 20px 3px }
+  layer direct when active { translate := movement }
+}`,
+      false,
+    ),
+  ).definitions[0]
+
+  expect(compiledDefinition).toBeDefined()
+
+  await page.goto('/tests/browser/')
+  await page.waitForFunction(() => !!window.liva)
+
+  const result = await page.evaluate((definition) => {
+    const element = document.createElement('div')
+    element.style.cssText = 'width:20px;height:20px'
+    document.body.append(element)
+
+    const errors: RuntimeDiagnostic[] = []
+    const inputs = { axis: 'x', input: 0, active: false }
+    const instance = new window.liva.LivaInstance(definition, inputs, (error) => errors.push(error))
+    const readTranslate = () =>
+      getComputedStyle(element)
+        .translate.split(/\s+/)
+        .map((part) => parseFloat(part))
+
+    try {
+      instance.bind([['self', element]])
+      instance.updateParameters({ ...inputs, active: true })
+      instance.updateParameters({ ...inputs, active: true, input: 10 })
+
+      const moved = readTranslate()
+      const rejected = ['y', 'z'].map((axis) => {
+        instance.updateParameters({ ...inputs, active: true, axis, input: 50 })
+
+        return readTranslate()
+      })
+
+      // Rejected updates must preserve the accepted axis and relative-control baseline.
+      instance.updateParameters({ ...inputs, active: true, input: 20 })
+
+      return {
+        moved,
+        rejected,
+        recovered: readTranslate(),
+        errors: errors.map(({ code, message }) => ({ code, message })),
+      }
+    } finally {
+      instance.dispose()
+      element.remove()
+    }
+  }, compiledDefinition)
+
+  expect(result.moved).toEqual([110, 20, 3])
+  expect(result.rejected).toEqual([
+    [110, 20, 3],
+    [110, 20, 3],
+  ])
+  expect(result.recovered).toEqual([120, 20, 3])
+  expect(result.errors.map((error) => error.code)).toEqual([
+    'runtime.expression',
+    'runtime.expression',
+  ])
+  expect(result.errors[0].message).toContain('component and input shape are fixed')
+  expect(result.errors[1].message).toContain('component must be x or y')
+})
 
 test('drag follows input, preserves the scale effect, returns and can be interrupted', async ({
   page,
