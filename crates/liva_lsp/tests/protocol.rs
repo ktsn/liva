@@ -598,7 +598,7 @@ fn empty_attachments_offer_usable_controller_names_in_standalone_and_vue() {
             ),
         ] {
             let marked = format!(
-                "{prefix}motion a {{ let movement = link(input: 1, component: 'x'); layer base {{ translate := ¦ }} }}{suffix}"
+                "{prefix}motion a {{ let movement = link(input: 1, component: 'x'); let alias = movement; layer base {{ translate := ¦ }} }}{suffix}"
             );
             let cursor = marked.find('¦').unwrap();
             let source = marked.replace('¦', "");
@@ -614,10 +614,7 @@ fn empty_attachments_offer_usable_controller_names_in_standalone_and_vue() {
             diagnostics(client);
 
             let items = completion_at(client, uri, &source, cursor);
-            let item = items
-                .iter()
-                .find(|item| item["label"] == "movement")
-                .unwrap();
+            let item = items.iter().find(|item| item["label"] == "alias").unwrap();
 
             assert!(item["textEdit"].is_null());
             assert!(items.iter().all(|item| item["textEdit"].is_null()));

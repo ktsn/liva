@@ -265,22 +265,26 @@ fn ordinary_empty_and_prefixed_expression_names_still_complete() {
 
 #[test]
 fn attachment_values_offer_controller_names_while_css_values_stay_opaque() {
-    for (declaration, expected) in [
-        ("translate := ¦", true),
-        ("translate := move¦", true),
-        ("translate := (¦)", true),
-        ("translate: ¦", false),
-        ("translate := /* ¦ */", false),
-    ] {
-        let (_, found) = analyze(&format!(
-            "motion a {{ let movement = link(input: 1, component: 'x'); layer base {{ {declaration} }} }}"
-        ));
+    let cases: [(&str, &[&str]); 6] = [
+        ("translate := ¦", &["alias", "movement"]),
+        ("translate := move¦", &["movement"]),
+        ("translate := ali¦", &["alias"]),
+        ("translate := (¦)", &["alias", "movement"]),
+        ("translate: ¦", &[]),
+        ("translate := /* ¦ */", &[]),
+    ];
 
-        assert_eq!(
-            found.iter().any(|item| item.label == "movement"),
-            expected,
-            "{declaration}: {found:?}"
-        );
+    for (declaration, expected) in cases {
+        let (_, found) = analyze(&format!(
+            "motion a {{ let movement = link(input: 1, component: 'x'); let alias = movement; layer base {{ {declaration} }} }}"
+        ));
+        let controllers: Vec<_> = found
+            .iter()
+            .map(|item| item.label.as_str())
+            .filter(|name| matches!(*name, "alias" | "movement"))
+            .collect();
+
+        assert_eq!(controllers, expected, "{declaration}: {found:?}");
         assert!(literal_items(&found).is_empty());
     }
 }
