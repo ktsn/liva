@@ -198,10 +198,14 @@ describe('shared layout scheduling', () => {
     document.body.append(iframe)
     cleanups.push(() => iframe.remove())
     const otherDocument = iframe.contentDocument
+
     if (!otherDocument) throw new Error('Expected same-origin iframe document')
+
     const target = otherDocument.createElement('div')
-    target.setAttribute('style', 'width:100px')
+    // Move without resizing so ResizeObserver cannot mask a missed attribute mutation.
+    target.setAttribute('style', 'position:relative;left:100px')
     otherDocument.body.append(target)
+
     let publications = 0
     cleanups.push(
       registerLayoutRead(
