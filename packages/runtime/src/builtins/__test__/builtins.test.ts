@@ -1,9 +1,9 @@
 import { expect, it } from 'vite-plus/test'
 import cardFixture from '../../../../../fixtures/card.json'
-import { decodeBundle } from '../../definition.ts'
-import { evaluate, evaluateScalar } from '../../expression.ts'
-import { LetBindingGraph, targetValues } from '../../let-bindings.ts'
-import { isReactiveSubscription } from '../../reactive-value.ts'
+import { decodeBundle } from '../../model/definition.ts'
+import { evaluate, evaluateScalar } from '../../evaluation/expression.ts'
+import { LetBindingGraph, targetValues } from '../../evaluation/let-bindings.ts'
+import { isReactiveSubscription } from '../../evaluation/reactive-value.ts'
 import { callBuiltin } from '../index.ts'
 
 it('dispatches call IR to independently initialized built-in subscriptions', () => {
@@ -16,7 +16,7 @@ it('dispatches call IR to independently initialized built-in subscriptions', () 
   expect(first.evaluate(firstVariables).movement).not.toBe(
     second.evaluate(secondVariables).movement,
   )
-  expect(first.evaluate(firstVariables).movement).toEqual({
+  expect(first.evaluate(firstVariables).movement).toMatchObject({
     active: false,
     released: false,
     offset: { x: 0, y: 0 },
@@ -64,7 +64,11 @@ it('evaluates target variables using the same environment as other argument valu
 
   if (!isReactiveSubscription(subscription)) throw new Error('Expected a reactive subscription')
 
-  expect(subscription.value).toEqual({ active: false, released: false, offset: { x: 0, y: 0 } })
+  expect(subscription.value).toMatchObject({
+    active: false,
+    released: false,
+    offset: { x: 0, y: 0 },
+  })
 })
 
 it('rejects drag arguments without a named target and tolerates an absent DOM binding', () => {
@@ -81,7 +85,11 @@ it('rejects drag arguments without a named target and tolerates an absent DOM bi
 
   cleanup()
 
-  expect(subscription.value).toEqual({ active: false, released: false, offset: { x: 0, y: 0 } })
+  expect(subscription.value).toMatchObject({
+    active: false,
+    released: false,
+    offset: { x: 0, y: 0 },
+  })
 })
 
 it('rejects invalid interaction targets and tolerates an absent DOM binding', () => {

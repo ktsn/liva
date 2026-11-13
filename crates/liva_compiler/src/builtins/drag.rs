@@ -30,6 +30,10 @@ pub const DRAG: Function = Function {
                     },
                 ]),
             },
+            Field {
+                name: "release",
+                value_type: Type::Event,
+            },
         ]),
     }],
 };

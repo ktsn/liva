@@ -259,8 +259,8 @@ fn lifecycle_accessors_retain_duplicate_and_malformed_declarations() {
 }
 
 #[test]
-fn controller_attachments_preserve_typed_ranges() {
-    let source = "motion demo { let pointer = drag(target: self); layer position { translate := link(input: pointer.offset); } }";
+fn controller_attachments_and_event_blocks_preserve_typed_ranges_and_source_order() {
+    let source = "motion demo { let pointer = drag(target: self); layer position { translate := link(input: pointer.offset); state closed initial {} state open {} on pointer.release { transition closed -> open when true } } }";
     let parsed = parse(source);
 
     assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
@@ -275,17 +275,22 @@ fn controller_attachments_preserve_typed_ranges() {
         .unwrap();
     let property = layer.properties().next().unwrap();
     let attachment = property.attachment().unwrap();
+    let event = layer.event_blocks().next().unwrap();
+    let transition = layer.transitions().next().unwrap();
 
     assert_eq!(attachment.text(), "link(input: pointer.offset)");
     assert_eq!(
         &source[attachment.range().start..attachment.range().end],
         attachment.text()
     );
+    assert_eq!(event.event_expression().unwrap().text(), "pointer.release");
+    assert_eq!(transition.event_block().unwrap().range(), event.range());
+    assert!(transition.condition().is_some());
 }
 
 #[test]
-fn incomplete_controller_syntax_recovers_losslessly_at_every_boundary() {
-    let complete = "// 😀\nmotion demo { let p = drag(target: self); layer position { width := link(input: p.offset.x); } }";
+fn incomplete_controller_and_event_syntax_recovers_losslessly_at_every_boundary() {
+    let complete = "// 😀\nmotion demo { let p = drag(target: self); layer position { width := link(input: p.offset.x); state a initial {} state b {} on p.release { transition a -> b when true } } }";
 
     for end in (0..=complete.len()).filter(|end| complete.is_char_boundary(*end)) {
         let source = &complete[..end];
@@ -298,4 +303,48 @@ fn incomplete_controller_syntax_recovers_losslessly_at_every_boundary() {
             assert!(diagnostic.range.end <= source.len());
         }
     }
+}
+
+#[test]
+fn event_headers_distinguish_named_targets_from_event_expressions() {
+    let source = "motion demo { layer base { on { opacity: 1 } state idle initial { on { opacity: 0 } } on pointer.release { transition idle -> idle } } enter { on { opacity: 0 } } }";
+    let parsed = parse(source);
+
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    assert_eq!(parsed.root.text(), source);
+
+    let motion = parsed.root.motions().next().unwrap();
+    let layer = motion.layers().next().unwrap();
+    let event = layer.event_blocks().next().unwrap();
+
+    assert_eq!(layer.event_blocks().count(), 1);
+    assert_eq!(event.event_expression().unwrap().text(), "pointer.release");
+    assert_eq!(
+        layer.targets().next().unwrap().header().as_deref(),
+        Some("on")
+    );
+    assert_eq!(
+        layer
+            .states()
+            .next()
+            .unwrap()
+            .targets()
+            .next()
+            .unwrap()
+            .header()
+            .as_deref(),
+        Some("on")
+    );
+    assert_eq!(
+        motion
+            .enters()
+            .next()
+            .unwrap()
+            .targets()
+            .next()
+            .unwrap()
+            .header()
+            .as_deref(),
+        Some("on")
+    );
 }

@@ -102,7 +102,8 @@ for (const intermediaryPosition of ['static', 'relative'] as const) {
   }) => {
     await page.goto('/tests/browser/')
     const result = await page.evaluate(async (position) => {
-      const { readLayoutBounds } = await import('../../packages/runtime/src/layout-bounds.ts')
+      const { readLayoutBounds } =
+        await import('../../packages/runtime/src/layout/layout-bounds.ts')
 
       const root = document.createElement('div')
       root.style.cssText =

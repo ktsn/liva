@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { link } from './link.ts'
-import { propertyController } from '../controllers.ts'
-import type { FunctionArguments } from '../reactive-value.ts'
+import { propertyController } from '../motion/controllers.ts'
+import type { FunctionArguments } from '../evaluation/reactive-value.ts'
 
 afterEach(() => {
   vi.restoreAllMocks()

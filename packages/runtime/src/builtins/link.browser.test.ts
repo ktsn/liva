@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { link } from './link.ts'
-import { propertyController } from '../controllers.ts'
-import { PropertyMotion } from '../property-motion.ts'
-import { decodeProperty } from '../property-codec.ts'
-import type { FunctionArguments, RuntimeValue } from '../reactive-value.ts'
+import { propertyController } from '../motion/controllers.ts'
+import { PropertyMotion } from '../motion/property-motion.ts'
+import { decodeProperty } from '../motion/property-codec.ts'
+import type { FunctionArguments, RuntimeValue } from '../evaluation/reactive-value.ts'
 
 const cleanups: (() => void)[] = []
 

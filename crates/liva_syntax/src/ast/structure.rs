@@ -43,15 +43,24 @@ node!(State, |n: &SyntaxNode| keyword(n, "state")
     && (block_depth(n) == 1
         || n.parent()
             .is_some_and(|parent| Layer::cast(parent).is_some())));
+// A bare `on { ... }` remains a named target; an event header has a parsed condition.
+node!(OnBlock, |n: &SyntaxNode| keyword(n, "on")
+    && n.child::<Header>().is_some_and(|header| header
+        .child::<Condition>()
+        .is_some()));
 node!(Transition, |n: &SyntaxNode| (block_depth(n) == 1
-    || n.parent()
-        .is_some_and(|parent| Layer::cast(parent).is_some()))
+    || n.parent().is_some_and(|parent| Layer::cast(
+        parent.clone()
+    )
+    .is_some()
+        || OnBlock::cast(parent).is_some()))
     && (keyword(n, "transition")
         || keyword(n, "enter")
         || keyword(n, "leave")));
 node!(Target, |n: &SyntaxNode| n.kind() == Kind::Block
     && PropertyBlock::cast(n.clone()).is_none()
     && State::cast(n.clone()).is_none()
+    && OnBlock::cast(n.clone()).is_none()
     && Transition::cast(n.clone()).is_none()
     && n.parent().is_some_and(|parent| State::cast(
         parent.clone()
@@ -87,9 +96,9 @@ node!(Interpolation, |n: &SyntaxNode| n.kind()
 macro_rules! implement {
     ($trait:ident: $($name:ident),+ $(,)?) => { $(impl $trait for $name {})+ };
 }
-implement!(HasHeader: Block, Motion, Layer, State, Transition, Target, PropertyBlock, Keyframe, Property, LetBinding, Parameter, Event);
+implement!(HasHeader: Block, Motion, Layer, State, Transition, Target, PropertyBlock, Keyframe, Property, LetBinding, Parameter, Event, OnBlock);
 implement!(HasValue: Property, LetBinding, Keyframe);
-implement!(HasItems: Document, Block, Motion, Layer, State, Transition, Target, PropertyBlock);
+implement!(HasItems: Document, Block, Motion, Layer, State, Transition, Target, PropertyBlock, OnBlock);
 
 impl Document {
     pub fn motions(&self) -> impl Iterator<Item = Motion> {
@@ -186,6 +195,18 @@ impl Event {
 
 impl Layer {
     pub fn transitions(&self) -> impl Iterator<Item = Transition> {
+        self.syntax().children().flat_map(|node| {
+            if let Some(transition) = Transition::cast(node.clone()) {
+                vec![transition]
+            } else if let Some(event) = OnBlock::cast(node) {
+                event.transitions().collect()
+            } else {
+                vec![]
+            }
+        })
+    }
+
+    pub fn event_blocks(&self) -> impl Iterator<Item = OnBlock> {
         self.children()
     }
 
@@ -225,6 +246,16 @@ impl State {
     }
 }
 
+impl OnBlock {
+    pub fn event_expression(&self) -> Option<expression::Expr> {
+        self.header_node()?.child::<Condition>()?.expression()
+    }
+
+    pub fn transitions(&self) -> impl Iterator<Item = Transition> {
+        self.children()
+    }
+}
+
 impl Property {
     pub fn is_attachment(&self) -> bool {
         self.syntax()
@@ -240,6 +271,10 @@ impl Property {
 }
 
 impl Transition {
+    pub fn event_block(&self) -> Option<OnBlock> {
+        OnBlock::cast(self.syntax().parent()?)
+    }
+
     pub fn condition(&self) -> Option<Condition> {
         self.header_node()?.child()
     }

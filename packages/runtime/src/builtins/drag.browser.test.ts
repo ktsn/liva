@@ -1,7 +1,9 @@
 import { expect, it } from 'vite-plus/test'
 import { userEvent } from 'vite-plus/test/browser'
 import { drag } from './drag.ts'
-import type { RuntimeValue } from '../reactive-value.ts'
+import type { ReactiveNotification } from '../evaluation/events.ts'
+import { isEventValue } from '../evaluation/events.ts'
+import type { RuntimeValue } from '../evaluation/reactive-value.ts'
 
 it('tracks real pointer movement, release and cleanup independently for each target', async () => {
   const source = document.createElement('div')
@@ -30,12 +32,18 @@ it('tracks real pointer movement, release and cleanup independently for each tar
 
     await userEvent.dragAndDrop(source, destination)
 
-    expect(updates).toContainEqual({ active: true, released: false, offset: { x: 0, y: 0 } })
-    expect(subscription.value).toEqual({ active: false, released: true, offset: { x: 100, y: 60 } })
+    expect(updates).toContainEqual(
+      expect.objectContaining({ active: true, released: false, offset: { x: 0, y: 0 } }),
+    )
+    expect(subscription.value).toMatchObject({
+      active: false,
+      released: true,
+      offset: { x: 100, y: 60 },
+    })
 
     cleanup()
 
-    expect(subscription.value).toEqual({
+    expect(subscription.value).toMatchObject({
       active: false,
       released: false,
       offset: { x: 100, y: 60 },
@@ -86,3 +94,41 @@ it.each(['cleanup', 'capture-lost'] as const)(
     }
   },
 )
+
+it('emits one typed release with terminal pointer-up displacement independently of the last move', async () => {
+  const source = document.createElement('div')
+  const destination = document.createElement('div')
+  source.style.cssText =
+    'position:fixed;left:20px;top:20px;width:40px;height:40px;touch-action:none'
+  destination.style.cssText = 'position:fixed;left:120px;top:80px;width:40px;height:40px'
+  document.body.append(source, destination)
+  const subscription = drag({ target: { name: 'body' } })
+  const occurrences: ReactiveNotification[] = []
+  const cleanup = subscription.bind(new Map([['body', source]]), (_value, notification) => {
+    if (notification?.event) occurrences.push(notification)
+  })
+  source.addEventListener('pointermove', (event) => {
+    if (!source.hasPointerCapture(event.pointerId)) return
+    source.dispatchEvent(
+      new PointerEvent('pointerup', { pointerId: event.pointerId, clientX: 177, clientY: 109 }),
+    )
+  })
+
+  try {
+    await userEvent.dragAndDrop(source, destination)
+
+    expect(occurrences).toHaveLength(1)
+    expect(occurrences[0].event).toBeDefined()
+    expect(isEventValue(occurrences[0].event!)).toBe(true)
+    expect(occurrences[0].snapshots.get(subscription)).toMatchObject({
+      active: false,
+      released: true,
+      offset: { x: 137, y: 69 },
+    })
+    expect(subscription.value).toMatchObject({ released: true, offset: { x: 137, y: 69 } })
+  } finally {
+    cleanup()
+    source.remove()
+    destination.remove()
+  }
+})

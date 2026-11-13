@@ -70,3 +70,21 @@ motion rooted {
     }
   }
 }
+
+motion swipe {
+  let pointer = drag(target: self)
+  let movement = link(input: pointer.offset.x, component: "x")
+//               ^ function
+  layer position {
+    state closed initial {}
+    state open {}
+    on pointer.release {
+//  ^^ keyword
+      transition closed -> open when movement.value.x > 48
+//    ^ keyword
+    }
+    translate := movement
+//  ^ property
+//            ^^ operator
+  }
+}

@@ -153,3 +153,25 @@ fn without_decorator(node: &impl AstNode) -> String {
         .trim()
         .into()
 }
+
+/// Byte range from the first through the last non-trivia token, including nested nodes.
+/// An empty or trivia-only node returns an empty range at its start.
+pub fn significant_range(node: &impl AstNode) -> Range {
+    let tokens: Vec<_> = node
+        .syntax()
+        .descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| token.kind() != Kind::Trivia)
+        .collect();
+
+    match (tokens.first(), tokens.last()) {
+        (Some(first), Some(last)) => Range {
+            start: u32::from(first.text_range().start()) as usize,
+            end: u32::from(last.text_range().end()) as usize,
+        },
+        _ => Range {
+            start: node.range().start,
+            end: node.range().start,
+        },
+    }
+}

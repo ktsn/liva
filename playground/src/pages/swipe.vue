@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, onScopeDispose, ref } from 'vue'
 
 const initialItems = [
   { id: 1, title: 'Item A' },
@@ -7,6 +7,16 @@ const initialItems = [
   { id: 3, title: 'Item C' },
 ]
 const items = ref([...initialItems])
+const activeRow = ref<number>()
+
+function outsideInteraction(event: PointerEvent) {
+  const row = event.target instanceof Element ? event.target.closest('[data-swipe-id]') : null
+  const id = row?.getAttribute('data-swipe-id')
+  activeRow.value = id === null || id === undefined ? undefined : Number(id)
+}
+
+onMounted(() => document.addEventListener('pointerdown', outsideInteraction, true))
+onScopeDispose(() => document.removeEventListener('pointerdown', outsideInteraction, true))
 
 function resetItems() {
   items.value = initialItems
@@ -19,73 +29,123 @@ function removeItem(id: number) {
 
 <template>
   <section class="demo">
-    <h1>Swipe to dismiss</h1>
-    <p>Drag a card more than 120 pixels to the right, then release.</p>
+    <h1>Swipe actions</h1>
+
     <button type="button" @click="resetItems">Reset cards</button>
+
     <p data-testid="item-count">{{ items.length }} items</p>
-    <div
-      v-for="item in items"
-      :key="item.id"
-      v-liva:swipeItem
-      v-liva-target:body
-      class="swipe-card"
-      :data-testid="'swipe-' + item.id"
-      @liva-dismiss="removeItem(item.id)"
-    >
-      {{ item.title }}
-      <button @pointerdown.stop @click="removeItem(item.id)">Dismiss</button>
-    </div>
+
+    <ul class="swipe-list">
+      <li
+        v-for="item in items"
+        :key="item.id"
+        v-liva:swipeItem="{ outside: activeRow !== item.id }"
+        class="swipe-card"
+        :data-swipe-id="item.id"
+        :data-testid="'swipe-' + item.id"
+        @liva-dismiss="removeItem(item.id)"
+      >
+        <button
+          class="swipe-action"
+          :aria-label="'Delete ' + item.title"
+          @click="removeItem(item.id)"
+        >
+          Delete
+        </button>
+
+        <div v-liva-target:body class="swipe-face">
+          {{ item.title }}
+          <button @pointerdown.stop @click="removeItem(item.id)">Dismiss</button>
+        </div>
+      </li>
+    </ul>
   </section>
 </template>
 
 <style scoped>
+.swipe-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
 .swipe-card {
+  position: relative;
+  margin-block: 1rem;
+  border-radius: 1rem;
+  overflow: clip;
+}
+
+.swipe-action {
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block: 0;
+  inline-size: 96px;
+  border: 0;
+  margin: 0;
+  padding: 0.5rem;
+  background: #c44343;
+  color: white;
+
+  &:focus-visible {
+    z-index: 2;
+    outline-offset: -4px;
+  }
+}
+
+.swipe-face {
+  position: relative;
   display: flex;
   justify-content: space-between;
   padding: 2rem;
-  margin-block: 1rem;
   border-radius: 1rem;
   background: #d9f3e8;
   color: #16362a;
-  touch-action: none;
+  touch-action: pan-y;
   user-select: none;
 }
 </style>
 
 <liva lang="liva">
-motion swipeItem {
-  let movement = drag(target: body)
+motion swipeItem(outside: boolean) {
+  let pointer = drag(target: body)
+  let movement = link(input: pointer.offset.x, component: "x")
+  let projectedX = movement.value.x + movement.velocity.x * 200
 
-  event dismiss when movement.released && movement.offset.x > 120
+  event dismiss when pointer.released && projectedX > 120
 
-  layer base {
-    @spring(stiffness: 300, damping: 20)
-    body {
-      translate: 0 0
-      opacity: 1
+  @spring(stiffness: 300, damping: 25)
+  layer position {
+    opacity: 1
+    translate: 0 0
+    body { translate: 0 0 }
+
+    state closed initial {}
+    state open { body { translate: 96px 0 } }
+
+    on pointer.release {
+      transition closed -> open when projectedX >= 48 && projectedX <= 120
+      transition open -> closed when projectedX < 48
     }
+
+    transition open -> closed when outside
   }
 
-  layer dragging when movement.active {
-    body {
-      translate: ${movement.offset.x}px 0 @instant
-    }
+  layer dragging when pointer.active {
+    body { translate := movement }
   }
 
+  @tween(duration: 350, easing: easeOut)
   enter {
-    @tween(duration: 350, easing: easeOut)
-    body {
-      opacity: 0
-      translate: 0 -20px
-    }
+    opacity: 0
+    translate: 0 -20px
   }
 
+  @tween(duration: 250, easing: easeOut)
   leave {
-    @tween(duration: 250, easing: easeOut)
-    body {
-      translate: 500px 0
-      opacity: 0
-    }
+    translate: 500px 0
+    opacity: 0
+    body { translate: 500px 0 }
   }
 }
 </liva>

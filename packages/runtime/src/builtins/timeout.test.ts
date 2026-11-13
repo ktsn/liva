@@ -7,7 +7,7 @@ afterEach(() => vi.useRealTimers())
 describe('timeout', () => {
   it('starts an initially active timer only at binding activation', () => {
     const timer = timeout({ when: true, duration: 100 })
-    const publish = vi.fn<(value: import('../reactive-value.ts').RuntimeValue) => void>()
+    const publish = vi.fn<(value: import('../evaluation/reactive-value.ts').RuntimeValue) => void>()
 
     vi.advanceTimersByTime(200)
     expect(timer.value).toBe(false)
@@ -25,7 +25,7 @@ describe('timeout', () => {
 
   it('does not restart unchanged arguments and resets on false', () => {
     const timer = timeout({ when: false, duration: 100 })
-    const publish = vi.fn<(value: import('../reactive-value.ts').RuntimeValue) => void>()
+    const publish = vi.fn<(value: import('../evaluation/reactive-value.ts').RuntimeValue) => void>()
     timer.bind(new Map(), publish)
 
     timer.prepareUpdate({ when: true, duration: 100 }).commit()
@@ -72,7 +72,7 @@ describe('timeout', () => {
 
   it('schedules zero duration and cancels obsolete callbacks on unbind and disposal', () => {
     const timer = timeout({ when: true, duration: 0 })
-    const publish = vi.fn<(value: import('../reactive-value.ts').RuntimeValue) => void>()
+    const publish = vi.fn<(value: import('../evaluation/reactive-value.ts').RuntimeValue) => void>()
     const unbind = timer.bind(new Map(), publish)
 
     expect(timer.value).toBe(false)
@@ -115,7 +115,7 @@ describe('timeout', () => {
   it('suppresses a stale callback even if the host already queued it', () => {
     const scheduled = vi.spyOn(globalThis, 'setTimeout')
     const timer = timeout({ when: true, duration: 100 })
-    const publish = vi.fn<(value: import('../reactive-value.ts').RuntimeValue) => void>()
+    const publish = vi.fn<(value: import('../evaluation/reactive-value.ts').RuntimeValue) => void>()
     timer.bind(new Map(), publish)
     const callback = scheduled.mock.calls[0]?.[0]
 
@@ -133,7 +133,7 @@ describe('timeout', () => {
   it('waits across the native signed 32-bit timer limit', () => {
     const duration = 2_147_483_648
     const timer = timeout({ when: true, duration })
-    const publish = vi.fn<(value: import('../reactive-value.ts').RuntimeValue) => void>()
+    const publish = vi.fn<(value: import('../evaluation/reactive-value.ts').RuntimeValue) => void>()
     timer.bind(new Map(), publish)
 
     vi.advanceTimersByTime(2_147_483_647)

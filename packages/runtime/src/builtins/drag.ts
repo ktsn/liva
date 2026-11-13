@@ -1,4 +1,5 @@
-import type { ReactiveSubscription, RuntimeValue } from '../reactive-value.ts'
+import { createEventValue } from '../evaluation/events.ts'
+import type { ReactiveSubscription, RuntimeValue } from '../evaluation/reactive-value.ts'
 
 interface DragValue {
   readonly released: boolean
@@ -15,11 +16,12 @@ export function drag(args: Readonly<Record<string, RuntimeValue>>): ReactiveSubs
 
   const targetName = target.name
 
+  const release = createEventValue()
   let value: DragValue = { active: false, released: false, offset: { x: 0, y: 0 } }
 
-  return {
+  const subscription: ReactiveSubscription = {
     get value() {
-      return { active: value.active, released: value.released, offset: value.offset }
+      return { active: value.active, released: value.released, offset: value.offset, release }
     },
     bind(targets, update) {
       const element = targets.get(targetName)
@@ -28,7 +30,22 @@ export function drag(args: Readonly<Record<string, RuntimeValue>>): ReactiveSubs
 
       const cleanup = bindDrag(element, (next) => {
         value = next
-        update({ active: value.active, released: value.released, offset: value.offset })
+        const snapshot = {
+          active: value.active,
+          released: value.released,
+          offset: value.offset,
+          release,
+        }
+        update(
+          snapshot,
+          next.released
+            ? {
+                time: performance.now(),
+                snapshots: new Map([[subscription, snapshot]]),
+                event: release,
+              }
+            : undefined,
+        )
       })
 
       return () => {
@@ -37,6 +54,8 @@ export function drag(args: Readonly<Record<string, RuntimeValue>>): ReactiveSubs
       }
     },
   }
+
+  return subscription
 }
 
 function bindDrag(element: HTMLElement, update: (value: DragValue) => void): () => void {
@@ -49,6 +68,8 @@ function bindDrag(element: HTMLElement, update: (value: DragValue) => void): () 
     const captured = pointer
     pointer = undefined
     if (element.hasPointerCapture(captured)) element.releasePointerCapture(captured)
+    if (event?.type === 'pointerup')
+      offset = { x: event.clientX - origin.x, y: event.clientY - origin.y }
     update({ active: false, released: event?.type === 'pointerup', offset })
   }
 
@@ -69,7 +90,6 @@ function bindDrag(element: HTMLElement, update: (value: DragValue) => void): () 
 
   const up = (event: PointerEvent) => {
     if (event.pointerId !== pointer) return
-    move(event)
     finish(event)
   }
 

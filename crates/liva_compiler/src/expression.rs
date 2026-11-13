@@ -21,6 +21,7 @@ pub enum Type {
     Timing,
     Easing,
     Target,
+    Event,
     Controller(&'static [crate::builtins::Field]),
     Record(&'static [crate::builtins::Field]),
 }

@@ -1150,9 +1150,33 @@ impl Compiler {
                         }
                     }
 
+                    // Check each header even when its block contains no transitions.
+                    // Reuse the result so several transitions do not duplicate diagnostics.
+                    let events: BTreeMap<_, _> = layer.event_blocks().filter_map(|block| {
+                        let event = block.event_expression()?;
+                        match event.check(&scope).and_then(|ty| {
+                            if ty == expression::Type::Event {
+                                event.to_output()
+                            } else {
+                                Err(event.error("on requires an event-typed expression"))
+                            }
+                        }) {
+                            Ok(event) => Some((block.range().start, event)),
+
+                            Err(error) => {
+                                self.expression_error(error);
+
+                                None
+                            }
+                        }
+                    }).collect();
                     let mut guarded = vec![];
 
                     for transition in layer.transitions() {
+                        let event = transition
+                            .event_block()
+                            .and_then(|block| events.get(&block.range().start).cloned());
+
                         let Some(syn::TransitionSelector::Directional { from, to }) =
                             transition.selector()
                         else {
@@ -1174,30 +1198,40 @@ impl Compiler {
                             }
                         }
 
-                        let Some(condition) = transition.condition() else {
+                        let when = if let Some(condition) = transition.condition() {
+                            let Some(parsed) = self.expression_view(&condition) else {
+                                continue;
+                            };
+
+                            match parsed.check(&scope).and_then(|ty| {
+                                if ty == expression::Type::Boolean {
+                                    parsed.to_output()
+                                } else {
+                                    Err(parsed.error("Transition guard must be Boolean"))
+                                }
+                            }) {
+                                Ok(when) => when,
+
+                                Err(error) => {
+                                    self.expression_error(error);
+
+                                    continue;
+                                }
+                            }
+                        } else if event.is_some() {
+                            expression::Expression {
+                                kind: expression::ExpressionKind::Boolean { value: true },
+                            }
+                        } else {
                             self.error(
                                 "semantic.layer-transition",
                                 "Layer transitions require a Boolean when guard",
                                 &transition,
                             );
+
                             continue;
                         };
-                        let Some(parsed) = self.expression_view(&condition) else {
-                            continue;
-                        };
-                        let when = match parsed.check(&scope).and_then(|ty| {
-                            if ty == expression::Type::Boolean {
-                                parsed.to_output()
-                            } else {
-                                Err(parsed.error("Transition guard must be Boolean"))
-                            }
-                        }) {
-                            Ok(when) => when,
-                            Err(error) => {
-                                self.expression_error(error);
-                                continue;
-                            }
-                        };
+
                         let path = format!("{layer_path}/transition/{}", guarded.len());
                         let animation = self.transition(&transition, &path, &scope);
 
@@ -1228,6 +1262,7 @@ impl Compiler {
                         }
 
                         guarded.push(GuardedTransition {
+                            event,
                             from,
                             to,
                             when,
@@ -1417,8 +1452,10 @@ pub fn compile(source: &str, development: bool) -> Compilation {
             .diagnostics
             .into_iter()
             .map(|mut diagnostic| {
-                if diagnostic.code == "syntax.expression" {
-                    diagnostic.code = "semantic.expression".into();
+                match diagnostic.code.as_str() {
+                    "syntax.expression" => diagnostic.code = "semantic.expression".into(),
+                    "syntax.event" => diagnostic.code = "semantic.event".into(),
+                    _ => {}
                 }
                 diagnostic
             })

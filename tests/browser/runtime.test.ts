@@ -1,4 +1,4 @@
-import type { Definition as PropertyIRDefinition } from '../../packages/runtime/src/definition.ts'
+import type { Definition as PropertyIRDefinition } from '../../packages/runtime/src/model/definition.ts'
 import { test, expect } from '@playwright/test'
 import type * as Runtime from '../../packages/runtime/src/index.ts'
 
