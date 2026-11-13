@@ -7,6 +7,4 @@ license.workspace = true
 [dependencies]
 liva_syntax = { path = "../liva_syntax" }
 serde.workspace = true
-
-[dev-dependencies]
 serde_json.workspace = true
