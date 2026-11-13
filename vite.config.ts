@@ -111,6 +111,10 @@ export default defineConfig({
     linter: {
       maxWarnings: 0,
       reportUnusedDisableDirectives: true,
+      rules: {
+        // Props objects and template-only declarations are supported alongside destructuring.
+        'script/define-props-destructuring': 'off',
+      },
       categories: {
         correctness: 'error',
         suspicious: 'error',
