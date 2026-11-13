@@ -4,13 +4,13 @@ import { measure } from '../builtins/measure.ts'
 
 const cleanups: (() => void)[] = []
 
-async function frame() {
-  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+async function frame(view: Window = window) {
+  await new Promise<void>((resolve) => view.requestAnimationFrame(() => resolve()))
 }
 
-async function settled() {
-  await frame()
-  await frame()
+async function settled(view: Window = window) {
+  await frame(view)
+  await frame(view)
 }
 
 afterEach(() => {
@@ -195,15 +195,22 @@ describe('shared layout scheduling', () => {
 
   it('detects removed style attributes in another document realm', async () => {
     const iframe = document.createElement('iframe')
+    const loaded = new Promise<void>((resolve) => {
+      iframe.addEventListener('load', () => resolve(), { once: true })
+    })
+
     document.body.append(iframe)
     cleanups.push(() => iframe.remove())
-    const otherDocument = iframe.contentDocument
 
-    if (!otherDocument) throw new Error('Expected same-origin iframe document')
+    await loaded
+
+    const otherDocument = iframe.contentDocument
+    const otherWindow = iframe.contentWindow
+
+    if (!otherDocument || !otherWindow) throw new Error('Expected same-origin iframe document')
 
     const target = otherDocument.createElement('div')
-    // Move without resizing so ResizeObserver cannot mask a missed attribute mutation.
-    target.setAttribute('style', 'position:relative;left:100px')
+    target.setAttribute('style', 'width:100px')
     otherDocument.body.append(target)
 
     let publications = 0
@@ -213,18 +220,22 @@ describe('shared layout scheduling', () => {
         () => () => {
           publications++
         },
-        [target],
+        // Observe only mutations so ResizeObserver cannot mask a missed attribute removal.
+        [],
       ),
     )
 
-    await settled()
+    await settled(otherWindow)
+
     const before = publications
+
     target.removeAttribute('style')
 
-    await settled()
+    await settled(otherWindow)
 
     expect(publications).toBe(before + 1)
   })
+
   it('tracks registered custom-property animations that move an unmeasured sibling', async () => {
     const property = `--measure-space-${crypto.randomUUID()}`
     CSS.registerProperty({
