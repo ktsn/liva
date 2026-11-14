@@ -211,6 +211,7 @@ describe('browser animation execution', () => {
       const { instance, targets, errors } = setup(source)
       const element = targets.get('box')
       const unrelated = targets.get('unrelated')
+
       expect(element).toBeDefined()
       expect(unrelated).toBeDefined()
 
