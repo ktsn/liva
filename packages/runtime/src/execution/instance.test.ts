@@ -181,3 +181,35 @@ describe('composition snapshots', () => {
     expect(second.composition).toEqual({ layers: { visible: false }, states: { history: 'idle' } })
   })
 })
+
+describe('public facade compatibility', () => {
+  it('uses a directly assigned definition for subsequent event evaluation', () => {
+    const instance = createInstance(false)
+    const replacement: Definition = {
+      ...definition,
+      events: [{ name: 'replacement', when: { kind: 'reference', path: ['ready'] } }],
+    }
+    const emitted: string[] = []
+    instance.definition = replacement
+    instance.onEvent = (name) => emitted.push(name)
+
+    instance.updateParameters({ ready: true })
+    instance.updateParameters({ ready: false })
+    instance.updateParameters({ ready: true })
+
+    expect(instance.definition).toBe(replacement)
+    expect(emitted).toEqual(['replacement'])
+  })
+
+  it('returns the assigned update callback', () => {
+    const instance = createInstance(false)
+    const observed: boolean[] = []
+    const update = () => observed.push(instance.composition.layers.idle)
+    instance.onUpdate = update
+
+    instance.updateParameters({ ready: true })
+
+    expect(instance.onUpdate).toBe(update)
+    expect(observed).toEqual([true])
+  })
+})

@@ -42,6 +42,30 @@ These directories group responsibilities; they do not impose a one-way dependenc
 hierarchy. For example, expression rendering uses cascade timing helpers, while
 composition resolution evaluates expressions.
 
+The public `execution/instance.ts` facade routes logical requests to `Runtime` and
+DOM-bearing requests directly to `PresentationExecutor`. Runtime owns accepted
+parameters and let environments, reactive-call lifetime, ordinary layer/state
+history, conditional events, binding revisions, and the update queue. It does not
+receive elements or native effects. `execution-contracts.ts` defines the logical
+execution requests and evaluation callbacks shared by these modules; the executor
+does not import Runtime.
+
+`presentation-planner.ts` calculates declaration order, canonical ownership,
+changed/removed properties, tracks, and affected effect identities from supplied
+values and snapshots. It reuses `composition/layers.ts` for timing and frame
+resolution. Receiver-specific canonical addresses preserve target-wide controller
+ownership when the same logical target has multiple receiving elements. Planning
+reads neither browser state nor clocks. Incomplete displayed observations reject
+planning before replacement effects are published.
+
+The executor owns DOM bindings and subscription connections, controller operations,
+style restoration, motion history, effect preparation/replacement, reference
+tracking, and previews. Notification-time expression snapshots and later displayed
+snapshots have separate lifetimes: terminal controller writes are applied and
+recorded, ownership is reconciled and released velocity is transferred, then the
+executor captures displayed values for planning. Replacement effects are prepared
+before affected old effects are cancelled; unrelated effects remain active.
+
 ## Rust syntax infrastructure
 
 The Rowan CST is the source of truth for syntax and UTF-8 byte ranges. Whole-block
