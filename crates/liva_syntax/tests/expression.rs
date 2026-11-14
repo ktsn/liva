@@ -147,3 +147,49 @@ fn named_calls_accept_nested_expressions_and_reject_invalid_argument_syntax() {
         );
     }
 }
+
+#[test]
+fn generated_string_spellings_round_trip_the_complete_decoder_character_domain() {
+    let controls: String = (0_u8..32).map(char::from).collect();
+
+    for value in [
+        "",
+        "a'\"\\b",
+        "\n\r\t",
+        "日本語😀",
+        "${literal}",
+        &controls,
+        "\u{7f}\u{2028}",
+    ] {
+        let spelling = liva_syntax::quote_string(value);
+
+        let parsed = liva_syntax::parse_expression(&spelling);
+        let expression = parsed.root.expression().unwrap();
+
+        assert!(
+            parsed.diagnostics.is_empty(),
+            "{spelling:?}: {:?}",
+            parsed.diagnostics
+        );
+        assert!(expression.is_closed_string());
+        assert_eq!(expression.string_value().unwrap(), value);
+    }
+}
+
+#[test]
+fn lexical_string_closure_is_independent_of_escape_validity() {
+    for (spelling, closed) in [
+        (r#""\q""#, true),
+        (r#"'a\'"#, false),
+        ("'unfinished", false),
+        ("42", false),
+    ] {
+        let parsed = liva_syntax::parse_expression(spelling);
+
+        assert_eq!(
+            parsed.root.expression().unwrap().is_closed_string(),
+            closed,
+            "{spelling}"
+        );
+    }
+}

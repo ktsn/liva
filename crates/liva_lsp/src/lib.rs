@@ -43,6 +43,52 @@ fn range(text: &str, range: &liva_syntax::Range) -> Value {
     json!({ "start": position(text, range.start), "end": position(text, range.end) })
 }
 
+// LSP completion textEdit must be single-line and contain the requested position.
+// Split a spanning literal replacement into that edit and adjacent deletions,
+// all in the unchanged buffer's coordinates, preserving whole-value replacement.
+fn completion_edit(
+    text: &str,
+    line: &liva_syntax::Range,
+    full: &liva_syntax::Range,
+    new_text: String,
+) -> (Value, Vec<Value>) {
+    let primary = liva_syntax::Range {
+        start: full.start.max(line.start),
+        end: full.end.min(line.end),
+    };
+    let mut additional = vec![];
+
+    for omitted in [
+        liva_syntax::Range {
+            start: full.start,
+            end: primary.start,
+        },
+        liva_syntax::Range {
+            start: primary.end,
+            end: full.end,
+        },
+    ] {
+        if omitted.start < omitted.end {
+            additional.push(json!({"range": range(text, &omitted), "newText": ""}));
+        }
+    }
+
+    (
+        json!({"range": range(text, &primary), "newText": new_text}),
+        additional,
+    )
+}
+
+fn cursor_line(text: &str, offset: usize) -> liva_syntax::Range {
+    let start = text[..offset].rfind('\n').map_or(0, |index| index + 1);
+    let end = text[offset..]
+        .find('\n')
+        .map_or(text.len(), |index| offset + index);
+    let end = start + text[start..end].trim_end_matches('\r').len();
+
+    liva_syntax::Range { start, end }
+}
+
 struct Document {
     text: String,
     version: i64,
@@ -145,9 +191,32 @@ impl Document {
             return vec![];
         };
 
+        let line = cursor_line(&self.text, offset);
+
         analysis::completions(&self.text[block.clone()], offset - block.start)
             .into_iter()
-            .map(|item| json!({ "label": item.label, "detail": item.detail }))
+            .map(|item| {
+                let mut completion = json!({ "label": item.label, "detail": item.detail });
+
+                if let Some(edit) = item.text_edit {
+                    let mapped = liva_syntax::Range {
+                        start: block.start + edit.range.start,
+                        end: block.start + edit.range.end,
+                    };
+                    let (primary, additional) =
+                        completion_edit(&self.text, &line, &mapped, edit.new_text);
+                    completion["kind"] = json!(12); // Value
+                    completion["filterText"] =
+                        json!(&self.text[mapped.start.max(line.start)..offset]);
+                    completion["textEdit"] = primary;
+
+                    if !additional.is_empty() {
+                        completion["additionalTextEdits"] = json!(additional);
+                    }
+                }
+
+                completion
+            })
             .collect()
     }
 
@@ -220,7 +289,7 @@ pub fn run(connection: Connection) -> Result<(), Box<dyn std::error::Error>> {
             "legend": { "tokenTypes": ["variable"], "tokenModifiers": ["readonly", "defaultLibrary"] },
             "full": true,
         },
-        "completionProvider": { "triggerCharacters": ["."] },
+        "completionProvider": { "triggerCharacters": [".", ":", "\"", "'"] },
     }))?;
     let mut documents = HashMap::<String, Document>::new();
 
@@ -344,6 +413,18 @@ fn handle_request(request: Request, documents: &HashMap<String, Document>) -> Re
             })
             .unwrap_or_default();
 
+        // Decoding escapes and replacement ranges depend on the current buffer.
+        // Requery rather than letting clients refilter an obsolete quoted prefix.
+        if completions
+            .iter()
+            .any(|item| item.get("textEdit").is_some())
+        {
+            return Response::new_ok(
+                request.id,
+                json!({"isIncomplete": true, "items": completions}),
+            );
+        }
+
         return Response::new_ok(request.id, completions);
     }
 
@@ -355,6 +436,85 @@ fn handle_request(request: Request, documents: &HashMap<String, Document>) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn multiline_completion_cleanup_preserves_empty_cursor_lines_and_outside_source() {
+        for (uri, prefix, suffix, separator) in [
+            ("file:///empty.liv", "/* 😀 */ ", "", "\n"),
+            ("file:///empty.liv", "/* 😀 */ ", "", "\r\n"),
+            (
+                "file:///empty.vue",
+                "<template>😀</template><liva>",
+                "</liva>",
+                "\n",
+            ),
+            (
+                "file:///empty.vue",
+                "<template>😀</template><liva>",
+                "</liva>",
+                "\r\n",
+            ),
+        ] {
+            let literal = format!("\"old{separator}{separator}suffix\"");
+            let text = format!(
+                "{prefix}motion a {{ let curve = steps(count: 4, position: {literal}); layer base {{}} }}{suffix}"
+            );
+            let start = text.find(&literal).unwrap();
+            let cursor = start + "\"old".len() + separator.len();
+            let full = liva_syntax::Range {
+                start,
+                end: start + literal.len(),
+            };
+            let line = cursor_line(&text, cursor);
+
+            let (primary, additional) = completion_edit(&text, &line, &full, "\"start\"".into());
+            let mut edits = vec![primary.clone()];
+            edits.extend(additional.iter().cloned());
+            let mut byte_edits: Vec<_> = edits
+                .iter()
+                .map(|edit| {
+                    let begin: Position =
+                        serde_json::from_value(edit["range"]["start"].clone()).unwrap();
+                    let end: Position =
+                        serde_json::from_value(edit["range"]["end"].clone()).unwrap();
+
+                    (
+                        offset(&text, begin).unwrap(),
+                        offset(&text, end).unwrap(),
+                        edit["newText"].as_str().unwrap(),
+                    )
+                })
+                .collect();
+
+            assert_eq!(
+                line,
+                liva_syntax::Range {
+                    start: cursor,
+                    end: cursor
+                }
+            );
+            assert_eq!(primary["range"]["start"], primary["range"]["end"]);
+            assert_eq!(additional.len(), 2);
+            byte_edits.sort_by_key(|(begin, end, _)| (*begin, *end));
+
+            for pair in byte_edits.windows(2) {
+                assert!(pair[0].1 <= pair[1].0);
+                assert!(
+                    !(pair[0].0 == pair[0].1 && pair[1].0 == pair[1].1 && pair[0].0 == pair[1].0)
+                );
+            }
+
+            byte_edits.sort_by_key(|(begin, end, _)| std::cmp::Reverse((*begin, *end)));
+            let mut edited = text.clone();
+
+            for (begin, end, new_text) in byte_edits {
+                edited.replace_range(begin..end, new_text);
+            }
+
+            assert_eq!(edited, text.replacen(&literal, "\"start\"", 1));
+            assert!(Document::new(edited, 2, uri).diagnostics.is_empty());
+        }
+    }
 
     #[test]
     fn semantic_tokens_identify_builtin_root_blocks_and_references_in_utf16() {

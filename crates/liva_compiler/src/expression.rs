@@ -116,6 +116,18 @@ impl Type {
         self.primitive_category().is_some()
     }
 
+    /// Known finite decoded string members in stored order, including duplicates.
+    /// Broad strings and non-string types yield no members. Values are borrowed.
+    pub fn string_literals(&self) -> impl Iterator<Item = &str> {
+        let values: &[Cow<'static, str>] = match self {
+            Self::StringLiteral(value) => std::slice::from_ref(value),
+            Self::StringUnion(values) => values.as_ref(),
+            _ => &[],
+        };
+
+        values.iter().map(|value| value.as_ref())
+    }
+
     /// Whether every value represented by this source type is permitted by `destination`.
     /// String sets compare decoded values, ignoring duplicates and order. Other types
     /// retain exact compatibility, including the existing record/controller contracts.

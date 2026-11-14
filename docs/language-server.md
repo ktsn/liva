@@ -89,10 +89,63 @@ After extension or grammar changes, rerun `pnpm --dir editors/zed build` and res
 Installation failures are recorded by **zed: open log**. In particular,
 `wasm32-wasip2` must be installed for the toolchain selected by `rust-toolchain.toml`.
 
+## Literal types and argument choices
+
+Hover displays inferred string literals (`alias: "x"`), annotated finite unions
+(`position: "end" | "start"`), and constrained function signatures using the same
+compiler formatter as diagnostics. For example, `link.component` offers `"x"` and
+`"y"` as literal choices and accepts parameters of type `"x" | "y"`. Changing the
+selected component after a call is created is rejected by the runtime.
+
+At an empty constrained argument value, completion offers its permitted strings
+alongside expression names. Inside an existing quoted value, it filters choices
+by the decoded prefix. Both quote styles and equivalent supported escapes work;
+selecting a choice replaces the whole closed value with a correctly escaped,
+double-quoted spelling. This also works in nested timing decorators:
+
+```liva
+motion sample {
+  let curve = steps(count: 4, position: )
+  layer base { opacity: 1 @tween(easing: steps(count: 4, position: "ju")) }
+}
+```
+
+Place the caret after `position:` or inside `"ju"` and request completion.
+A colon or opening quote triggers argument completion; a dot still triggers member
+completion. Completed closing quotes, type annotations, comments, opaque CSS, and
+unrelated strings do not offer expression insertions. Ordinary variable/function
+and member completion remains available in expressions, including empty CSS
+interpolations.
+
+Choices come from the still-compatible signatures, using the compiler's argument
+rules for supplied values. Known incompatible types, configuration constraints,
+unknown names and duplicates exclude candidates. Required arguments that are not
+yet supplied and other incomplete/unresolved values leave potential signatures open.
+The server does not maintain separate option lists or type compatibility rules.
+
+Incomplete quoted prefixes can complete at the end of the input or immediately
+before a structural delimiter, preserving following source. When an unfinished
+string has ordinary suffix text after the caret, its replacement boundary is
+ambiguous and no insertion is offered: close the quote or move to the end of that
+literal text. An unfinished escape needs completing or removing the escape before
+choices return. Partial annotations/unions retain parser recovery and current
+buffer ranges; they do not receive built-in argument choices.
+
+The compiler exposes UTF-8 byte edits; the server maps them to UTF-16 positions in
+standalone and Vue buffers. Literal results carry explicit edits and current-prefix
+filter text, and request recomputation as typing continues. Closed multiline values
+use a single-line main edit containing the caret plus nonoverlapping cleanup edits
+in the original buffer's coordinates, following the
+[LSP completion edit contract](https://github.com/microsoft/language-server-protocol/blob/gh-pages/_specifications/lsp/3.17/language/completion.md).
+Applying all edits replaces only the original literal. Prefix matching remains
+exact, so a prefix containing a real newline has no match among today's single-line
+built-in options. The Zed grammar highlights quoted type members as strings and the
+union separator as an operator.
+
 ## Architecture and other editors
 
-- `crates/liva_compiler/src/analysis.rs` exposes byte-ranged type hover information.
-  It uses the same motion scope, dependency inference, and built-in signatures as
+- `crates/liva_compiler/src/analysis.rs` and its completion module expose byte-ranged
+  type hovers, contextual choices and source edits. They use the same motion scope, dependency inference, and built-in signatures as
   compilation, including forward references and member types. Invalid definitions
   retain the type information that can still be inferred.
 - `crates/liva_lsp` owns document versions, full-text synchronization, UTF-16 LSP

@@ -26,6 +26,14 @@ pub enum ExprView {
 }
 
 impl Expr {
+    /// Whether this is a string expression with a lexical closing quote.
+    /// Escape validity is checked separately by string_value; other expressions
+    /// and unfinished strings return false.
+    pub fn is_closed_string(&self) -> bool {
+        matches!(self.view(), ExprView::String)
+            && crate::literal::quoted_end(&self.text()).is_some()
+    }
+
     pub fn string_value(&self) -> Result<String, String> {
         if !matches!(self.view(), ExprView::String) {
             return Err("Expected string expression".into());
