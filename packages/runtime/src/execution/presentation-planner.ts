@@ -1,3 +1,10 @@
+import { sampleSpring } from '../motion/spring.ts'
+import {
+  prepareSpringMotion,
+  type SpringObservation,
+  type MotionSample,
+} from '../motion/property-motion.ts'
+import type { RenderedFrame } from '../model/presentation.ts'
 import {
   layerPropertyChanged,
   layerTrackTemplates,
@@ -212,4 +219,103 @@ export function replacedEffects(
         changed.has(layerPropertyKey(effect.target, effect.property)),
     )
     .map((effect) => effect.id)
+}
+
+/** Final, browser-independent playback instructions for one canonical property. */
+export interface TrackPlan {
+  readonly id: number
+  readonly receiver: number
+  readonly track: ResolvedTrack
+  readonly sourceProperty: string
+  readonly sourceDestination: string
+  readonly frames: readonly RenderedFrame[]
+  readonly durationMs: number
+  readonly easing: string
+  readonly fill: 'both' | 'backwards'
+  readonly reference?: string
+  /** Pure analytic sampler using effect-local milliseconds and canonical units/ms. */
+  readonly trajectory?: (milliseconds: number) => MotionSample
+}
+
+export interface TrackSnapshot {
+  readonly id: number
+  readonly receiver: number
+  readonly source: ResolvedTrack
+  readonly track: ResolvedTrack
+  readonly declarations: DeclarationAddresses
+  readonly displayed?: string
+  readonly interrupted: boolean
+  readonly motion?: SpringObservation
+  readonly reference?: string
+}
+
+/** Scalar timing, shared by ordinary playback and manually scrubbed previews. */
+export function trackTiming(track: ResolvedTrack) {
+  return track.timing.kind === 'tween'
+    ? { durationMs: track.timing.durationMs, easing: 'linear' }
+    : sampleSpring(track.timing)
+}
+
+/** Determines observation needs before the executor reads displayed/numeric values. */
+export function trackObservationNeeds(
+  track: ResolvedTrack,
+  interrupted: boolean,
+  handoff: boolean,
+) {
+  return {
+    displayed: track.implicitStart === true || interrupted,
+    motion:
+      handoff &&
+      track.timing.kind !== 'tween' &&
+      track.keyframes.every((frame) => frame.offset === 0 || frame.offset === 1),
+  }
+}
+
+/**
+ * Plans ownership, displayed-start interruption, scalar or supported numeric spring
+ * playback from supplied facts. No clock, browser state, or native effect is read.
+ * Returns undefined when a later declaration owns the canonical property. Missing
+ * requested displayed observations reject planning before effect replacement.
+ */
+export function planTrack(
+  snapshot: TrackSnapshot,
+  timing: ReturnType<typeof trackTiming>,
+  fill: TrackPlan['fill'],
+): TrackPlan | undefined {
+  const { source, track } = snapshot
+
+  if (!ownsCanonicalProperty(snapshot.declarations, source.property, track.property))
+    return undefined
+
+  const needs = trackObservationNeeds(track, snapshot.interrupted, snapshot.motion !== undefined)
+
+  let frames = track.keyframes
+
+  if (needs.displayed) {
+    const displayed = snapshot.displayed
+
+    if (displayed === undefined)
+      throw new Error(`Missing displayed track snapshot: ${track.target}.${track.property}`)
+
+    frames = frames.map((frame, index) => (index === 0 ? { ...frame, value: displayed } : frame))
+  }
+
+  const handoff =
+    track.timing.kind !== 'tween' && snapshot.motion
+      ? prepareSpringMotion(track.property, track.timing, needs.motion, snapshot.motion)
+      : undefined
+
+  return {
+    id: snapshot.id,
+    receiver: snapshot.receiver,
+    track,
+    sourceProperty: source.property,
+    sourceDestination: source.destinationValue,
+    frames: handoff?.frames ?? frames,
+    durationMs: handoff?.durationMs ?? timing.durationMs,
+    easing: handoff ? 'linear' : timing.easing,
+    fill,
+    reference: snapshot.reference,
+    trajectory: handoff?.sample,
+  }
 }

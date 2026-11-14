@@ -164,6 +164,61 @@ describe('browser animation execution', () => {
     expect(errors).toEqual([])
   })
 
+  it('scrubs canonical preview tracks with the same overlapping-property ownership as playback', async () => {
+    const tween = { kind: 'tween', durationMs: 1000, easing: 'linear' } as const
+    const source: PropertyIRDefinition = {
+      name: 'canonical-preview',
+      layers: [
+        {
+          name: 'base',
+          timing: tween,
+          targets: [
+            {
+              name: 'box',
+              properties: [
+                { name: 'inset', value: { kind: 'literal', value: '0px' } },
+                { name: 'left', value: { kind: 'literal', value: '20px' } },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'active',
+          when: { kind: 'boolean', value: false },
+          timing: tween,
+          targets: [
+            {
+              name: 'box',
+              properties: [{ name: 'inset', value: { kind: 'literal', value: '10px' } }],
+            },
+          ],
+        },
+      ],
+    }
+    const { instance, targets, errors } = setup(source)
+    const element = targets.get('box')
+
+    expect(element).toBeDefined()
+
+    instance.previewComposition(
+      { layers: { base: true, active: false }, states: {} },
+      { layers: { base: true, active: true }, states: {} },
+    )
+    await Promise.all(instance.animations.map((animation) => animation.ready))
+
+    for (const animation of instance.animations) animation.currentTime = 500
+
+    expect(instance.animations).toHaveLength(4)
+    expect(getComputedStyle(element!).left).toBe('15px')
+    expect(getComputedStyle(element!).right).toBe('5px')
+
+    instance.endCompositionPreview()
+
+    expect(element!.style.left).toBe('20px')
+    expect(instance.animations).toEqual([])
+    expect(errors).toEqual([])
+  })
+
   it('does not observe styles for unchanged untimed presentations', () => {
     const source: PropertyIRDefinition = {
       name: 'untimed',

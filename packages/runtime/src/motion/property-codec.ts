@@ -44,9 +44,16 @@ export function encodeProperty(
   values: readonly number[],
   bounded = false,
 ): string | undefined {
+  return propertyEncoder(property)?.(values, bounded)
+}
+
+/** Returns a pure canonical-component encoder, or undefined for an unsupported property. */
+export function propertyEncoder(property: string) {
   const rule = propertyRule(property)
 
-  return rule ? serialize(rule, values, bounded) : undefined
+  return rule
+    ? (values: readonly number[], bounded: boolean) => serialize(rule, values, bounded)
+    : undefined
 }
 
 /** Splits space-separated computed components while keeping CSS math expressions intact. */

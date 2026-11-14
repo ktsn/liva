@@ -67,8 +67,17 @@ style restoration, motion history, effect preparation/replacement, reference
 tracking, and previews. Notification-time expression snapshots and later displayed
 snapshots have separate lifetimes: terminal controller writes are applied and
 recorded, ownership is reconciled and released velocity is transferred, then the
-executor captures displayed values for planning. Replacement effects are prepared
-before affected old effects are cancelled; unrelated effects remain active.
+executor captures displayed values for planning. The planner produces final
+identifier-based `TrackPlan` values, including ownership, displayed-start frames,
+scalar timing or supported numeric spring samples, and playback fill. Numeric facts
+use canonical component units and units per millisecond; the existing property codec
+and spring solver supply serialization and trajectories. No native effect or element
+is part of a track plan. Ordinary playback and paused previews use the same final
+planner and effect materialization; previews retain their frozen-controller policy
+and do not inherit live input velocity. `PropertyMotion.prepareSpring` remains a
+browser-observing compatibility adapter over the shared pure spring calculation.
+Replacement effects are prepared before affected old effects are cancelled;
+unrelated effects remain active.
 
 ## Rust syntax infrastructure
 

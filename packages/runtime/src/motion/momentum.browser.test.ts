@@ -176,11 +176,9 @@ describe('displayed momentum integration', () => {
     const { instance, element, errors } = setup('translate', '100% 0px')
     instance.updateParameters({ enabled: true })
     const failure = new Error('Failed to sample replacement effect')
-    const sampling = vi
-      .spyOn(PropertyMotion.prototype, 'prepareSpring')
-      .mockImplementationOnce(() => {
-        throw failure
-      })
+    const sampling = vi.spyOn(PropertyMotion.prototype, 'read').mockImplementationOnce(() => {
+      throw failure
+    })
     element.style.width = '200px'
 
     await frames()

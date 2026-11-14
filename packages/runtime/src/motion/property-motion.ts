@@ -12,6 +12,7 @@ import {
   SPRING_SAMPLING_DENSITY,
 } from './spring.ts'
 import {
+  propertyEncoder,
   decodeDestination,
   decodeProperty,
   propertyReference,
@@ -170,6 +171,59 @@ export function springMotion(
   })
 
   return { durationMs, samples, sample }
+}
+
+/**
+ * Endpoint-only spring observations in canonical component order. Start/end positions
+ * use px, degrees, or unitless components; start velocity uses those units per ms.
+ * Start value/velocity vectors have matching finite components. Relative dependency
+ * is observed only when needed to select numeric handoff for a stationary property.
+ */
+export interface SpringObservation {
+  readonly start?: MotionSample
+  readonly end?: readonly number[]
+  readonly relative: boolean
+}
+
+/**
+ * Plans a supported spring from supplied observations without browser reads.
+ * Non-endpoint tracks, unreadable/incompatible values, and stationary non-opacity
+ * tracks without relative dependencies use the ordinary scalar-easing fallback.
+ * CSS output uses existing bounded property serialization. Sampling failures throw.
+ */
+export function prepareSpringMotion(
+  property: string,
+  timing: SpringTiming,
+  endpointOnly: boolean,
+  observation: SpringObservation,
+) {
+  const { start, end } = observation
+
+  if (
+    !endpointOnly ||
+    !start ||
+    !end ||
+    start.value.length !== end.length ||
+    (property !== 'opacity' &&
+      start.velocity.every((value) => value === 0) &&
+      !observation.relative)
+  )
+    return undefined
+
+  const encode = propertyEncoder(property)
+
+  if (!encode) return undefined
+
+  const motion = springMotion(timing, start.value, end, start.velocity)
+
+  return {
+    ...motion,
+    frames: motion.samples.map(({ time, value }) => ({
+      value: encode(value, true),
+      offset: time,
+      easing: 'linear',
+    })),
+  }
 }
 
 /**
@@ -410,27 +464,38 @@ export class PropertyMotion {
     endpointOnly: boolean,
   ) {
     if (!endpointOnly) return undefined
-    const start = this.read(element, property)
-    const end = decodeDestination(element, property, destination)
-    if (
-      !start ||
-      !end ||
-      start.value.length !== end.values.length ||
-      (property !== 'opacity' &&
-        start.velocity.every((value) => value === 0) &&
-        propertyReference(element, property, destination) === undefined)
-    )
-      return undefined
+    const observation = this.observeSpring(element, property, destination)
+    const motion = prepareSpringMotion(property, timing, endpointOnly, observation)
 
-    const motion = springMotion(timing, start.value, end.values, start.velocity)
+    if (!motion) return undefined
 
     return {
       ...motion,
-      frames: motion.samples.map(({ time, value }) => ({
-        [waapiProperty(property)]: end.serialize(value, true),
-        offset: time,
-        easing: 'linear',
+      frames: motion.frames.map(({ value, offset, easing }) => ({
+        [waapiProperty(property)]: value,
+        offset,
+        easing,
       })),
+    }
+  }
+
+  /** Captures displayed motion and numeric destination/reference facts for pure planning. */
+  observeSpring(element: HTMLElement, property: string, destination: string): SpringObservation {
+    const start = this.read(element, property)
+    const end = decodeDestination(element, property, destination)?.values
+    // Relative dependency is only needed to decide whether a stationary,
+    // non-opacity track should use numeric frames instead of scalar easing.
+    const needsReference =
+      property !== 'opacity' &&
+      start !== undefined &&
+      end !== undefined &&
+      start.value.length === end.length &&
+      start.velocity.every((value) => value === 0)
+
+    return {
+      start,
+      end,
+      relative: needsReference && propertyReference(element, property, destination) !== undefined,
     }
   }
 }

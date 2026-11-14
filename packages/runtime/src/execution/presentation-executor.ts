@@ -1,4 +1,8 @@
 import {
+  trackTiming,
+  trackObservationNeeds,
+  planTrack,
+  type TrackPlan,
   replacedEffects,
   orderedResolution,
   ownsCanonicalProperty,
@@ -35,7 +39,6 @@ import {
   lifecycleTransitions,
   type LifecycleSession,
 } from './lifecycle.ts'
-import { sampleSpring } from '../motion/spring.ts'
 import { trackLayoutAnimation } from '../layout/layout-scheduler.ts'
 import { PropertyMotion, type MotionSample } from '../motion/property-motion.ts'
 
@@ -60,7 +63,11 @@ function inlineDeclarations(element: HTMLElement): Map<string, InlineValue> {
   )
 }
 
+let nextEffectId = 0
+
 type ActiveTrack = {
+  id: number
+  receiver: number
   track: ResolvedTrack
   element: HTMLElement
   animation: Animation
@@ -113,6 +120,48 @@ export class PresentationExecutor {
   get bindingFacts(): BindingFacts {
     return {
       suspended: this.suspended,
+    }
+  }
+
+  private readonly receiverIds = new WeakMap<HTMLElement, number>()
+  private nextReceiverId = 0
+
+  private receiverId(element: HTMLElement): number {
+    const previous = this.receiverIds.get(element)
+
+    if (previous !== undefined) return previous
+
+    const id = this.nextReceiverId++
+    this.receiverIds.set(element, id)
+
+    return id
+  }
+
+  /** Materializes a final identifier-based plan; all timing/frame decisions are already pure. */
+  private prepareEffect(plan: TrackPlan, element: HTMLElement): ActiveTrack {
+    const animation = new Animation(
+      new KeyframeEffect(
+        element,
+        plan.frames.map((frame) => ({
+          [waapiProperty(plan.track.property)]: frame.value,
+          offset: frame.offset,
+          easing: frame.easing,
+        })),
+        { duration: plan.durationMs, easing: plan.easing, fill: plan.fill },
+      ),
+      document.timeline,
+    )
+
+    return {
+      id: plan.id,
+      receiver: plan.receiver,
+      track: plan.track,
+      element,
+      animation,
+      sourceProperty: plan.sourceProperty,
+      sourceDestination: plan.sourceDestination,
+      trajectory: plan.trajectory,
+      reference: plan.reference,
     }
   }
 
@@ -949,35 +998,38 @@ export class PresentationExecutor {
                 () => true,
               )
 
-          for (const track of tracks) {
-            const timing =
-              track.timing.kind === 'tween'
-                ? { durationMs: track.timing.durationMs, easing: 'linear' }
-                : sampleSpring(track.timing)
-            const animation = new Animation(
-              new KeyframeEffect(
-                element,
-                track.keyframes.map((frame) => ({
-                  [waapiProperty(track.property)]: frame.value,
-                  offset: frame.offset,
-                  easing: frame.easing,
-                })),
-                {
-                  duration: timing.durationMs,
-                  easing: timing.easing,
-                  fill: phase === 'leave' ? 'both' : 'backwards',
-                },
-              ),
-              document.timeline,
-            )
+          const addresses = this.declarationAddresses(next, element, target)
 
-            prepared.push({
-              track,
-              element,
-              animation,
-              sourceProperty: track.property,
-              sourceDestination: track.destinationValue,
-            })
+          for (const source of tracks) {
+            const timing = trackTiming(source)
+
+            for (const track of canonicalTracks(element, source)) {
+              const needs = trackObservationNeeds(track, false, false)
+              const plan = planTrack(
+                {
+                  id: nextEffectId++,
+                  receiver: this.receiverId(element),
+                  source,
+                  track,
+                  declarations: phase
+                    ? [
+                        {
+                          name: source.property,
+                          addresses: propertyAddresses(element, source.property),
+                        },
+                      ]
+                    : addresses,
+                  displayed: needs.displayed
+                    ? getComputedStyle(element).getPropertyValue(track.property)
+                    : undefined,
+                  interrupted: false,
+                },
+                timing,
+                phase === 'leave' ? 'both' : 'backwards',
+              )
+
+              if (plan) prepared.push(this.prepareEffect(plan, element))
+            }
           }
         }
       }
@@ -1092,10 +1144,7 @@ export class PresentationExecutor {
       if (!this.suspended && !this.motion.matches) {
         for (const sourceTrack of tracks) {
           changed.add(layerPropertyKey(sourceTrack.target, sourceTrack.property))
-          const timing =
-            sourceTrack.timing.kind === 'tween'
-              ? { durationMs: sourceTrack.timing.durationMs, easing: 'linear' }
-              : sampleSpring(sourceTrack.timing)
+          const timing = trackTiming(sourceTrack)
 
           if (timing.durationMs === 0) continue
 
@@ -1110,45 +1159,36 @@ export class PresentationExecutor {
               const interrupted = this.active.some(
                 (entry) => entry.element === element && entry.track.property === track.property,
               )
-              const frames = track.keyframes.map((frame, index) => ({
-                [waapiProperty(track.property)]:
-                  index === 0 && (track.implicitStart || interrupted)
+              const needs = trackObservationNeeds(track, interrupted, true)
+              const trackPlan = planTrack(
+                {
+                  id: nextEffectId++,
+                  receiver: this.receiverId(element),
+                  source: sourceTrack,
+                  track,
+                  declarations: addresses,
+                  displayed: needs.displayed
                     ? getComputedStyle(element).getPropertyValue(track.property)
-                    : frame.value,
-                offset: frame.offset,
-                easing: frame.easing,
-              }))
-              const handoff =
-                track.timing.kind !== 'tween'
-                  ? this.propertyMotion.prepareSpring(
-                      element,
-                      track.property,
-                      track.destinationValue,
-                      track.timing,
-                      track.keyframes.every((frame) => frame.offset === 0 || frame.offset === 1),
-                    )
-                  : undefined
-              const animation = new Animation(
-                new KeyframeEffect(element, handoff?.frames ?? frames, {
-                  duration: handoff?.durationMs ?? timing.durationMs,
-                  easing: handoff ? 'linear' : timing.easing,
-                  fill: 'both',
-                }),
-                document.timeline,
+                    : undefined,
+                  interrupted,
+                  motion: needs.motion
+                    ? this.propertyMotion.observeSpring(
+                        element,
+                        track.property,
+                        track.destinationValue,
+                      )
+                    : undefined,
+                  reference: propertyReference(
+                    element,
+                    sourceTrack.property,
+                    sourceTrack.destinationValue,
+                  ),
+                },
+                timing,
+                'both',
               )
-              prepared.push({
-                track,
-                element,
-                animation,
-                trajectory: handoff?.sample,
-                sourceProperty: sourceTrack.property,
-                sourceDestination: sourceTrack.destinationValue,
-                reference: propertyReference(
-                  element,
-                  sourceTrack.property,
-                  sourceTrack.destinationValue,
-                ),
-              })
+
+              if (trackPlan) prepared.push(this.prepareEffect(trackPlan, element))
             }
           }
         }
@@ -1160,8 +1200,8 @@ export class PresentationExecutor {
 
     const replacementIds = new Set(
       replacedEffects(
-        this.active.map((entry, id) => ({
-          id,
+        this.active.map((entry) => ({
+          id: entry.id,
           target: entry.track.target,
           sourceProperty: entry.sourceProperty,
           property: entry.track.property,
@@ -1170,7 +1210,7 @@ export class PresentationExecutor {
         removedProperties,
       ),
     )
-    const replaced = this.active.filter((_entry, id) => replacementIds.has(id))
+    const replaced = this.active.filter((entry) => replacementIds.has(entry.id))
     this.active = this.active.filter((entry) => !replaced.includes(entry))
 
     for (const entry of replaced) entry.animation.cancel()
