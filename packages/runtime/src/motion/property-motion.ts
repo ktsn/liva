@@ -182,6 +182,13 @@ export function springMotion(
   return { durationMs, samples, sample }
 }
 
+/** One released canonical component: units/ms velocity and an exclusive performance-clock ms deadline. */
+export interface ReleasedVelocity {
+  readonly time: number
+  readonly velocity: number
+  readonly validUntil: number
+}
+
 /**
  * Endpoint-only spring observations in canonical component order. Start/end positions
  * use px, degrees, or unitless components; start velocity uses those units per ms.
@@ -192,8 +199,8 @@ export interface SpringObservation {
   readonly start?: MotionSample
   readonly end?: readonly number[]
   readonly relative: boolean
-  /** New terminal/controller-release derivative, if committed after a captured handoff. */
-  readonly releasedAt?: readonly (number | undefined)[]
+  /** Latest input-release facts in canonical component order, independently of display-history reset. */
+  readonly released?: readonly (ReleasedVelocity | undefined)[]
   /** Components currently sampled from a running/paused native effect, in the same address order. */
   readonly animated?: readonly boolean[]
 }
@@ -249,10 +256,17 @@ export function prepareSpringMotion(
  */
 export class PropertyMotion {
   private histories = new WeakMap<HTMLElement, Map<string, PropertyHistory>>()
+  private releases = new WeakMap<HTMLElement, Map<string, Sample>>()
 
-  /** Forgets all target histories and animation references without cancelling their effects. */
-  reset() {
+  /**
+   * Drops display/native histories without cancelling their effects. Disposal may
+   * retain weakly keyed, plain input-release facts for deferred captured work;
+   * their original timestamps/deadlines survive, and no native handle is retained.
+   */
+  reset(retainReleased = false) {
     this.histories = new WeakMap()
+
+    if (!retainReleased) this.releases = new WeakMap()
   }
 
   /** Returns this instance's component history, creating an empty entry on first access. */
@@ -284,6 +298,7 @@ export class PropertyMotion {
 
     for (const [index, address] of decoded.addresses.entries()) {
       const history = this.history(element, address)
+      this.releases.get(element)?.delete(address)
       history.samples = [{ time, value: decoded.values[index] }]
       history.animation = undefined
       history.trajectory = undefined
@@ -295,6 +310,8 @@ export class PropertyMotion {
    * ordered like the property's decoded components. Captures the displayed start
    * position at time; unreadable targets are ignored. The supplied velocity takes
    * precedence over DOM finite differences until stale or superseded by a write/effect.
+   * validUntil uses the same canonical component order and absolute millisecond
+   * clock; its deadline is exclusive. Omitted deadlines use time + the direct window.
    */
   endControl(
     element: HTMLElement,
@@ -306,18 +323,21 @@ export class PropertyMotion {
     const decoded = decodeProperty(element, property)
     if (!decoded) return
 
+    const releases = this.releases.get(element) ?? new Map<string, Sample>()
+    this.releases.set(element, releases)
+
     for (const [index, address] of decoded.addresses.entries()) {
       const history = this.history(element, address)
-      history.samples = [
-        {
-          time,
-          value: decoded.values[index],
-          velocity: velocity[index],
-          validUntil: validUntil?.[index],
-        },
-      ]
+      const sample = {
+        time,
+        value: decoded.values[index],
+        velocity: velocity[index],
+        validUntil: validUntil?.[index],
+      }
+      history.samples = [sample]
       history.animation = undefined
       history.trajectory = undefined
+      releases.set(address, sample)
     }
   }
 
@@ -360,9 +380,15 @@ export class PropertyMotion {
 
       // A hold expires movement history; subsequent motion starts from a recent rest sample.
       if (last?.value === value) {
-        if (time - last.time >= DIRECT_SAMPLE_WINDOW_MS) history.samples = [{ time, value }]
+        if (time - last.time >= DIRECT_SAMPLE_WINDOW_MS) {
+          history.samples = [{ time, value }]
+          this.releases.get(element)?.delete(address)
+        }
+
         continue
       }
+
+      this.releases.get(element)?.delete(address)
 
       if (last && time - last.time >= DIRECT_SAMPLE_WINDOW_MS) samples.length = 0
       if (last?.time === time) samples.pop()
@@ -489,6 +515,7 @@ export class PropertyMotion {
 
     for (const [component, address] of decoded.addresses.entries()) {
       const history = this.history(element, address)
+      this.releases.get(element)?.delete(address)
       history.animation = animation
       history.trajectory =
         trajectory && ((milliseconds) => trajectory(milliseconds).velocity[component])
@@ -535,11 +562,16 @@ export class PropertyMotion {
 
       return animation !== undefined && ['running', 'paused'].includes(animation.playState)
     })
-    const releasedAt = endpoint?.addresses.map((address) => {
-      const history = this.histories.get(element)?.get(address)
-      const last = history?.samples.at(-1)
+    const released = endpoint?.addresses.map((address): ReleasedVelocity | undefined => {
+      const sample = this.releases.get(element)?.get(address)
 
-      return !history?.animation && last?.velocity !== undefined ? last.time : undefined
+      if (sample?.velocity === undefined) return undefined
+
+      return {
+        time: sample.time,
+        velocity: sample.velocity,
+        validUntil: sample.validUntil ?? sample.time + DIRECT_SAMPLE_WINDOW_MS,
+      }
     })
     // Relative dependency is only needed to decide whether a stationary,
     // non-opacity track should use numeric frames instead of scalar easing.
@@ -553,7 +585,7 @@ export class PropertyMotion {
     return {
       start,
       end,
-      releasedAt,
+      released,
       animated,
       relative: needsReference && propertyReference(element, property, destination) !== undefined,
     }

@@ -3,6 +3,7 @@ import {
   prepareSpringMotion,
   type SpringObservation,
   type MotionSample,
+  type MotionObservation,
 } from '../motion/property-motion.ts'
 import type { RenderedFrame } from '../model/presentation.ts'
 import {
@@ -261,6 +262,39 @@ export function trackTiming(track: ResolvedTrack) {
   return track.timing.kind === 'tween'
     ? { durationMs: track.timing.durationMs, easing: 'linear' }
     : sampleSpring(track.timing)
+}
+
+/**
+ * Selects component velocity for deferred captured work at a supplied performance
+ * clock time (ms). Available native trajectories win, then newer released input,
+ * then the capture. Direct deadlines stay exclusive; values come from the current
+ * displayed observation, and the input snapshots are never mutated.
+ */
+export function planMotionHandoff(
+  current: SpringObservation,
+  captured: MotionObservation,
+  time: number,
+): SpringObservation {
+  const start = current.start
+
+  if (!start) return current
+
+  const velocity = captured.sample.velocity.map((value, index) => {
+    if (current.animated?.[index]) return start.velocity[index]
+
+    const released = current.released?.[index]
+    const observedAt = captured.observedAt[index] ?? captured.time
+
+    if (released && released.time >= observedAt) {
+      return time >= released.time && time < released.validUntil ? released.velocity : 0
+    }
+
+    const expiry = captured.validUntil[index]
+
+    return expiry === undefined || time < expiry ? value : 0
+  })
+
+  return { ...current, start: { value: start.value, velocity } }
 }
 
 /** Determines observation needs before the executor reads displayed/numeric values. */

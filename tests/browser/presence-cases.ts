@@ -8,6 +8,7 @@ import {
   type Timing,
 } from '../../packages/runtime/src/index.ts'
 
+import { decodeProperty } from '../../packages/runtime/src/motion/property-codec.ts'
 import { PropertyMotion } from '../../packages/runtime/src/motion/property-motion.ts'
 
 const literal = (value: string) => ({ kind: 'literal' as const, value })
@@ -1994,6 +1995,125 @@ export const presenceCases = {
 
       instance.dispose()
       element.remove()
+    }
+  },
+  async releasedAfterDisposal(
+    axis: 'x' | 'y',
+    mode: 'fresh' | 'near-expiry' | 'boundary' | 'stationary',
+  ) {
+    let time = 1000
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- Restored on its native receiver in finally.
+    const nativeNow = performance.now
+    Object.defineProperty(performance, 'now', { configurable: true, value: () => time })
+    const component = axis === 'x' ? 0 : 1
+    const destination = mode === 'stationary' ? -100 : 100
+    const fixture = setup(
+      {
+        name: 'released-after-disposal',
+        parameters: [
+          { name: 'input', type: 'number' },
+          { name: 'sensitivity', type: 'number' },
+        ],
+        letBindings: [
+          {
+            name: 'movement',
+            initializer: {
+              kind: 'call',
+              function: 'link',
+              arguments: [
+                { name: 'input', value: reference('input') },
+                { name: 'sensitivity', value: reference('sensitivity') },
+                { name: 'component', value: { kind: 'string', value: axis } },
+              ],
+            },
+          },
+        ],
+        layers: [
+          {
+            name: 'base',
+            targets: [
+              {
+                name: 'box',
+                properties: [
+                  {
+                    name: 'translate',
+                    value: { kind: 'binding', expression: reference('movement') },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        leave: {
+          timing: physics,
+          targets: [
+            {
+              name: 'box',
+              properties: [
+                {
+                  name: 'translate',
+                  keyframes: [
+                    {
+                      offset: 1,
+                      value: literal(
+                        axis === 'x' ? `${destination}px 0px` : `0px ${destination}px`,
+                      ),
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      },
+      { input: 0, sensitivity: 1 },
+    )
+    let session: LifecycleSession | undefined
+
+    const positionAt = (animation: Animation, milliseconds: number) => {
+      animation.pause()
+      animation.currentTime = milliseconds
+      const decoded = decodeProperty(fixture.element, 'translate')
+
+      if (!decoded) throw new Error('Expected readable translate')
+
+      return { selected: decoded.values[component], other: decoded.values[component === 0 ? 1 : 0] }
+    }
+
+    try {
+      time = 1010
+      fixture.instance.updateParameters({ input: 10, sensitivity: 1 })
+      time = 1070
+      const work = fixture.instance.captureLifecycle('leave', ['box'], fixture.element)
+      time = 1075
+      fixture.instance.updateParameters(
+        mode === 'stationary' ? { input: 10, sensitivity: 0 } : { input: -30, sensitivity: 1 },
+      )
+      time = 1080
+      fixture.instance.dispose()
+      time = mode === 'near-expiry' ? 1154 : mode === 'boundary' ? 1155 : 1081
+      session = new LifecycleSession(work, 'leave', (error) => fixture.failures.push(error))
+      session.initialize()
+      session.play()
+      const animation = effect(fixture.element, 'translate')
+      await animation.ready
+
+      const start = positionAt(animation, 0)
+      const next = positionAt(animation, 1)
+      animation.finish()
+      const result = await session.finished
+
+      return {
+        start: start.selected,
+        direction: Math.sign(next.selected - start.selected),
+        other: next.other,
+        result,
+        errors: fixture.diagnostics.length + fixture.failures.length,
+      }
+    } finally {
+      session?.cancel('owner-teardown')
+      fixture.cleanup()
+      Object.defineProperty(performance, 'now', { configurable: true, value: nativeNow })
     }
   },
 }

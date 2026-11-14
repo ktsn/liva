@@ -2,6 +2,7 @@ import {
   trackTiming,
   trackObservationNeeds,
   planTrack,
+  planMotionHandoff,
   type TrackPlan,
   planEffectChanges,
   orderedResolution,
@@ -647,27 +648,7 @@ export class PresentationExecutor {
       trackObservationNeeds(track, false, true).endpoint,
     )
     const captured = this.pendingHandoffs.get(`${this.receiverId(element)}\0${track.property}`)
-    const current = observation.start
-
-    if (!current || !captured) return observation
-
-    const now = performance.now()
-    const velocity = captured.sample.velocity.map((componentVelocity, index) => {
-      const currentTime = observation.releasedAt?.[index]
-      const capturedTime = captured.observedAt[index] ?? captured.time
-
-      if (
-        observation.animated?.[index] ||
-        (currentTime !== undefined && currentTime >= capturedTime)
-      )
-        return current.velocity[index]
-
-      const expiry = captured.validUntil[index]
-
-      return expiry === undefined || now < expiry ? componentVelocity : 0
-    })
-
-    return { ...observation, start: { value: current.value, velocity } }
+    return captured ? planMotionHandoff(observation, captured, performance.now()) : observation
   }
 
   playOperation(operation: PresenceOperation) {
@@ -1350,7 +1331,7 @@ export class PresentationExecutor {
     if (!preserveControllerSnapshot) {
       for (const controller of this.controllers.keys()) controller.setPreview(false)
     }
-    if (!this.active.some((entry) => entry.group)) this.propertyMotion.reset()
+    if (!this.active.some((entry) => entry.group)) this.propertyMotion.reset(this.disposed)
 
     this.dirtyProperties.clear()
     if (cancelEnter) this.cancelEnterSessions('superseded')

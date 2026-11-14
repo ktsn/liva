@@ -3,6 +3,7 @@ import { resolveLayers, type LayerResolution } from '../composition/layers.ts'
 import type { Definition } from '../model/definition.ts'
 import {
   planTrack,
+  planMotionHandoff,
   trackTiming,
   trackObservationNeeds,
   type TrackSnapshot,
@@ -570,5 +571,88 @@ describe('final pure track planning', () => {
         false,
       ).endpoint,
     ).toBe('1')
+  })
+
+  it('selects current trajectories, newer zero releases and older captures per component without changing positions', () => {
+    const captured = {
+      sample: { value: [1, 2, 3], velocity: [1, 2, 3] },
+      time: 1070,
+      observedAt: [1010, 1020, undefined],
+      validUntil: [1100, 1200, undefined],
+    }
+    const current = {
+      start: { value: [10, 20, 30], velocity: [9, 8, 7] },
+      relative: false,
+      animated: [true, false, false],
+      released: [
+        { time: 1080, velocity: -1, validUntil: 1155 },
+        { time: 1000, velocity: -2, validUntil: 1250 },
+        { time: 1071, velocity: 0, validUntil: 1200 },
+      ],
+    }
+
+    const result = planMotionHandoff(current, captured, 1081)
+
+    expect(result.start?.velocity).toEqual([9, 2, 0])
+    expect(result.start?.value).toBe(current.start.value)
+    expect(captured.sample.velocity).toEqual([1, 2, 3])
+  })
+
+  it.each([
+    [1199, [0, -2, 0]],
+    [1250, [0, 0, 0]],
+  ])(
+    'expires newer releases independently at %s without reviving older captured velocity',
+    (time, expected) => {
+      const captured = {
+        sample: { value: [1, 2, 3], velocity: [1, 2, 3] },
+        time: 1070,
+        observedAt: [1010, 1020, 1030],
+        validUntil: [1400, 1400, 1400],
+      }
+      const current = {
+        start: { value: [10, 20, 30], velocity: [9, 8, 7] },
+        relative: false,
+        released: [
+          { time: 1080, velocity: -1, validUntil: 1100 },
+          { time: 1090, velocity: -2, validUntil: 1250 },
+          { time: 1080, velocity: 0, validUntil: 1150 },
+        ],
+      }
+
+      expect(planMotionHandoff(current, captured, time).start?.velocity).toEqual(expected)
+    },
+  )
+
+  it('ignores an older release for a captured trajectory and treats a future release as rest', () => {
+    const captured = {
+      sample: { value: [1, 2, 3], velocity: [1, 2, 3] },
+      time: 1070,
+      observedAt: [undefined, 1020, 1030],
+      validUntil: [undefined, 1100, 1200],
+    }
+    const current = {
+      start: { value: [10, 20, 30], velocity: [9, 8, 7] },
+      relative: false,
+      released: [
+        { time: 1069, velocity: -1, validUntil: 1300 },
+        undefined,
+        { time: 1250, velocity: -3, validUntil: 1330 },
+      ],
+    }
+
+    expect(planMotionHandoff(current, captured, 1200).start?.velocity).toEqual([1, 0, 0])
+  })
+
+  it('retains the ordinary fallback when displayed motion is unavailable', () => {
+    const unreadable = { relative: false }
+    const captured = {
+      sample: { value: [1], velocity: [2] },
+      time: 100,
+      observedAt: [90],
+      validUntil: [170],
+    }
+
+    expect(planMotionHandoff(unreadable, captured, 110)).toBe(unreadable)
   })
 })

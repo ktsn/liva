@@ -313,3 +313,28 @@ for (const complete of [false, true]) {
     })
   })
 }
+
+for (const axis of ['x', 'y'] as const) {
+  for (const mode of ['fresh', 'near-expiry', 'boundary', 'stationary'] as const) {
+    test(`retains newest released velocity through disposal axis=${axis} mode=${mode}`, async ({
+      page,
+    }) => {
+      const result = await page.evaluate(
+        async ({ component, sample }) => {
+          const { presenceCases } = await import('./presence-cases.ts')
+
+          return presenceCases.releasedAfterDisposal(component, sample)
+        },
+        { component: axis, sample: mode },
+      )
+
+      expect(result).toEqual({
+        start: 10,
+        direction: mode === 'boundary' ? 1 : -1,
+        other: 0,
+        result: 'completed',
+        errors: 0,
+      })
+    })
+  }
+}

@@ -468,4 +468,18 @@ describe('shared presence layer execution', () => {
       })
     },
   )
+
+  it.each(
+    (['x', 'y'] as const).flatMap((axis) =>
+      (['fresh', 'near-expiry', 'boundary', 'stationary'] as const).map((mode) => ({ axis, mode })),
+    ),
+  )('retains newest released $axis velocity through disposal at $mode', async ({ axis, mode }) => {
+    expect(await presenceCases.releasedAfterDisposal(axis, mode)).toEqual({
+      start: 10,
+      direction: mode === 'boundary' ? 1 : -1,
+      other: 0,
+      result: 'completed',
+      errors: 0,
+    })
+  })
 })

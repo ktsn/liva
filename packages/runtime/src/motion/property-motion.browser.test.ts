@@ -377,4 +377,56 @@ describe('per-property motion histories', () => {
       spring?.frames.every((frame) => Number(frame.opacity) >= 0 && Number(frame.opacity) <= 1),
     ).toBe(true)
   })
+
+  it('retains only plain per-component release facts across an opted-in display-history reset', () => {
+    const element = target()
+    const motion = new PropertyMotion()
+    motion.endControl(element, 'translate', [1, -2, 0], 100, [150, 180, 200])
+
+    motion.reset(true)
+
+    expect(motion.read(element, 'translate', 120)?.velocity).toEqual([0, 0, 0])
+    expect(motion.observeSpring(element, 'translate', '100px').released).toEqual([
+      { time: 100, velocity: 1, validUntil: 150 },
+      { time: 100, velocity: -2, validUntil: 180 },
+      { time: 100, velocity: 0, validUntil: 200 },
+    ])
+
+    motion.reset()
+
+    expect(motion.observeSpring(element, 'translate', '100px').released).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ])
+  })
+
+  it('retires only the released components superseded by a changed direct write', () => {
+    const element = target()
+    const motion = new PropertyMotion()
+    motion.endControl(element, 'translate', [1, -2, 0], 100)
+
+    element.style.translate = '30px 0px'
+    motion.record(element, 'translate', 110)
+
+    expect(motion.observeSpring(element, 'translate', '100px').released).toEqual([
+      undefined,
+      { time: 100, velocity: -2, validUntil: 180 },
+      { time: 100, velocity: 0, validUntil: 180 },
+    ])
+  })
+
+  it('retires released facts when a new direct-control owner acquires the property', () => {
+    const element = target()
+    const motion = new PropertyMotion()
+    motion.endControl(element, 'translate', [1, -2, 0], 100)
+
+    motion.beginControl(element, 'translate', 120)
+
+    expect(motion.observeSpring(element, 'translate', '100px').released).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ])
+  })
 })
