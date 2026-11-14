@@ -2354,6 +2354,126 @@ export const presenceCases = {
     }
   },
 
+  async fallbackApplicability(binding: boolean, invalid: boolean) {
+    const observed = observeNativeAnimations()
+    const fixture = setup(
+      {
+        name: 'fallback-applicability',
+        parameters: [
+          { name: 'active', type: 'boolean' },
+          { name: 'duration', type: 'number' },
+          { name: 'offset', type: 'number' },
+        ],
+        letBindings: [
+          {
+            name: 'movement',
+            initializer: {
+              kind: 'call',
+              function: 'link',
+              arguments: [
+                { name: 'input', value: { kind: 'number', value: 0 } },
+                { name: 'component', value: { kind: 'string', value: 'x' } },
+              ],
+            },
+          },
+        ],
+        layers: [
+          {
+            name: 'base',
+            targets: [
+              {
+                name: 'box',
+                properties: [
+                  { name: 'left', value: { kind: 'template', parts: [reference('offset'), 'px'] } },
+                ],
+              },
+            ],
+          },
+          { ...base('inset', '100px'), name: 'obscurer' },
+          {
+            name: 'binding',
+            when: reference('active'),
+            targets: [
+              {
+                name: 'box',
+                properties: [
+                  { name: 'left', value: { kind: 'binding', expression: reference('movement') } },
+                ],
+              },
+            ],
+          },
+        ],
+        enter: {
+          timingExpression: {
+            kind: 'call',
+            function: 'tween',
+            arguments: [
+              { name: 'duration', value: reference('duration') },
+              { name: 'easing', value: reference('linear') },
+            ],
+          },
+          targets: [
+            {
+              name: 'box',
+              properties: [{ name: 'left', keyframes: [{ offset: 0, value: literal('0px') }] }],
+            },
+          ],
+        },
+      },
+      { active: false, duration: 400, offset: 0 },
+      'left:0px;',
+    )
+
+    try {
+      const session = fixture.start('enter')
+      const first = effect(fixture.element, 'left')
+      await first.ready
+
+      first.pause()
+      first.currentTime = 100
+      fixture.element.remove()
+      let updates = 0
+      fixture.instance.onUpdate = () => {
+        updates++
+      }
+
+      fixture.instance.updateParameters({
+        active: binding,
+        duration: invalid ? -1 : 400,
+        offset: 20,
+      })
+      const accepted = updates
+      const selected = fixture.instance.composition.layers.binding
+      const current = observed.animations.filter((animation) => animation.playState !== 'idle')
+      await Promise.all(current.map((animation) => animation.ready))
+      const duration = current[0]?.effect?.getTiming().duration
+      const pending = !session.isFinished
+      let preserved = true
+
+      if (invalid) {
+        fixture.instance.updateParameters({ active: false, duration: 400, offset: 0 })
+        preserved = first.playState !== 'idle'
+      }
+
+      for (const animation of observed.animations)
+        if (animation.playState !== 'idle') animation.finish()
+
+      return {
+        accepted,
+        selected,
+        duration,
+        pending,
+        preserved,
+        result: await session.finished,
+        diagnostics: fixture.diagnostics.length,
+        failures: fixture.failures.length,
+      }
+    } finally {
+      fixture.cleanup()
+      observed.restore()
+    }
+  },
+
   async canonicalTakeover(mode: 'physical' | 'logical' | 'repeated') {
     const property = mode === 'physical' ? 'left' : 'inset-inline-start'
     const fixture = setup(

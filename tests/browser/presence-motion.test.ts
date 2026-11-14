@@ -396,6 +396,34 @@ for (const mode of ['takeover', 'remaining', 'mixed', 'ordered'] as const) {
   })
 }
 
+for (const binding of [false, true]) {
+  for (const invalid of [false, true]) {
+    test(`orders unavailable-controller fallbacks before enter applicability binding=${binding} invalid=${invalid}`, async ({
+      page,
+    }) => {
+      const result = await page.evaluate(
+        async ({ enabled, rejected }) => {
+          const { presenceCases } = await import('./presence-cases.ts')
+
+          return presenceCases.fallbackApplicability(enabled, rejected)
+        },
+        { enabled: binding, rejected: invalid },
+      )
+
+      expect(result).toEqual({
+        accepted: invalid ? 0 : 1,
+        selected: !invalid && binding,
+        duration: 400,
+        pending: true,
+        preserved: true,
+        result: 'completed',
+        diagnostics: invalid ? 1 : 0,
+        failures: 0,
+      })
+    })
+  }
+}
+
 for (const mode of ['physical', 'logical', 'repeated'] as const) {
   test(`preserves unowned enter components and replacement barrier mode=${mode}`, async ({
     page,

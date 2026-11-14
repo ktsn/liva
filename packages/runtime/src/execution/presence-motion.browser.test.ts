@@ -524,6 +524,24 @@ describe('shared presence layer execution', () => {
     },
   )
 
+  it.each(
+    [false, true].flatMap((binding) => [false, true].map((invalid) => ({ binding, invalid }))),
+  )(
+    'preserves enter applicability after an unavailable controller substitutes an obscured fallback (binding=$binding invalid=$invalid)',
+    async ({ binding, invalid }) => {
+      expect(await presenceCases.fallbackApplicability(binding, invalid)).toEqual({
+        accepted: invalid ? 0 : 1,
+        selected: !invalid && binding,
+        duration: 400,
+        pending: true,
+        preserved: true,
+        result: 'completed',
+        diagnostics: invalid ? 1 : 0,
+        failures: 0,
+      })
+    },
+  )
+
   it.each(['physical', 'logical', 'repeated'] as const)(
     'takes over only affected enter components and preserves the current barrier (mode=%s)',
     async (mode) => {

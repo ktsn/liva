@@ -1222,7 +1222,10 @@ export class PresentationExecutor {
       },
     }
 
-    return { normal, provisional }
+    // A fallback may belong to an earlier declaration than the unavailable
+    // binding. Both candidate applicability and accepted exclusions need the
+    // substituted owner's source order before deciding effective components.
+    return { normal, provisional: orderedResolution(provisional, definition) }
   }
 
   /**
