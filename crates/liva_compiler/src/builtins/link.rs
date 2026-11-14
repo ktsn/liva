@@ -1,4 +1,5 @@
 use super::{Field, Function, Parameter, Signature, Type};
+use std::borrow::Cow;
 
 pub const XY: &[Field] = &[
     Field {
@@ -81,7 +82,10 @@ pub const LINK: Function = Function {
                 Parameter {
                     optional: false,
                     name: "component",
-                    value_type: Type::String,
+                    value_type: Type::StringUnion(Cow::Borrowed(&[
+                        Cow::Borrowed("x"),
+                        Cow::Borrowed("y"),
+                    ])),
                 },
                 Parameter {
                     optional: true,

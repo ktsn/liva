@@ -2052,6 +2052,86 @@ describe('typed timing playback', () => {
     },
   )
 
+  it('retains step timing inputs and presentation after runtime argument rejection', () => {
+    const source: Definition = {
+      name: 'step-rollback',
+      parameters: [
+        { name: 'amount', type: 'number' },
+        { name: 'count', type: 'number' },
+        { name: 'position', type: 'string' },
+      ],
+      letBindings: [
+        { name: 'selected', initializer: ref('position') },
+        {
+          name: 'curve',
+          initializer: {
+            kind: 'call',
+            function: 'steps',
+            arguments: [
+              { name: 'count', value: ref('count') },
+              { name: 'position', value: ref('position') },
+            ],
+          },
+        },
+      ],
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'opacity',
+                  value: { kind: 'template', parts: [ref('amount')] },
+                  timingExpression: {
+                    kind: 'call',
+                    function: 'tween',
+                    arguments: [
+                      { name: 'duration', value: { kind: 'number', value: 0 } },
+                      { name: 'easing', value: ref('curve') },
+                    ],
+                  },
+                },
+                { name: '--position', value: { kind: 'template', parts: [ref('selected')] } },
+              ],
+            },
+          ],
+        },
+      ],
+    }
+    const { instance, element, errors } = setup(source, { amount: 0.25, count: 4, position: 'end' })
+
+    instance.updateParameters({ amount: 0.75, count: 4, position: 'start' })
+
+    expect(element.style.opacity).toBe('0.75')
+    expect(element.style.getPropertyValue('--position')).toBe('start')
+
+    for (const args of [
+      { count: 0, position: 'end' },
+      { count: 1, position: 'jump-none' },
+      { count: 2, position: 'middle' },
+    ]) {
+      instance.updateParameters({ amount: 1, ...args })
+
+      expect(errors.at(-1)?.code).toBe('runtime.expression')
+      expect(element.style.opacity).toBe('0.75')
+      expect(element.style.getPropertyValue('--position')).toBe('start')
+    }
+
+    expect(errors).toHaveLength(3)
+
+    instance.replaceDefinition(structuredClone(source))
+
+    expect(element.style.opacity).toBe('0.75')
+    expect(element.style.getPropertyValue('--position')).toBe('start')
+
+    instance.updateParameters({ amount: 0.5, count: 2, position: 'end' })
+
+    expect(element.style.opacity).toBe('0.5')
+    expect(element.style.getPropertyValue('--position')).toBe('end')
+  })
+
   it('scrubs a typed duration spring from a shared transition default', async () => {
     const source: Definition = {
       name: 'duration',

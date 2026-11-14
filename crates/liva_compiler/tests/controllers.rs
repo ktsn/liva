@@ -336,8 +336,8 @@ fn component_arguments_use_ordinary_string_expressions() {
         (
             "",
             "",
-            "\"z\"",
-            serde_json::json!({"kind": "string", "value": "z"}),
+            "\"y\"",
+            serde_json::json!({"kind": "string", "value": "y"}),
         ),
         (
             "",
@@ -346,7 +346,7 @@ fn component_arguments_use_ordinary_string_expressions() {
             serde_json::json!({"kind": "reference", "path": ["axis"]}),
         ),
         (
-            "axis: string",
+            "axis: \"x\"",
             "let selected = axis",
             "(selected)",
             serde_json::json!({"kind": "reference", "path": ["selected"]}),
@@ -372,5 +372,88 @@ fn component_arguments_use_ordinary_string_expressions() {
             .unwrap();
 
         assert_eq!(serde_json::to_value(&component.value).unwrap(), expected);
+    }
+}
+
+#[test]
+fn component_configuration_accepts_literals_forward_aliases_and_subset_parameters() {
+    for (parameters, declarations, expression) in [
+        ("", "", "'x'"),
+        ("", "", "('y')"),
+        ("", "let alias = later; let later = ('y')", "alias"),
+        (r#"axis: "x""#, "let alias = axis", "(alias)"),
+        (r#"axis: "y" | 'y' | "y""#, "let alias = axis", "alias"),
+        (r#"axis: "x" | "y""#, "", "axis"),
+        (r#"axis: "y" | "x" | "y""#, "let alias = axis", "(alias)"),
+    ] {
+        valid(&format!(
+            "motion sample({parameters}) {{ {declarations}; let movement = link(input: 1, component: {expression}); layer base {{ translate := movement }} }}"
+        ));
+    }
+}
+
+#[test]
+fn component_configuration_rejects_unproved_or_unsupported_values() {
+    for (parameters, expression) in [
+        ("", "'z'"),
+        ("", "1"),
+        ("", "false"),
+        ("axis: string", "axis"),
+        (r#"axis: "x" | "z""#, "axis"),
+    ] {
+        let source = format!(
+            "motion sample({parameters}) {{ let movement = link(input: 1, component: {expression}); layer base {{ translate := movement }} }}"
+        );
+
+        let result = compile(&source, false);
+        let error = result
+            .diagnostics
+            .iter()
+            .find(|error| {
+                error
+                    .message
+                    .starts_with("Invalid argument type for link.component")
+            })
+            .unwrap();
+
+        assert!(result.definitions.is_empty());
+        assert_eq!(&source[error.range.start..error.range.end], expression);
+        assert!(error.message.contains(r#"expected "x" | "y""#));
+    }
+}
+
+#[test]
+fn valid_components_do_not_bypass_input_shapes_or_attachment_rules() {
+    for (body, message) in [
+        (
+            "let pointer = drag(target: self); let movement = link(input: pointer.offset, component: 'x'); layer base { translate := movement }",
+            "Incompatible argument groups for link",
+        ),
+        (
+            "let movement = link(input: true, component: 'y'); layer base { translate := movement }",
+            "Invalid argument type for link.input",
+        ),
+        (
+            "let movement = link(input: 1, component: 'x'); layer base {}",
+            "Controller is not bound to a property",
+        ),
+        (
+            "let movement = link(input: 1, component: 'y'); layer base { translate := movement; rotate := movement }",
+            "A controller may attach to exactly one target/property address",
+        ),
+    ] {
+        let source = format!("motion sample {{ {body} }}");
+
+        let result = compile(&source, false);
+
+        assert!(result.definitions.is_empty());
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|error| error.message.starts_with(message)),
+            "{source}: {:?}",
+            result.diagnostics
+        );
     }
 }

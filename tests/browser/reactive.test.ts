@@ -71,12 +71,12 @@ test('HMR derives an aliased controller address from inactive property bindings'
   expect(result).toEqual({ controlledWidth: '120px', width: '100px', height: '210px', errors: [] })
 })
 
-test('component expressions reject invalid updates without changing the controlled pose', async ({
+test('external component expressions reject invalid updates without changing the controlled pose', async ({
   page,
 }) => {
   const compiledDefinition = decodeBundle(
     compile(
-      `motion mapped(axis: string, input: number, active: boolean) {
+      `motion mapped(axis: "x" | "y", input: number, active: boolean) {
   let selected = axis
   let movement = link(input: input, component: selected)
   layer base { translate: 100px 20px 3px }
@@ -87,6 +87,16 @@ test('component expressions reject invalid updates without changing the controll
   ).definitions[0]
 
   expect(compiledDefinition).toBeDefined()
+
+  // Broad external inputs exercise runtime validation of both unsupported and changed axes.
+  const externalDefinition = {
+    ...compiledDefinition,
+    parameters: [
+      { name: 'axis', type: 'string' },
+      { name: 'input', type: 'number' },
+      { name: 'active', type: 'boolean' },
+    ] as const,
+  }
 
   await page.goto('/tests/browser/')
   await page.waitForFunction(() => !!window.liva)
@@ -129,7 +139,7 @@ test('component expressions reject invalid updates without changing the controll
       instance.dispose()
       element.remove()
     }
-  }, compiledDefinition)
+  }, externalDefinition)
 
   expect(result.moved).toEqual([110, 20, 3])
   expect(result.rejected).toEqual([

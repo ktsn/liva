@@ -1,4 +1,5 @@
 use super::{Function, Parameter, Signature, Type};
+use std::borrow::Cow;
 
 const fn optional(name: &'static str, value_type: Type) -> Parameter {
     Parameter {
@@ -61,7 +62,20 @@ pub const CUBIC_BEZIER: Function = Function {
 pub const STEPS: Function = Function {
     name: "steps",
     signatures: &[Signature {
-        parameters: &[coordinate("count"), optional("position", Type::String)],
+        parameters: &[
+            coordinate("count"),
+            optional(
+                "position",
+                Type::StringUnion(Cow::Borrowed(&[
+                    Cow::Borrowed("start"),
+                    Cow::Borrowed("end"),
+                    Cow::Borrowed("jump-start"),
+                    Cow::Borrowed("jump-end"),
+                    Cow::Borrowed("jump-none"),
+                    Cow::Borrowed("jump-both"),
+                ])),
+            ),
+        ],
         return_type: Type::Easing,
     }],
 };
