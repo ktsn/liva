@@ -411,4 +411,29 @@ describe('shared presence layer execution', () => {
     expect(result.result).toBe('completed')
     expect(result.errors).toBe(0)
   })
+
+  it.each([
+    [false, false, false],
+    [true, false, false],
+    [false, true, false],
+    [true, true, false],
+    [false, true, true],
+  ])(
+    'cleans failed live preparation without changing its first result (explicit=%s disposed=%s existing=%s)',
+    async (explicit, disposed, existing) => {
+      expect(await presenceCases.failedPreparation(explicit, disposed, existing)).toEqual({
+        result: 'failed',
+        stillFailed: 'failed',
+        reports: 1,
+        causePreserved: true,
+        explicitThrew: explicit,
+        message: 'Tween duration must be non-negative milliseconds',
+        remainingListeners: 0,
+        remainingEffects: 0,
+        diagnostics: 0,
+        continued: true,
+        continuingResult: 'completed',
+      })
+    },
+  )
 })

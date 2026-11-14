@@ -229,3 +229,38 @@ test('samples an available native trajectory at final planning time and playback
   expect(result.result).toBe('completed')
   expect(result.errors).toBe(0)
 })
+
+for (const [explicit, disposed, existing] of [
+  [false, false, false],
+  [true, false, false],
+  [false, true, false],
+  [true, true, false],
+  [false, true, true],
+]) {
+  test(`cleans failed phase preparation explicit=${explicit} disposed=${disposed} existing=${existing}`, async ({
+    page,
+  }) => {
+    const result = await page.evaluate(
+      async ([initialize, ownerDisposed, hasExisting]) => {
+        const { presenceCases } = await import('./presence-cases.ts')
+
+        return presenceCases.failedPreparation(initialize, ownerDisposed, hasExisting)
+      },
+      [explicit, disposed, existing],
+    )
+
+    expect(result).toEqual({
+      result: 'failed',
+      stillFailed: 'failed',
+      reports: 1,
+      causePreserved: true,
+      explicitThrew: explicit,
+      message: 'Tween duration must be non-negative milliseconds',
+      remainingListeners: 0,
+      remainingEffects: 0,
+      diagnostics: 0,
+      continued: true,
+      continuingResult: 'completed',
+    })
+  })
+}

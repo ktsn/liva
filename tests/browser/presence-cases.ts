@@ -1710,4 +1710,120 @@ export const presenceCases = {
       fixture.cleanup()
     }
   },
+  async failedPreparation(explicit: boolean, disposed: boolean, existing = false) {
+    // Observe actual native registrations, including listener reacquisition when
+    // work starts after disposal; no event or media-query behavior is simulated.
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- Forwarded with the native receiver.
+    const nativeAdd = MediaQueryList.prototype.addEventListener
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- Forwarded with the native receiver.
+    const nativeRemove = MediaQueryList.prototype.removeEventListener
+    const listeners = new Set<unknown>()
+    MediaQueryList.prototype.addEventListener = function (
+      this: MediaQueryList,
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: boolean | AddEventListenerOptions,
+    ) {
+      nativeAdd.call(this, type, listener, options)
+
+      if (type === 'change' && this.media === '(prefers-reduced-motion: reduce)')
+        listeners.add(listener)
+    }
+    MediaQueryList.prototype.removeEventListener = function (
+      this: MediaQueryList,
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: boolean | EventListenerOptions,
+    ) {
+      nativeRemove.call(this, type, listener, options)
+
+      if (type === 'change' && this.media === '(prefers-reduced-motion: reduce)')
+        listeners.delete(listener)
+    }
+    const fixture = setup(
+      {
+        name: 'failed-start',
+        parameters: [{ name: 'duration', type: 'number' }],
+        layers: [base('opacity', '1')],
+        leave: {
+          timingExpression: {
+            kind: 'call',
+            function: 'tween',
+            arguments: [{ name: 'duration', value: reference('duration') }],
+          },
+          targets: [
+            {
+              name: 'box',
+              properties: [{ name: 'opacity', keyframes: [{ offset: 1, value: literal('0') }] }],
+            },
+          ],
+        },
+      },
+      { duration: 100 },
+    )
+    let session: LifecycleSession | undefined
+
+    try {
+      const continuing = existing ? fixture.start('leave') : undefined
+      const previous = continuing ? effect(fixture.element, 'opacity') : undefined
+
+      if (previous) {
+        await previous.ready
+
+        previous.pause()
+        previous.currentTime = 25
+        fixture.instance.replaceDefinition({ ...fixture.instance.definition, name: 'replacement' })
+      }
+
+      const work = fixture.instance.captureLifecycle('leave', ['box'], fixture.element)
+      fixture.instance.updateParameters({ duration: -1 })
+
+      if (disposed) fixture.instance.dispose()
+
+      session = new LifecycleSession(work, 'leave', (error) => fixture.failures.push(error))
+      let initializationError: unknown
+
+      if (explicit) {
+        try {
+          session.initialize()
+        } catch (error) {
+          initializationError = error
+        }
+      }
+
+      session.play()
+      const result = await session.finished
+      session.cancel('owner-teardown')
+      session.play()
+      session.initialize()
+      fixture.instance.dispose()
+      const continued =
+        previous === undefined ||
+        (fixture.element.getAnimations().includes(previous) && listeners.size === 1)
+
+      if (previous) previous.finish()
+
+      const continuingResult = continuing ? await continuing.finished : 'completed'
+      const reported = fixture.failures[0]
+
+      return {
+        result,
+        stillFailed: await session.finished,
+        reports: fixture.failures.length,
+        causePreserved: !explicit || initializationError === reported,
+        explicitThrew: initializationError instanceof Error,
+        message: reported instanceof Error ? reported.message : '',
+        remainingListeners: listeners.size,
+        remainingEffects: fixture.element.getAnimations().length,
+        diagnostics: fixture.diagnostics.length,
+        continued,
+        continuingResult,
+      }
+    } finally {
+      session?.cancel('owner-teardown')
+      fixture.cleanup()
+      MediaQueryList.prototype.addEventListener = nativeAdd
+      MediaQueryList.prototype.removeEventListener = nativeRemove
+    }
+  },
 }

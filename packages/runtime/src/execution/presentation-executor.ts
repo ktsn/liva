@@ -543,10 +543,21 @@ export class PresentationExecutor {
       initialized: false,
       held,
     }
-    if (this.disposed && this.operations.size === 0) this.listenMotion()
-
     this.operations.add(operation)
-    this.updateOperations(this.layerResolution)
+
+    // The caller receives cleanup ownership only after normalization succeeds.
+    // Undo this registration if live phase inputs cannot prepare the operation.
+    try {
+      if (this.disposed && this.operations.size === 1) this.listenMotion()
+
+      this.updateOperations(this.layerResolution)
+    } catch (error) {
+      this.operations.delete(operation)
+
+      if (this.disposed && this.operations.size === 0) this.stopMotion()
+
+      throw error
+    }
 
     return operation
   }
@@ -2160,13 +2171,23 @@ export class PresencePlayback {
       })
   }
 
-  initialize() {
-    if (this.ended || this.initialized) return
-
+  private initializeOperations() {
     this.initialized = true
     this.prepare()
 
     for (const { executor, operation } of this.operations) executor.initializeOperation(operation)
+  }
+
+  initialize() {
+    if (this.ended || this.initialized) return
+
+    try {
+      this.initializeOperations()
+    } catch (error) {
+      this.end('failed')
+      this.report(error)
+      throw error
+    }
   }
 
   play() {
@@ -2175,7 +2196,9 @@ export class PresencePlayback {
     this.started = true
 
     try {
-      if (!this.initialized) this.initialize()
+      // Automatic initialization shares preparation, while play retains its
+      // report-and-failed-result contract rather than exposing an initialize throw.
+      if (!this.initialized) this.initializeOperations()
 
       for (const { executor, operation } of this.operations) executor.playOperation(operation)
 

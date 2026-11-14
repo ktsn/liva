@@ -70,10 +70,12 @@ export class LifecycleSession {
     return this.playback.isFinished
   }
 
+  /** Applies the current start before paint; failure reports, settles as failed, cleans up and rethrows its cause. */
   initialize() {
     this.playback.initialize()
   }
 
+  /** Starts once; preparation/native failure reports its cause and resolves finished as failed. */
   play() {
     this.playback.play()
   }
