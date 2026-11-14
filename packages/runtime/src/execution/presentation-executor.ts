@@ -71,6 +71,15 @@ function inlineDeclarations(element: HTMLElement): Map<string, InlineValue> {
   )
 }
 
+/** CSSOM supplies shorthand field names and pending var()-valued declarations. */
+function inlinePropertyStyle(property: string, value?: string): CSSStyleDeclaration {
+  const style = document.createElement('div').style
+
+  if (value !== undefined) style.setProperty(property, value)
+
+  return style
+}
+
 let nextEffectId = 0
 let nextOperationId = 0
 
@@ -1376,12 +1385,12 @@ export class PresentationExecutor {
     element.style.setProperty(property, value)
     const after = inlineDeclarations(element)
 
-    const pending = document.createElement('div')
-    if (beforeCss !== element.style.cssText) {
-      pending.style.setProperty(property, value)
-    }
+    const pending = inlinePropertyStyle(
+      property,
+      beforeCss !== element.style.cssText ? value : undefined,
+    )
     const pendingNames = new Set(
-      Array.from(pending.style).filter((name) => pending.style.getPropertyValue(name) === ''),
+      Array.from(pending).filter((name) => pending.getPropertyValue(name) === ''),
     )
 
     // CSSOM enumerates the affected longhands, including shorthand side effects.
@@ -1412,17 +1421,17 @@ export class PresentationExecutor {
     this.dirtyProperties.set(element, dirty)
   }
 
-  private lifecycleOwns(element: HTMLElement, property: string): boolean {
+  private lifecycleProperties(element: HTMLElement): ReadonlySet<string> {
     const receiver = this.receiverId(element)
 
-    return [...this.operations].some(
-      (operation) =>
-        !operation.group.isFinished &&
-        operation.layers.some(
-          (layer) =>
-            (layer.scope === 'all' || layer.scope.includes(receiver)) &&
-            layer.targets.some((target) =>
-              target.properties.some((candidate) => candidate.name === property),
+    return new Set(
+      [...this.operations]
+        .filter((operation) => !operation.group.isFinished)
+        .flatMap((operation) =>
+          operation.layers
+            .filter((layer) => layer.scope === 'all' || layer.scope.includes(receiver))
+            .flatMap((layer) =>
+              layer.targets.flatMap((target) => target.properties.map((property) => property.name)),
             ),
         ),
     )
@@ -1446,27 +1455,27 @@ export class PresentationExecutor {
 
   private restore(preserveLifecycle = false, receivingElement?: HTMLElement) {
     const protectedValues = preserveLifecycle
-      ? this.owned.flatMap(({ element }) =>
-          [
-            ...new Set(
-              [...this.operations].flatMap((operation) =>
-                operation.layers.flatMap((layer) =>
-                  layer.targets.flatMap((target) =>
-                    target.properties.map((property) => property.name),
-                  ),
-                ),
-              ),
-            ),
-          ]
-            .filter((property) => this.lifecycleOwns(element, property))
-            .map((property) => ({
+      ? this.owned
+          .filter(({ element }) => receivingElement === undefined || element === receivingElement)
+          .flatMap(({ element }) =>
+            [...this.lifecycleProperties(element)].map((property) => ({
               element,
               property,
               value: element.style.getPropertyValue(property),
               priority: element.style.getPropertyPriority(property),
             })),
-        )
+          )
       : []
+    const protectedFields = new Map<HTMLElement, Set<string>>()
+
+    for (const { element, property, value } of protectedValues) {
+      const fields = protectedFields.get(element) ?? new Set<string>()
+      fields.add(property)
+
+      for (const field of inlinePropertyStyle(property, value)) fields.add(field)
+
+      protectedFields.set(element, fields)
+    }
 
     for (const { element, original, originalCss, pending, written } of this.owned) {
       if (receivingElement && element !== receivingElement) continue
@@ -1514,10 +1523,25 @@ export class PresentationExecutor {
     for (const { element, property, value, priority } of protectedValues)
       element.style.setProperty(property, value, priority)
 
-    if (!preserveLifecycle)
-      this.owned = receivingElement
-        ? this.owned.filter((item) => item.element !== receivingElement)
-        : []
+    // Restoration ends ownership of every restored field except declarations
+    // still required by another operation. Later work starts from the then-current
+    // external CSS, rather than inheriting this retired operation's originals.
+    this.owned = this.owned.filter(({ element, written, pending }) => {
+      if (receivingElement && element !== receivingElement) return true
+
+      const fields = protectedFields.get(element)
+
+      if (!fields) return false
+
+      for (const property of written.keys()) {
+        if (fields.has(property)) continue
+
+        written.delete(property)
+        pending.delete(property)
+      }
+
+      return true
+    })
   }
 
   /** Reconciles presentation, optionally restricting writes to one receiving element. */
@@ -2075,6 +2099,9 @@ export class PresentationExecutor {
     this.disconnectBindings()
     this.cancel()
     this.restore(this.operations.size > 0)
+    // Teardown writes are not a new motion source, and must not retain receivers
+    // unrelated to the continuing operation's work.
+    this.dirtyProperties.clear()
     this.targetElements.clear()
     this.controllers.clear()
 

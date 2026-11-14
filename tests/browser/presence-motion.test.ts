@@ -264,3 +264,52 @@ for (const [explicit, disposed, existing] of [
     })
   })
 }
+
+for (const [concurrent, complete] of [
+  [false, false],
+  [true, false],
+  [false, true],
+  [true, true],
+]) {
+  test(`retires disposed receiver ownership concurrent=${concurrent} complete=${complete}`, async ({
+    page,
+  }) => {
+    const result = await page.evaluate(
+      async ([alreadyStarted, finish]) => {
+        const { presenceCases } = await import('./presence-cases.ts')
+
+        return presenceCases.retiredOwnership(alreadyStarted, finish)
+      },
+      [concurrent, complete],
+    )
+
+    expect(result).toEqual({
+      firstRestored: '0.3',
+      external: '0.8',
+      other: concurrent ? '0.4' : '0.3',
+      result: complete ? 'completed' : 'owner-teardown',
+      remaining: 0,
+      diagnostics: 0,
+    })
+  })
+}
+
+for (const complete of [false, true]) {
+  test(`retires restored property ownership while another property leaves complete=${complete}`, async ({
+    page,
+  }) => {
+    const result = await page.evaluate(async (finish) => {
+      const { presenceCases } = await import('./presence-cases.ts')
+
+      return presenceCases.retiredProperty(finish)
+    }, complete)
+
+    expect(result).toEqual({
+      restored: '0.3',
+      opacity: '0',
+      scale: '0.4',
+      result: complete ? 'completed' : 'owner-teardown',
+      remaining: 0,
+    })
+  })
+}

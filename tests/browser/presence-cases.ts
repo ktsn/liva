@@ -1826,4 +1826,174 @@ export const presenceCases = {
       MediaQueryList.prototype.removeEventListener = nativeRemove
     }
   },
+  async retiredOwnership(concurrent: boolean, complete: boolean) {
+    const first = document.createElement('div')
+    const second = document.createElement('div')
+    first.style.opacity = '0.3'
+    second.style.opacity = '0.4'
+    document.body.append(first, second)
+    const diagnostics: RuntimeDiagnostic[] = []
+    const instance = new LivaInstance(
+      {
+        name: 'retired-receivers',
+        layers: [
+          {
+            name: 'base',
+            targets: [
+              { name: 'first', properties: [{ name: 'opacity', value: literal('1') }] },
+              { name: 'second', properties: [{ name: 'opacity', value: literal('0.8') }] },
+            ],
+          },
+        ],
+        leave: {
+          timing: { ...tween, durationMs: 1000 },
+          targets: ['first', 'second'].map((name) => ({
+            name,
+            properties: [{ name: 'opacity', keyframes: [{ offset: 1, value: literal('0') }] }],
+          })),
+        },
+      },
+      {},
+      (diagnostic) => diagnostics.push(diagnostic),
+    )
+    instance.bind([
+      ['first', first],
+      ['second', second],
+    ])
+    const firstWork = instance.captureLifecycle('leave', ['first'], first)
+    const secondWork = instance.captureLifecycle('leave', ['second'], second)
+    const sessions: LifecycleSession[] = []
+
+    const start = (work: typeof firstWork) => {
+      const session = new LifecycleSession(work, 'leave')
+      sessions.push(session)
+      session.initialize()
+      instance.retainLifecycle('leave', session)
+      session.play()
+
+      for (const item of work) {
+        const animation = effect(item.element, item.track.property)
+        animation.pause()
+        animation.currentTime = 0
+      }
+
+      return session
+    }
+    const end = async (session: LifecycleSession, element: HTMLElement) => {
+      if (complete) effect(element, 'opacity').finish()
+      else session.cancel('owner-teardown')
+
+      return session.finished
+    }
+
+    try {
+      const firstSession = start(firstWork)
+      const secondSession = concurrent ? start(secondWork) : undefined
+      instance.dispose()
+      await end(firstSession, first)
+      const firstRestored = first.style.opacity
+      const external = concurrent ? first : second
+      external.style.opacity = '0.8'
+
+      if (secondSession) await end(secondSession, second)
+
+      const replay = start(concurrent ? firstWork : secondWork)
+      const result = await end(replay, external)
+
+      return {
+        firstRestored,
+        external: external.style.opacity,
+        other: (concurrent ? second : first).style.opacity,
+        result,
+        remaining: first.getAnimations().length + second.getAnimations().length,
+        diagnostics: diagnostics.length,
+      }
+    } finally {
+      for (const session of sessions) session.cancel('owner-teardown')
+
+      instance.dispose()
+      first.remove()
+      second.remove()
+    }
+  },
+
+  async retiredProperty(complete: boolean) {
+    const element = document.createElement('div')
+    element.style.cssText = 'opacity:0.3;scale:0.4;'
+    document.body.append(element)
+    const instance = new LivaInstance({
+      name: 'retired-properties',
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'box',
+              properties: [
+                { name: 'opacity', value: literal('1') },
+                { name: 'scale', value: literal('1') },
+              ],
+            },
+          ],
+        },
+      ],
+      leave: {
+        timing: { ...tween, durationMs: 1000 },
+        targets: [
+          {
+            name: 'box',
+            properties: ['opacity', 'scale'].map((name) => ({
+              name,
+              keyframes: [{ offset: 1, value: literal('0') }],
+            })),
+          },
+        ],
+      },
+    })
+    instance.bind([['box', element]])
+    const work = instance.captureLifecycle('leave', ['box'], element)
+    const sessions = ['opacity', 'scale'].map((property) => {
+      const session = new LifecycleSession(
+        work.filter((item) => item.track.property === property),
+        'leave',
+      )
+      session.initialize()
+      instance.retainLifecycle('leave', session)
+      session.play()
+      const animation = effect(element, property)
+      animation.pause()
+      animation.currentTime = 0
+
+      return session
+    })
+    const end = async (session: LifecycleSession, property: string) => {
+      if (complete) effect(element, property).finish()
+      else session.cancel('owner-teardown')
+
+      return session.finished
+    }
+
+    try {
+      instance.dispose()
+      await end(sessions[0], 'opacity')
+      const restored = element.style.opacity
+      // Match the old operation's last inline value: its ended ownership must
+      // not make this later external write appear to remain runtime-owned.
+      element.style.opacity = '0'
+      const result = await end(sessions[1], 'scale')
+
+      return {
+        restored,
+        opacity: element.style.opacity,
+        scale: element.style.scale,
+        result,
+        remaining: element.getAnimations().length,
+      }
+    } finally {
+      for (const session of sessions) session.cancel('owner-teardown')
+
+      instance.dispose()
+      element.remove()
+    }
+  },
 }

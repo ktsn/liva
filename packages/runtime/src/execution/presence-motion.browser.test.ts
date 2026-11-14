@@ -436,4 +436,36 @@ describe('shared presence layer execution', () => {
       })
     },
   )
+
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])(
+    'retires disposed receiver ownership before later captured work (concurrent=%s complete=%s)',
+    async (concurrent, complete) => {
+      expect(await presenceCases.retiredOwnership(concurrent, complete)).toEqual({
+        firstRestored: '0.3',
+        external: '0.8',
+        other: concurrent ? '0.4' : '0.3',
+        result: complete ? 'completed' : 'owner-teardown',
+        remaining: 0,
+        diagnostics: 0,
+      })
+    },
+  )
+
+  it.each([false, true])(
+    'retires a restored property while another property still leaves (complete=%s)',
+    async (complete) => {
+      expect(await presenceCases.retiredProperty(complete)).toEqual({
+        restored: '0.3',
+        opacity: '0',
+        scale: '0.4',
+        result: complete ? 'completed' : 'owner-teardown',
+        remaining: 0,
+      })
+    },
+  )
 })
