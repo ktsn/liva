@@ -164,6 +164,83 @@ describe('browser animation execution', () => {
     expect(errors).toEqual([])
   })
 
+  it.each(['enter', 'leave'] as const)(
+    'does not observe unused ordinary addresses during %s previews',
+    async (phase) => {
+      const source: PropertyIRDefinition = {
+        name: 'lifecycle-observations',
+        layers: [
+          {
+            name: 'base',
+            targets: [
+              {
+                name: 'box',
+                properties: [
+                  { name: 'width', value: { kind: 'literal', value: '10px' } },
+                  { name: 'height', value: { kind: 'literal', value: '20px' } },
+                  { name: 'opacity', value: { kind: 'literal', value: '1' } },
+                ],
+              },
+              {
+                name: 'unrelated',
+                properties: [
+                  { name: 'width', value: { kind: 'literal', value: '30px' } },
+                  { name: 'height', value: { kind: 'literal', value: '40px' } },
+                ],
+              },
+            ],
+          },
+        ],
+        [phase]: {
+          timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
+          targets: [
+            {
+              name: 'box',
+              properties: [
+                {
+                  name: 'opacity',
+                  keyframes: [
+                    { offset: phase === 'enter' ? 0 : 1, value: { kind: 'literal', value: '0' } },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      }
+      const { instance, targets, errors } = setup(source)
+      const element = targets.get('box')
+      const unrelated = targets.get('unrelated')
+      expect(element).toBeDefined()
+      expect(unrelated).toBeDefined()
+
+      const observe = vi.spyOn(window, 'getComputedStyle')
+      let reads: number
+      let unrelatedReads: number
+
+      try {
+        instance.previewLifecycle(phase)
+        reads = observe.mock.calls.length
+        unrelatedReads = observe.mock.calls.filter(([receiver]) => receiver === unrelated).length
+      } finally {
+        observe.mockRestore()
+      }
+
+      await Promise.all(instance.animations.map((animation) => animation.ready))
+
+      for (const animation of instance.animations) animation.currentTime = 100
+
+      // Only the phase's opacity can need a displayed snapshot; ordinary lengths
+      // and the target without phase tracks require no writing-context observation.
+      expect(reads).toBeLessThanOrEqual(1)
+      expect(unrelatedReads).toBe(0)
+      expect(getComputedStyle(element!).opacity).toBe('0.5')
+      expect(errors).toEqual([])
+
+      instance.endCompositionPreview()
+    },
+  )
+
   it('scrubs canonical preview tracks with the same overlapping-property ownership as playback', async () => {
     const tween = { kind: 'tween', durationMs: 1000, easing: 'linear' } as const
     const source: PropertyIRDefinition = {

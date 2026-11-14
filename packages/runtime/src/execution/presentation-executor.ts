@@ -998,7 +998,11 @@ export class PresentationExecutor {
                 () => true,
               )
 
-          const addresses = this.declarationAddresses(next, element, target)
+          if (tracks.length === 0) continue
+
+          // Lifecycle previews use their own declarations, so ordinary cascade
+          // addresses would add unused writing-context observations.
+          const addresses = phase ? undefined : this.declarationAddresses(next, element, target)
 
           for (const source of tracks) {
             const timing = trackTiming(source)
@@ -1011,14 +1015,12 @@ export class PresentationExecutor {
                   receiver: this.receiverId(element),
                   source,
                   track,
-                  declarations: phase
-                    ? [
-                        {
-                          name: source.property,
-                          addresses: propertyAddresses(element, source.property),
-                        },
-                      ]
-                    : addresses,
+                  declarations: addresses ?? [
+                    {
+                      name: source.property,
+                      addresses: propertyAddresses(element, source.property),
+                    },
+                  ],
                   displayed: needs.displayed
                     ? getComputedStyle(element).getPropertyValue(track.property)
                     : undefined,
