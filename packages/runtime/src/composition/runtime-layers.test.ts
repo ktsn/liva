@@ -90,6 +90,20 @@ describe('evaluated runtime layer composition', () => {
 
     expect(result[0].properties[0]).toEqual({ name: 'opacity', value: 2, timing: undefined })
   })
+
+  it('fills an omitted authored animation endpoint from completion', () => {
+    const layer = trackLayer('custom', 0, [
+      {
+        target: 'box',
+        property: 'opacity',
+        timing,
+        destinationValue: '1',
+        keyframes: [{ offset: 0, value: '0' }],
+      },
+    ])
+
+    expect(layer.targets[0].properties[0].value).toBe('1')
+  })
 })
 
 describe('presence normalization from captured values', () => {
@@ -132,21 +146,10 @@ describe('presence normalization from captured values', () => {
       [1, '1'],
     ])
   })
-})
 
-it('normalizes an absent phase to no work and fills omitted authored animation endpoints', () => {
-  expect(
-    normalizeLifecycleTracks('enter', undefined, { name: 'state', targets: [] }, new Map()),
-  ).toEqual([])
-  const layer = trackLayer('custom', 0, [
-    {
-      target: 'box',
-      property: 'opacity',
-      timing,
-      destinationValue: '1',
-      keyframes: [{ offset: 0, value: '0' }],
-    },
-  ])
-
-  expect(layer.targets[0].properties[0].value).toBe('1')
+  it('normalizes an absent phase to no work', () => {
+    expect(
+      normalizeLifecycleTracks('enter', undefined, { name: 'state', targets: [] }, new Map()),
+    ).toEqual([])
+  })
 })

@@ -555,20 +555,20 @@ describe('final pure track planning', () => {
     expect(plan?.frames.map((frame) => frame.value)).toEqual(['1', '1'])
     expect(plan?.fill).toBe('backwards')
   })
-})
 
-it('uses completion as the observation endpoint when custom work omits its final frame', () => {
-  expect(
-    trackObservationNeeds(
-      {
-        target: 'box',
-        property: 'opacity',
-        timing: { kind: 'tween', durationMs: 100, easing: 'linear' },
-        keyframes: [{ offset: 0, value: '0' }],
-        destinationValue: '1',
-      },
-      false,
-      false,
-    ).endpoint,
-  ).toBe('1')
+  it('uses completion as the observation endpoint when custom work omits its final frame', () => {
+    expect(
+      trackObservationNeeds(
+        {
+          target: 'box',
+          property: 'opacity',
+          timing: { kind: 'tween', durationMs: 100, easing: 'linear' },
+          keyframes: [{ offset: 0, value: '0' }],
+          destinationValue: '1',
+        },
+        false,
+        false,
+      ).endpoint,
+    ).toBe('1')
+  })
 })
