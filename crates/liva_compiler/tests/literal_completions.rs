@@ -172,8 +172,8 @@ fn comments_css_unrelated_strings_and_annotations_do_not_receive_argument_choice
 }
 
 #[test]
-fn literal_and_union_hovers_share_notation_and_expose_fixed_metadata() {
-    let source = r#"motion a(axis: 'x', position: 'start' | "end") {
+fn literal_and_union_hovers_share_notation_with_function_signatures() {
+    let source = r#"motion a(axis: 'x' | 'y', position: 'start' | "end") {
         let alias = axis
         let curve = steps(count: 4, position: position)
         let movement = link(input: 1, component: alias)
@@ -183,8 +183,8 @@ fn literal_and_union_hovers_share_notation_and_expose_fixed_metadata() {
     let found = hovers(source);
 
     for label in [
-        r#"axis: "x""#,
-        r#"alias: "x""#,
+        r#"axis: "x" | "y""#,
+        r#"alias: "x" | "y""#,
         r#"position: "end" | "start""#,
     ] {
         assert!(found.iter().any(|hover| hover.label == label), "{found:?}");
@@ -192,10 +192,14 @@ fn literal_and_union_hovers_share_notation_and_expose_fixed_metadata() {
 
     assert!(found.iter().any(|hover| hover.label.starts_with("steps(")
         && hover.label.contains(r#"position?: "end" | "jump-both""#)));
+    let component_signature =
+        r#"link(input: number, component: "x" | "y", sensitivity?: number): controller"#;
+
     assert!(
         found
             .iter()
-            .any(|hover| hover.label.contains(r#"component: "x" | "y" (fixed)"#))
+            .flat_map(|hover| hover.label.lines())
+            .any(|line| line == component_signature)
     );
 }
 

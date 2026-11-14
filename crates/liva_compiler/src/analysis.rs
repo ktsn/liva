@@ -39,11 +39,10 @@ fn symbol_detail(symbol: &Symbol) -> Option<String> {
                             .parameters
                             .iter()
                             .map(|parameter| format!(
-                                "{}{}: {}{}",
+                                "{}{}: {}",
                                 parameter.name,
                                 if parameter.optional { "?" } else { "" },
                                 type_name(&parameter.value_type),
-                                if parameter.fixed { " (fixed)" } else { "" },
                             ))
                             .collect::<Vec<_>>()
                             .join(", "),

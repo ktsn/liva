@@ -390,7 +390,7 @@ fn literal_hover_diagnostics_and_edits_map_utf16_in_standalone_and_vue_buffers()
                 ("alias =", r#"alias: "x""#),
                 ("position:", r#"position: "end" | "start""#),
                 ("steps(", r#"position?: "end" | "jump-both""#),
-                ("link(", r#"component: "x" | "y" (fixed)"#),
+                ("link(", r#"component: "x" | "y", sensitivity?: number"#),
             ] {
                 let byte = source.find(name).unwrap();
 

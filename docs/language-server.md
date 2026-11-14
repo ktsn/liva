@@ -93,10 +93,9 @@ Installation failures are recorded by **zed: open log**. In particular,
 
 Hover displays inferred string literals (`alias: "x"`), annotated finite unions
 (`position: "end" | "start"`), and constrained function signatures using the same
-compiler formatter as diagnostics. A `(fixed)` marker on a parameter comes from
-signature metadata: its value must have one provable string value in addition to
-belonging to the displayed set. For example, `link.component` offers `"x"` and `"y"`
-as literal choices, while a changeable `"x" | "y"` parameter still fails compilation.
+compiler formatter as diagnostics. For example, `link.component` offers `"x"` and
+`"y"` as literal choices and accepts parameters of type `"x" | "y"`. Changing the
+selected component after a call is created is rejected by the runtime.
 
 At an empty constrained argument value, completion offers its permitted strings
 alongside expression names. Inside an existing quoted value, it filters choices

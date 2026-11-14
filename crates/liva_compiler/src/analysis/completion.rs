@@ -414,11 +414,11 @@ fn literal_choices(context: &ArgumentContext, scope: &Scope) -> Vec<Completion> 
                 }
 
                 // Incomplete/unresolved values leave candidates open; a resolved type
-                // must satisfy the exact same membership/configuration rule as checking.
+                // must satisfy the same assignability rule as argument checking.
                 argument
                     .value()
                     .and_then(|value| value.check(scope).ok())
-                    .is_none_or(|actual| parameter.accepts(&actual))
+                    .is_none_or(|actual| actual.is_assignable_to(&parameter.value_type))
             });
 
         if compatible {
@@ -458,7 +458,6 @@ mod tests {
             parameters: &[Parameter {
                 name: "mode",
                 optional: false,
-                fixed: false,
                 value_type: Type::StringUnion(Cow::Borrowed(&[
                     Cow::Borrowed("a'quote"),
                     Cow::Borrowed("a\"quote"),
@@ -486,13 +485,11 @@ mod tests {
                     Parameter {
                         name: "selector",
                         optional: false,
-                        fixed: false,
                         value_type: Type::Number,
                     },
                     Parameter {
                         name: "choice",
                         optional: false,
-                        fixed: false,
                         value_type: Type::StringLiteral(Cow::Borrowed("number")),
                     },
                 ],
@@ -503,13 +500,11 @@ mod tests {
                     Parameter {
                         name: "selector",
                         optional: false,
-                        fixed: false,
                         value_type: Type::Boolean,
                     },
                     Parameter {
                         name: "choice",
                         optional: false,
-                        fixed: false,
                         value_type: Type::StringLiteral(Cow::Borrowed("boolean")),
                     },
                 ],
@@ -520,14 +515,12 @@ mod tests {
                     Parameter {
                         name: "selector",
                         optional: false,
-                        fixed: true,
                         value_type: Type::String,
                     },
                     Parameter {
                         name: "choice",
                         optional: false,
-                        fixed: false,
-                        value_type: Type::StringLiteral(Cow::Borrowed("fixed")),
+                        value_type: Type::StringLiteral(Cow::Borrowed("string")),
                     },
                 ],
                 return_type: Type::Boolean,
@@ -635,28 +628,28 @@ mod tests {
     }
 
     #[test]
-    fn compatible_overloads_use_supplied_types_and_configuration_metadata() {
+    fn compatible_overloads_use_supplied_argument_types() {
         for (arguments, expected) in [
             ("selector: 1, choice: ¦", vec![r#""number""#]),
             ("choice: 'n¦onsense', selector: 1", vec![r#""number""#]),
             ("selector: true, choice: ¦", vec![r#""boolean""#]),
-            ("selector: 'value', choice: ¦", vec![r#""fixed""#]),
-            ("selector: broad, choice: ¦", vec![]),
-            ("selector: multiple, choice: ¦", vec![]),
+            ("selector: 'value', choice: ¦", vec![r#""string""#]),
+            ("selector: broad, choice: ¦", vec![r#""string""#]),
+            ("selector: multiple, choice: ¦", vec![r#""string""#]),
             ("selector: 1, unknown: true, choice: ¦", vec![]),
             ("selector: 1, selector: 1, choice: ¦", vec![]),
             ("selector: 1, choice: 'number', choice: ¦", vec![]),
             (
                 "choice: ¦",
-                vec![r#""boolean""#, r#""fixed""#, r#""number""#],
+                vec![r#""boolean""#, r#""number""#, r#""string""#],
             ),
             (
                 "selector: missing, choice: ¦",
-                vec![r#""boolean""#, r#""fixed""#, r#""number""#],
+                vec![r#""boolean""#, r#""number""#, r#""string""#],
             ),
             (
                 "selector: , choice: ¦",
-                vec![r#""boolean""#, r#""fixed""#, r#""number""#],
+                vec![r#""boolean""#, r#""number""#, r#""string""#],
             ),
         ] {
             let (_, _, found) = custom_choices(
