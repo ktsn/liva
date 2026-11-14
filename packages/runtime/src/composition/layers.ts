@@ -17,7 +17,7 @@ import {
   type VariableValues,
 } from '../evaluation/expression.ts'
 
-import type { RenderedProperty, RenderedState } from '../model/presentation.ts'
+import type { RenderedProperty, RenderedState, RenderedFrame } from '../model/presentation.ts'
 
 interface LayerProperty extends RenderedProperty {
   readonly owner: string
@@ -242,16 +242,22 @@ export function layerPropertyChanged(
   )
 }
 
-export function resolveLayerTracks(
+/** A selected track whose omitted starting endpoint still requires a displayed observation. */
+export interface LayerTrackTemplate extends Omit<ResolvedTrack, 'keyframes'> {
+  readonly keyframes?: readonly RenderedFrame[]
+}
+
+/**
+ * Selects and evaluates track instructions without observing receiving elements.
+ * @yields Selected timing and authored frames, before omitted endpoints are completed.
+ */
+export function* layerTrackTemplates(
   previous: LayerResolution,
   next: LayerResolution,
   values: VariableValues,
-  displayed: (target: string, property: string) => string,
   warn: (message: string) => void,
-  retarget: (target: string, property: string) => boolean = () => false,
-): ResolvedTrack[] {
-  const tracks: ResolvedTrack[] = []
-
+  retarget: (target: string, property: string) => boolean,
+): Generator<LayerTrackTemplate> {
   for (const target of next.presentation.targets) {
     for (const property of target.properties) {
       const owner = property.owner
@@ -306,7 +312,7 @@ export function resolveLayerTracks(
         )
       }
 
-      tracks.push({
+      yield {
         target: target.name,
         property: property.name,
         timing,
@@ -319,14 +325,38 @@ export function resolveLayerTracks(
             ? owner
             : undefined,
         ownerState: next.states.get(owner),
-        keyframes: normalizeFrames(
-          displayed(target.name, property.name),
-          property.value,
-          explicit,
-          timing,
-        ),
-      })
+        keyframes: explicit,
+      }
     }
+  }
+}
+
+/** Completes one selected track using a supplied displayed CSS value for an omitted 0% endpoint. */
+export function completeLayerTrack(template: LayerTrackTemplate, displayed: string): ResolvedTrack {
+  return {
+    ...template,
+    keyframes: normalizeFrames(
+      displayed,
+      template.destinationValue,
+      template.keyframes,
+      template.timing,
+    ),
+  }
+}
+
+/** Compatibility resolver retaining per-track observation and diagnostic ordering. */
+export function resolveLayerTracks(
+  previous: LayerResolution,
+  next: LayerResolution,
+  values: VariableValues,
+  displayed: (target: string, property: string) => string,
+  warn: (message: string) => void,
+  retarget: (target: string, property: string) => boolean = () => false,
+): ResolvedTrack[] {
+  const tracks: ResolvedTrack[] = []
+
+  for (const template of layerTrackTemplates(previous, next, values, warn, retarget)) {
+    tracks.push(completeLayerTrack(template, displayed(template.target, template.property)))
   }
 
   return tracks

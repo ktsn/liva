@@ -55,8 +55,12 @@ changed/removed properties, tracks, and affected effect identities from supplied
 values and snapshots. It reuses `composition/layers.ts` for timing and frame
 resolution. Receiver-specific canonical addresses preserve target-wide controller
 ownership when the same logical target has multiple receiving elements. Planning
-reads neither browser state nor clocks. Incomplete displayed observations reject
-planning before replacement effects are published.
+reads neither browser state nor clocks. Pure track selection first identifies
+which omitted starting endpoints need displayed observations; unchanged updates
+read no CSSOM state. The executor captures only those endpoints and canonical
+facts for affected targets, reusing each receiver's facts during track preparation.
+Incomplete displayed observations reject planning before replacement effects are
+published.
 
 The executor owns DOM bindings and subscription connections, controller operations,
 style restoration, motion history, effect preparation/replacement, reference

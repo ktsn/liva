@@ -1,6 +1,8 @@
 import {
   layerPropertyChanged,
-  resolveLayerTracks,
+  layerTrackTemplates,
+  completeLayerTrack,
+  type LayerTrackTemplate,
   type LayerResolution,
 } from '../composition/layers.ts'
 import type { ResolvedTrack } from '../composition/resolve.ts'
@@ -86,23 +88,17 @@ export interface LayerPlanningSnapshot {
   readonly previous: LayerResolution
   readonly next: LayerResolution
   readonly values: VariableValues
-  readonly displayed: ReadonlyMap<string, string>
-  readonly receivers: readonly {
-    readonly target: string
-    readonly addresses: DeclarationAddresses
-  }[]
   readonly active: readonly { readonly track: ResolvedTrack }[]
   readonly retargets: ReadonlySet<string>
 }
 
 /**
- * Plans logical property changes using immutable phase-specific observations.
- * Reuses layer track resolution for timing, explicit frames, endpoint completion,
- * and declaration identity. Canonical address facts include every receiver for a
- * target; callers must not substitute one receiver's writing context for the others.
- * The returned sets are owned by the caller and may accumulate expanded track names.
+ * Selects changed declarations and track instructions before browser observation.
+ * Reuses layer resolution for timing, explicit frames, and declaration identity.
+ * Returned templates identify the omitted endpoints that need displayed snapshots;
+ * unchanged declarations need no observation.
  */
-export function planLayerChange(snapshot: LayerPlanningSnapshot) {
+export function prepareLayerChange(snapshot: LayerPlanningSnapshot) {
   const { previous, next } = snapshot
   const changed = new Set(snapshot.retargets)
 
@@ -128,39 +124,71 @@ export function planLayerChange(snapshot: LayerPlanningSnapshot) {
     ),
   )
   const diagnostics: string[] = []
-  const tracks = resolveLayerTracks(
-    previous,
-    next,
-    snapshot.values,
-    (target, property) => {
-      const value = snapshot.displayed.get(layerPropertyKey(target, property))
-
-      if (value === undefined) throw new Error(`Missing displayed snapshot: ${target}.${property}`)
-
-      return value
-    },
-    (message) => diagnostics.push(message),
-    (target, property) => changed.has(layerPropertyKey(target, property)),
-  )
+  const templates = [
+    ...layerTrackTemplates(
+      previous,
+      next,
+      snapshot.values,
+      (message) => diagnostics.push(message),
+      (target, property) => changed.has(layerPropertyKey(target, property)),
+    ),
+  ]
 
   for (const target of next.presentation.targets) {
     for (const property of target.properties) {
       if (!layerPropertyChanged(previous, target.name, property)) continue
 
       changed.add(layerPropertyKey(target.name, property.name))
-
-      for (const receiver of snapshot.receivers.filter((item) => item.target === target.name)) {
-        for (const declaration of receiver.addresses) {
-          if (declaration.name !== property.name) continue
-
-          for (const address of declaration.addresses)
-            changed.add(layerPropertyKey(target.name, address))
-        }
-      }
     }
   }
 
-  return { changed, removedProperties, tracks, diagnostics }
+  return { changed, removedProperties, templates, diagnostics }
+}
+
+export interface LayerChangePreparation {
+  readonly changed: ReadonlySet<string>
+  readonly removedProperties: ReadonlySet<string>
+  readonly templates: readonly LayerTrackTemplate[]
+  readonly diagnostics: readonly string[]
+}
+
+/**
+ * Completes a prepared change with post-controller displayed/canonical facts.
+ * Only implicit starting endpoints require displayed observations. Receiver facts
+ * cover affected targets and include all their declarations in cascade order.
+ */
+export function planLayerChange(
+  preparation: LayerChangePreparation,
+  displayed: ReadonlyMap<string, string>,
+  receivers: readonly { readonly target: string; readonly addresses: DeclarationAddresses }[],
+) {
+  const changed = new Set(preparation.changed)
+  const tracks = preparation.templates.map((template) => {
+    const source = template.implicitStart
+      ? displayed.get(layerPropertyKey(template.target, template.property))
+      : ''
+
+    if (source === undefined)
+      throw new Error(`Missing displayed snapshot: ${template.target}.${template.property}`)
+
+    return completeLayerTrack(template, source)
+  })
+
+  for (const receiver of receivers) {
+    for (const declaration of receiver.addresses) {
+      if (!preparation.changed.has(layerPropertyKey(receiver.target, declaration.name))) continue
+
+      for (const address of declaration.addresses)
+        changed.add(layerPropertyKey(receiver.target, address))
+    }
+  }
+
+  return {
+    changed,
+    removedProperties: preparation.removedProperties,
+    tracks,
+    diagnostics: preparation.diagnostics,
+  }
 }
 
 export interface ActiveEffectMetadata {

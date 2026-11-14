@@ -1,5 +1,5 @@
 import type { Definition as PropertyIRDefinition } from '../model/definition.ts'
-import { afterEach, describe, expect, it } from 'vite-plus/test'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { cdp, userEvent } from 'vite-plus/test/browser'
 import type { CDPSession } from '@vitest/browser-playwright'
 import constrainedFixture from '../../../../fixtures/constrained.json'
@@ -55,6 +55,38 @@ afterEach(() => {
 })
 
 describe('browser animation execution', () => {
+  it('does not observe styles for unchanged untimed presentations', () => {
+    const source: PropertyIRDefinition = {
+      name: 'untimed',
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'box',
+              properties: [
+                { name: 'opacity', value: { kind: 'literal', value: '1' } },
+                { name: 'width', value: { kind: 'literal', value: '10px' } },
+                { name: 'height', value: { kind: 'literal', value: '20px' } },
+              ],
+            },
+          ],
+        },
+      ],
+    }
+    const { instance } = setup(source)
+    const observe = vi.spyOn(window, 'getComputedStyle')
+
+    try {
+      for (let update = 0; update < 10; update++) instance.updateParameters({})
+
+      expect(observe).not.toHaveBeenCalled()
+      expect(instance.animations).toEqual([])
+    } finally {
+      observe.mockRestore()
+    }
+  })
+
   it('plays compiled explicit self properties on the root with their shared timing', async () => {
     const source = decodeBundle(JSON.stringify(selfFixture)).definitions[0]
     const { instance, targets, errors } = setup(source, { active: false })

@@ -2,6 +2,7 @@ import {
   replacedEffects,
   orderedResolution,
   ownsCanonicalProperty,
+  prepareLayerChange,
   planLayerChange,
   layerPropertyKey,
   type DeclarationAddresses,
@@ -964,35 +965,59 @@ export class PresentationExecutor {
 
   applyLayerResolution(previous: LayerResolution, next: LayerResolution) {
     const prepared: ActiveTrack[] = []
-    // Read after terminal controller writes/releases. Evaluation snapshots are not
-    // valid displayed-start observations for this later preparation phase.
-    const displayed = new Map(
-      next.presentation.targets.flatMap((target) =>
-        target.properties.map((property) => {
-          const element = this.targets.get(target.name)
-
-          return [
-            layerPropertyKey(target.name, property.name),
-            element ? getComputedStyle(element).getPropertyValue(property.name) : '',
-          ] as const
-        }),
-      ),
-    )
-    const facts = [...this.targetElements].flatMap(([target, elements]) =>
-      elements.map((element) => ({
-        target,
-        addresses: this.declarationAddresses(next, element, target),
-      })),
-    )
-    const plan = planLayerChange({
+    const preparation = prepareLayerChange({
       previous,
       next,
       values: this.values,
-      displayed,
-      receivers: facts,
       active: this.active.map((entry) => ({ track: entry.track })),
       retargets: this.referenceRetargets,
     })
+    const affectedTargets = new Set(preparation.templates.map((track) => track.target))
+
+    for (const target of next.presentation.targets) {
+      if (
+        target.properties.some((property) =>
+          preparation.changed.has(layerPropertyKey(target.name, property.name)),
+        )
+      )
+        affectedTargets.add(target.name)
+    }
+
+    // Candidate selection needs no DOM. Read only the selected endpoints after
+    // terminal writes/releases, and share each target's computed-style observation.
+    const displayed = new Map<string, string>()
+
+    for (const target of next.presentation.targets) {
+      const implicit = preparation.templates.filter(
+        (track) => track.target === target.name && track.implicitStart,
+      )
+
+      if (implicit.length === 0) continue
+
+      const element = this.targets.get(target.name)
+      const style = element ? getComputedStyle(element) : undefined
+
+      for (const track of implicit)
+        displayed.set(
+          layerPropertyKey(track.target, track.property),
+          style ? style.getPropertyValue(track.property) : '',
+        )
+    }
+
+    const receivers = [...this.targetElements]
+      .filter(([target]) => affectedTargets.has(target))
+      .flatMap(([target, elements]) =>
+        elements.map((element) => ({
+          element,
+          target,
+          addresses: this.declarationAddresses(next, element, target),
+        })),
+      )
+    const plan = planLayerChange(
+      preparation,
+      displayed,
+      receivers.map(({ target, addresses }) => ({ target, addresses })),
+    )
     const { changed, removedProperties, tracks } = plan
     const removed = removedProperties.size > 0
 
@@ -1009,21 +1034,11 @@ export class PresentationExecutor {
 
           if (timing.durationMs === 0) continue
 
-          for (const element of this.targetElements.get(sourceTrack.target) ?? []) {
+          for (const receiver of receivers.filter((item) => item.target === sourceTrack.target)) {
+            const { element, addresses } = receiver
+
             for (const track of canonicalTracks(element, sourceTrack)) {
-              if (
-                !ownsCanonicalProperty(
-                  this.declarationAddresses(
-                    next,
-                    element,
-                    sourceTrack.target,
-                    sourceTrack.property,
-                  ),
-                  sourceTrack.property,
-                  track.property,
-                )
-              )
-                continue
+              if (!ownsCanonicalProperty(addresses, sourceTrack.property, track.property)) continue
               changed.add(layerPropertyKey(track.target, track.property))
               if (this.lifecycleOwns(element, track.property)) continue
 

@@ -7,6 +7,7 @@ import {
   orderedResolution,
   ownsCanonicalProperty,
   planLayerChange,
+  prepareLayerChange,
   type LayerPlanningSnapshot,
 } from './presentation-planner.ts'
 
@@ -36,7 +37,16 @@ function resolution(properties: readonly [string, string][]): LayerResolution {
   )
 }
 
-function snapshot(previous: LayerResolution, next: LayerResolution): LayerPlanningSnapshot {
+function snapshot(
+  previous: LayerResolution,
+  next: LayerResolution,
+): LayerPlanningSnapshot & {
+  displayed: ReadonlyMap<string, string>
+  receivers: readonly {
+    target: string
+    addresses: readonly { name: string; addresses: readonly string[] }[]
+  }[]
+} {
   return {
     previous,
     next,
@@ -62,12 +72,20 @@ function snapshot(previous: LayerResolution, next: LayerResolution): LayerPlanni
   }
 }
 
+function planObservedChange(observations: ReturnType<typeof snapshot>) {
+  return planLayerChange(
+    prepareLayerChange(observations),
+    observations.displayed,
+    observations.receivers,
+  )
+}
+
 describe('pure presentation planning', () => {
   it('rejects incomplete displayed observations before preparing effects', () => {
     const previous = resolution([['opacity', '0']])
     const next = resolution([['opacity', '1']])
 
-    expect(() => planLayerChange({ ...snapshot(previous, next), displayed: new Map() })).toThrow(
+    expect(() => planObservedChange({ ...snapshot(previous, next), displayed: new Map() })).toThrow(
       'Missing displayed snapshot: box.opacity',
     )
   })
@@ -82,7 +100,7 @@ describe('pure presentation planning', () => {
       ['color', 'red'],
     ])
 
-    const plan = planLayerChange(snapshot(previous, next))
+    const plan = planObservedChange(snapshot(previous, next))
 
     expect(plan.tracks).toMatchObject([
       { property: 'opacity', keyframes: [{ value: '0.4' }, { value: '1' }] },
@@ -98,7 +116,7 @@ describe('pure presentation planning', () => {
     ])
     const next = resolution([['opacity', '1']])
 
-    const plan = planLayerChange(snapshot(previous, next))
+    const plan = planObservedChange(snapshot(previous, next))
 
     expect([...plan.removedProperties]).toEqual([layerPropertyKey('box', 'color')])
     expect(plan.tracks).toEqual([])
@@ -108,7 +126,7 @@ describe('pure presentation planning', () => {
     const current = resolution([['opacity', '1']])
     const observations = snapshot(current, current)
 
-    const plan = planLayerChange({
+    const plan = planObservedChange({
       ...observations,
       retargets: new Set([layerPropertyKey('box', 'opacity')]),
     })
@@ -121,7 +139,7 @@ describe('pure presentation planning', () => {
     const current = resolution([['opacity', '1']])
     const observations = snapshot(current, current)
 
-    const plan = planLayerChange({
+    const plan = planObservedChange({
       ...observations,
       active: [
         {
@@ -147,7 +165,7 @@ describe('pure presentation planning', () => {
     const next = resolution([['margin-inline-start', '20px']])
     const observations = snapshot(previous, next)
 
-    const plan = planLayerChange({
+    const plan = planObservedChange({
       ...observations,
       receivers: [
         { target: 'box', addresses: [{ name: 'margin-inline-start', addresses: ['margin-left'] }] },
@@ -192,7 +210,7 @@ describe('pure presentation planning', () => {
       },
     }
 
-    const plan = planLayerChange(snapshot(previous, next))
+    const plan = planObservedChange(snapshot(previous, next))
 
     expect(plan.tracks).toHaveLength(1)
     expect(plan.tracks[0].keyframes.map((frame) => frame.value)).toEqual(['1', '1'])
@@ -243,7 +261,7 @@ describe('pure presentation planning', () => {
       },
     }
 
-    const plan = planLayerChange(snapshot(previous, next))
+    const plan = planObservedChange(snapshot(previous, next))
 
     expect(plan.tracks[0].destinationValue).toBe('1')
     expect(plan.tracks[0].keyframes).toEqual([
