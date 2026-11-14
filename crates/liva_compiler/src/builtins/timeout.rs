@@ -5,13 +5,11 @@ pub const TIMEOUT: Function = Function {
     signatures: &[Signature {
         parameters: &[
             Parameter {
-                fixed: false,
                 optional: false,
                 name: "when",
                 value_type: Type::Boolean,
             },
             Parameter {
-                fixed: false,
                 optional: false,
                 name: "duration",
                 value_type: Type::Number,

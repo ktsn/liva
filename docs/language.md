@@ -210,15 +210,14 @@ The compiler registers these `link` signatures:
   vector controller. A component argument is not accepted for vector input.
 
 Omitting `component` preserves the scalar/vector input distinction. When supplied,
-its value must be both permitted and provably fixed for the call. Direct literals,
-parentheses, aliases (including forward bindings), and singleton-annotated host
-parameters establish this proof. Duplicate-only unions such as `"x" | 'x'` also
-have one possible decoded value. A parameter of type `"x" | "y"` has two permitted
-values and cannot establish a fixed component; broad `string`, unsupported strings
-such as `"z"`, and non-string inputs also fail compilation.
+its type must be a subset of `"x" | "y"`. Direct literals, parentheses, aliases
+(including forward bindings), and host parameters such as `axis: "x" | "y"` are
+accepted. Broad `string`, unsupported strings such as `"z"`, and non-string inputs
+fail compilation. The compiler does not require the component to have one possible
+value; changing it after a call is created is checked by the runtime.
 
 ```liva
-motion mapped(axis: "y", input: number) {
+motion mapped(axis: "x" | "y", input: number) {
   let selected = axis
   let movement = link(input: input, component: (selected))
   layer base { translate := movement }
@@ -229,13 +228,13 @@ A controller must attach to one target/property address with `:=`; repeating the
 same address is allowed. Permitted components do not relax input-shape or attachment
 checks. These signatures describe the compiler contract; runtime attachment
 integration is tracked separately in [PR #131](https://github.com/ktsn/liva/pull/131).
-Direct runtime calls retain argument and fixed-component validation, including
+The runtime retains argument and fixed-component validation, including
 rollback when an update attempts to change a call's component.
 
 The component constraint tightens the previous broad-string contract. Replace a
-host `axis: string` parameter with a singleton such as `axis: "x"` for a fixed-axis
-call. A changeable `"x" | "y"` parameter does not provide a migration to dynamic
-component switching; that behavior is unsupported.
+host `axis: string` parameter with the choices the application supplies, such as
+`axis: "x" | "y"`. Either value can initialize the call, but changing the selected
+axis during that call remains unsupported and causes a runtime error.
 
 ## Expressions and CSS templates
 

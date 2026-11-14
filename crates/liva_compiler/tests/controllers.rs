@@ -376,13 +376,15 @@ fn component_arguments_use_ordinary_string_expressions() {
 }
 
 #[test]
-fn component_configuration_accepts_fixed_literals_forward_aliases_and_singleton_parameters() {
+fn component_configuration_accepts_literals_forward_aliases_and_subset_parameters() {
     for (parameters, declarations, expression) in [
         ("", "", "'x'"),
         ("", "", "('y')"),
         ("", "let alias = later; let later = ('y')", "alias"),
         (r#"axis: "x""#, "let alias = axis", "(alias)"),
         (r#"axis: "y" | 'y' | "y""#, "let alias = axis", "alias"),
+        (r#"axis: "x" | "y""#, "", "axis"),
+        (r#"axis: "y" | "x" | "y""#, "let alias = axis", "(alias)"),
     ] {
         valid(&format!(
             "motion sample({parameters}) {{ {declarations}; let movement = link(input: 1, component: {expression}); layer base {{ translate := movement }} }}"
@@ -391,26 +393,13 @@ fn component_configuration_accepts_fixed_literals_forward_aliases_and_singleton_
 }
 
 #[test]
-fn component_configuration_distinguishes_membership_from_fixed_proof() {
-    for (parameters, expression, message) in [
-        ("", "'z'", "Invalid argument type for link.component"),
-        ("", "1", "Invalid argument type for link.component"),
-        ("", "false", "Invalid argument type for link.component"),
-        (
-            "axis: string",
-            "axis",
-            "Invalid argument type for link.component",
-        ),
-        (
-            r#"axis: "x" | "z""#,
-            "axis",
-            "Invalid argument type for link.component",
-        ),
-        (
-            r#"axis: "x" | "y""#,
-            "(axis)",
-            "Argument for link.component must be a fixed string",
-        ),
+fn component_configuration_rejects_unproved_or_unsupported_values() {
+    for (parameters, expression) in [
+        ("", "'z'"),
+        ("", "1"),
+        ("", "false"),
+        ("axis: string", "axis"),
+        (r#"axis: "x" | "z""#, "axis"),
     ] {
         let source = format!(
             "motion sample({parameters}) {{ let movement = link(input: 1, component: {expression}); layer base {{ translate := movement }} }}"
@@ -420,17 +409,16 @@ fn component_configuration_distinguishes_membership_from_fixed_proof() {
         let error = result
             .diagnostics
             .iter()
-            .find(|error| error.message.starts_with(message))
+            .find(|error| {
+                error
+                    .message
+                    .starts_with("Invalid argument type for link.component")
+            })
             .unwrap();
 
         assert!(result.definitions.is_empty());
         assert_eq!(&source[error.range.start..error.range.end], expression);
-
-        if message.starts_with("Invalid") {
-            assert!(error.message.contains(r#"expected "x" | "y""#));
-        } else {
-            assert!(error.message.contains(r#"got "x" | "y""#));
-        }
+        assert!(error.message.contains(r#"expected "x" | "y""#));
     }
 }
 

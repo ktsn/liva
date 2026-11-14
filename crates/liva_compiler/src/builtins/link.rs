@@ -60,13 +60,11 @@ pub const LINK: Function = Function {
         Signature {
             parameters: &[
                 Parameter {
-                    fixed: false,
                     optional: false,
                     name: "input",
                     value_type: Type::Number,
                 },
                 Parameter {
-                    fixed: false,
                     optional: true,
                     name: "sensitivity",
                     value_type: Type::Number,
@@ -77,13 +75,11 @@ pub const LINK: Function = Function {
         Signature {
             parameters: &[
                 Parameter {
-                    fixed: false,
                     optional: false,
                     name: "input",
                     value_type: Type::Number,
                 },
                 Parameter {
-                    fixed: true,
                     optional: false,
                     name: "component",
                     value_type: Type::StringUnion(Cow::Borrowed(&[
@@ -92,7 +88,6 @@ pub const LINK: Function = Function {
                     ])),
                 },
                 Parameter {
-                    fixed: false,
                     optional: true,
                     name: "sensitivity",
                     value_type: Type::Number,
@@ -103,13 +98,11 @@ pub const LINK: Function = Function {
         Signature {
             parameters: &[
                 Parameter {
-                    fixed: false,
                     optional: false,
                     name: "input",
                     value_type: Type::Record(XY),
                 },
                 Parameter {
-                    fixed: false,
                     optional: true,
                     name: "sensitivity",
                     value_type: Type::Number,

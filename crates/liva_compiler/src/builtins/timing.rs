@@ -3,7 +3,6 @@ use std::borrow::Cow;
 
 const fn optional(name: &'static str, value_type: Type) -> Parameter {
     Parameter {
-        fixed: false,
         name,
         value_type,
         optional: true,
@@ -12,7 +11,6 @@ const fn optional(name: &'static str, value_type: Type) -> Parameter {
 
 const fn coordinate(name: &'static str) -> Parameter {
     Parameter {
-        fixed: false,
         name,
         value_type: Type::Number,
         optional: false,

@@ -76,7 +76,7 @@ test('external component expressions reject invalid updates without changing the
 }) => {
   const compiledDefinition = decodeBundle(
     compile(
-      `motion mapped(axis: "x", input: number, active: boolean) {
+      `motion mapped(axis: "x" | "y", input: number, active: boolean) {
   let selected = axis
   let movement = link(input: input, component: selected)
   layer base { translate: 100px 20px 3px }
@@ -88,7 +88,7 @@ test('external component expressions reject invalid updates without changing the
 
   expect(compiledDefinition).toBeDefined()
 
-  // External IR may use broad string inputs even though source requires a fixed component.
+  // Broad external inputs exercise runtime validation of both unsupported and changed axes.
   const externalDefinition = {
     ...compiledDefinition,
     parameters: [

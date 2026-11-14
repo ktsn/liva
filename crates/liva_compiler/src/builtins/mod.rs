@@ -15,20 +15,9 @@ pub struct Field {
 
 #[derive(Debug)]
 pub struct Parameter {
-    /// Requires one provable decoded string value in addition to type membership.
-    /// This configuration proof is independent of whether every value is permitted.
-    pub fixed: bool,
     pub optional: bool,
     pub name: &'static str,
     pub value_type: Type,
-}
-
-impl Parameter {
-    /// Whether the source type satisfies both membership and configuration rules.
-    pub fn accepts(&self, actual: &Type) -> bool {
-        actual.is_assignable_to(&self.value_type)
-            && (!self.fixed || actual.singleton_string().is_some())
-    }
 }
 
 #[derive(Debug)]

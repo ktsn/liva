@@ -4,7 +4,6 @@ pub const DRAG: Function = Function {
     name: "drag",
     signatures: &[Signature {
         parameters: &[Parameter {
-            fixed: false,
             optional: false,
             name: "target",
             value_type: Type::Target,
