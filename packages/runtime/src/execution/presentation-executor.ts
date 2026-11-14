@@ -460,9 +460,14 @@ export class PresentationExecutor {
       // controller snapshots. This is a local logical projection, not a displayed
       // observation, and it is discarded before terminal writes/ownership changes.
       if (operation.phase === 'enter' && operation.started) {
-        projectedCandidate ??= hasControllerBindings(candidate)
-          ? this.controllerBaseline(candidate, values, this.definition).provisional
-          : candidate
+        if (!projectedCandidate) {
+          // Logical/physical ownership follows the final declaration owners, not
+          // the cascade map's first-insertion order. Match accepted application.
+          const ordered = orderedResolution(candidate, this.definition)
+          projectedCandidate = hasControllerBindings(ordered)
+            ? this.controllerBaseline(ordered, values, this.definition).provisional
+            : ordered
+        }
       }
 
       const excluded = this.operationExclusions(operation, projectedCandidate ?? candidate)

@@ -2125,8 +2125,11 @@ export const presenceCases = {
       Object.defineProperty(performance, 'now', { configurable: true, value: nativeNow })
     }
   },
-  async candidateApplicability(mode: 'takeover' | 'remaining' | 'mixed') {
+  async candidateApplicability(mode: 'takeover' | 'remaining' | 'mixed' | 'ordered') {
     const mixed = mode === 'mixed'
+    const ordered = mode === 'ordered'
+    const takenOver = mode === 'takeover' || ordered
+    const property = ordered ? 'left' : 'opacity'
     const duration = reference('duration')
     const fixture = setup(
       {
@@ -2143,7 +2146,8 @@ export const presenceCases = {
               {
                 name: 'box',
                 properties: [
-                  { name: 'opacity', value: literal('1') },
+                  { name: property, value: literal(ordered ? '0px' : '1') },
+                  ...(ordered ? [{ name: 'inset', value: literal('0px') }] : []),
                   ...(mixed ? [{ name: 'scale', value: literal('1') }] : []),
                 ],
               },
@@ -2156,7 +2160,11 @@ export const presenceCases = {
               {
                 name: 'box',
                 properties: [
-                  { name: 'opacity', value: literal('0.9'), timing: { ...tween, durationMs: 80 } },
+                  {
+                    name: property,
+                    value: literal(ordered ? '200px' : '0.9'),
+                    timing: { ...tween, durationMs: 80 },
+                  },
                 ],
               },
             ],
@@ -2207,7 +2215,10 @@ export const presenceCases = {
             {
               name: 'box',
               properties: [
-                { name: 'opacity', keyframes: [{ offset: 0, value: literal('0') }] },
+                {
+                  name: property,
+                  keyframes: [{ offset: 0, value: literal(ordered ? '100px' : '0') }],
+                },
                 ...(mixed
                   ? [{ name: 'scale', keyframes: [{ offset: 0, value: literal('0.5') }] }]
                   : []),
@@ -2242,7 +2253,7 @@ export const presenceCases = {
       const rejectedHistory = fixture.instance.composition.states.history
       let retryRetained = true
 
-      if (mode !== 'takeover') {
+      if (!takenOver) {
         fixture.instance.updateParameters({ duration: 400, takeover: false, replaceScale: false })
         retryRetained = originals.every((animation) =>
           fixture.element.getAnimations().includes(animation),
@@ -2269,7 +2280,7 @@ export const presenceCases = {
         result,
         diagnostics: fixture.diagnostics.length,
         failures: fixture.failures.length,
-        final: fixture.element.style.opacity,
+        final: fixture.element.style.getPropertyValue(property),
       }
     } finally {
       fixture.cleanup()

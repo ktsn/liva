@@ -486,19 +486,20 @@ describe('shared presence layer execution', () => {
     })
   })
 
-  it.each(['takeover', 'remaining', 'mixed'] as const)(
+  it.each(['takeover', 'remaining', 'mixed', 'ordered'] as const)(
     'validates only applicable enter declarations without changing rejected state ($mode=%s)',
     async (mode) => {
       expect(await presenceCases.candidateApplicability(mode)).toEqual({
-        firstAccepted: mode === 'takeover',
-        rejectedHistory: mode === 'takeover' ? 'next' : 'idle',
+        firstAccepted: mode === 'takeover' || mode === 'ordered',
+        rejectedHistory: mode === 'takeover' || mode === 'ordered' ? 'next' : 'idle',
         retryRetained: true,
-        durations: mode === 'mixed' ? [80, 80] : [mode === 'takeover' ? 80 : 400],
+        durations:
+          mode === 'mixed' ? [80, 80] : [mode === 'takeover' || mode === 'ordered' ? 80 : 400],
         history: mode === 'remaining' ? 'idle' : 'next',
         result: 'completed',
-        diagnostics: mode === 'takeover' ? 0 : 1,
+        diagnostics: mode === 'takeover' || mode === 'ordered' ? 0 : 1,
         failures: 0,
-        final: mode === 'remaining' ? '1' : '0.9',
+        final: mode === 'ordered' ? '200px' : mode === 'remaining' ? '1' : '0.9',
       })
     },
   )

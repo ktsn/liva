@@ -343,7 +343,7 @@ for (const axis of ['x', 'y'] as const) {
   }
 }
 
-for (const mode of ['takeover', 'remaining', 'mixed'] as const) {
+for (const mode of ['takeover', 'remaining', 'mixed', 'ordered'] as const) {
   test(`validates enter applicability without committing rejected state mode=${mode}`, async ({
     page,
   }) => {
@@ -354,15 +354,16 @@ for (const mode of ['takeover', 'remaining', 'mixed'] as const) {
     }, mode)
 
     expect(result).toEqual({
-      firstAccepted: mode === 'takeover',
-      rejectedHistory: mode === 'takeover' ? 'next' : 'idle',
+      firstAccepted: mode === 'takeover' || mode === 'ordered',
+      rejectedHistory: mode === 'takeover' || mode === 'ordered' ? 'next' : 'idle',
       retryRetained: true,
-      durations: mode === 'mixed' ? [80, 80] : [mode === 'takeover' ? 80 : 400],
+      durations:
+        mode === 'mixed' ? [80, 80] : [mode === 'takeover' || mode === 'ordered' ? 80 : 400],
       history: mode === 'remaining' ? 'idle' : 'next',
       result: 'completed',
-      diagnostics: mode === 'takeover' ? 0 : 1,
+      diagnostics: mode === 'takeover' || mode === 'ordered' ? 0 : 1,
       failures: 0,
-      final: mode === 'remaining' ? '1' : '0.9',
+      final: mode === 'ordered' ? '200px' : mode === 'remaining' ? '1' : '0.9',
     })
   })
 }
