@@ -473,6 +473,26 @@ describe('shared presence layer execution', () => {
   )
 
   it.each(
+    [false, true].flatMap((complete) =>
+      [false, true].map((shorthand) => ({ complete, shorthand })),
+    ),
+  )(
+    'renews reacquired field baselines while preserving continuous ownership (complete=$complete shorthand=$shorthand)',
+    async ({ complete, shorthand }) => {
+      expect(await presenceCases.reacquiredProperty(complete, shorthand)).toEqual({
+        afterReplay: shorthand ? 'var(--fresh)' : '0.8',
+        priority: shorthand ? 'important' : '',
+        retained: true,
+        final: shorthand ? 'var(--fresh)' : '0.8',
+        finalPriority: shorthand ? 'important' : '',
+        scale: '0.4',
+        result: complete ? 'completed' : 'owner-teardown',
+        remaining: 0,
+      })
+    },
+  )
+
+  it.each(
     (['x', 'y'] as const).flatMap((axis) =>
       (['fresh', 'near-expiry', 'boundary', 'stationary'] as const).map((mode) => ({ axis, mode })),
     ),

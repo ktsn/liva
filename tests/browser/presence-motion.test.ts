@@ -318,6 +318,34 @@ for (const complete of [false, true]) {
   })
 }
 
+for (const complete of [false, true]) {
+  for (const shorthand of [false, true]) {
+    test(`renews reacquired field baselines before continuous ownership ends complete=${complete} shorthand=${shorthand}`, async ({
+      page,
+    }) => {
+      const result = await page.evaluate(
+        async ({ finish, useShorthand }) => {
+          const { presenceCases } = await import('./presence-cases.ts')
+
+          return presenceCases.reacquiredProperty(finish, useShorthand)
+        },
+        { finish: complete, useShorthand: shorthand },
+      )
+
+      expect(result).toEqual({
+        afterReplay: shorthand ? 'var(--fresh)' : '0.8',
+        priority: shorthand ? 'important' : '',
+        retained: true,
+        final: shorthand ? 'var(--fresh)' : '0.8',
+        finalPriority: shorthand ? 'important' : '',
+        scale: '0.4',
+        result: complete ? 'completed' : 'owner-teardown',
+        remaining: 0,
+      })
+    })
+  }
+}
+
 for (const axis of ['x', 'y'] as const) {
   for (const mode of ['fresh', 'near-expiry', 'boundary', 'stationary'] as const) {
     test(`retains newest released velocity through disposal axis=${axis} mode=${mode}`, async ({

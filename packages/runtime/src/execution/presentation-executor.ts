@@ -121,6 +121,53 @@ function inlinePropertyStyle(property: string, value?: string): CSSStyleDeclarat
   return style
 }
 
+/**
+ * Reconstructs inline CSS from still-owned originals and later external edits.
+ * Shared by restoration and new field acquisition; only detached CSSOM snapshots
+ * are changed, preserving shorthand serialization and priorities on the receiver.
+ */
+function restoredInlineCss(
+  { original, originalCss, pending, written }: OwnedElement,
+  currentStyle: CSSStyleDeclaration,
+  current: ReadonlyMap<string, InlineValue>,
+): string {
+  const baseline = document.createElement('div')
+  const external = document.createElement('div')
+  baseline.style.cssText = originalCss
+  external.style.cssText = currentStyle.cssText
+  const stillOwned = new Set<string>()
+
+  // Pending shorthand signatures read the stable observation while external is
+  // pruned field by field. Removing one field must not change later ownership tests.
+  for (const [property, last] of written) {
+    const value = current.get(property) ?? { value: '', priority: '' }
+    const signature = pending.get(property)
+    const pendingChanged =
+      signature !== undefined &&
+      (currentStyle.getPropertyValue(signature.property) !== signature.value ||
+        currentStyle.getPropertyPriority(signature.property) !== signature.priority)
+
+    if (!pendingChanged && value.value === last.value && value.priority === last.priority) {
+      stillOwned.add(property)
+      external.style.removeProperty(property)
+    }
+  }
+
+  for (const property of original.keys()) {
+    if (!stillOwned.has(property) && !current.has(property)) {
+      baseline.style.removeProperty(property)
+    }
+  }
+
+  for (const property of Array.from(external.style)) {
+    baseline.style.removeProperty(property)
+  }
+
+  // Restore the intact original serialization, then overlay external writes.
+  // This retains var()-valued shorthands that CSSOM cannot expose as longhands.
+  return baseline.style.cssText + ';' + external.style.cssText
+}
+
 let nextEffectId = 0
 let nextOperationId = 0
 
@@ -1532,29 +1579,43 @@ export class PresentationExecutor {
       Array.from(pending).filter((name) => pending.getPropertyValue(name) === ''),
     )
 
-    // CSSOM enumerates the affected longhands, including shorthand side effects.
-    for (const name of new Set([...before.keys(), ...after.keys()])) {
+    // CSSOM enumerates affected fields, including shorthand side effects.
+    const changed = [...new Set([...before.keys(), ...after.keys()])].filter((name) => {
       const previous = before.get(name)
       const next = after.get(name)
 
-      if (
+      return (
         pendingNames.has(name) ||
         previous?.value !== next?.value ||
         previous?.priority !== next?.priority
-      ) {
-        owned.written.set(name, next ?? { value: '', priority: '' })
+      )
+    })
 
-        if (pendingNames.has(name)) {
-          owned.pending.set(name, {
-            property,
-            value: element.style.getPropertyValue(property),
-            priority: element.style.getPropertyPriority(property),
-          })
-        } else {
-          owned.pending.delete(name)
-        }
+    if (changed.some((name) => !owned.written.has(name))) {
+      // A newly acquired field starts a fresh ownership epoch. Reconstruct the
+      // pre-write baseline with the same external-edit rules as restoration,
+      // retaining originals only for fields that stayed continuously owned.
+      const baseline = document.createElement('div')
+      baseline.style.cssText = beforeCss
+      baseline.style.cssText = restoredInlineCss(owned, baseline.style, before)
+      owned.originalCss = baseline.style.cssText
+      owned.original = inlineDeclarations(baseline)
+    }
+
+    for (const name of changed) {
+      owned.written.set(name, after.get(name) ?? { value: '', priority: '' })
+
+      if (pendingNames.has(name)) {
+        owned.pending.set(name, {
+          property,
+          value: element.style.getPropertyValue(property),
+          priority: element.style.getPropertyPriority(property),
+        })
+      } else {
+        owned.pending.delete(name)
       }
     }
+
     const dirty = this.dirtyProperties.get(element) ?? new Set<string>()
     dirty.add(property)
     this.dirtyProperties.set(element, dirty)
@@ -1616,47 +1677,16 @@ export class PresentationExecutor {
       protectedFields.set(element, fields)
     }
 
-    for (const { element, original, originalCss, pending, written } of this.owned) {
+    for (const owned of this.owned) {
+      const { element, written } = owned
+
       if (receivingElement && element !== receivingElement) continue
 
       const dirty = this.dirtyProperties.get(element) ?? new Set<string>()
       for (const property of written.keys()) dirty.add(property)
       this.dirtyProperties.set(element, dirty)
 
-      const current = inlineDeclarations(element)
-      const baseline = document.createElement('div')
-      const external = document.createElement('div')
-      baseline.style.cssText = originalCss
-      external.style.cssText = element.style.cssText
-      const stillOwned = new Set<string>()
-
-      for (const [property, last] of written) {
-        const value = current.get(property) ?? { value: '', priority: '' }
-        const signature = pending.get(property)
-        const pendingChanged =
-          signature !== undefined &&
-          (element.style.getPropertyValue(signature.property) !== signature.value ||
-            element.style.getPropertyPriority(signature.property) !== signature.priority)
-
-        if (!pendingChanged && value.value === last.value && value.priority === last.priority) {
-          stillOwned.add(property)
-          external.style.removeProperty(property)
-        }
-      }
-
-      for (const property of original.keys()) {
-        if (!stillOwned.has(property) && !current.has(property)) {
-          baseline.style.removeProperty(property)
-        }
-      }
-
-      for (const property of Array.from(external.style)) {
-        baseline.style.removeProperty(property)
-      }
-
-      // Restore the intact original serialization, then overlay external writes.
-      // This retains var()-valued shorthands that CSSOM cannot expose as longhands.
-      element.style.cssText = baseline.style.cssText + ';' + external.style.cssText
+      element.style.cssText = restoredInlineCss(owned, element.style, inlineDeclarations(element))
     }
 
     for (const { element, property, value, priority } of protectedValues)

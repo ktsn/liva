@@ -142,6 +142,86 @@ function base(property: string, value: string, timing?: Timing): Definition['lay
   }
 }
 
+/** Reuses one disposed receiver while independent fields retire and reacquire ownership. */
+function retiredFieldFixture(property: 'opacity' | 'margin-left' = 'opacity') {
+  const element = document.createElement('div')
+  element.style.cssText =
+    property === 'opacity'
+      ? 'opacity:0.3;scale:0.4;'
+      : 'margin:var(--old);--old:3px;--fresh:8px;scale:0.4;'
+  document.body.append(element)
+  const instance = new LivaInstance({
+    name: 'retired-properties',
+    layers: [
+      {
+        name: 'base',
+        targets: [
+          {
+            name: 'box',
+            properties: [
+              { name: property, value: literal(property === 'opacity' ? '1' : '1px') },
+              { name: 'scale', value: literal('1') },
+            ],
+          },
+        ],
+      },
+    ],
+    leave: {
+      timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
+      targets: [
+        {
+          name: 'box',
+          properties: [property, 'scale'].map((name) => ({
+            name,
+            keyframes: [{ offset: 1, value: literal(name === 'margin-left' ? '0px' : '0') }],
+          })),
+        },
+      ],
+    },
+  })
+
+  instance.bind([['box', element]])
+  const work = instance.captureLifecycle('leave', ['box'], element)
+  const sessions: LifecycleSession[] = []
+
+  const start = (field: string) => {
+    const session = new LifecycleSession(
+      work.filter((item) => item.track.property === field),
+      'leave',
+    )
+
+    sessions.push(session)
+    session.initialize()
+    instance.retainLifecycle('leave', session)
+    session.play()
+    const animation = effect(element, field)
+    animation.pause()
+    animation.currentTime = 0
+
+    return session
+  }
+
+  const end = async (session: LifecycleSession, field: string, complete: boolean) => {
+    if (complete) effect(element, field).finish()
+    else session.cancel('owner-teardown')
+
+    return session.finished
+  }
+
+  return {
+    element,
+    instance,
+    start,
+    end,
+    cleanup() {
+      for (const session of sessions) session.cancel('owner-teardown')
+
+      instance.dispose()
+      element.remove()
+    },
+  }
+}
+
 export const presenceCases = {
   async retarget() {
     const fixture = setup(
@@ -1928,69 +2008,19 @@ export const presenceCases = {
   },
 
   async retiredProperty(complete: boolean) {
-    const element = document.createElement('div')
-    element.style.cssText = 'opacity:0.3;scale:0.4;'
-    document.body.append(element)
-    const instance = new LivaInstance({
-      name: 'retired-properties',
-      layers: [
-        {
-          name: 'base',
-          targets: [
-            {
-              name: 'box',
-              properties: [
-                { name: 'opacity', value: literal('1') },
-                { name: 'scale', value: literal('1') },
-              ],
-            },
-          ],
-        },
-      ],
-      leave: {
-        timing: { ...tween, durationMs: 1000 },
-        targets: [
-          {
-            name: 'box',
-            properties: ['opacity', 'scale'].map((name) => ({
-              name,
-              keyframes: [{ offset: 1, value: literal('0') }],
-            })),
-          },
-        ],
-      },
-    })
-    instance.bind([['box', element]])
-    const work = instance.captureLifecycle('leave', ['box'], element)
-    const sessions = ['opacity', 'scale'].map((property) => {
-      const session = new LifecycleSession(
-        work.filter((item) => item.track.property === property),
-        'leave',
-      )
-      session.initialize()
-      instance.retainLifecycle('leave', session)
-      session.play()
-      const animation = effect(element, property)
-      animation.pause()
-      animation.currentTime = 0
-
-      return session
-    })
-    const end = async (session: LifecycleSession, property: string) => {
-      if (complete) effect(element, property).finish()
-      else session.cancel('owner-teardown')
-
-      return session.finished
-    }
+    const fixture = retiredFieldFixture()
+    const { element, instance, start, end } = fixture
+    const opacity = start('opacity')
+    const scale = start('scale')
 
     try {
       instance.dispose()
-      await end(sessions[0], 'opacity')
+      await end(opacity, 'opacity', complete)
       const restored = element.style.opacity
       // Match the old operation's last inline value: its ended ownership must
       // not make this later external write appear to remain runtime-owned.
       element.style.opacity = '0'
-      const result = await end(sessions[1], 'scale')
+      const result = await end(scale, 'scale', complete)
 
       return {
         restored,
@@ -2000,12 +2030,49 @@ export const presenceCases = {
         remaining: element.getAnimations().length,
       }
     } finally {
-      for (const session of sessions) session.cancel('owner-teardown')
-
-      instance.dispose()
-      element.remove()
+      fixture.cleanup()
     }
   },
+
+  async reacquiredProperty(complete: boolean, shorthand: boolean) {
+    const property = shorthand ? 'margin-left' : 'opacity'
+    const externalProperty = shorthand ? 'margin' : 'opacity'
+    const fixture = retiredFieldFixture(property)
+    const { element, instance, start, end } = fixture
+    const first = start(property)
+    const other = start('scale')
+    const continuous = effect(element, 'scale')
+
+    try {
+      instance.dispose()
+      await end(first, property, complete)
+      element.style.setProperty(
+        externalProperty,
+        shorthand ? 'var(--fresh)' : '0.8',
+        shorthand ? 'important' : '',
+      )
+      const replay = start(property)
+      await end(replay, property, complete)
+      const afterReplay = element.style.getPropertyValue(externalProperty)
+      const priority = element.style.getPropertyPriority(externalProperty)
+      const retained = effect(element, 'scale') === continuous && !other.isFinished
+      const result = await end(other, 'scale', complete)
+
+      return {
+        afterReplay,
+        priority,
+        retained,
+        final: element.style.getPropertyValue(externalProperty),
+        finalPriority: element.style.getPropertyPriority(externalProperty),
+        scale: element.style.scale,
+        result,
+        remaining: element.getAnimations().length,
+      }
+    } finally {
+      fixture.cleanup()
+    }
+  },
+
   async releasedAfterDisposal(
     axis: 'x' | 'y',
     mode: 'fresh' | 'near-expiry' | 'boundary' | 'stationary',
