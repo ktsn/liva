@@ -15,8 +15,6 @@ export interface RuntimeDiagnostic {
 /** Logical facts about bindings; receiving elements remain owned by the executor. */
 export interface BindingFacts {
   readonly suspended: boolean
-  readonly duplicate: boolean
-  readonly targets: ReadonlySet<string>
 }
 
 /** Evaluation callbacks carry accepted environments, never browser observations. */

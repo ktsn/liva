@@ -94,8 +94,6 @@ export class PresentationExecutor {
   get bindingFacts(): BindingFacts {
     return {
       suspended: this.suspended,
-      duplicate: this.duplicateBindings,
-      targets: new Set(this.targets.keys()),
     }
   }
 
