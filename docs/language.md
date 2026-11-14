@@ -413,7 +413,7 @@ A motion may declare one `enter` and one `leave` directly in its body. Named tar
 must be declared in its layers (including local states). The built-in `self` target
 is always bound to the Motion root, including lifecycle-only declarations. Lifecycle timing is
 independent of ordinary layer timing. Lifecycle property timing overrides target
-timing, which overrides the lifecycle shared decorator. All are captured at start.
+timing, which overrides the lifecycle shared decorator.
 
 ```liva
 motion panel(open: boolean) {
@@ -437,23 +437,33 @@ state-change animation. Layers cannot declare their own enter/leave blocks.
 
 A direct declaration in enter is the 0% frame; in leave it is the 100% frame.
 Explicit keyframe blocks and `${expression}` values are also supported. Duplicate
-properties are errors. Enter snapshots the fully cascaded destination and its
-animation expressions at insertion/showing. Missing 100% endpoints use that
-snapshot. Leave snapshots the currently displayed presentation and its expressions
-before disposal/hiding; missing 0% endpoints use that display, including interrupted
-animations.
+properties are errors. Enter begins at its declared start and animates toward the
+ordinary cascaded destination. Missing 100% endpoints use that destination. An
+explicit 100% frame remains the animation endpoint; completion restores the
+ordinary destination, as for ordinary transitions.
 
-Only properties explicitly animated by a lifecycle receive lifecycle precedence.
-Other properties continue to follow layer changes. Enter never retargets while
-running: completion applies the latest layer presentation, which can visibly jump
-if inputs changed. Leave ignores later layer changes and signals Vue to finish
-removal/hiding when its tracks complete. This snapshot limitation is intentional;
-smooth lifecycle retargeting and layer-local lifecycle composition are unsupported.
+Presence declarations participate in the same cascade and animation planning as
+ordinary layers. Only declared presence properties receive presence precedence.
+During enter, a new ordinary layer change interrupts the affected property from
+its displayed value and uses the new transition's timing. Other enter properties
+continue. Leave keeps precedence on its declared properties while unowned
+properties continue to follow ordinary layer updates.
 
-State and expression changes do not retarget an existing lifecycle session.
-Existing cancellation and replacement behavior still applies, for example when
-showing an element again during leave. During leave, ordinary transitions do not
-take over the properties owned by that session.
+Presence expressions remain live while their Motion runtime and input
+subscriptions remain active, including when a target element is detached. A
+changed endpoint, timing, or relative CSS reference replaces the affected effect
+without completing the removal/hide barrier early. If Motion is disposed before
+leave starts or finishes, its subscriptions are released and leave retains the
+last accepted expression environment. DOM-relative CSS values can still observe
+the retained element. The removal/hide callback runs after all currently
+applicable effects complete; cancellation, replacement, and failure retain their
+existing distinct cleanup behavior.
+
+Endpoint-only springs share ordinary numeric decoding and supported momentum
+handoff, including ordinary-to-leave and leave-to-reentry interruption. Direct
+input velocity expires from its original input observation; capturing work does
+not renew it. Intermediate keyframes and unsupported CSS use the existing scalar
+spring/browser-interpolation fallback.
 
 A conditional event is independent of state selection and animation completion:
 

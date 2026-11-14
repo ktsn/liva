@@ -95,7 +95,9 @@ for layer previews. It resolves the baseline and captures lifecycle expressions 
 without replacing the application definition or state-machine history. It resolves
 every mounted target, including repeated targets and targets absent from the active
 baseline. The inspector uses the same expression snapshot and lifecycle-only rows.
-Paused effects participate in the instance's existing animation ownership and
-cleanup. Enter settles to the baseline composition at its end; leave holds its last frame. The
+Evaluated tracks use the common final planner and native materializer. Manual
+preview keeps a frozen expression/baseline snapshot for seeking, separate from
+live presence environments and completion groups. Paused effects participate in
+the executor's existing animation ownership and cleanup. Enter settles to the baseline composition at its end; leave holds its last frame. The
 controller restores the committed definition on cancellation and never invokes Vue
 presence completion callbacks or removes DOM elements.

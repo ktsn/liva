@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from 'vite-plus/test'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { LifecycleSession, resolveLifecycle, type LifecycleWork } from './lifecycle.ts'
+import { PropertyMotion } from '../motion/property-motion.ts'
 import { evaluate } from '../evaluation/expression.ts'
 import { timingValue } from '../evaluation/timing-values.ts'
 import type { Timing } from '../model/definition.ts'
@@ -163,4 +164,97 @@ describe('lifecycle effects', () => {
         .keyframes[0].value,
     ).toBe('0.7')
   })
+})
+
+it('reports simultaneous current-effect failures once and releases every standalone effect', async () => {
+  const element = document.createElement('div')
+  element.style.cssText = 'opacity:0.7;scale:0.8;'
+  document.body.append(element)
+  const errors: unknown[] = []
+  const work = ['opacity', 'scale'].map((property) => ({
+    element,
+    track: {
+      target: 'box',
+      property,
+      timing: { kind: 'tween' as const, durationMs: 100, easing: 'linear' },
+      keyframes: [
+        { offset: 0, value: '0' },
+        { offset: 1, value: '1' },
+      ],
+      destinationValue: '1',
+    },
+  }))
+  const session = new LifecycleSession(work, 'leave', (error) => errors.push(error))
+
+  try {
+    session.play()
+
+    for (const animation of element.getAnimations()) animation.cancel()
+
+    expect(await session.finished).toBe('failed')
+    expect(errors).toHaveLength(1)
+    expect(element.style.opacity).toBe('0.7')
+    expect(element.style.scale).toBe('0.8')
+    expect(element.getAnimations()).toEqual([])
+  } finally {
+    session.cancel('owner-teardown')
+    element.remove()
+  }
+})
+
+it('retains a detached-owner native effect after reference preparation failure and recovers later', async () => {
+  const element = document.createElement('div')
+  element.style.cssText = 'width:40px;height:20px;translate:0px;'
+  document.body.append(element)
+  const errors: unknown[] = []
+  const session = new LifecycleSession(
+    [
+      {
+        element,
+        track: {
+          target: 'box',
+          property: 'translate',
+          timing: { kind: 'spring-physics', stiffness: 300, damping: 25, mass: 1 },
+          keyframes: [
+            { offset: 0, value: '0px' },
+            { offset: 1, value: '50%' },
+          ],
+          destinationValue: '50%',
+        },
+      },
+    ],
+    'leave',
+    (error) => errors.push(error),
+  )
+  const failure = new Error('reference observation failed')
+  let restoreRead: (() => void) | undefined
+
+  try {
+    session.play()
+    const original = element.getAnimations()[0]
+    await original.ready
+    const read = vi.spyOn(PropertyMotion.prototype, 'read').mockImplementation(() => {
+      throw failure
+    })
+    restoreRead = () => read.mockRestore()
+    element.style.width = '80px'
+
+    await vi.waitFor(() => expect(errors).toContain(failure))
+
+    expect(element.getAnimations()).toContain(original)
+    expect(session.isFinished).toBe(false)
+    read.mockRestore()
+
+    await vi.waitFor(() => expect(element.getAnimations()).not.toContain(original))
+
+    for (const animation of element.getAnimations()) animation.finish()
+
+    expect(await session.finished).toBe('completed')
+    expect(element.style.translate).toBe('0px')
+    expect(element.getAnimations()).toEqual([])
+  } finally {
+    restoreRead?.()
+    session.cancel('owner-teardown')
+    element.remove()
+  }
 })

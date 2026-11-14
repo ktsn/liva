@@ -190,8 +190,30 @@ export function planLayerChange(
     }
   }
 
+  const writes = new Set(changed)
+
+  // Reapply later aliases affected by an earlier inline write, without treating
+  // those unchanged declarations as replacement animation sources.
+  for (const receiver of receivers) {
+    for (const declaration of receiver.addresses) {
+      if (
+        !writes.has(layerPropertyKey(receiver.target, declaration.name)) &&
+        !declaration.addresses.some((address) =>
+          writes.has(layerPropertyKey(receiver.target, address)),
+        )
+      )
+        continue
+
+      writes.add(layerPropertyKey(receiver.target, declaration.name))
+
+      for (const address of declaration.addresses)
+        writes.add(layerPropertyKey(receiver.target, address))
+    }
+  }
+
   return {
     changed,
+    writes,
     removedProperties: preparation.removedProperties,
     tracks,
     diagnostics: preparation.diagnostics,
@@ -205,22 +227,6 @@ export interface ActiveEffectMetadata {
   readonly property: string
 }
 
-/** Selects affected effect identities after receiver-specific track expansion. */
-export function replacedEffects(
-  active: readonly ActiveEffectMetadata[],
-  changed: ReadonlySet<string>,
-  removed: ReadonlySet<string>,
-): readonly number[] {
-  return active
-    .filter(
-      (effect) =>
-        removed.has(layerPropertyKey(effect.target, effect.sourceProperty)) ||
-        changed.has(layerPropertyKey(effect.target, effect.sourceProperty)) ||
-        changed.has(layerPropertyKey(effect.target, effect.property)),
-    )
-    .map((effect) => effect.id)
-}
-
 /** Final, browser-independent playback instructions for one canonical property. */
 export interface TrackPlan {
   readonly id: number
@@ -228,6 +234,7 @@ export interface TrackPlan {
   readonly track: ResolvedTrack
   readonly sourceProperty: string
   readonly sourceDestination: string
+  readonly source: ResolvedTrack
   readonly frames: readonly RenderedFrame[]
   readonly durationMs: number
   readonly easing: string
@@ -263,6 +270,8 @@ export function trackObservationNeeds(
   handoff: boolean,
 ) {
   return {
+    endpoint:
+      track.keyframes.findLast((frame) => frame.offset === 1)?.value ?? track.destinationValue,
     displayed: track.implicitStart === true || interrupted,
     motion:
       handoff &&
@@ -311,6 +320,7 @@ export function planTrack(
     track,
     sourceProperty: source.property,
     sourceDestination: source.destinationValue,
+    source,
     frames: handoff?.frames ?? frames,
     durationMs: handoff?.durationMs ?? timing.durationMs,
     easing: handoff ? 'linear' : timing.easing,
@@ -318,4 +328,37 @@ export function planTrack(
     reference: snapshot.reference,
     trajectory: handoff?.sample,
   }
+}
+
+/** Selects replacements from effective source identity/ownership, preserving obscuring owners during lower updates. */
+export function planEffectChanges(
+  previous: LayerResolution,
+  next: LayerResolution,
+  active: readonly (ActiveEffectMetadata & { readonly track: ResolvedTrack })[],
+  retargets: ReadonlySet<string>,
+  receivers: readonly { readonly target: string; readonly addresses: DeclarationAddresses }[],
+): readonly number[] {
+  return active
+    .filter((entry) => {
+      const declaration = next.presentation.targets
+        .find((target) => target.name === entry.target)
+        ?.properties.find((property) => property.name === entry.sourceProperty)
+
+      if (
+        !declaration ||
+        layerPropertyChanged(previous, entry.target, declaration) ||
+        retargets.has(layerPropertyKey(entry.target, entry.sourceProperty)) ||
+        (entry.track.directionalOwner !== undefined &&
+          next.states.get(entry.track.directionalOwner) !== entry.track.ownerState)
+      )
+        return true
+
+      const facts = receivers.find((receiver) => receiver.target === entry.target)
+
+      return (
+        facts !== undefined &&
+        !ownsCanonicalProperty(facts.addresses, entry.sourceProperty, entry.property)
+      )
+    })
+    .map((entry) => entry.id)
 }

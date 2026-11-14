@@ -1254,22 +1254,26 @@ describe('layer lifecycle snapshots', () => {
     ],
   }
 
-  it('holds an enter snapshot while another property changes and settles the latest values', async () => {
+  it('retargets enter from the displayed start when layers change and settles the latest values', async () => {
     const { instance, element } = setup({ ...timedDefinition(), enter: lifecycle })
     const session = start('enter', instance, element)
     const effect = element.getAnimations()[0]
 
     instance.updateParameters({ hover: true, press: true, size: 1.4 })
 
-    expect(element.getAnimations()).toContain(effect)
+    expect(element.getAnimations()).not.toContain(effect)
+    const replacement = element.getAnimations()[0]
+    replacement.pause()
+    replacement.currentTime = 0
+
     expect(getComputedStyle(element).scale).toBe('0.5')
     expect(element.style.opacity).toBe('0.5')
 
-    if (!(effect.effect instanceof KeyframeEffect)) throw new Error('Expected keyframe effect')
+    if (!(replacement.effect instanceof KeyframeEffect)) throw new Error('Expected keyframe effect')
 
-    expect(effect.effect.getKeyframes().at(-1)?.scale).toBe('1')
+    expect(replacement.effect.getKeyframes().at(-1)?.scale).toBe('0.9')
 
-    effect.finish()
+    replacement.finish()
 
     await session.finished
 
@@ -1377,7 +1381,7 @@ describe('layer lifecycle snapshots', () => {
 
       instance.updateParameters({ hover: false, press: false, size: 1 })
 
-      expect(getComputedStyle(element).scale).toBe('0.5')
+      expect(getComputedStyle(element).scale).toBe('none')
 
       try {
         if (reason === 'reduced motion') {

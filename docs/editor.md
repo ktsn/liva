@@ -86,7 +86,11 @@ create a missing lifecycle block for a property already declared in a layer.
 Play and scrub operate on the mounted preview instance without inserting, hiding,
 or removing application elements. Templates use that instance's current parameters
 and bindings. Leave starts from the selected baseline's settled presentation; it does
-not simulate removal during an interrupted application animation. The final leave
+not simulate removal during an interrupted application animation. Unlike live
+presence playback, a manual preview freezes its expression and baseline observations
+for repeatable seeking. It shares the runtime cascade, final track planner and
+native effect preparation, while its own teardown restores application presentation.
+The final leave
 pose remains visible until preview ends. End preview, closing the dock, application
 updates, and source invalidation restore the committed definition and application
 state. Missing targets are not mounted by the editor.

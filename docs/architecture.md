@@ -487,13 +487,29 @@ Snapshots unused by that render patch are released in a microtask. Vue component
 unmount hooks and reactive-effect disposal retain their normal ordering; retained
 DOM does not keep the original Motion alive.
 
-`packages/runtime/src/execution/lifecycle.ts` resolves lifecycle tracks from resolved layer
-values and a presentation snapshot. A session owns only resolved tracks, element
-references, temporary inline presentations, and WAAPI handles. Completion joins
-all tracks. Supersession, owner teardown, cancellation/failure, and normal
-completion have distinct results with idempotent cleanup. Only a current session
-may release Vue's removal/hide callback. Enter sessions are registered with live
-Motion instances so explicitly animated properties are protected during layer updates. Enter completion restores the latest cascade, including properties removed during entry; leave sessions remain independent of the disposed instance.
+`packages/runtime/src/execution/lifecycle.ts` preserves the public lifecycle
+capture/session adapters. Evaluated ordinary and presence declarations normalize
+into `composition/runtime-layers.ts` layers containing receiver identifiers,
+values, timing and frames. The common cascade reuses `layer-cascade.ts`; operation
+phase, environment and lifetime stay outside those layer values. Public
+composition contains only application layers, and definitions remain unchanged.
+
+`PresentationExecutor` owns the DOM, controllers, temporary inline writes and all
+native effects. Ordinary, presence and preview tracks use the same pure final
+planner and native materializer. Presence operations keep expression environments
+and receiver scope outside common layers. Live environments update only after
+acceptance; disposal detaches Runtime providers and subscriptions while captured
+work retains its final values. Unused captured work is owned by its caller and
+is not retained in an executor registry. Rebased Vue work retains its internal
+capture association through object spreads.
+
+`CompletionGroup` owns only effect identifiers, current membership and the result.
+Replacement IDs are installed before obsolete effects are cancelled, so stale
+native settlement cannot finish or fail the group. A session can join multiple
+Motion executors, including disposed owners. Completion, supersession, owner
+teardown and failure clean up idempotently; Vue's current-session identity decides
+which removal/hide callback may run. A settled group cannot acquire effects during
+the subsequent public completion-cleanup microtasks.
 
 The core runtime contains no Vue structural semantics. It shares transition IR,
 spring sampling, CSS-property conversion, and browser interpolation with normal
@@ -512,10 +528,13 @@ runtime renders the selected lifecycle and uses the instance's resolved layer
 presentation, including all active local states, for missing enter endpoints.
 Leave samples current displayed values before ordinary effects are released.
 Only explicit lifecycle properties release ordinary effects; unrelated animation
-continues. Sessions protect these properties from layer writes until completion.
-Enter completion restores original ownership and applies the latest cascade;
-leave completion releases Vue's pending removal/hide callback. No new Vue boundary
-or directive is needed, and component/application data remains Vue-owned.
+continues. These initial observations seed common runtime layers: an ordinary
+change can retarget enter, while leave retains cascade ownership only on its
+declared properties. Phase expressions use live accepted inputs until Motion
+disposal freezes the final environment and releases subscriptions. Completion
+reconciles ordinary ownership after the group's current effects settle; only the
+current Vue session may release a pending removal/hide callback. Component and
+application data remains Vue-owned.
 
 ### Product examples and editor safety
 
@@ -650,12 +669,23 @@ Acquisition resets input history; release seeds property motion with the fresh i
 derivative before the next spring is prepared. Registered animation trajectories still
 supply spring-to-spring velocity at interruption time, without polling. Property codecs
 read/serialize canonical values separately from input mapping and effective ownership. Per-element physical/component histories
-survive ordinary retargeting and reset at lifecycle boundaries.
+survive ordinary and presence handoffs. Direct components retain the original
+input-sample freshness deadline, while registered trajectories are sampled at
+effect-local time and playback rate. Releasing a controller transfers its newest
+accepted derivative before final planning; capturing work does not overwrite it
+with an older derivative or restart the freshness window.
 
 Reactive notifications can carry an occurrence and timestamped source snapshot map.
-The binding graph stages dependent expressions against that map. An instance first
-applies terminal input to old owners, freezes observations, resolves all guards, then
-commits composition and property effects. Publications during evaluation are queued;
+The binding graph stages dependent expressions against that map, using current
+parameters and the captured source snapshots. It validates candidate expressions
+and resolves guards before acceptance. Accepted values and conditional-event history
+publish and events fire while public composition still reflects the preceding
+presentation; callbacks are followed by a disposal/binding-revision recheck.
+Accepted terminal input is then written to old owners; obscured controllers release before displayed and motion observations
+are supplied to final planning. Effect preparation completes before obsolete
+effects are cancelled and presentation is committed. Relative-reference refreshes
+replan effects without advancing guards or conditional-event history. Publications during
+evaluation are queued;
 event occurrences have FIFO identity and are never collapsed into ordinary updates.
 Target/source replacement clears obsolete queued work. Inspection uses snapshot-only
 evaluation and preview freezes on-demand controller snapshots; it cannot advance

@@ -236,6 +236,7 @@ export function layerPropertyChanged(
 
   return (
     before?.value !== property.value ||
+    before?.completionValue !== property.completionValue ||
     before?.owner !== property.owner ||
     JSON.stringify(before?.timing) !== JSON.stringify(property.timing) ||
     JSON.stringify(before?.keyframes) !== JSON.stringify(property.keyframes)
@@ -245,6 +246,7 @@ export function layerPropertyChanged(
 /** A selected track whose omitted starting endpoint still requires a displayed observation. */
 export interface LayerTrackTemplate extends Omit<ResolvedTrack, 'keyframes'> {
   readonly keyframes?: readonly RenderedFrame[]
+  readonly animationDestinationValue?: string
 }
 
 /**
@@ -316,7 +318,10 @@ export function* layerTrackTemplates(
         target: target.name,
         property: property.name,
         timing,
-        destinationValue: property.value,
+        destinationValue: property.completionValue ?? property.value,
+        ...(property.completionValue !== undefined
+          ? { animationDestinationValue: property.value }
+          : {}),
         implicitStart: !explicit?.some((frame) => frame.offset === 0),
         directionalOwner:
           instruction ||
@@ -337,7 +342,7 @@ export function completeLayerTrack(template: LayerTrackTemplate, displayed: stri
     ...template,
     keyframes: normalizeFrames(
       displayed,
-      template.destinationValue,
+      template.animationDestinationValue ?? template.destinationValue,
       template.keyframes,
       template.timing,
     ),

@@ -83,6 +83,12 @@ export interface ExecutionPort {
   /** Current binding validity; Runtime connects reactive calls only when not suspended. */
   readonly bindingFacts: BindingFacts
 
+  /** Validates active lifecycle expressions against candidate values before presentation is accepted. */
+  validatePresentation(values: VariableValues): void
+
+  /** Retains accepted values and definition for lifecycle operations that outlive Runtime ownership. */
+  retainEnvironment(values: VariableValues): void
+
   /** Retains the current resolved presentation for later writes/restoration; does not write styles. */
   initialize(resolution: LayerResolution): void
 
@@ -175,3 +181,6 @@ export interface ExecutionPort {
 export function compositionSnapshot(composition: Composition): Composition {
   return { layers: { ...composition.layers }, states: { ...composition.states } }
 }
+
+/** Internal compatibility key; payloads stay on the existing DOM-bearing lifecycle adapter. */
+export const lifecycleOrigin = Symbol('liva.lifecycle-origin')

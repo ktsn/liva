@@ -6,7 +6,7 @@ import {
   trackTiming,
   trackObservationNeeds,
   type TrackSnapshot,
-  replacedEffects,
+  planEffectChanges,
   layerPropertyKey,
   orderedResolution,
   ownsCanonicalProperty,
@@ -196,22 +196,51 @@ describe('pure presentation planning', () => {
     expect(plan.diagnostics).toEqual([])
   })
 
-  it('selects replacement effects by authored/canonical properties and removed declarations', () => {
+  it('replaces changed sources while preserving an unchanged higher canonical owner', () => {
+    const previous = resolution([
+      ['margin-left', '1px'],
+      ['margin', '10px'],
+      ['opacity', '1'],
+    ])
+    const next = resolution([
+      ['margin-left', '2px'],
+      ['margin', '10px'],
+      ['opacity', '0'],
+    ])
     const active = [
-      { id: 1, target: 'box', sourceProperty: 'margin', property: 'margin-left' },
-      { id: 2, target: 'box', sourceProperty: 'margin-inline', property: 'margin-right' },
-      { id: 3, target: 'box', sourceProperty: 'color', property: 'color' },
-      { id: 4, target: 'other', sourceProperty: 'margin', property: 'margin-left' },
-      { id: 5, target: 'box', sourceProperty: 'opacity', property: 'opacity' },
+      {
+        id: 1,
+        target: 'box',
+        sourceProperty: 'margin',
+        property: 'margin-left',
+        track: {
+          target: 'box',
+          property: 'margin-left',
+          timing,
+          keyframes: [],
+          destinationValue: '10px',
+        },
+      },
+      {
+        id: 2,
+        target: 'box',
+        sourceProperty: 'opacity',
+        property: 'opacity',
+        track: { target: 'box', property: 'opacity', timing, keyframes: [], destinationValue: '1' },
+      },
+    ]
+    const receivers = [
+      {
+        target: 'box',
+        addresses: [
+          { name: 'margin-left', addresses: ['margin-left'] },
+          { name: 'margin', addresses: ['margin-left', 'margin-right'] },
+          { name: 'opacity', addresses: ['opacity'] },
+        ],
+      },
     ]
 
-    const replaced = replacedEffects(
-      active,
-      new Set(['box\0margin-left', 'box\0margin-inline']),
-      new Set(['box\0color']),
-    )
-
-    expect(replaced).toEqual([1, 2, 3])
+    expect(planEffectChanges(previous, next, active, new Set(), receivers)).toEqual([2])
   })
 })
 
@@ -526,4 +555,20 @@ describe('final pure track planning', () => {
     expect(plan?.frames.map((frame) => frame.value)).toEqual(['1', '1'])
     expect(plan?.fill).toBe('backwards')
   })
+})
+
+it('uses completion as the observation endpoint when custom work omits its final frame', () => {
+  expect(
+    trackObservationNeeds(
+      {
+        target: 'box',
+        property: 'opacity',
+        timing: { kind: 'tween', durationMs: 100, easing: 'linear' },
+        keyframes: [{ offset: 0, value: '0' }],
+        destinationValue: '1',
+      },
+      false,
+      false,
+    ).endpoint,
+  ).toBe('1')
 })

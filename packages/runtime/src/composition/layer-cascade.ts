@@ -84,6 +84,49 @@ export function* compositionLayerSelection(
 }
 
 /**
+ * Shared value/timing cascade. Later values win; timing changes only when a provider
+ * is present. The timing wrapper distinguishes an absent provider from an explicitly
+ * mapped undefined value. Source order can retain first insertion or the last owner.
+ */
+export function cascadeTargets<Value, ResolvedTiming>(
+  targets: Iterable<
+    Target<{
+      readonly name: string
+      readonly value: Value
+      readonly timing?: { readonly value: ResolvedTiming }
+    }>
+  >,
+  order: 'first' | 'last',
+  merge: (previous: Value | undefined, next: Value) => Value = (_previous, next) => next,
+): readonly Target<{
+  readonly name: string
+  readonly value: Value
+  readonly timing?: ResolvedTiming
+}>[] {
+  const result = new Map<
+    string,
+    Map<string, { name: string; value: Value; timing?: ResolvedTiming }>
+  >()
+
+  for (const target of targets) {
+    const properties = result.get(target.name) ?? new Map()
+    result.set(target.name, properties)
+
+    for (const property of target.properties) {
+      const previous = properties.get(property.name)
+      const value = merge(previous?.value, property.value)
+      const timing = property.timing ? property.timing.value : previous?.timing
+
+      if (order === 'last') properties.delete(property.name)
+
+      properties.set(property.name, { name: property.name, value, timing })
+    }
+  }
+
+  return [...result].map(([name, properties]) => ({ name, properties: [...properties.values()] }))
+}
+
+/**
  * Resolves property ownership and independent timing inheritance across selected layers.
  * State properties override common properties within a layer; later layers override
  * earlier layers for each target/property pair.
@@ -111,77 +154,99 @@ export function resolveLayerCascade<Value, ResolvedTiming>(
   mapValue: (source: PropertySource) => Value,
   mapTiming: (source: TimingSource) => ResolvedTiming,
 ): readonly Target<CascadedProperty<Value, ResolvedTiming>>[] {
-  const targets = new Map<string, Map<string, CascadedProperty<Value, ResolvedTiming>>>()
+  type Contribution = {
+    value: Value
+    source: PropertySource
+    declarations: readonly PropertySource[]
+  }
 
-  for (const { layer, state } of selection) {
-    const contributions = new Map<string, Map<string, PropertySource[]>>()
+  function* contributions(): Generator<
+    Target<{ name: string; value: Contribution; timing?: { value: ResolvedTiming } }>
+  > {
+    for (const { layer, state } of selection) {
+      const targets = new Map<string, Map<string, PropertySource[]>>()
 
-    for (const scope of [{ targets: layer.targets }, ...(state ? [state] : [])]) {
-      for (const target of scope.targets) {
-        let properties = contributions.get(target.name)
+      for (const scope of [{ targets: layer.targets }, ...(state ? [state] : [])]) {
+        for (const target of scope.targets) {
+          const properties = targets.get(target.name) ?? new Map<string, PropertySource[]>()
+          targets.set(target.name, properties)
 
-        if (!properties) {
-          properties = new Map()
-          contributions.set(target.name, properties)
-        }
-
-        for (const property of target.properties) {
-          const declarations = properties.get(property.name) ?? []
-          declarations.push({ layer, state: scope === state ? state : undefined, target, property })
-          properties.set(property.name, declarations)
+          for (const property of target.properties) {
+            const declarations = properties.get(property.name) ?? []
+            declarations.push({
+              layer,
+              state: scope === state ? state : undefined,
+              target,
+              property,
+            })
+            properties.set(property.name, declarations)
+          }
         }
       }
-    }
 
-    for (const [targetName, contribution] of contributions) {
-      let properties = targets.get(targetName)
+      for (const [name, properties] of targets) {
+        if (properties.size === 0) yield { name, properties: [] }
 
-      if (!properties) {
-        properties = new Map()
-        targets.set(targetName, properties)
-      }
+        const commonTarget = layer.targets.find((target) => target.name === name)
+        const stateTarget = state?.targets.find((target) => target.name === name)
 
-      const commonTarget = layer.targets.find((target) => target.name === targetName)
-      const stateTarget = state?.targets.find((target) => target.name === targetName)
+        for (const [propertyName, declarations] of properties) {
+          // Each contribution is created by pushing at least one source.
+          const source = declarations[declarations.length - 1]
+          const candidates: TimingSource[] = []
 
-      for (const [name, declarations] of contribution) {
-        // A contribution is created only when at least one declaration is pushed.
-        const source = declarations.at(-1)!
-        const candidates: TimingSource[] = []
+          for (const scope of [
+            ...(state ? [{ state, target: stateTarget, declaration: state }] : []),
+            { state: undefined, target: commonTarget, declaration: layer },
+          ]) {
+            const { target } = scope
+            const property = target?.properties.find((item) => item.name === propertyName)
 
-        for (const scope of [
-          ...(state ? [{ state, target: stateTarget, declaration: state }] : []),
-          { state: undefined, target: commonTarget, declaration: layer },
-        ]) {
-          const { target } = scope
-          const property = target?.properties.find((item) => item.name === name)
+            if (property)
+              candidates.push({
+                layer,
+                state: scope.state,
+                target,
+                property,
+                declaration: property,
+              })
 
-          if (property)
-            candidates.push({ layer, state: scope.state, target, property, declaration: property })
-          const sharedTiming = targetTiming(target, name)
+            const sharedTiming = targetTiming(target, propertyName)
 
-          if (sharedTiming)
-            candidates.push({ layer, state: scope.state, target, declaration: sharedTiming })
+            if (sharedTiming)
+              candidates.push({ layer, state: scope.state, target, declaration: sharedTiming })
 
-          candidates.push({ layer, state: scope.state, declaration: scope.declaration })
+            candidates.push({ layer, state: scope.state, declaration: scope.declaration })
+          }
+
+          const provider = candidates.find((candidate) => timingProvider(candidate.declaration))
+          // Preserve evaluation/failure order: timing before value, including
+          // contributions subsequently hidden by later layers.
+          const timing = provider ? { value: mapTiming(provider) } : undefined
+          const value = mapValue(source)
+
+          yield {
+            name,
+            properties: [{ name: propertyName, value: { value, source, declarations }, timing }],
+          }
         }
-
-        const provider = candidates.find((candidate) => timingProvider(candidate.declaration))
-        const previous = properties.get(name)
-        const timing = provider ? mapTiming(provider) : previous?.timing
-
-        properties.set(name, {
-          name,
-          source,
-          value: mapValue(source),
-          declarations: [...(previous?.declarations ?? []), ...declarations],
-          timing,
-        })
       }
     }
   }
 
-  return [...targets].map(([name, properties]) => ({ name, properties: [...properties.values()] }))
+  return cascadeTargets(contributions(), 'first', (previous, next) => ({
+    ...next,
+    declarations: [...(previous?.declarations ?? []), ...next.declarations],
+  })).map((target) => ({
+    name: target.name,
+    properties: target.properties.map((property) => ({
+      name: property.name,
+      value: property.value.value,
+      source: property.value.source,
+      declarations: property.value.declarations,
+      timing: property.timing,
+    })),
+  }))
 }
 
 export function transitionPropertySources(

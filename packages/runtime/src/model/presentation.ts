@@ -14,6 +14,8 @@ export interface RenderedFrame {
 export interface RenderedProperty {
   readonly name: string
   readonly value: string
+  /** Final style reconciled after an explicit track, when distinct from its animated endpoint. */
+  readonly completionValue?: string
   readonly timing?: Timing
   readonly keyframes?: readonly RenderedFrame[]
   readonly binding?: Expression

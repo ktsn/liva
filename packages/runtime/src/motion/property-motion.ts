@@ -48,14 +48,23 @@ const PHYSICS_DURATION_STEP_MS = 16
 /** Spring timing accepted by numeric trajectories; browser tween timing is handled elsewhere. */
 type SpringTiming = Exclude<Timing, { kind: 'tween' }>
 
-/** Canonical component values and matching velocities in component units per millisecond. */
+/** Values use canonical component units; matching velocity components use those units per millisecond. */
 export type MotionSample = {
   readonly value: readonly number[]
   readonly velocity: readonly number[]
 }
 
+/** A trajectory sample has no direct expiry; direct components retain their original observation deadline. */
+export interface MotionObservation {
+  readonly sample: MotionSample
+  /** Capture instant on the same performance-clock millisecond axis as direct observations. */
+  readonly time: number
+  readonly validUntil: readonly (number | undefined)[]
+  readonly observedAt: readonly (number | undefined)[]
+}
+
 /** Direct observation on the millisecond clock, optionally carrying released input velocity in units/ms. */
-type Sample = { time: number; value: number; velocity?: number }
+type Sample = { time: number; value: number; velocity?: number; validUntil?: number }
 
 /**
  * Observations for one target/component address. A registered animation takes
@@ -183,6 +192,10 @@ export interface SpringObservation {
   readonly start?: MotionSample
   readonly end?: readonly number[]
   readonly relative: boolean
+  /** New terminal/controller-release derivative, if committed after a captured handoff. */
+  readonly releasedAt?: readonly (number | undefined)[]
+  /** Components currently sampled from a running/paused native effect, in the same address order. */
+  readonly animated?: readonly boolean[]
 }
 
 /**
@@ -283,13 +296,26 @@ export class PropertyMotion {
    * position at time; unreadable targets are ignored. The supplied velocity takes
    * precedence over DOM finite differences until stale or superseded by a write/effect.
    */
-  endControl(element: HTMLElement, property: string, velocity: readonly number[], time: number) {
+  endControl(
+    element: HTMLElement,
+    property: string,
+    velocity: readonly number[],
+    time: number,
+    validUntil?: readonly number[],
+  ) {
     const decoded = decodeProperty(element, property)
     if (!decoded) return
 
     for (const [index, address] of decoded.addresses.entries()) {
       const history = this.history(element, address)
-      history.samples = [{ time, value: decoded.values[index], velocity: velocity[index] }]
+      history.samples = [
+        {
+          time,
+          value: decoded.values[index],
+          velocity: velocity[index],
+          validUntil: validUntil?.[index],
+        },
+      ]
       history.animation = undefined
       history.trajectory = undefined
     }
@@ -352,12 +378,30 @@ export class PropertyMotion {
    * Returns undefined when the displayed value cannot be decoded.
    */
   read(element: HTMLElement, property: string, time = performance.now()): MotionSample | undefined {
+    return this.capture(element, property, time)?.sample
+  }
+
+  /** Captures motion plus original direct-sample expiry times (performance-clock ms) for deferred handoff. */
+  capture(
+    element: HTMLElement,
+    property: string,
+    time = performance.now(),
+  ): MotionObservation | undefined {
     const decoded = decodeProperty(element, property)
     if (!decoded) return undefined
 
+    const validUntil: (number | undefined)[] = []
+    const observedAt: (number | undefined)[] = []
     const velocity = decoded.addresses.map((address) => {
       const history = this.history(element, address)
       const animation = history.animation
+      const lastDirect = history.samples.at(-1)
+      validUntil.push(
+        animation
+          ? undefined
+          : (lastDirect?.validUntil ?? (lastDirect?.time ?? time) + DIRECT_SAMPLE_WINDOW_MS),
+      )
+      observedAt.push(animation ? undefined : lastDirect?.time)
 
       if (animation && (animation.playState === 'idle' || animation.playState === 'finished'))
         return 0
@@ -374,7 +418,9 @@ export class PropertyMotion {
       const last = history.samples.at(-1)
       const before = history.samples.at(-2)
       if (last?.velocity !== undefined)
-        return time >= last.time && time - last.time < DIRECT_SAMPLE_WINDOW_MS ? last.velocity : 0
+        return time >= last.time && time < (last.validUntil ?? last.time + DIRECT_SAMPLE_WINDOW_MS)
+          ? last.velocity
+          : 0
       if (
         !last ||
         !before ||
@@ -386,7 +432,7 @@ export class PropertyMotion {
       return (last.value - before.value) / (last.time - before.time)
     })
 
-    return { value: decoded.values, velocity }
+    return { sample: { value: decoded.values, velocity }, time, validUntil, observedAt }
   }
 
   /**
@@ -482,7 +528,19 @@ export class PropertyMotion {
   /** Captures displayed motion and numeric destination/reference facts for pure planning. */
   observeSpring(element: HTMLElement, property: string, destination: string): SpringObservation {
     const start = this.read(element, property)
-    const end = decodeDestination(element, property, destination)?.values
+    const endpoint = decodeDestination(element, property, destination)
+    const end = endpoint?.values
+    const animated = endpoint?.addresses.map((address) => {
+      const animation = this.histories.get(element)?.get(address)?.animation
+
+      return animation !== undefined && ['running', 'paused'].includes(animation.playState)
+    })
+    const releasedAt = endpoint?.addresses.map((address) => {
+      const history = this.histories.get(element)?.get(address)
+      const last = history?.samples.at(-1)
+
+      return !history?.animation && last?.velocity !== undefined ? last.time : undefined
+    })
     // Relative dependency is only needed to decide whether a stationary,
     // non-opacity track should use numeric frames instead of scalar easing.
     const needsReference =
@@ -495,6 +553,8 @@ export class PropertyMotion {
     return {
       start,
       end,
+      releasedAt,
+      animated,
       relative: needsReference && propertyReference(element, property, destination) !== undefined,
     }
   }

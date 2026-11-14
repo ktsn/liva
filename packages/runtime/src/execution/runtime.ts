@@ -149,6 +149,7 @@ export class Runtime {
       layerTargets(definition),
     )
 
+    this.execution.retainEnvironment(this.values)
     this.execution.releaseControllers()
     this.clearBindings()
     this.execution.resetPresentation()
@@ -245,6 +246,8 @@ export class Runtime {
           )
 
           for (const event of this.definition.events ?? []) evaluate(event.when, snapshot)
+
+          this.execution.validatePresentation(snapshot)
         },
         notification,
       )
@@ -269,6 +272,7 @@ export class Runtime {
     if (this.disposed) return
 
     this.queue.length = 0
+    this.execution.retainEnvironment(this.values)
     this.execution.releaseControllers()
     this.clearBindings()
     this.graph.dispose()
