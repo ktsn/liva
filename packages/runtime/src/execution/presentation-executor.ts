@@ -53,13 +53,43 @@ import { evaluate, renderTransition, type VariableValues } from '../evaluation/e
 import type { Definition, Transition } from '../model/definition.ts'
 import { type ResolvedTrack } from '../composition/resolve.ts'
 import { captureLifecycleDefinition, hasLifecycle } from '../composition/runtime-layers.ts'
-import { resolveLifecycleTracks, type LifecycleSession, type LifecycleWork } from './lifecycle.ts'
+import type { LifecycleSession, LifecycleWork } from './lifecycle.ts'
+import type { RenderedState } from '../model/presentation.ts'
 import { trackLayoutAnimation } from '../layout/layout-scheduler.ts'
 import {
   PropertyMotion,
   type MotionSample,
   type MotionObservation,
 } from '../motion/property-motion.ts'
+
+/** Compatibility callback adapter; new pure normalization receives captured values only. */
+export function resolveLifecycleTracks(
+  phase: 'enter' | 'leave',
+  transition: Transition | undefined,
+  state: RenderedState,
+  presentation: (target: string, property: string) => string | undefined,
+): ResolvedTrack[] {
+  const tracks: ResolvedTrack[] = []
+
+  for (const target of transition?.targets ?? []) {
+    for (const property of target.properties) {
+      const displayed = presentation(target.name, property.name)
+
+      if (displayed === undefined) continue
+
+      tracks.push(
+        ...normalizeLifecycleTracks(
+          phase,
+          { ...transition, targets: [{ ...target, properties: [property] }] },
+          state,
+          new Map([[`${target.name}\0${property.name}`, displayed]]),
+        ),
+      )
+    }
+  }
+
+  return tracks
+}
 
 type InlineValue = { value: string; priority: string }
 type OwnedElement = {

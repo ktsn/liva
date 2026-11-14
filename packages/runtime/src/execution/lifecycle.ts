@@ -1,13 +1,14 @@
 import type { Transition } from '../model/definition.ts'
 import type { RenderedState } from '../model/presentation.ts'
 import type { ResolvedTrack } from '../composition/resolve.ts'
-import { normalizeLifecycleTracks } from '../composition/runtime-layers.ts'
 import {
   PresencePlayback,
+  resolveLifecycleTracks,
   type PresentationExecutor,
   type CapturedPresence,
 } from './presentation-executor.ts'
 import { lifecycleOrigin } from './execution-contracts.ts'
+export { resolveLifecycleTracks } from './presentation-executor.ts'
 export {
   lifecycleTransitions,
   hasLifecycle,
@@ -83,33 +84,4 @@ export class LifecycleSession {
   cancel(reason: 'superseded' | 'owner-teardown') {
     this.playback.cancel(reason)
   }
-}
-
-/** Compatibility callback adapter; new pure normalization receives captured values only. */
-export function resolveLifecycleTracks(
-  phase: 'enter' | 'leave',
-  transition: Transition | undefined,
-  state: RenderedState,
-  presentation: (target: string, property: string) => string | undefined,
-): ResolvedTrack[] {
-  const tracks: ResolvedTrack[] = []
-
-  for (const target of transition?.targets ?? []) {
-    for (const property of target.properties) {
-      const displayed = presentation(target.name, property.name)
-
-      if (displayed === undefined) continue
-
-      tracks.push(
-        ...normalizeLifecycleTracks(
-          phase,
-          { ...transition, targets: [{ ...target, properties: [property] }] },
-          state,
-          new Map([[`${target.name}\0${property.name}`, displayed]]),
-        ),
-      )
-    }
-  }
-
-  return tracks
 }
