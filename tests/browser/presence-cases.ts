@@ -16,9 +16,9 @@ const reference = (...path: string[]): Expression => ({ kind: 'reference', path 
 const tween: Timing = { kind: 'tween', durationMs: 400, easing: 'linear' }
 const physics: Timing = { kind: 'spring-physics', stiffness: 300, damping: 25, mass: 1 }
 
-function setup(definition: Definition, inputs: Record<string, unknown> = {}) {
+function setup(definition: Definition, inputs: Record<string, unknown> = {}, style = '') {
   const element = document.createElement('div')
-  element.style.cssText = 'position:relative;width:40px;height:40px;translate:0px 0px;'
+  element.style.cssText = `position:relative;width:40px;height:40px;translate:0px 0px;${style}`
   document.body.append(element)
   const diagnostics: RuntimeDiagnostic[] = []
   const failures: unknown[] = []
@@ -1189,7 +1189,9 @@ export const presenceCases = {
       Object.defineProperty(performance, 'now', { configurable: true, value: nativeNow })
     }
   },
-  async controllerOwnership() {
+  async controllerOwnership(mode: 'exact' | 'component' | 'enter' = 'exact') {
+    const property = mode === 'component' ? 'left' : 'width'
+    const phase = mode === 'enter' ? 'enter' : 'leave'
     const fixture = setup(
       {
         name: 'ownership',
@@ -1211,29 +1213,36 @@ export const presenceCases = {
               {
                 name: 'box',
                 properties: [
-                  { name: 'width', value: { kind: 'binding', expression: reference('movement') } },
+                  {
+                    name: mode === 'component' ? 'inset-inline-start' : 'width',
+                    value: { kind: 'binding', expression: reference('movement') },
+                  },
                 ],
               },
             ],
           },
         ],
-        leave: {
+        [phase]: {
           timing: tween,
           targets: [
             {
               name: 'box',
               properties: [
-                { name: 'inline-size', keyframes: [{ offset: 1, value: literal('100px') }] },
+                {
+                  name: mode === 'component' ? 'left' : 'inline-size',
+                  keyframes: [{ offset: 1, value: literal('100px') }],
+                },
               ],
             },
           ],
         },
       },
       { input: 0 },
+      mode === 'component' ? 'left:0px;' : '',
     )
 
     const other = document.createElement('div')
-    other.style.width = '40px'
+    other.style.cssText = 'position:relative;width:40px;left:0px;'
     document.body.append(other)
     fixture.instance.bind([
       ['box', fixture.element],
@@ -1242,21 +1251,21 @@ export const presenceCases = {
 
     try {
       fixture.instance.updateParameters({ input: 10 })
-      const session = fixture.start('leave')
-      const animation = effect(fixture.element, 'width')
+      const session = fixture.start(phase)
+      const animation = effect(fixture.element, property)
       await animation.ready
       animation.pause()
       animation.currentTime = 100
-      const held = getComputedStyle(fixture.element).width
-      const otherHeld = getComputedStyle(other).width
+      const held = getComputedStyle(fixture.element).getPropertyValue(property)
+      const otherHeld = getComputedStyle(other).getPropertyValue(property)
       fixture.instance.updateParameters({ input: 40 })
-      const retained = effect(fixture.element, 'width') === animation
-      const unchanged = getComputedStyle(fixture.element).width === held
-      const otherStable = getComputedStyle(other).width === otherHeld
+      const retained = effect(fixture.element, property) === animation
+      const unchanged = getComputedStyle(fixture.element).getPropertyValue(property) === held
+      const otherStable = getComputedStyle(other).getPropertyValue(property) === otherHeld
       session.cancel('superseded')
-      const released = parseFloat(getComputedStyle(other).width)
+      const released = parseFloat(getComputedStyle(other).getPropertyValue(property))
       fixture.instance.updateParameters({ input: 50 })
-      const resumed = parseFloat(getComputedStyle(other).width)
+      const resumed = parseFloat(getComputedStyle(other).getPropertyValue(property))
 
       return {
         retained,
@@ -2114,6 +2123,392 @@ export const presenceCases = {
       session?.cancel('owner-teardown')
       fixture.cleanup()
       Object.defineProperty(performance, 'now', { configurable: true, value: nativeNow })
+    }
+  },
+  async candidateApplicability(mode: 'takeover' | 'remaining' | 'mixed') {
+    const mixed = mode === 'mixed'
+    const duration = reference('duration')
+    const fixture = setup(
+      {
+        name: 'candidate-applicability',
+        parameters: [
+          { name: 'duration', type: 'number' },
+          { name: 'takeover', type: 'boolean' },
+          { name: 'replaceScale', type: 'boolean' },
+        ],
+        layers: [
+          {
+            name: 'base',
+            targets: [
+              {
+                name: 'box',
+                properties: [
+                  { name: 'opacity', value: literal('1') },
+                  ...(mixed ? [{ name: 'scale', value: literal('1') }] : []),
+                ],
+              },
+            ],
+          },
+          {
+            name: 'takeover',
+            when: reference('takeover'),
+            targets: [
+              {
+                name: 'box',
+                properties: [
+                  { name: 'opacity', value: literal('0.9'), timing: { ...tween, durationMs: 80 } },
+                ],
+              },
+            ],
+          },
+          {
+            name: 'scaleTakeover',
+            when: reference('replaceScale'),
+            targets: [
+              {
+                name: 'box',
+                properties: [
+                  { name: 'scale', value: literal('1.5'), timing: { ...tween, durationMs: 80 } },
+                ],
+              },
+            ],
+          },
+          {
+            name: 'history',
+            initialState: 'idle',
+            targets: [],
+            states: ['idle', 'next', 'final'].map((name) => ({ name, targets: [] })),
+            transitions: [
+              {
+                from: 'idle',
+                to: 'next',
+                when: reference('takeover'),
+                transition: { targets: [] },
+              },
+              {
+                from: 'next',
+                to: 'final',
+                when: { kind: 'boolean', value: true },
+                transition: { targets: [] },
+              },
+            ],
+          },
+        ],
+        enter: {
+          timingExpression: {
+            kind: 'call',
+            function: 'tween',
+            arguments: [
+              { name: 'duration', value: duration },
+              { name: 'easing', value: reference('linear') },
+            ],
+          },
+          targets: [
+            {
+              name: 'box',
+              properties: [
+                { name: 'opacity', keyframes: [{ offset: 0, value: literal('0') }] },
+                ...(mixed
+                  ? [{ name: 'scale', keyframes: [{ offset: 0, value: literal('0.5') }] }]
+                  : []),
+              ],
+            },
+          ],
+        },
+      },
+      { duration: 400, takeover: false, replaceScale: false },
+    )
+
+    try {
+      const session = fixture.start('enter')
+      const originals = fixture.element.getAnimations()
+      await Promise.all(originals.map((animation) => animation.ready))
+
+      for (const animation of originals) {
+        animation.pause()
+        animation.currentTime = 100
+      }
+
+      let updates = 0
+      fixture.instance.onUpdate = () => {
+        updates++
+      }
+      fixture.instance.updateParameters({
+        duration: -1,
+        takeover: mode !== 'remaining',
+        replaceScale: false,
+      })
+      const firstAccepted = updates === 1
+      const rejectedHistory = fixture.instance.composition.states.history
+      let retryRetained = true
+
+      if (mode !== 'takeover') {
+        fixture.instance.updateParameters({ duration: 400, takeover: false, replaceScale: false })
+        retryRetained = originals.every((animation) =>
+          fixture.element.getAnimations().includes(animation),
+        )
+      }
+
+      if (mixed)
+        fixture.instance.updateParameters({ duration: -1, takeover: true, replaceScale: true })
+
+      const current = fixture.element.getAnimations()
+      const durations = current.map((animation) => animation.effect?.getTiming().duration)
+      const history = fixture.instance.composition.states.history
+
+      for (const animation of current) animation.finish()
+
+      const result = await session.finished
+
+      return {
+        firstAccepted,
+        rejectedHistory,
+        retryRetained,
+        durations,
+        history,
+        result,
+        diagnostics: fixture.diagnostics.length,
+        failures: fixture.failures.length,
+        final: fixture.element.style.opacity,
+      }
+    } finally {
+      fixture.cleanup()
+    }
+  },
+
+  async canonicalTakeover(mode: 'physical' | 'logical' | 'repeated') {
+    const property = mode === 'physical' ? 'left' : 'inset-inline-start'
+    const fixture = setup(
+      {
+        name: 'canonical-takeover',
+        parameters: [{ name: 'active', type: 'boolean' }],
+        layers: [
+          base('inset', '0px'),
+          {
+            name: 'takeover',
+            when: reference('active'),
+            targets: [
+              {
+                name: 'box',
+                properties: [
+                  { name: property, value: literal('200px'), timing: { ...tween, durationMs: 80 } },
+                ],
+              },
+            ],
+          },
+        ],
+        enter: {
+          timing: tween,
+          targets: [
+            {
+              name: 'box',
+              properties: [{ name: 'inset', keyframes: [{ offset: 0, value: literal('100px') }] }],
+            },
+          ],
+        },
+      },
+      { active: false },
+    )
+    const other = document.createElement('div')
+    other.style.cssText = 'position:relative;width:40px;height:40px;writing-mode:vertical-rl;'
+    const elements = mode === 'repeated' ? [fixture.element, other] : [fixture.element]
+    const properties = ['top', 'right', 'bottom', 'left']
+    let session: LifecycleSession | undefined
+
+    if (mode === 'repeated') {
+      document.body.append(other)
+      fixture.instance.bind(elements.map((element) => ['box', element] as const))
+    }
+
+    try {
+      const work = elements.flatMap((element) =>
+        fixture.instance.captureLifecycle('enter', ['box'], element),
+      )
+      session = new LifecycleSession(work, 'enter', (error) => fixture.failures.push(error))
+      session.initialize()
+      fixture.instance.retainLifecycle('enter', session)
+      session.play()
+      const originals = elements.map((element) => properties.map((name) => effect(element, name)))
+      await Promise.all(originals.flat().map((animation) => animation.ready))
+
+      for (const animation of originals.flat()) {
+        animation.pause()
+        animation.currentTime = 100
+      }
+
+      const affected = elements.map((_element, index) =>
+        mode === 'repeated' && index === 1 ? 'top' : 'left',
+      )
+      const oldRejections = Promise.all(
+        originals.map((animations, index) =>
+          animations[properties.indexOf(affected[index])].finished.catch(() => undefined),
+        ),
+      )
+      let completed = false
+      void session.finished.then(() => {
+        completed = true
+        return undefined
+      })
+      fixture.instance.updateParameters({ active: true })
+      const replacement = elements.map((element, index) => effect(element, affected[index]))
+
+      for (const animation of replacement) {
+        animation.pause()
+        animation.currentTime = 0
+      }
+
+      await oldRejections
+      const start = elements.map((element, index) =>
+        getComputedStyle(element).getPropertyValue(affected[index]),
+      )
+      const ends = replacement.map(
+        (animation, index) => frames(animation).at(-1)?.[affected[index]],
+      )
+      const durations = replacement.map((animation) => animation.effect?.getTiming().duration)
+      const preserved = elements.every((element, index) =>
+        properties.every(
+          (name, component) =>
+            name === affected[index] || effect(element, name) === originals[index][component],
+        ),
+      )
+
+      for (const animation of replacement) animation.finish()
+
+      await Promise.all(replacement.map((animation) => animation.finished))
+      const premature = completed
+
+      for (const animations of originals)
+        for (const animation of animations) if (animation.playState !== 'idle') animation.finish()
+
+      const result = await session.finished
+
+      return {
+        start,
+        ends,
+        durations,
+        preserved,
+        premature,
+        result,
+        final: elements.map((element, index) =>
+          getComputedStyle(element).getPropertyValue(affected[index]),
+        ),
+        remaining: elements.reduce((count, element) => count + element.getAnimations().length, 0),
+        diagnostics: fixture.diagnostics.length + fixture.failures.length,
+      }
+    } finally {
+      session?.cancel('owner-teardown')
+      fixture.cleanup()
+      other.remove()
+    }
+  },
+
+  async unchangedCanonicalObservation() {
+    const fixture = setup(
+      {
+        name: 'unchanged-canonical',
+        parameters: [{ name: 'unused', type: 'number' }],
+        layers: [
+          base('inset', '0px'),
+          {
+            name: 'unrelated',
+            targets: [
+              {
+                name: 'other',
+                properties: [
+                  { name: 'opacity', value: { kind: 'template', parts: [reference('unused')] } },
+                ],
+              },
+            ],
+          },
+        ],
+        enter: {
+          timing: tween,
+          targets: [
+            {
+              name: 'box',
+              properties: [{ name: 'inset', keyframes: [{ offset: 0, value: literal('100px') }] }],
+            },
+          ],
+        },
+      },
+      { unused: 0 },
+    )
+    const original = globalThis.getComputedStyle
+    let reads = 0
+
+    try {
+      const session = fixture.start('enter')
+      const animations = fixture.element.getAnimations()
+      await Promise.all(animations.map((animation) => animation.ready))
+
+      for (const animation of animations) animation.pause()
+
+      globalThis.getComputedStyle = (...args) => {
+        reads++
+
+        return original(...args)
+      }
+
+      for (let unused = 1; unused <= 3; unused++) fixture.instance.updateParameters({ unused })
+
+      globalThis.getComputedStyle = original
+      const preserved = animations.every((animation) =>
+        fixture.element.getAnimations().includes(animation),
+      )
+
+      for (const animation of animations) animation.finish()
+
+      return { reads, preserved, result: await session.finished }
+    } finally {
+      globalThis.getComputedStyle = original
+      fixture.cleanup()
+    }
+  },
+
+  async canonicalReference() {
+    const parent = document.createElement('div')
+    parent.style.cssText = 'position:relative;width:200px;height:100px;'
+    document.body.append(parent)
+    const fixture = setup({
+      name: 'canonical-reference',
+      layers: [base('inset', '0px')],
+      leave: {
+        timing: physics,
+        targets: [
+          {
+            name: 'box',
+            properties: [{ name: 'inset', keyframes: [{ offset: 1, value: literal('10%') }] }],
+          },
+        ],
+      },
+    })
+    fixture.element.style.position = 'absolute'
+    parent.append(fixture.element)
+
+    try {
+      const session = fixture.start('leave')
+      const first = effect(fixture.element, 'left')
+      await first.ready
+
+      parent.style.width = '400px'
+      await paint()
+      const replacement = effect(fixture.element, 'left')
+      const changed = replacement !== first
+      const left = frames(replacement).at(-1)?.left
+      const top = frames(effect(fixture.element, 'top')).at(-1)?.top
+
+      for (const animation of fixture.element.getAnimations()) animation.finish()
+
+      return {
+        changed,
+        left,
+        top,
+        result: await session.finished,
+        diagnostics: fixture.diagnostics.length + fixture.failures.length,
+      }
+    } finally {
+      fixture.cleanup()
+      parent.remove()
     }
   },
 }

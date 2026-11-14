@@ -350,10 +350,26 @@ export function canonicalTracks(
   element: HTMLElement,
   track: import('../composition/resolve.ts').ResolvedTrack,
 ): readonly import('../composition/resolve.ts').ResolvedTrack[] {
+  return canonicalTrackFacts(element, track).map((fact) => fact.track)
+}
+
+/**
+ * Observes expansion once, retaining the canonical component addresses alongside
+ * each playback unit. Opaque/unsplittable CSS remains one atomic browser track;
+ * no additional codec support or unit conversion is introduced.
+ */
+export function canonicalTrackFacts(
+  element: HTMLElement,
+  track: import('../composition/resolve.ts').ResolvedTrack,
+): readonly {
+  readonly track: import('../composition/resolve.ts').ResolvedTrack
+  readonly addresses: readonly string[]
+}[] {
   const rule = propertyRule(track.property)
-  if (rule?.kind !== 'length') return [track]
+  if (rule?.kind !== 'length')
+    return [{ track, addresses: propertyAddresses(element, track.property) }]
   const addresses = resolvePropertyComponents(rule, getComputedStyle(element))
-  if (addresses.length === 1 && addresses[0] === track.property) return [track]
+  if (addresses.length === 1 && addresses[0] === track.property) return [{ track, addresses }]
 
   // Authored longhand names split the CSS value; resolved components determine
   // which physical tracks receive it. Neither step resolves authored units.
@@ -369,16 +385,19 @@ export function canonicalTracks(
   }
   const destination = split(track.destinationValue)
   const frames = track.keyframes.map((frame) => split(frame.value))
-  if (!destination || frames.some((frame) => frame === undefined)) return [track]
+  if (!destination || frames.some((frame) => frame === undefined)) return [{ track, addresses }]
 
   return addresses.map((property, index) => ({
-    ...track,
-    property,
-    destinationValue: destination[index],
-    keyframes: track.keyframes.map((frame, frameIndex) => ({
-      ...frame,
-      // Every frame was split successfully above, with one value per canonical address.
-      value: frames[frameIndex]![index],
-    })),
+    addresses: [property],
+    track: {
+      ...track,
+      property,
+      destinationValue: destination[index],
+      keyframes: track.keyframes.map((frame, frameIndex) => ({
+        ...frame,
+        // Every frame was split successfully above, with one value per canonical address.
+        value: frames[frameIndex]![index],
+      })),
+    },
   }))
 }

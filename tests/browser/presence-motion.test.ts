@@ -199,21 +199,25 @@ for (const completion of [false, true]) {
   })
 }
 
-test('uses target-wide controller ownership across two logical receivers', async ({ page }) => {
-  const result = await page.evaluate(async () => {
-    const { presenceCases } = await import('./presence-cases.ts')
+for (const mode of ['exact', 'component', 'enter'] as const) {
+  test(`uses target-wide controller ownership across two logical receivers mode=${mode}`, async ({
+    page,
+  }) => {
+    const result = await page.evaluate(async (sample) => {
+      const { presenceCases } = await import('./presence-cases.ts')
 
-    return presenceCases.controllerOwnership()
-  })
+      return presenceCases.controllerOwnership(sample)
+    }, mode)
 
-  expect(result).toEqual({
-    retained: true,
-    unchanged: true,
-    otherStable: true,
-    increment: 10,
-    errors: 0,
+    expect(result).toEqual({
+      retained: true,
+      unchanged: true,
+      otherStable: true,
+      increment: 10,
+      errors: 0,
+    })
   })
-})
+}
 
 test('samples an available native trajectory at final planning time and playback rate', async ({
   page,
@@ -338,3 +342,82 @@ for (const axis of ['x', 'y'] as const) {
     })
   }
 }
+
+for (const mode of ['takeover', 'remaining', 'mixed'] as const) {
+  test(`validates enter applicability without committing rejected state mode=${mode}`, async ({
+    page,
+  }) => {
+    const result = await page.evaluate(async (sample) => {
+      const { presenceCases } = await import('./presence-cases.ts')
+
+      return presenceCases.candidateApplicability(sample)
+    }, mode)
+
+    expect(result).toEqual({
+      firstAccepted: mode === 'takeover',
+      rejectedHistory: mode === 'takeover' ? 'next' : 'idle',
+      retryRetained: true,
+      durations: mode === 'mixed' ? [80, 80] : [mode === 'takeover' ? 80 : 400],
+      history: mode === 'remaining' ? 'idle' : 'next',
+      result: 'completed',
+      diagnostics: mode === 'takeover' ? 0 : 1,
+      failures: 0,
+      final: mode === 'remaining' ? '1' : '0.9',
+    })
+  })
+}
+
+for (const mode of ['physical', 'logical', 'repeated'] as const) {
+  test(`preserves unowned enter components and replacement barrier mode=${mode}`, async ({
+    page,
+  }) => {
+    const result = await page.evaluate(async (sample) => {
+      const { presenceCases } = await import('./presence-cases.ts')
+
+      return presenceCases.canonicalTakeover(sample)
+    }, mode)
+    const count = mode === 'repeated' ? 2 : 1
+
+    expect(result).toEqual({
+      start: Array(count).fill('75px'),
+      ends: Array(count).fill('200px'),
+      durations: Array(count).fill(80),
+      preserved: true,
+      premature: false,
+      result: 'completed',
+      final: Array(count).fill('200px'),
+      remaining: 0,
+      diagnostics: 0,
+    })
+  })
+}
+
+test('keeps authored relative references after canonical presence normalization', async ({
+  page,
+}) => {
+  const result = await page.evaluate(async () => {
+    const { presenceCases } = await import('./presence-cases.ts')
+
+    return presenceCases.canonicalReference()
+  })
+
+  expect(result).toEqual({
+    changed: true,
+    left: '40px',
+    top: '10px',
+    result: 'completed',
+    diagnostics: 0,
+  })
+})
+
+test('does not observe unchanged canonical presence during unrelated input updates', async ({
+  page,
+}) => {
+  const result = await page.evaluate(async () => {
+    const { presenceCases } = await import('./presence-cases.ts')
+
+    return presenceCases.unchangedCanonicalObservation()
+  })
+
+  expect(result).toEqual({ reads: 0, preserved: true, result: 'completed' })
+})

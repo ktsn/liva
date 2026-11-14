@@ -83,9 +83,8 @@ export interface ExecutionPort {
   /** Current binding validity; Runtime connects reactive calls only when not suspended. */
   readonly bindingFacts: BindingFacts
 
-  /** Validates active lifecycle expressions against candidate values before presentation is accepted. */
-  validatePresentation(values: VariableValues): void
-
+  /** Validates applicable lifecycle expressions against candidate values and resolved ownership. */
+  validatePresentation(values: VariableValues, candidate: LayerResolution): void
   /** Retains accepted values and definition for lifecycle operations that outlive Runtime ownership. */
   retainEnvironment(values: VariableValues): void
 

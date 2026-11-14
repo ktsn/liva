@@ -8,16 +8,20 @@ import {
 import type { RenderedFrame } from '../model/presentation.ts'
 import {
   layerPropertyChanged,
+  layerPropertyKey,
+  changedLayerProperties,
+  removedLayerProperties,
   layerTrackTemplates,
   completeLayerTrack,
   type LayerTrackTemplate,
+  type LayerTrack,
   type LayerResolution,
 } from '../composition/layers.ts'
 import type { ResolvedTrack } from '../composition/resolve.ts'
 import type { Definition } from '../model/definition.ts'
 import type { VariableValues } from '../evaluation/expression.ts'
 
-export const layerPropertyKey = (target: string, property: string) => `${target}\0${property}`
+export { layerPropertyKey } from '../composition/layers.ts'
 
 export function orderedResolution(
   resolution: LayerResolution,
@@ -92,6 +96,63 @@ export function ownsCanonicalProperty(
   return candidates[candidates.length - 1].name === sourceProperty
 }
 
+/** Stable receiver-scoped component identity; no native receiver/effect is transported. */
+export const receiverPropertyKey = (receiver: number, target: string, property: string) =>
+  `${receiver}\0${layerPropertyKey(target, property)}`
+
+/** Maps ordinary authored changes to effective physical components using supplied receiver facts. */
+export function planLayerTakeovers(
+  changes: readonly { target: string; property: string }[],
+  receivers: readonly {
+    receiver: number
+    target: string
+    previous: DeclarationAddresses
+    next: DeclarationAddresses
+  }[],
+): ReadonlySet<string> {
+  const affected = new Set<string>()
+
+  for (const receiver of receivers) {
+    for (const change of changes) {
+      if (change.target !== receiver.target) continue
+
+      const before = receiver.previous.find((property) => property.name === change.property)
+      const after = receiver.next.find((property) => property.name === change.property)
+
+      for (const address of new Set([...(before?.addresses ?? []), ...(after?.addresses ?? [])])) {
+        if (
+          (before?.addresses.includes(address) &&
+            ownsCanonicalProperty(receiver.previous, change.property, address)) ||
+          (after?.addresses.includes(address) &&
+            ownsCanonicalProperty(receiver.next, change.property, address))
+        )
+          affected.add(receiverPropertyKey(receiver.receiver, change.target, address))
+      }
+    }
+  }
+
+  return affected
+}
+
+/** One native playback unit and the physical components it owns; unsupported CSS stays atomic. */
+export interface TrackComponentFacts {
+  readonly track: ResolvedTrack
+  readonly addresses: readonly string[]
+}
+
+/** Keeps playback units whose components have not been taken over by an ordinary change. */
+export function remainingTrackFacts(
+  receiver: number,
+  tracks: readonly TrackComponentFacts[],
+  excluded: ReadonlySet<string>,
+): readonly TrackComponentFacts[] {
+  return tracks.filter(({ track, addresses }) =>
+    addresses.every(
+      (address) => !excluded.has(receiverPropertyKey(receiver, track.target, address)),
+    ),
+  )
+}
+
 export interface LayerPlanningSnapshot {
   readonly previous: LayerResolution
   readonly next: LayerResolution
@@ -119,18 +180,7 @@ export function prepareLayerChange(snapshot: LayerPlanningSnapshot) {
     }
   }
 
-  const removedProperties = new Set(
-    previous.presentation.targets.flatMap((target) =>
-      target.properties
-        .filter(
-          (property) =>
-            !next.presentation.targets
-              .find((item) => item.name === target.name)
-              ?.properties.some((item) => item.name === property.name),
-        )
-        .map((property) => layerPropertyKey(target.name, property.name)),
-    ),
-  )
+  const removedProperties = removedLayerProperties(previous, next)
   const diagnostics: string[] = []
   const templates = [
     ...layerTrackTemplates(
@@ -142,13 +192,7 @@ export function prepareLayerChange(snapshot: LayerPlanningSnapshot) {
     ),
   ]
 
-  for (const target of next.presentation.targets) {
-    for (const property of target.properties) {
-      if (!layerPropertyChanged(previous, target.name, property)) continue
-
-      changed.add(layerPropertyKey(target.name, property.name))
-    }
-  }
+  for (const property of changedLayerProperties(previous, next)) changed.add(property)
 
   return { changed, removedProperties, templates, diagnostics }
 }
@@ -248,7 +292,7 @@ export interface TrackPlan {
 export interface TrackSnapshot {
   readonly id: number
   readonly receiver: number
-  readonly source: ResolvedTrack
+  readonly source: LayerTrack
   readonly track: ResolvedTrack
   readonly declarations: DeclarationAddresses
   readonly displayed?: string
@@ -354,7 +398,7 @@ export function planTrack(
     track,
     sourceProperty: source.property,
     sourceDestination: source.destinationValue,
-    source,
+    source: source.authored ?? source,
     frames: handoff?.frames ?? frames,
     durationMs: handoff?.durationMs ?? timing.durationMs,
     easing: handoff ? 'linear' : timing.easing,

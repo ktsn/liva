@@ -3,6 +3,9 @@ import {
   trackObservationNeeds,
   planTrack,
   planMotionHandoff,
+  planLayerTakeovers,
+  remainingTrackFacts,
+  type TrackComponentFacts,
   type TrackPlan,
   planEffectChanges,
   orderedResolution,
@@ -23,12 +26,19 @@ import {
   type LayerChange,
 } from '../composition/runtime-layers.ts'
 import type { BindingFacts, ExecutionEnvironment } from './execution-contracts.ts'
-import { propertyReference, propertyAddresses, canonicalTracks } from '../motion/property-codec.ts'
+import {
+  propertyReference,
+  propertyAddresses,
+  canonicalTracks,
+  canonicalTrackFacts,
+} from '../motion/property-codec.ts'
 import { propertyRule } from '../motion/property-rules.ts'
 import { propertyController, type PropertyController } from '../motion/controllers.ts'
 import type { ReactiveNotification } from '../evaluation/events.ts'
 import {
-  layerPropertyChanged,
+  prepareLayerTakeovers,
+  layerPropertyDiffers,
+  type LayerProperty,
   layerTargets,
   resolveLayerTracks,
   resolveComposition,
@@ -98,6 +108,14 @@ export interface CapturedPresence {
   readonly interrupted: boolean
 }
 
+interface PresenceSource {
+  readonly item: LifecycleWork
+  readonly receiver: number
+  readonly property: LayerProperty
+  readonly track: ResolvedTrack
+  readonly canonical: readonly TrackComponentFacts[]
+}
+
 interface PresenceOperation {
   readonly id: number
   readonly phase: 'enter' | 'leave'
@@ -108,6 +126,7 @@ interface PresenceOperation {
   readonly starts: Map<LifecycleWork, string>
   readonly bindings: ReadonlyMap<number, ReadonlySet<string>>
   layers: readonly EvaluatedLayer[]
+  sources: readonly PresenceSource[]
   normal: LayerResolution
   started: boolean
   initialized: boolean
@@ -122,6 +141,12 @@ const emptyResolution = (): LayerResolution => ({
 })
 const workKey = (track: Pick<ResolvedTrack, 'target' | 'property'>) =>
   layerPropertyKey(track.target, track.property)
+
+function hasControllerBindings(resolution: LayerResolution) {
+  return resolution.presentation.targets.some((target) =>
+    target.properties.some((property) => property.binding),
+  )
+}
 
 type ActiveTrack = {
   id: number
@@ -323,20 +348,98 @@ export class PresentationExecutor {
     return renderTransition({ ...transition, targets }, values)
   }
 
-  validatePresentation(values: VariableValues) {
+  private operationExclusions(
+    operation: PresenceOperation,
+    normal: LayerResolution,
+  ): ReadonlySet<string> {
+    if (operation.phase !== 'enter' || !operation.started) return operation.excluded
+
+    const changes = prepareLayerTakeovers(operation.normal, normal)
+
+    if (changes.length === 0) return operation.excluded
+
+    const targets = new Set(changes.map((change) => change.target))
+    const receivers = new Map<
+      number,
+      Map<
+        string,
+        {
+          receiver: number
+          target: string
+          previous: DeclarationAddresses
+          next: DeclarationAddresses
+        }
+      >
+    >()
+    const observed = new Map<number, Map<string, readonly string[]>>()
+
+    for (const { item, receiver } of operation.sources) {
+      const target = item.track.target
+
+      if (!targets.has(target)) continue
+
+      const facts = receivers.get(receiver) ?? new Map()
+      receivers.set(receiver, facts)
+
+      if (facts.has(target)) continue
+
+      // Before/after ownership shares writing-context facts within this read-only
+      // calculation. Validation facts are never reused after terminal writes.
+      const addresses = observed.get(receiver) ?? new Map<string, readonly string[]>()
+      observed.set(receiver, addresses)
+      facts.set(target, {
+        receiver,
+        target,
+        previous: this.declarationAddresses(
+          operation.normal,
+          item.element,
+          target,
+          undefined,
+          addresses,
+        ),
+        next: this.declarationAddresses(normal, item.element, target, undefined, addresses),
+      })
+    }
+
+    return new Set([
+      ...operation.excluded,
+      ...planLayerTakeovers(
+        changes,
+        [...receivers.values()].flatMap((facts) => [...facts.values()]),
+      ),
+    ])
+  }
+
+  validatePresentation(values: VariableValues, candidate: LayerResolution) {
+    let projectedCandidate: LayerResolution | undefined
+
     for (const operation of this.operations) {
       if (operation.group.isFinished) continue
 
-      for (const item of operation.work) {
-        const capture = item[lifecycleOrigin]
+      const captures = operation.sources.flatMap((source) => {
+        const capture = source.item[lifecycleOrigin]
 
-        if (
-          capture &&
-          capture.environment.definition === this.definition &&
-          !operation.excluded.has(workKey(item.track))
-        ) {
-          this.renderOperation(capture.source, values, [item])
-        }
+        return capture && capture.environment.definition === this.definition
+          ? [{ source, capture }]
+          : []
+      })
+
+      if (captures.length === 0) continue
+
+      // Candidate applicability uses the already-selected layers and supplied
+      // controller snapshots. This is a local logical projection, not a displayed
+      // observation, and it is discarded before terminal writes/ownership changes.
+      if (operation.phase === 'enter' && operation.started) {
+        projectedCandidate ??= hasControllerBindings(candidate)
+          ? this.controllerBaseline(candidate, values, this.definition).provisional
+          : candidate
+      }
+
+      const excluded = this.operationExclusions(operation, projectedCandidate ?? candidate)
+
+      for (const { source, capture } of captures) {
+        if (remainingTrackFacts(source.receiver, source.canonical, excluded).length > 0)
+          this.renderOperation(capture.source, values, [source.item])
       }
     }
   }
@@ -354,33 +457,28 @@ export class PresentationExecutor {
     for (const operation of this.operations) {
       if (operation.group.isFinished) continue
 
-      if (operation.phase === 'enter' && operation.started) {
-        for (const target of normal.presentation.targets) {
-          for (const property of target.properties) {
-            if (layerPropertyChanged(operation.normal, target.name, property))
-              operation.excluded.add(layerPropertyKey(target.name, property.name))
-          }
-        }
-      }
-
-      if (operation.phase === 'enter' && operation.started) {
-        for (const item of operation.work) {
-          const before = operation.normal.presentation.targets
-            .find((target) => target.name === item.track.target)
-            ?.properties.some((property) => property.name === item.track.property)
-          const after = normal.presentation.targets
-            .find((target) => target.name === item.track.target)
-            ?.properties.some((property) => property.name === item.track.property)
-
-          if (before && !after) operation.excluded.add(workKey(item.track))
-        }
-      }
+      // Only accepted application updates commit these exclusions. Rejected
+      // candidate validation above leaves operation state and history untouched.
+      for (const property of this.operationExclusions(operation, normal))
+        operation.excluded.add(property)
 
       operation.normal = normal
       const layers: EvaluatedLayer[] = []
+      const sources: PresenceSource[] = []
+      const previousSources = new Map(operation.sources.map((source) => [source.item, source]))
 
       for (const [item, held] of operation.held) {
-        if (operation.excluded.has(workKey(item.track))) continue
+        const previous = previousSources.get(item)
+
+        if (
+          previous &&
+          remainingTrackFacts(previous.receiver, previous.canonical, operation.excluded).length ===
+            0
+        ) {
+          sources.push(previous)
+
+          continue
+        }
 
         const capture = item[lifecycleOrigin]
         const environment =
@@ -453,17 +551,34 @@ export class PresentationExecutor {
           }
         }
 
+        const receiver = this.receiverId(item.element)
+        const id = `@presence:${operation.id}:${workKey(item.track)}`
+        const property = trackLayer(id, receiver, [track], !operation.started).targets[0]
+          .properties[0]
+        const retarget = previous?.canonical.some((fact) =>
+          this.referenceRetargets.has(layerPropertyKey(fact.track.target, fact.track.property)),
+        )
+        // Cache only derived normalization for identical evaluated data. A source
+        // change or reference refresh observes current writing context again;
+        // ordinary no-op updates do not add CSSOM reads.
+        const canonical =
+          previous && !layerPropertyDiffers(previous.property, property) && !retarget
+            ? previous.canonical
+            : canonicalTrackFacts(item.element, track)
+        sources.push({ item, receiver, property, track, canonical })
         layers.push(
           trackLayer(
-            `@presence:${operation.id}:${workKey(item.track)}`,
-            this.receiverId(item.element),
-            [track],
+            id,
+            receiver,
+            remainingTrackFacts(receiver, canonical, operation.excluded).map((fact) => fact.track),
             !operation.started,
+            track,
           ),
         )
       }
 
       operation.layers = layers
+      operation.sources = sources
     }
   }
 
@@ -548,6 +663,7 @@ export class PresentationExecutor {
       starts: new Map(),
       bindings,
       layers: [],
+      sources: [],
       normal: this.layerResolution,
       started: false,
       initialized: false,
@@ -600,12 +716,8 @@ export class PresentationExecutor {
     this.initializeStarts(operation)
     this.updateOperations(this.layerResolution)
 
-    // Initialization precedes start/exclusion, so updateOperations emits one
-    // single-property layer for each work item in that same order.
-    for (const [index, item] of operation.work.entries()) {
-      const value = operation.layers[index].targets[0].properties[0].value
-
-      this.write(item.element, item.track.property, value)
+    for (const { item, track } of operation.sources) {
+      this.write(item.element, item.track.property, track.keyframes[0].value)
       this.receiver(item.element).resolution = this.effectiveResolution(
         this.layerResolution,
         item.element,
@@ -951,6 +1063,7 @@ export class PresentationExecutor {
     element: HTMLElement,
     target: string,
     source?: string,
+    observed = new Map<string, readonly string[]>(),
   ): DeclarationAddresses {
     const names = resolution.presentation.targets
       .filter((item) => item.name === target)
@@ -958,54 +1071,21 @@ export class PresentationExecutor {
 
     if (source) names.push(source)
 
-    return [...new Set(names)].map((name) => ({
-      name,
-      addresses: propertyAddresses(element, name),
-    }))
+    return [...new Set(names)].map((name) => {
+      const previous = observed.get(name)
+      const addresses = previous ?? propertyAddresses(element, name)
+      observed.set(name, addresses)
+
+      return { name, addresses }
+    })
   }
 
-  /**
-   * Resolves effective controller bindings into CSS values and, in live mode,
-   * reconciles controller ownership for the next presentation. Bindings obscured
-   * by other declarations are omitted. If a controller cannot supply a value, the
-   * same composition is resolved without bindings to recover a normal declaration;
-   * properties without a fallback are omitted.
-   *
-   * @param resolution - Layer selection and presentation resolved from definition.
-   * @param values - Expression values used to resolve bindings and fallback styles.
-   * @param time - Acquisition/release time in performance.now()-compatible milliseconds.
-   * @param definition - Source definition matching the resolution's layer owners.
-   * @param live - Acquires effective controllers and releases previous owners when
-   * true; false renders snapshots for inspection/preview without changing ownership.
-   * @returns A new resolution with properties in declaration order. The caller
-   * applies its CSS values to the DOM.
-   * @throws If expression evaluation fails or a binding lacks a controller capability.
-   */
-  controllerResolution(
+  /** Formats supplied snapshots/fallbacks without acquiring, releasing or controlling a receiver. */
+  private controllerBaseline(
     resolution: LayerResolution,
     values: VariableValues,
-    time: number,
-    definition = this.definition,
-    live = true,
-  ): LayerResolution {
-    // Declaration order determines ownership, including overlapping shorthand,
-    // longhand, and logical properties that address the same physical CSS property.
-    resolution = orderedResolution(resolution, definition)
-
-    if (
-      !resolution.presentation.targets.some((target) =>
-        target.properties.some((property) => property.binding),
-      )
-    ) {
-      // Without effective bindings, live control ends for every previous owner.
-      if (live) {
-        this.releaseControllers(time)
-        this.updateOperations(resolution, values)
-      }
-
-      return orderedResolution(resolution, definition)
-    }
-
+    definition: Definition,
+  ) {
     // Re-resolve the selected composition without bindings so an unreadable
     // controller can reveal the normal declaration hidden beneath it.
     const normal = resolveComposition(
@@ -1059,6 +1139,49 @@ export class PresentationExecutor {
         })),
       },
     }
+
+    return { normal, provisional }
+  }
+
+  /**
+   * Resolves effective controller bindings into CSS values and, in live mode,
+   * reconciles controller ownership for the next presentation. Bindings obscured
+   * by other declarations are omitted. If a controller cannot supply a value, the
+   * same composition is resolved without bindings to recover a normal declaration;
+   * properties without a fallback are omitted.
+   *
+   * @param resolution - Layer selection and presentation resolved from definition.
+   * @param values - Expression values used to resolve bindings and fallback styles.
+   * @param time - Acquisition/release time in performance.now()-compatible milliseconds.
+   * @param definition - Source definition matching the resolution's layer owners.
+   * @param live - Acquires effective controllers and releases previous owners when
+   * true; false renders snapshots for inspection/preview without changing ownership.
+   * @returns A new resolution with properties in declaration order. The caller
+   * applies its CSS values to the DOM.
+   * @throws If expression evaluation fails or a binding lacks a controller capability.
+   */
+  controllerResolution(
+    resolution: LayerResolution,
+    values: VariableValues,
+    time: number,
+    definition = this.definition,
+    live = true,
+  ): LayerResolution {
+    // Declaration order determines ownership, including overlapping shorthand,
+    // longhand, and logical properties that address the same physical CSS property.
+    resolution = orderedResolution(resolution, definition)
+
+    if (!hasControllerBindings(resolution)) {
+      // Without effective bindings, live control ends for every previous owner.
+      if (live) {
+        this.releaseControllers(time)
+        this.updateOperations(resolution, values)
+      }
+
+      return orderedResolution(resolution, definition)
+    }
+
+    const { normal, provisional } = this.controllerBaseline(resolution, values, definition)
 
     if (live) this.updateOperations(provisional, values)
 
@@ -1276,8 +1399,8 @@ export class PresentationExecutor {
       if (entry.reference === undefined || entry.animation.playState === 'paused') continue
       const next = this.referenceValue(
         entry.element,
-        entry.sourceProperty,
-        entry.sourceDestination,
+        entry.source.property,
+        entry.source.destinationValue,
         trackObservationNeeds(entry.source, false, false).endpoint,
       )
 
@@ -1907,6 +2030,7 @@ export class PresentationExecutor {
                 const needs = trackObservationNeeds(track, interrupted, true)
                 const motion = needs.motion ? this.observeMotion(element, track) : undefined
 
+                const authored = source.authored ?? source
                 const trackPlan = planTrack(
                   {
                     id: nextEffectId++,
@@ -1924,9 +2048,9 @@ export class PresentationExecutor {
                     motion,
                     reference: this.referenceValue(
                       element,
-                      source.property,
-                      source.destinationValue,
-                      trackObservationNeeds(source, false, false).endpoint,
+                      authored.property,
+                      authored.destinationValue,
+                      trackObservationNeeds(authored, false, false).endpoint,
                     ),
                   },
                   timing,
@@ -2034,8 +2158,8 @@ export class PresentationExecutor {
             entry.reference !== undefined &&
             this.referenceValue(
               entry.element,
-              entry.sourceProperty,
-              entry.sourceDestination,
+              entry.source.property,
+              entry.source.destinationValue,
               trackObservationNeeds(entry.source, false, false).endpoint,
             ) !== entry.reference
           ) {

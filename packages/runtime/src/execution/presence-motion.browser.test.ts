@@ -152,15 +152,18 @@ describe('shared presence layer execution', () => {
     },
   )
 
-  it('releases an alias-obscured controller and reacquires from displayed presence on cancellation', async () => {
-    expect(await presenceCases.controllerOwnership()).toEqual({
-      retained: true,
-      unchanged: true,
-      otherStable: true,
-      increment: 10,
-      errors: 0,
-    })
-  })
+  it.each(['exact', 'component', 'enter'] as const)(
+    'releases a target-wide controller obscured by presence and reacquires on cancellation (mode=%s)',
+    async (mode) => {
+      expect(await presenceCases.controllerOwnership(mode)).toEqual({
+        retained: true,
+        unchanged: true,
+        otherStable: true,
+        increment: 10,
+        errors: 0,
+      })
+    },
+  )
 
   it('preserves custom spread-based work and ignores unrelated instance retain requests', async () => {
     const element = document.createElement('div')
@@ -480,6 +483,60 @@ describe('shared presence layer execution', () => {
       other: 0,
       result: 'completed',
       errors: 0,
+    })
+  })
+
+  it.each(['takeover', 'remaining', 'mixed'] as const)(
+    'validates only applicable enter declarations without changing rejected state ($mode=%s)',
+    async (mode) => {
+      expect(await presenceCases.candidateApplicability(mode)).toEqual({
+        firstAccepted: mode === 'takeover',
+        rejectedHistory: mode === 'takeover' ? 'next' : 'idle',
+        retryRetained: true,
+        durations: mode === 'mixed' ? [80, 80] : [mode === 'takeover' ? 80 : 400],
+        history: mode === 'remaining' ? 'idle' : 'next',
+        result: 'completed',
+        diagnostics: mode === 'takeover' ? 0 : 1,
+        failures: 0,
+        final: mode === 'remaining' ? '1' : '0.9',
+      })
+    },
+  )
+
+  it.each(['physical', 'logical', 'repeated'] as const)(
+    'takes over only affected enter components and preserves the current barrier (mode=%s)',
+    async (mode) => {
+      const count = mode === 'repeated' ? 2 : 1
+
+      expect(await presenceCases.canonicalTakeover(mode)).toEqual({
+        start: Array(count).fill('75px'),
+        ends: Array(count).fill('200px'),
+        durations: Array(count).fill(80),
+        preserved: true,
+        premature: false,
+        result: 'completed',
+        final: Array(count).fill('200px'),
+        remaining: 0,
+        diagnostics: 0,
+      })
+    },
+  )
+
+  it('does not observe unchanged canonical presence during unrelated input updates', async () => {
+    expect(await presenceCases.unchangedCanonicalObservation()).toEqual({
+      reads: 0,
+      preserved: true,
+      result: 'completed',
+    })
+  })
+
+  it('retains authored relative-reference observation after phase canonicalization', async () => {
+    expect(await presenceCases.canonicalReference()).toEqual({
+      changed: true,
+      left: '40px',
+      top: '10px',
+      result: 'completed',
+      diagnostics: 0,
     })
   })
 })

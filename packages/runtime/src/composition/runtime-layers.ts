@@ -1,12 +1,12 @@
 import { cascadeTargets, targetTiming } from './layer-cascade.ts'
 import { normalizeFrames } from './resolve.ts'
 import type { Definition, Transition } from '../model/definition.ts'
-import type { RenderedProperty, RenderedState } from '../model/presentation.ts'
+import type { RenderedState } from '../model/presentation.ts'
 import { renderFrame, renderTransition, type VariableValues } from '../evaluation/expression.ts'
-import type { LayerResolution } from './layers.ts'
+import type { LayerResolution, LayerProperty } from './layers.ts'
 import type { ResolvedTrack } from './resolve.ts'
 
-export type EvaluatedProperty = RenderedProperty & { readonly owner: string }
+export type EvaluatedProperty = LayerProperty
 
 /** Evaluated declarations and receiver identifiers; operation lifetime stays outside these values. */
 export interface EvaluatedLayer {
@@ -64,6 +64,7 @@ export function trackLayer(
   receiver: number,
   tracks: readonly ResolvedTrack[],
   start = false,
+  authored?: ResolvedTrack,
 ): EvaluatedLayer {
   const targets = new Map<string, EvaluatedProperty[]>()
 
@@ -80,6 +81,7 @@ export function trackLayer(
       completionValue: start ? undefined : track.destinationValue,
       timing: start ? { kind: 'tween', durationMs: 0, easing: 'linear' } : track.timing,
       keyframes: start ? undefined : track.keyframes,
+      ...(authored && authored.property !== track.property ? { authored } : {}),
     })
   }
 

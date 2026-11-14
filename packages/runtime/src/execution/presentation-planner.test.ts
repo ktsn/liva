@@ -3,6 +3,9 @@ import { resolveLayers, type LayerResolution } from '../composition/layers.ts'
 import type { Definition } from '../model/definition.ts'
 import {
   planTrack,
+  planLayerTakeovers,
+  remainingTrackFacts,
+  receiverPropertyKey,
   planMotionHandoff,
   trackTiming,
   trackObservationNeeds,
@@ -246,6 +249,70 @@ describe('pure presentation planning', () => {
 })
 
 describe('canonical declaration ownership', () => {
+  it('maps only effective authored changes through each receiver writing context', () => {
+    const previous = [
+      { name: 'inset', addresses: ['top', 'left'] },
+      { name: 'left', addresses: ['left'] },
+    ]
+    const next = [...previous, { name: 'inset-inline-start', addresses: ['left'] }]
+
+    const affected = planLayerTakeovers(
+      [
+        { target: 'box', property: 'inset' },
+        { target: 'box', property: 'inset-inline-start' },
+        { target: 'other', property: 'left' },
+        { target: 'box', property: 'absent' },
+      ],
+      [
+        { receiver: 1, target: 'box', previous, next },
+        {
+          receiver: 2,
+          target: 'box',
+          previous,
+          next: [...previous, { name: 'inset-inline-start', addresses: ['top'] }],
+        },
+      ],
+    )
+
+    expect(affected).toEqual(
+      new Set([
+        receiverPropertyKey(1, 'box', 'top'),
+        receiverPropertyKey(1, 'box', 'left'),
+        receiverPropertyKey(2, 'box', 'top'),
+      ]),
+    )
+    expect(
+      planLayerTakeovers(
+        [{ target: 'box', property: 'inset' }],
+        [{ receiver: 1, target: 'box', previous, next: previous }],
+      ),
+    ).toEqual(new Set([receiverPropertyKey(1, 'box', 'top')]))
+  })
+
+  it('includes released components and leaves unsupported playback units atomic', () => {
+    const track = receiverSnapshot().track
+    const top = { track: { ...track, property: 'top' }, addresses: ['top'] }
+    const atomic = { track: { ...track, property: 'inset' }, addresses: ['top', 'left'] }
+    const left = { track: { ...track, property: 'left' }, addresses: ['left'] }
+    const excluded = planLayerTakeovers(
+      [{ target: 'box', property: 'left' }],
+      [
+        {
+          receiver: 3,
+          target: 'box',
+          previous: [{ name: 'left', addresses: ['left'] }],
+          next: [],
+        },
+      ],
+    )
+
+    const remaining = remainingTrackFacts(3, [top, atomic, left], excluded)
+
+    expect(remaining).toEqual([top])
+    expect(remaining[0]).toBe(top)
+    expect(remainingTrackFacts(4, [top, atomic, left], excluded)).toEqual([top, atomic, left])
+  })
+
   it('uses the final declaration addressing a physical property', () => {
     const addresses = [
       { name: 'margin', addresses: ['margin-left', 'margin-right'] },
@@ -330,6 +397,22 @@ function finalPlan(snapshot: TrackSnapshot) {
 }
 
 describe('final pure track planning', () => {
+  it('retains authored reference facts while using effective canonical ownership', () => {
+    const snapshot = receiverSnapshot()
+    const authored = {
+      ...snapshot.source,
+      property: 'inset',
+      destinationValue: '10%',
+    }
+    const source = { ...snapshot.source, authored }
+
+    const plan = finalPlan({ ...snapshot, source })
+
+    expect(plan?.source).toBe(authored)
+    expect(plan?.sourceProperty).toBe('opacity')
+    expect(plan?.sourceDestination).toBe('1')
+  })
+
   it.each([
     { implicit: true, interrupted: false, start: '0.4' },
     { implicit: false, interrupted: true, start: '0.4' },

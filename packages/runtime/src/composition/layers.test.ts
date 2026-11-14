@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vite-plus/test'
 import type { Definition, Expression, Layer, Property, Target } from '../model/definition.ts'
 import {
   layerTargets,
+  prepareLayerTakeovers,
   resolveLayers,
   resolveLayerTracks,
   resolveComposition,
@@ -187,6 +188,39 @@ describe('layer state machines', () => {
 })
 
 describe('layer animation ownership', () => {
+  it('selects ordinary transition takeovers even when values are unchanged without rendering timing expressions', () => {
+    const source = definition([
+      {
+        ...visibility,
+        targets: targets({ opacity: '1' }),
+        states: [
+          { name: 'closed', targets: [] },
+          { name: 'open', targets: [] },
+        ],
+        transitions: [
+          {
+            from: 'closed',
+            to: 'open',
+            when: ref('open'),
+            transition: {
+              timingExpression: {
+                kind: 'call',
+                function: 'tween',
+                arguments: [{ name: 'duration', value: ref('duration') }],
+              },
+              targets: [],
+            },
+          },
+        ],
+      },
+    ])
+    const before = resolveLayers(source, { open: false })
+    const after = resolveLayers(source, { open: true, duration: -1 }, before.states)
+
+    expect(prepareLayerTakeovers(before, after)).toEqual([{ target: 'body', property: 'opacity' }])
+    expect(prepareLayerTakeovers(after, after)).toEqual([])
+  })
+
   const tween: Expression = {
     kind: 'call',
     function: 'tween',

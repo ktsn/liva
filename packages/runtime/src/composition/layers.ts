@@ -19,8 +19,10 @@ import {
 
 import type { RenderedProperty, RenderedState, RenderedFrame } from '../model/presentation.ts'
 
-interface LayerProperty extends RenderedProperty {
+export interface LayerProperty extends RenderedProperty {
   readonly owner: string
+  /** Authored observations/reference source when this declaration was expanded into a canonical CSS field. */
+  readonly authored?: ResolvedTrack
 }
 
 export interface Composition {
@@ -234,6 +236,14 @@ export function layerPropertyChanged(
     .find((item) => item.name === target)
     ?.properties.find((item) => item.name === property.name)
 
+  return layerPropertyDiffers(before, property)
+}
+
+/** Compares plain evaluated declarations, also used to reuse unchanged normalized source data. */
+export function layerPropertyDiffers(
+  before: LayerProperty | undefined,
+  property: LayerProperty,
+): boolean {
   return (
     before?.value !== property.value ||
     before?.completionValue !== property.completionValue ||
@@ -243,8 +253,98 @@ export function layerPropertyChanged(
   )
 }
 
+/** Stable identity for one authored target/property declaration. */
+export const layerPropertyKey = (target: string, property: string) => `${target}\0${property}`
+
+/** Finds changed authored declarations using the same value/owner/timing/frame comparison as track selection. */
+export function changedLayerProperties(
+  previous: LayerResolution,
+  next: LayerResolution,
+): ReadonlySet<string> {
+  return new Set(
+    next.presentation.targets.flatMap((target) =>
+      target.properties
+        .filter((property) => layerPropertyChanged(previous, target.name, property))
+        .map((property) => layerPropertyKey(target.name, property.name)),
+    ),
+  )
+}
+
+/** Finds declarations removed by the supplied resolved selection, without reevaluating conditions or guards. */
+export function removedLayerProperties(
+  previous: LayerResolution,
+  next: LayerResolution,
+): ReadonlySet<string> {
+  return new Set(
+    previous.presentation.targets.flatMap((target) =>
+      target.properties
+        .filter(
+          (property) =>
+            !next.presentation.targets
+              .find((item) => item.name === target.name)
+              ?.properties.some((item) => item.name === property.name),
+        )
+        .map((property) => layerPropertyKey(target.name, property.name)),
+    ),
+  )
+}
+
+/** Detects explicit transition instructions without evaluating their timing/frame expressions. */
+export function layerTransitionApplies(
+  transition: import('../model/definition.ts').Transition | undefined,
+  target: string,
+  property: string,
+): boolean {
+  const sources = transitionPropertySources(transition, target, property)
+
+  return sources.property !== undefined || sources.timing !== undefined
+}
+
+/** Identifies new ordinary changes before receiver observations; state/guard selection is already supplied. */
+export function prepareLayerTakeovers(
+  previous: LayerResolution,
+  next: LayerResolution,
+): readonly { target: string; property: string }[] {
+  const changed = new Set([
+    ...changedLayerProperties(previous, next),
+    ...removedLayerProperties(previous, next),
+  ])
+
+  if (previous.transitions !== next.transitions) {
+    for (const target of next.presentation.targets) {
+      for (const property of target.properties) {
+        if (
+          layerTransitionApplies(
+            next.transitions.get(property.owner)?.transition,
+            target.name,
+            property.name,
+          )
+        )
+          changed.add(layerPropertyKey(target.name, property.name))
+      }
+    }
+  }
+
+  const properties = new Map<string, { target: string; property: string }>()
+
+  for (const target of [...previous.presentation.targets, ...next.presentation.targets]) {
+    for (const property of target.properties) {
+      const key = layerPropertyKey(target.name, property.name)
+
+      if (changed.has(key)) properties.set(key, { target: target.name, property: property.name })
+    }
+  }
+
+  return [...properties.values()]
+}
+
+/** A selected playback unit optionally retaining its authored observation/reference source. */
+export interface LayerTrack extends ResolvedTrack {
+  readonly authored?: ResolvedTrack
+}
+
 /** A selected track whose omitted starting endpoint still requires a displayed observation. */
-export interface LayerTrackTemplate extends Omit<ResolvedTrack, 'keyframes'> {
+export interface LayerTrackTemplate extends Omit<LayerTrack, 'keyframes'> {
   readonly keyframes?: readonly RenderedFrame[]
   readonly animationDestinationValue?: string
 }
@@ -269,15 +369,9 @@ export function* layerTrackTemplates(
         target.name,
         property.name,
       )
-      const sharedTiming = targetTiming(transitionTarget, property.name)
-
       if (
         !layerPropertyChanged(previous, target.name, property) &&
-        !instruction &&
-        !transition?.timingExpression &&
-        !transition?.timing &&
-        !sharedTiming?.timingExpression &&
-        !sharedTiming?.timing &&
+        !layerTransitionApplies(transition, target.name, property.name) &&
         !retarget(target.name, property.name)
       )
         continue
@@ -331,13 +425,14 @@ export function* layerTrackTemplates(
             : undefined,
         ownerState: next.states.get(owner),
         keyframes: explicit,
+        ...(property.authored ? { authored: property.authored } : {}),
       }
     }
   }
 }
 
 /** Completes one selected track using a supplied displayed CSS value for an omitted 0% endpoint. */
-export function completeLayerTrack(template: LayerTrackTemplate, displayed: string): ResolvedTrack {
+export function completeLayerTrack(template: LayerTrackTemplate, displayed: string): LayerTrack {
   return {
     ...template,
     keyframes: normalizeFrames(

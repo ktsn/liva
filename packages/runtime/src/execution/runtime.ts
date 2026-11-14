@@ -237,7 +237,7 @@ export class Runtime {
       values = this.graph.evaluate(
         values,
         (snapshot) => {
-          resolution = resolveLayers(
+          const candidate = resolveLayers(
             this.definition,
             snapshot,
             this.resolution.states,
@@ -245,9 +245,11 @@ export class Runtime {
             notification?.event,
           )
 
+          resolution = candidate
+
           for (const event of this.definition.events ?? []) evaluate(event.when, snapshot)
 
-          this.execution.validatePresentation(snapshot)
+          this.execution.validatePresentation(snapshot, candidate)
         },
         notification,
       )
