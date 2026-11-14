@@ -178,6 +178,11 @@ Definition {
   enter?: Transition
   leave?: Transition
 }
+MotionParameter {
+  name: string
+  type: "number" | "boolean" | "string"
+    | { kind: "stringUnion", values: string[] }
+}
 Layer {
   name: string
   when?: Expression
@@ -234,9 +239,14 @@ Timing =
   | { kind: "spring-physics", stiffness: number, damping: number, mass: number }
 ```
 
-`MotionParameter` contains a name and a lowercase `number`, `boolean`, or `string`
-type. It contains no runtime value. `LetBinding` represents a `let` binding and contains a name and an `Expression`
-initializer. Call expressions contain a function name and named argument expressions. Target variables use ordinary
+`MotionParameter` contains a name and either a lowercase primitive type name or a
+`stringUnion` descriptor. Its candidate array contains one or more exact decoded
+strings; a singleton annotation has one candidate, which may be the empty string.
+The compiler emits sorted unique candidates, while runtime validation also accepts
+duplicate or reordered members with the same membership semantics. Host parameter
+values remain ordinary scalars validated against this metadata before an instance
+or updated snapshot is accepted. `LetBinding` represents a `let` binding and contains
+a name and an `Expression` initializer. Call expressions contain a function name and named argument expressions. Target variables use ordinary
 `{ kind: "reference", path: ["body"] }` expressions. `Expression` is a
 tagged scalar/reference/call/unary/binary tree, validated in Rust and evaluated without
 JavaScript code generation. A property's `value.kind` selects exactly one declaration

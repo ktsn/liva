@@ -14,6 +14,7 @@ import {
 } from '../packages/runtime/src/evaluation/expression.ts'
 
 for (const name of [
+  'constrained',
   'toggle',
   'self-target',
   'reactive-toggle',
@@ -35,6 +36,50 @@ for (const name of [
   assert.equal('mappings' in bundle, false)
 }
 assert.throws(() => decodeBundle('{"schemaVersion":1,"definitions":[]}'), /Unsupported/)
+
+const constrained = decodeBundle(
+  compile(readFileSync(new URL('../fixtures/constrained.liv', import.meta.url), 'utf8'), false),
+).definitions[0]
+
+assert(constrained.parameters && constrained.letBindings)
+
+const constrainedParameters = constrained.parameters
+const constrainedInputs = parameterValues(constrainedParameters, targetValues(constrained), {
+  position: 'start',
+  axis: 'x',
+})
+const constrainedGraph = new LetBindingGraph(constrained.letBindings, constrainedInputs)
+const constrainedValues = constrainedGraph.evaluate(constrainedInputs)
+
+assert.equal(constrainedValues.selected, 'start')
+assert.equal(constrainedValues.fixedAxis, 'x')
+
+for (const inputs of [
+  { position: 'middle', axis: 'x' },
+  { position: false, axis: 'x' },
+  { position: 'end', axis: 'y' },
+  { position: 'end' },
+  { position: 'end', axis: 'x', other: true },
+]) {
+  assert.throws(
+    () => parameterValues(constrainedParameters, constrainedValues, inputs),
+    /parameter/,
+  )
+  assert.equal(constrainedValues.selected, 'start')
+}
+
+const malformedChoices = structuredClone(constrained)
+
+assert(malformedChoices.parameters)
+
+Object.assign(malformedChoices.parameters[0], { type: { kind: 'stringUnion', values: [] } })
+
+assert.throws(
+  () => decodeBundle(JSON.stringify({ schemaVersion: 2, definitions: [malformedChoices] })),
+  /schema/,
+)
+
+constrainedGraph.dispose()
 
 const unicode = '// 😀\r\nmotion a { @tween(duration: 1000) layer on {} }'
 const development: Compilation = JSON.parse(compile(unicode, true))

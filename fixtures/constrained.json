@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 2,
+  "definitions": [
+    {
+      "name": "constrained",
+      "letBindings": [
+        {
+          "name": "selected",
+          "initializer": {
+            "kind": "reference",
+            "path": ["position"]
+          }
+        },
+        {
+          "name": "fixedAxis",
+          "initializer": {
+            "kind": "reference",
+            "path": ["axis"]
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "position",
+          "type": {
+            "kind": "stringUnion",
+            "values": ["end", "start"]
+          }
+        },
+        {
+          "name": "axis",
+          "type": {
+            "kind": "stringUnion",
+            "values": ["x"]
+          }
+        }
+      ],
+      "layers": [
+        {
+          "name": "base",
+          "targets": [
+            {
+              "name": "track",
+              "properties": [
+                {
+                  "name": "opacity",
+                  "value": {
+                    "kind": "literal",
+                    "value": "1"
+                  }
+                }
+              ]
+            },
+            {
+              "name": "thumb",
+              "properties": [
+                {
+                  "name": "opacity",
+                  "value": {
+                    "kind": "literal",
+                    "value": ".25"
+                  }
+                },
+                {
+                  "name": "--position",
+                  "value": {
+                    "kind": "template",
+                    "parts": [
+                      {
+                        "kind": "reference",
+                        "path": ["selected"]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "name": "--axis",
+                  "value": {
+                    "kind": "template",
+                    "parts": [
+                      {
+                        "kind": "reference",
+                        "path": ["fixedAxis"]
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "selected",
+          "when": {
+            "kind": "binary",
+            "operator": "==",
+            "left": {
+              "kind": "reference",
+              "path": ["selected"]
+            },
+            "right": {
+              "kind": "string",
+              "value": "start"
+            }
+          },
+          "targets": [
+            {
+              "name": "thumb",
+              "properties": [
+                {
+                  "name": "opacity",
+                  "value": {
+                    "kind": "literal",
+                    "value": "1"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "diagnostics": []
+}

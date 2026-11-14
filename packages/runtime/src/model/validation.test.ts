@@ -89,6 +89,35 @@ describe('serialized definition validation', () => {
     },
   )
 
+  it.each([['x'], ['', '日本語😀', 'a"b', 'a\\b', ',)|{}'], ['y', 'x', 'y']])(
+    'accepts exact nonempty string-set descriptors: %j',
+    (...values) => {
+      const parameter = { name: 'choice', type: { kind: 'stringUnion', values } }
+
+      const decoded = decodeBundle(
+        JSON.stringify({ schemaVersion: 2, definitions: [{ ...valid, parameters: [parameter] }] }),
+      ).definitions[0]
+
+      expect(decoded.parameters).toEqual([parameter])
+      expect(Object.isFrozen(decoded.parameters?.[0].type)).toBe(true)
+    },
+  )
+
+  it.each([
+    null,
+    {},
+    { kind: 'unknown', values: ['x'] },
+    { kind: 'stringUnion' },
+    { kind: 'stringUnion', values: [] },
+    { kind: 'stringUnion', values: 'x' },
+    { kind: 'stringUnion', values: [1] },
+    { kind: 'stringUnion', values: ['x'], extra: true },
+  ])('rejects malformed string-set descriptors: %j', (type) => {
+    expect.assertions(2)
+
+    expectInvalidDefinition({ ...valid, parameters: [{ name: 'choice', type }] })
+  })
+
   it('rejects the previous schema even if its definitions are otherwise valid', () => {
     expect(() => decodeBundle(JSON.stringify({ schemaVersion: 1, definitions: [valid] }))).toThrow(
       'schema',

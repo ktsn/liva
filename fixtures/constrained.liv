@@ -1,0 +1,13 @@
+motion constrained(position: "end" | 'start' | "end", axis: 'x') {
+  let selected = position
+  let fixedAxis = axis
+
+  layer base {
+    track { opacity: 1 }
+    thumb { opacity: .25; --position: ${selected}; --axis: ${fixedAxis} }
+  }
+
+  layer selected when selected == "start" {
+    thumb { opacity: 1 }
+  }
+}

@@ -260,6 +260,32 @@ function dependencies(expression: Expression): string[] {
   }
 }
 
+function validateParameterValue(parameter: MotionParameter, value: unknown): void {
+  const type = parameter.type
+
+  if (typeof type === 'object') {
+    if (typeof value !== 'string' || !type.values.includes(value)) {
+      const expected = type.values.map((member) => JSON.stringify(member)).join(' | ')
+
+      throw new Error(`Motion parameter ${parameter.name} requires ${expected}`)
+    }
+
+    return
+  }
+
+  if (type === 'number') {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw new Error(`Motion parameter ${parameter.name} requires ${type}`)
+    }
+
+    return
+  }
+
+  if (typeof value !== type) {
+    throw new Error(`Motion parameter ${parameter.name} requires ${type}`)
+  }
+}
+
 export function parameterValues(
   parameters: readonly MotionParameter[],
   values: VariableValues,
@@ -284,9 +310,7 @@ export function parameterValues(
 
     const value = inputs[parameter.name]
 
-    if (typeof value !== parameter.type || (typeof value === 'number' && !Number.isFinite(value))) {
-      throw new Error(`Motion parameter ${parameter.name} requires ${parameter.type}`)
-    }
+    validateParameterValue(parameter, value)
 
     Object.defineProperty(next, parameter.name, {
       value,

@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vite-plus/test'
 import cardFixture from '../../../../fixtures/card.json'
 import toggleFixture from '../../../../fixtures/reactive-toggle.json'
-import { decodeBundle, type Definition, type Expression } from '../model/definition.ts'
+import {
+  decodeBundle,
+  type Definition,
+  type Expression,
+  type MotionParameter,
+} from '../model/definition.ts'
 import { evaluate, renderProperty, renderValue } from '../evaluation/expression.ts'
 import { resolveLayers } from '../composition/layers.ts'
 import { parameterValues } from '../evaluation/let-bindings.ts'
@@ -150,6 +155,59 @@ describe('typed motion parameters', () => {
       expect(() =>
         decodeBundle(JSON.stringify({ schemaVersion: 2, definitions: [{ ...toggle, ...fields }] })),
       ).toThrow('schema')
+    }
+  })
+
+  it.each(['', '日本語😀', 'a"b', 'a\\b', ' x '])(
+    'preserves exact constrained parameter strings: %j',
+    (value) => {
+      const constrainedParameters: MotionParameter[] = [
+        { name: 'choice', type: { kind: 'stringUnion', values: ['other', value, value] } },
+      ]
+      const previous = { retained: 7 }
+
+      const values = parameterValues(constrainedParameters, previous, { choice: value })
+
+      expect(values).toEqual({ retained: 7, choice: value })
+      expect(previous).toEqual({ retained: 7 })
+      expect(typeof values.choice).toBe('string')
+    },
+  )
+
+  it.each(['middle', 'START', ' start ', 1, false, null, undefined])(
+    'rejects invalid constrained parameter values without coercion: %j',
+    (value) => {
+      const constrainedParameters: MotionParameter[] = [
+        { name: 'choice', type: { kind: 'stringUnion', values: ['start', 'end'] } },
+      ]
+
+      expect(() => parameterValues(constrainedParameters, {}, { choice: value })).toThrow(
+        'Motion parameter choice requires "start" | "end"',
+      )
+    },
+  )
+
+  it('requires full constrained snapshots and leaves earlier values unchanged on failure', () => {
+    const constrainedParameters: MotionParameter[] = [
+      { name: 'position', type: { kind: 'stringUnion', values: ['start', 'end'] } },
+      { name: 'axis', type: { kind: 'stringUnion', values: ['x'] } },
+    ]
+
+    const previous = parameterValues(constrainedParameters, {}, { position: 'end', axis: 'x' })
+
+    for (const { inputs, message } of [
+      { inputs: { position: 'start' }, message: 'Missing motion parameter: axis' },
+      {
+        inputs: { position: 'start', axis: 'x', other: true },
+        message: 'Unknown motion parameter: other',
+      },
+      {
+        inputs: { position: 'start', axis: 'y' },
+        message: 'Motion parameter axis requires "x"',
+      },
+    ]) {
+      expect(() => parameterValues(constrainedParameters, previous, inputs)).toThrow(message)
+      expect(previous).toEqual({ position: 'end', axis: 'x' })
     }
   })
 })

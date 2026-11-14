@@ -9,9 +9,10 @@ import {
   withDirectives,
   type App,
 } from 'vue'
+import constrainedFixture from '../../../fixtures/constrained.json'
 import fixture from '../../../fixtures/toggle.json'
 import reactiveFixture from '../../../fixtures/reactive-toggle.json'
-import { decodeBundle, type RuntimeDiagnostic } from '@liva/runtime'
+import { decodeBundle, type Definition, type RuntimeDiagnostic } from '@liva/runtime'
 import { createLivaPlugin, type InstanceBinding } from './runtime.ts'
 
 const definition = decodeBundle(JSON.stringify(fixture)).definitions[0]
@@ -24,21 +25,27 @@ afterEach(() => {
   for (const host of hosts.splice(0)) host.remove()
 })
 
-async function mount(reactive = false, initial?: string) {
+async function mount(
+  reactive = false,
+  initial?: string | Record<string, unknown>,
+  override?: Definition,
+) {
   const value = ref<string | Record<string, unknown> | undefined>(
     reactive ? { checked: false } : (initial ?? { mode: 'off' }),
   )
-  const name = ref('toggle')
+  const name = ref(override?.name ?? 'toggle')
   const shown = ref(true)
   const target = ref('thumb')
   const records: { event: string; binding: InstanceBinding }[] = []
   const errors: RuntimeDiagnostic[] = []
-  const def = reactive
-    ? {
-        ...decodeBundle(JSON.stringify(reactiveFixture)).definitions[0],
-        events: [{ name: 'ready', when: { kind: 'reference', path: ['checked'] } as const }],
-      }
-    : definition
+  const def =
+    override ??
+    (reactive
+      ? {
+          ...decodeBundle(JSON.stringify(reactiveFixture)).definitions[0],
+          events: [{ name: 'ready', when: { kind: 'reference', path: ['checked'] } as const }],
+        }
+      : definition)
   const component = defineComponent({
     livaDefinitions: [def],
     setup() {
@@ -108,6 +115,39 @@ describe('Vue motion directives', () => {
     expect(records.at(-1)?.event).toBe('unmount')
     expect(runtime.animations).toEqual([])
     expect(host.querySelector('[data-target]')).toBeNull()
+  })
+
+  it('drives compiler-declared string choices through Vue and preserves the last valid state', async () => {
+    const source = decodeBundle(JSON.stringify(constrainedFixture)).definitions[0]
+
+    const { value, errors, host } = await mount(false, { position: 'end', axis: 'x' }, source)
+    const thumb = host.querySelector<HTMLElement>('[data-target="thumb"]')
+
+    expect(thumb?.style.opacity).toBe('0.25')
+    expect(thumb?.style.getPropertyValue('--position')).toBe('end')
+
+    value.value = { position: 'start', axis: 'x' }
+
+    await nextTick()
+
+    expect(thumb?.style.opacity).toBe('1')
+    expect(thumb?.style.getPropertyValue('--position')).toBe('start')
+
+    value.value = { position: 'end', axis: 'y' }
+
+    await nextTick()
+
+    expect(errors.at(-1)?.code).toBe('runtime.parameter')
+    expect(thumb?.style.opacity).toBe('1')
+    expect(thumb?.style.getPropertyValue('--position')).toBe('start')
+    expect(thumb?.style.getPropertyValue('--axis')).toBe('x')
+
+    value.value = { position: 'end', axis: 'x' }
+
+    await nextTick()
+
+    expect(thumb?.style.opacity).toBe('0.25')
+    expect(thumb?.style.getPropertyValue('--position')).toBe('end')
   })
 
   it('updates reactive parameters and reports invalid snapshots', async () => {

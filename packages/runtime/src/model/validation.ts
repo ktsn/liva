@@ -242,6 +242,19 @@ function isLayer(value: unknown): value is Layer {
   )
 }
 
+function isParameterType(value: unknown): value is MotionParameter['type'] {
+  return (
+    value === 'number' ||
+    value === 'boolean' ||
+    value === 'string' ||
+    (isRecord(value) &&
+      hasOnlyFields(value, ['kind', 'values']) &&
+      value.kind === 'stringUnion' &&
+      isArrayOf(value.values, (member): member is string => typeof member === 'string') &&
+      value.values.length > 0)
+  )
+}
+
 export function isDefinition(value: unknown): value is Definition {
   return (
     isRecord(value) &&
@@ -253,9 +266,7 @@ export function isDefinition(value: unknown): value is Definition {
         (parameter): parameter is MotionParameter =>
           isRecord(parameter) &&
           typeof parameter.name === 'string' &&
-          (parameter.type === 'number' ||
-            parameter.type === 'boolean' ||
-            parameter.type === 'string'),
+          isParameterType(parameter.type),
       )) &&
     (value.letBindings === undefined || isArrayOf(value.letBindings, isLetBinding)) &&
     (value.enter === undefined || isTransition(value.enter)) &&

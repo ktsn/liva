@@ -61,30 +61,55 @@ impl Compiler {
                 );
             }
 
-            let reference = parameter.type_reference();
-            let value_type = match reference.as_ref().map(AstNode::semantic_text).as_deref() {
-                Some("number") => PrimitiveType::Number,
-                Some("boolean") => PrimitiveType::Boolean,
-                Some("string") => PrimitiveType::String,
-                _ => {
-                    let range = if let Some(reference) = &reference {
-                        let source = type_annotation_source(reference);
-                        let start = source.len() - source.trim_start().len();
-                        let end = source.trim_end().len();
-                        Range {
-                            start: reference.range().start + start,
-                            end: reference.range().start + end.max(start),
-                        }
-                    } else {
-                        let end = name_range(&parameter).end;
-                        Range { start: end, end }
-                    };
+            let reference = match parameter.type_reference() {
+                Some(reference) if !reference.semantic_text().is_empty() => reference,
+                reference => {
+                    let end = reference.map_or_else(
+                        || name_range(&parameter).end,
+                        |reference| reference.range().end,
+                    );
                     self.error_range(
                         "semantic.type",
-                        "Expected primitive type number, boolean, or string",
-                        range,
+                        "Expected primitive type number, boolean, or string, or quoted string choices",
+                        Range { start: end, end },
                     );
+
                     continue;
+                }
+            };
+
+            let annotation = match reference.annotation() {
+                Ok(annotation) => annotation,
+                // The syntax parser has already reported the ranged annotation error.
+                Err(_) => continue,
+            };
+
+            let value_type = match annotation {
+                syn::TypeAnnotation::Named(name) => {
+                    let primitive = match name.as_str() {
+                        "number" => PrimitiveType::Number,
+                        "boolean" => PrimitiveType::Boolean,
+                        "string" => PrimitiveType::String,
+                        _ => {
+                            self.error_range(
+                                "semantic.type",
+                                "Expected primitive type number, boolean, or string, or quoted string choices",
+                                significant_range(&reference),
+                            );
+                            continue;
+                        }
+                    };
+
+                    ParameterType::Primitive(primitive)
+                }
+                syn::TypeAnnotation::StringUnion(values) => {
+                    let values = values
+                        .into_iter()
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .collect();
+
+                    ParameterType::Constrained(StringConstraint::StringUnion { values })
                 }
             };
 
@@ -773,11 +798,7 @@ impl Compiler {
         for parameter in node.parameters() {
             let name = parameter.header().unwrap_or_default();
             let kind = match parameters.iter().find(|item| item.name == name) {
-                Some(metadata) => SymbolKind::Value(match metadata.value_type {
-                    PrimitiveType::Number => Type::Number,
-                    PrimitiveType::Boolean => Type::Boolean,
-                    PrimitiveType::String => Type::String,
-                }),
+                Some(metadata) => SymbolKind::Value(metadata.value_type.expression_type()),
                 // Invalid declarations still hide parent symbols while editing.
                 None => SymbolKind::Pending,
             };
@@ -1378,30 +1399,6 @@ impl Compiler {
             }
         }
     }
-}
-
-// Preserve byte positions when locating a type annotation inside surrounding comments.
-fn type_annotation_source(node: &impl AstNode) -> String {
-    node.syntax()
-        .descendants_with_tokens()
-        .filter_map(|element| element.into_token())
-        .map(|token| {
-            let text = token.text();
-            if token.kind() == Kind::Trivia && (text.starts_with("/*") || text.starts_with("//")) {
-                text.bytes()
-                    .map(|byte| {
-                        if matches!(byte, b'\n' | b'\r') {
-                            byte as char
-                        } else {
-                            ' '
-                        }
-                    })
-                    .collect::<String>()
-            } else {
-                text.to_owned()
-            }
-        })
-        .collect()
 }
 
 fn infer_let_type(
