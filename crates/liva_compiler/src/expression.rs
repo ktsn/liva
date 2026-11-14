@@ -4,7 +4,9 @@ use liva_syntax::{
     ast::expression::{Expr, ExprView, Name as AstName},
 };
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
@@ -13,11 +15,16 @@ pub enum TemplatePart {
     Expression(Expression),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Compile-time value types. String members contain decoded values, owned for
+/// source inference or borrowed from immutable built-in metadata. Use assignability
+/// for compatibility; representation equality does not normalize string sets.
+#[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Number,
     Boolean,
     String,
+    StringLiteral(Cow<'static, str>),
+    StringUnion(Cow<'static, [Cow<'static, str>]>),
     Timing,
     Easing,
     Target,
@@ -84,9 +91,92 @@ pub(crate) struct TypeError {
 pub use crate::scope::{Scope, SymbolKind};
 pub use liva_syntax::is_identifier as identifier;
 
+/// Primitive categories govern scalar operations without widening inferred types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrimitiveCategory {
+    Number,
+    Boolean,
+    String,
+}
+
 impl Type {
-    pub fn is_scalar(self) -> bool {
-        matches!(self, Self::Number | Self::Boolean | Self::String)
+    /// The primitive category of a scalar value; records and opaque built-ins have none.
+    pub fn primitive_category(&self) -> Option<PrimitiveCategory> {
+        match self {
+            Self::Number => Some(PrimitiveCategory::Number),
+            Self::Boolean => Some(PrimitiveCategory::Boolean),
+            Self::String | Self::StringLiteral(_) | Self::StringUnion(_) => {
+                Some(PrimitiveCategory::String)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn is_scalar(&self) -> bool {
+        self.primitive_category().is_some()
+    }
+
+    /// Whether every value represented by this source type is permitted by `destination`.
+    /// String sets compare decoded values, ignoring duplicates and order. Other types
+    /// retain exact compatibility, including the existing record/controller contracts.
+    pub fn is_assignable_to(&self, destination: &Self) -> bool {
+        match (self, destination) {
+            (Self::StringLiteral(_) | Self::StringUnion(_), Self::String) => true,
+            (Self::StringLiteral(source), Self::StringLiteral(target)) => source == target,
+            (Self::StringLiteral(source), Self::StringUnion(target)) => target.contains(source),
+            (Self::StringUnion(source), Self::StringLiteral(target)) => {
+                source.iter().all(|member| member == target)
+            }
+            (Self::StringUnion(source), Self::StringUnion(target)) => {
+                source.iter().all(|member| target.contains(member))
+            }
+            _ => self == destination,
+        }
+    }
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Number => formatter.write_str("number"),
+            Self::Boolean => formatter.write_str("boolean"),
+            Self::String => formatter.write_str("string"),
+            Self::StringLiteral(value) => {
+                // JSON quoting escapes control characters and quotes while preserving Unicode.
+                formatter.write_str(&serde_json::to_string(value).map_err(|_| fmt::Error)?)
+            }
+            Self::StringUnion(values) => {
+                let members: BTreeSet<_> = values.iter().collect();
+
+                for (index, member) in members.into_iter().enumerate() {
+                    if index > 0 {
+                        formatter.write_str(" | ")?;
+                    }
+
+                    formatter.write_str(&serde_json::to_string(member).map_err(|_| fmt::Error)?)?;
+                }
+
+                Ok(())
+            }
+            Self::Timing => formatter.write_str("timing"),
+            Self::Easing => formatter.write_str("easing"),
+            Self::Target => formatter.write_str("target"),
+            Self::Event => formatter.write_str("event"),
+            Self::Controller(_) => formatter.write_str("controller"),
+            Self::Record(fields) => {
+                formatter.write_str("{ ")?;
+
+                for (index, field) in fields.iter().enumerate() {
+                    if index > 0 {
+                        formatter.write_str(", ")?;
+                    }
+
+                    write!(formatter, "{}: {}", field.name, field.value_type)?;
+                }
+
+                formatter.write_str(" }")
+            }
+        }
     }
 }
 
@@ -144,7 +234,11 @@ impl ExprExt for Expr {
                 }
             }
             ExprView::Boolean => Ok(Type::Boolean),
-            ExprView::String => Ok(Type::String),
+            ExprView::String => Ok(Type::StringLiteral(
+                self.string_value()
+                    .map_err(|message| self.error(message))?
+                    .into(),
+            )),
             ExprView::Parenthesized => operand(self, 0)?.check(scope),
             ExprView::Reference => {
                 let path: Vec<_> = self.names().collect();
@@ -154,7 +248,7 @@ impl ExprExt for Expr {
                 let symbol = scope.get(&first.text()).ok_or_else(|| {
                     name_error(first, format!("Unknown variable: {}", first.text()))
                 })?;
-                let mut value_type = match symbol.kind {
+                let mut value_type = match &symbol.kind {
                     SymbolKind::Value(value_type) => value_type,
                     SymbolKind::Function(_) => {
                         return Err(name_error(first, "Functions cannot be used as values"));
@@ -180,13 +274,13 @@ impl ExprExt for Expr {
                     let (Type::Record(fields) | Type::Controller(fields)) = value_type else {
                         return Err(error());
                     };
-                    value_type = fields
+                    value_type = &fields
                         .iter()
                         .find(|field| field.name == member.text())
                         .ok_or_else(error)?
                         .value_type;
                 }
-                Ok(value_type)
+                Ok(value_type.clone())
             }
             ExprView::Call => {
                 let function = self
@@ -195,7 +289,7 @@ impl ExprExt for Expr {
                 let symbol = scope.get(&function.text()).ok_or_else(|| {
                     name_error(&function, format!("Unknown function: {}", function.text()))
                 })?;
-                let SymbolKind::Function(metadata) = symbol.kind else {
+                let SymbolKind::Function(metadata) = &symbol.kind else {
                     return Err(name_error(
                         &function,
                         format!("Value is not callable: {}", function.text()),
@@ -244,10 +338,10 @@ impl ExprExt for Expr {
 
                     if !parameters
                         .iter()
-                        .any(|parameter| parameter.value_type == actual)
+                        .any(|parameter| actual.is_assignable_to(&parameter.value_type))
                     {
                         return Err(value.error(format!(
-                            "Invalid argument type for {}.{}: expected {:?}, got {:?}",
+                            "Invalid argument type for {}.{}: expected {}, got {}",
                             function.text(),
                             name.text(),
                             parameters[0].value_type,
@@ -257,7 +351,8 @@ impl ExprExt for Expr {
 
                     candidates.retain(|signature| {
                         signature.parameters.iter().any(|parameter| {
-                            parameter.name == name.text() && parameter.value_type == actual
+                            parameter.name == name.text()
+                                && actual.is_assignable_to(&parameter.value_type)
                         })
                     });
                 }
@@ -268,7 +363,7 @@ impl ExprExt for Expr {
                         .iter()
                         .all(|parameter| parameter.optional || seen.contains(parameter.name))
                 }) {
-                    return Ok(signature.return_type);
+                    return Ok(signature.return_type.clone());
                 }
 
                 if let Some(signature) = candidates.first() {
@@ -311,14 +406,14 @@ impl ExprExt for Expr {
                 let a = left.check(scope)?;
                 let b = right.check(scope)?;
                 let expected = match operator.as_str() {
-                    "&&" | "||" => Type::Boolean,
-                    "+" | "-" | "*" | "/" | "%" => Type::Number,
-                    _ => a,
+                    "&&" | "||" => Some(PrimitiveCategory::Boolean),
+                    "+" | "-" | "*" | "/" | "%" => Some(PrimitiveCategory::Number),
+                    _ => a.primitive_category(),
                 };
-                if !a.is_scalar() || a != expected {
+                if !a.is_scalar() || a.primitive_category() != expected {
                     return Err(left.error("Incompatible expression operands"));
                 }
-                if a != b {
+                if a.primitive_category() != b.primitive_category() {
                     return Err(right.error("Incompatible expression operands"));
                 }
                 Ok(
@@ -410,4 +505,143 @@ pub(crate) fn parse_with_diagnostics(text: &str) -> Result<Expr, TypeError> {
         message: "Expected expression".into(),
         range: parsed.root.range(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::builtins::{Function, Parameter, Signature};
+
+    static CHOOSE: Function = Function {
+        name: "choose",
+        signatures: &[
+            Signature {
+                parameters: &[
+                    Parameter {
+                        name: "option",
+                        optional: false,
+                        value_type: Type::StringUnion(Cow::Borrowed(&[
+                            Cow::Borrowed("x"),
+                            Cow::Borrowed("y"),
+                        ])),
+                    },
+                    Parameter {
+                        name: "amount",
+                        optional: false,
+                        value_type: Type::Number,
+                    },
+                ],
+                return_type: Type::Number,
+            },
+            Signature {
+                parameters: &[
+                    Parameter {
+                        name: "option",
+                        optional: false,
+                        value_type: Type::StringLiteral(Cow::Borrowed("z")),
+                    },
+                    Parameter {
+                        name: "enabled",
+                        optional: false,
+                        value_type: Type::Boolean,
+                    },
+                ],
+                return_type: Type::Boolean,
+            },
+        ],
+    };
+
+    fn scope_with_options() -> Scope {
+        let mut scope = Scope::motion();
+
+        for (name, kind) in [
+            ("choose", SymbolKind::Function(&CHOOSE)),
+            ("broad", SymbolKind::Value(Type::String)),
+            (
+                "subset",
+                SymbolKind::Value(Type::StringUnion(Cow::Borrowed(&[
+                    Cow::Borrowed("y"),
+                    Cow::Borrowed("x"),
+                    Cow::Borrowed("y"),
+                ]))),
+            ),
+        ] {
+            scope
+                .declare(name.into(), kind, Range { start: 0, end: 0 })
+                .unwrap();
+        }
+
+        scope
+    }
+
+    #[test]
+    fn argument_validation_and_overload_selection_share_assignability() {
+        let scope = scope_with_options();
+
+        for (expression, expected) in [
+            ("choose(option: ('x'), amount: 1)", Type::Number),
+            ("choose(option: subset, amount: 1)", Type::Number),
+            ("choose(option: 'z', enabled: true)", Type::Boolean),
+        ] {
+            let actual = parse_with_diagnostics(expression)
+                .unwrap()
+                .check(&scope)
+                .unwrap();
+
+            assert_eq!(actual, expected, "{expression}");
+        }
+    }
+
+    #[test]
+    fn invalid_argument_diagnostics_use_type_notation_and_expression_range() {
+        let scope = scope_with_options();
+        let expression = "choose(option: broad, amount: 1)";
+
+        let error = parse_with_diagnostics(expression)
+            .unwrap()
+            .check(&scope)
+            .unwrap_err();
+
+        assert_eq!(&expression[error.range.start..error.range.end], "broad");
+        assert_eq!(
+            error.message,
+            "Invalid argument type for choose.option: expected \"x\" | \"y\", got string"
+        );
+    }
+
+    #[test]
+    fn compatible_arguments_must_belong_to_one_overload() {
+        let scope = scope_with_options();
+        let expression = "choose(option: 'z', amount: 1)";
+
+        let error = parse_with_diagnostics(expression)
+            .unwrap()
+            .check(&scope)
+            .unwrap_err();
+
+        assert!(
+            error
+                .message
+                .starts_with("Incompatible argument groups for choose:")
+        );
+    }
+
+    #[test]
+    fn finite_unions_compare_as_strings() {
+        let scope = scope_with_options();
+
+        for expression in [
+            "subset == 'x'",
+            "subset != broad",
+            "subset <= broad",
+            "'z' > subset",
+        ] {
+            let actual = parse_with_diagnostics(expression)
+                .unwrap()
+                .check(&scope)
+                .unwrap();
+
+            assert_eq!(actual, Type::Boolean, "{expression}");
+        }
+    }
 }

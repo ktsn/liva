@@ -155,7 +155,7 @@ impl Compiler {
 
         let result = expression::parse_with_diagnostics(source).and_then(|parsed| {
             if parsed.check(scope)? != expected {
-                return Err(parsed.error(format!("Decorator requires {:?}", expected)));
+                return Err(parsed.error(format!("Decorator requires {}", expected)));
             }
 
             parsed.to_output()
@@ -848,7 +848,7 @@ impl Compiler {
 
         for binding in bindings {
             if !matches!(
-                scope.local(&binding.name).map(|symbol| symbol.kind),
+                scope.local(&binding.name).map(|symbol| &symbol.kind),
                 Some(SymbolKind::Pending)
             ) {
                 continue;
@@ -1409,9 +1409,13 @@ fn infer_let_type(
     bindings: &BTreeMap<String, &Expr>,
     scope: &mut expression::Scope,
     visiting: &mut BTreeSet<String>,
-) -> Result<expression::Type, expression::TypeError> {
-    if let Some(value_type) = scope.local(name).and_then(scope::Symbol::value_type) {
-        return Ok(value_type);
+) -> Result<(), expression::TypeError> {
+    if scope
+        .local(name)
+        .and_then(scope::Symbol::value_type)
+        .is_some()
+    {
+        return Ok(());
     }
 
     visiting.insert(name.into());
@@ -1420,7 +1424,7 @@ fn infer_let_type(
         for (dependency, range) in binding.dependencies() {
             if !bindings.contains_key(&dependency)
                 || !matches!(
-                    scope.local(&dependency).map(|symbol| symbol.kind),
+                    scope.local(&dependency).map(|symbol| &symbol.kind),
                     Some(expression::SymbolKind::Pending)
                 )
             {
@@ -1438,7 +1442,8 @@ fn infer_let_type(
 
         let value_type = binding.check(scope)?;
         scope.resolve(name, value_type);
-        Ok(value_type)
+
+        Ok(())
     })();
     visiting.remove(name);
 

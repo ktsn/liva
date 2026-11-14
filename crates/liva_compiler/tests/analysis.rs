@@ -70,7 +70,7 @@ motion test(value: number) {
         ]
     );
     assert!(!found.iter().any(|hover| hover.label.starts_with("cycle:")));
-    assert!(found.iter().any(|hover| hover.label == "quoted: string"));
+    assert!(found.iter().any(|hover| hover.label == "quoted: \"value\""));
 }
 
 #[test]

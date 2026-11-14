@@ -3,7 +3,7 @@ use crate::{builtins, expression::Type};
 use liva_syntax::Range;
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum SymbolKind {
     Value(Type),
     Function(&'static builtins::Function),
@@ -19,11 +19,12 @@ pub struct Symbol {
 
 impl Symbol {
     pub fn is_builtin_target(&self) -> bool {
-        self.reserved && self.value_type() == Some(Type::Target)
+        self.reserved && self.value_type() == Some(&Type::Target)
     }
 
-    pub fn value_type(&self) -> Option<Type> {
-        match self.kind {
+    /// Borrow the resolved value type; functions and pending bindings have no value type.
+    pub fn value_type(&self) -> Option<&Type> {
+        match &self.kind {
             SymbolKind::Value(value_type) => Some(value_type),
             _ => None,
         }

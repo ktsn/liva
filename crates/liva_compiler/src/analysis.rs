@@ -16,27 +16,9 @@ pub struct Hover {
     pub label: String,
 }
 
-pub fn type_name(value: expression::Type) -> String {
-    use expression::Type;
-
-    match value {
-        Type::Number => "number".into(),
-        Type::Boolean => "boolean".into(),
-        Type::String => "string".into(),
-        Type::Timing => "timing".into(),
-        Type::Easing => "easing".into(),
-        Type::Target => "target".into(),
-        Type::Event => "event".into(),
-        Type::Controller(_) => "controller".into(),
-        Type::Record(fields) => format!(
-            "{{ {} }}",
-            fields
-                .iter()
-                .map(|field| format!("{}: {}", field.name, type_name(field.value_type)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-    }
+/// Format a compiler type with the notation shared by hovers and diagnostics.
+pub fn type_name(value: &expression::Type) -> String {
+    value.to_string()
 }
 
 #[derive(Debug, Clone)]
@@ -89,7 +71,7 @@ pub fn completions(source: &str, offset: usize) -> Vec<Completion> {
             let Some(field) = fields.iter().find(|field| field.name == name) else {
                 return vec![];
             };
-            value_type = field.value_type;
+            value_type = &field.value_type;
         }
 
         return match value_type {
@@ -98,7 +80,7 @@ pub fn completions(source: &str, offset: usize) -> Vec<Completion> {
                 .filter(|field| field.name.starts_with(partial))
                 .map(|field| Completion {
                     label: field.name.into(),
-                    detail: type_name(field.value_type),
+                    detail: type_name(&field.value_type),
                 })
                 .collect(),
             _ => vec![],
@@ -118,7 +100,7 @@ pub fn completions(source: &str, offset: usize) -> Vec<Completion> {
 }
 
 fn symbol_detail(symbol: &Symbol) -> Option<String> {
-    match symbol.kind {
+    match &symbol.kind {
         SymbolKind::Value(value_type) => Some(type_name(value_type)),
         SymbolKind::Pending => None,
         SymbolKind::Function(function) => Some(
@@ -136,11 +118,11 @@ fn symbol_detail(symbol: &Symbol) -> Option<String> {
                                 "{}{}: {}",
                                 parameter.name,
                                 if parameter.optional { "?" } else { "" },
-                                type_name(parameter.value_type),
+                                type_name(&parameter.value_type),
                             ))
                             .collect::<Vec<_>>()
                             .join(", "),
-                        type_name(signature.return_type),
+                        type_name(&signature.return_type),
                     )
                 })
                 .collect::<Vec<_>>()
@@ -150,7 +132,7 @@ fn symbol_detail(symbol: &Symbol) -> Option<String> {
 }
 
 fn symbol_label(name: &str, symbol: &Symbol) -> Option<String> {
-    symbol_detail(symbol).map(|detail| match symbol.kind {
+    symbol_detail(symbol).map(|detail| match &symbol.kind {
         SymbolKind::Function(_) => detail,
         _ => format!("{name}: {detail}"),
     })
@@ -326,7 +308,7 @@ fn expression_hovers(node: &impl AstNode, scope: &expression::Scope, result: &mu
                     let Some(field) = fields.iter().find(|field| field.name == name.text()) else {
                         break;
                     };
-                    value_type = field.value_type;
+                    value_type = &field.value_type;
                     path.push('.');
                     path.push_str(&name.text());
                     result.push(Hover {
