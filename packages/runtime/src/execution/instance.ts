@@ -12,14 +12,19 @@ export type { RuntimeDiagnostic } from './execution-contracts.ts'
 export class LivaInstance {
   private readonly runtime: Runtime
   private readonly executor: PresentationExecutor
+  onEvent?: (name: string) => void
+  onUpdate?: () => void
 
   constructor(
     definition: Definition,
     inputs: Readonly<Record<string, unknown>> = {},
     report: (diagnostic: RuntimeDiagnostic) => void = console.warn,
   ) {
-    this.executor = new PresentationExecutor(report)
-    this.runtime = new Runtime(this.executor, definition, inputs, report)
+    const diagnose = (diagnostic: RuntimeDiagnostic) => report.call(this, diagnostic)
+    this.executor = new PresentationExecutor(diagnose)
+    this.runtime = new Runtime(this.executor, definition, inputs, diagnose)
+    this.runtime.onEvent = (name) => this.onEvent?.(name)
+    this.runtime.onUpdate = () => this.onUpdate?.()
     this.executor.attach(this.runtime.environment)
   }
 
@@ -29,22 +34,6 @@ export class LivaInstance {
 
   set definition(value: Definition) {
     this.runtime.definition = value
-  }
-
-  get onUpdate() {
-    return this.runtime.onUpdate
-  }
-
-  set onUpdate(callback: (() => void) | undefined) {
-    this.runtime.onUpdate = callback
-  }
-
-  get onEvent() {
-    return this.runtime.onEvent
-  }
-
-  set onEvent(callback: ((name: string) => void) | undefined) {
-    this.runtime.onEvent = callback
   }
 
   get composition() {
@@ -119,5 +108,7 @@ export class LivaInstance {
 
   dispose() {
     this.runtime.dispose()
+    this.onEvent = undefined
+    this.onUpdate = undefined
   }
 }

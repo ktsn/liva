@@ -183,6 +183,49 @@ describe('composition snapshots', () => {
 })
 
 describe('public facade compatibility', () => {
+  it.each(['onEvent', 'onUpdate'] as const)(
+    'calls %s with the public instance as receiver',
+    (callback) => {
+      const instance = createInstance(false)
+      const observed: LivaInstance[] = []
+      instance[callback] = function (this: LivaInstance) {
+        observed.push(this)
+      }
+
+      instance.updateParameters({ ready: true })
+
+      expect(observed).toHaveLength(1)
+      expect(observed[0]).toBe(instance)
+    },
+  )
+
+  it.each(['onEvent', 'onUpdate'] as const)('stops calling a deleted %s property', (callback) => {
+    const instance = createInstance(false)
+    let calls = 0
+    instance[callback] = () => {
+      calls++
+    }
+
+    delete instance[callback]
+    instance.updateParameters({ ready: true })
+
+    expect(calls).toBe(0)
+    expect(Object.hasOwn(instance, callback)).toBe(false)
+  })
+
+  it('calls diagnostics with the public instance as receiver', () => {
+    const observed: LivaInstance[] = []
+    const instance = new LivaInstance(definition, { ready: false }, function (this: LivaInstance) {
+      observed.push(this)
+    })
+    instances.push(instance)
+
+    instance.updateParameters({ ready: 'invalid' })
+
+    expect(observed).toHaveLength(1)
+    expect(observed[0]).toBe(instance)
+  })
+
   it('uses a directly assigned definition for subsequent event evaluation', () => {
     const instance = createInstance(false)
     const replacement: Definition = {
