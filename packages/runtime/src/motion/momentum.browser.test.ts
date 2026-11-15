@@ -86,6 +86,33 @@ afterEach(() => {
 })
 
 describe('displayed momentum integration', () => {
+  it('reports reconciliation failures even after the completed effect has been removed', async () => {
+    const { instance, element, errors } = setup('width', '200px', {
+      kind: 'tween',
+      durationMs: 1000,
+      easing: 'linear',
+    })
+    instance.updateParameters({ enabled: true })
+    const animations = [...instance.animations]
+    const failure = new Error('Failed to write the accepted cascade')
+    const write = vi.spyOn(element.style, 'setProperty').mockImplementationOnce(() => {
+      throw failure
+    })
+
+    try {
+      for (const animation of animations) animation.finish()
+
+      await frames()
+
+      expect(instance.animations).toEqual([])
+      expect(errors).toEqual([
+        expect.objectContaining({ code: 'runtime.animation', error: failure }),
+      ])
+    } finally {
+      write.mockRestore()
+    }
+  })
+
   it.each([
     ['margin', '20px', 'margin-left', '40px', '40px'],
     ['background', 'blue', 'background-color', 'green', 'rgb(0, 128, 0)'],

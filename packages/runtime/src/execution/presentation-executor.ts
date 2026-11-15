@@ -1,17 +1,33 @@
 import {
-  trackTiming,
+  coordinatePresencePresentation,
+  coordinateOperationEnd,
+  coordinateOperationExclusions,
+  coordinateMotionChange,
+} from './presentation-coordinator.ts'
+import { materializeEffect } from './native-effect.ts'
+import type {
+  PresentationPlan,
+  PresentationFacts,
+  ReceiverAddresses,
+  ControllerBinding,
+  StyleWrite,
+  TrackCandidate,
+  TrackObservationRequest,
+  TrackSnapshot,
+  LifecycleFacts,
+} from './presentation-planner.ts'
+import type {
+  DisplayedRequest,
+  DisplayedValue,
+  PresencePreparation,
+  ReleasedPresence,
+} from './execution-contracts.ts'
+import {
   trackObservationNeeds,
-  planTrack,
-  planMotionHandoff,
-  planLayerTakeovers,
   remainingTrackFacts,
   type TrackComponentFacts,
   type TrackPlan,
-  planEffectChanges,
   orderedResolution,
-  ownsCanonicalProperty,
-  prepareLayerChange,
-  planLayerChange,
   layerPropertyKey,
   type DeclarationAddresses,
 } from './presentation-planner.ts'
@@ -23,7 +39,6 @@ import {
   trackLayer,
   normalizeLifecycleTracks,
   type EvaluatedLayer,
-  type LayerChange,
 } from '../composition/runtime-layers.ts'
 import type { BindingFacts, ExecutionEnvironment } from './execution-contracts.ts'
 import {
@@ -36,17 +51,12 @@ import { propertyRule } from '../motion/property-rules.ts'
 import { propertyController, type PropertyController } from '../motion/controllers.ts'
 import type { ReactiveNotification } from '../evaluation/events.ts'
 import {
-  prepareLayerTakeovers,
   layerPropertyDiffers,
   type LayerProperty,
   layerTargets,
-  resolveLayerTracks,
-  resolveComposition,
   type LayerResolution,
-  type Composition,
-  type CompositionTransition,
+  type LayerTrackTemplate,
 } from '../composition/layers.ts'
-import { waapiProperty } from '../motion/animation.ts'
 export { waapiProperty } from '../motion/animation.ts'
 import { LetBindingGraph } from '../evaluation/let-bindings.ts'
 import { evaluate, renderTransition, type VariableValues } from '../evaluation/expression.ts'
@@ -172,6 +182,7 @@ let nextEffectId = 0
 let nextOperationId = 0
 
 export interface CapturedPresence {
+  readonly receiver: Receiver
   readonly executor: PresentationExecutor
   readonly source: Transition
   readonly environment: {
@@ -207,6 +218,7 @@ interface PresenceOperation {
   normal: LayerResolution
   started: boolean
   initialized: boolean
+  readonly receivers: ReadonlyMap<LifecycleWork, Receiver>
   readonly held: readonly (readonly [LifecycleWork, string])[]
 }
 
@@ -225,11 +237,17 @@ function hasControllerBindings(resolution: LayerResolution) {
   )
 }
 
+type Receiver = {
+  readonly id: number
+  readonly element: HTMLElement
+  resolution: LayerResolution
+  layers: readonly EvaluatedLayer[]
+}
+
 type ActiveTrack = {
   id: number
-  receiver: number
+  receiver: Receiver
   track: ResolvedTrack
-  element: HTMLElement
   animation: Animation
   sourceProperty: string
   sourceDestination: string
@@ -248,6 +266,7 @@ type PresentationMode = 'live' | 'preparing-preview' | 'preview'
 
 /** Each registered name retains its receiving elements in accepted binding order. */
 type TargetElements = [HTMLElement, ...HTMLElement[]]
+type TargetReceivers = [Receiver, ...Receiver[]]
 
 /** Configured instances remain registered while another controller/declaration owns their address. */
 type ControllerState = {
@@ -310,52 +329,72 @@ export class PresentationExecutor {
     }
   }
 
-  private readonly receivers = new WeakMap<
-    HTMLElement,
-    { id: number; resolution: LayerResolution; layers: readonly EvaluatedLayer[] }
-  >()
+  private readonly receivers = new Map<number, Receiver>()
   private nextReceiverId = 0
 
-  /** New receivers have no owned presentation; later writes commit both logical layers and their cascade. */
-  private receiver(element: HTMLElement) {
-    const previous = this.receivers.get(element)
+  private receiverRegistration(retain: boolean) {
+    const byElement = new Map(
+      [...this.receivers.values()].map((receiver) => [receiver.element, receiver]),
+    )
 
-    if (previous) return previous
+    return (element: HTMLElement, captured?: Receiver): Receiver => {
+      const previous = byElement.get(element)
+      // Captured origins are created from this same LifecycleWork element.
+      const receiver = previous ??
+        captured ?? {
+          id: this.nextReceiverId++,
+          element,
+          resolution: emptyResolution(),
+          layers: [],
+        }
+      byElement.set(element, receiver)
 
-    const receiver = {
-      id: this.nextReceiverId++,
-      resolution: emptyResolution(),
-      layers: [] as readonly EvaluatedLayer[],
+      if (retain) this.receivers.set(receiver.id, receiver)
+
+      return receiver
     }
-    this.receivers.set(element, receiver)
-
-    return receiver
   }
 
-  private receiverId(element: HTMLElement): number {
-    return this.receiver(element).id
+  private receiver(id: number): Receiver {
+    // Synchronous plans address either current bindings or retained presence work.
+    return this.receivers.get(id)!
+  }
+
+  private receivingElement(id: number): HTMLElement {
+    return this.receiver(id).element
+  }
+
+  private pruneReceivers() {
+    const retained = new Set([...this.targetReceivers.values()].flat())
+
+    for (const operation of this.operations) {
+      for (const receiver of operation.receivers.values()) retained.add(receiver)
+    }
+
+    for (const [id, receiver] of this.receivers) {
+      if (!retained.has(receiver)) this.receivers.delete(id)
+    }
+  }
+
+  private replaceReceivers(targets: ReadonlyMap<string, TargetElements>) {
+    this.targetReceivers.clear()
+    this.pruneReceivers()
+    const register = this.receiverRegistration(true)
+
+    for (const [name, elements] of targets) {
+      const [first, ...rest] = elements
+      this.targetReceivers.set(name, [register(first), ...rest.map((element) => register(element))])
+    }
   }
 
   /** Materializes a final identifier-based plan; all timing/frame decisions are already pure. */
-  private prepareEffect(plan: TrackPlan, element: HTMLElement): ActiveTrack {
-    const animation = new Animation(
-      new KeyframeEffect(
-        element,
-        plan.frames.map((frame) => ({
-          [waapiProperty(plan.track.property)]: frame.value,
-          offset: frame.offset,
-          easing: frame.easing,
-        })),
-        { duration: plan.durationMs, easing: plan.easing, fill: plan.fill },
-      ),
-      document.timeline,
-    )
+  private prepareEffect(plan: TrackPlan, receiver: Receiver): ActiveTrack {
+    const animation = materializeEffect(plan, receiver.element)
 
     return {
       id: plan.id,
-      receiver: plan.receiver,
+      receiver,
       track: plan.track,
-      element,
       animation,
       sourceProperty: plan.sourceProperty,
       sourceDestination: plan.sourceDestination,
@@ -365,7 +404,7 @@ export class PresentationExecutor {
     }
   }
 
-  private targetElements = new Map<string, TargetElements>()
+  private readonly targetReceivers = new Map<string, TargetReceivers>()
   private active: ActiveTrack[] = []
   private readonly propertyMotion = new PropertyMotion()
   private readonly dirtyProperties = new Map<HTMLElement, Set<string>>()
@@ -429,62 +468,20 @@ export class PresentationExecutor {
     operation: PresenceOperation,
     normal: LayerResolution,
   ): ReadonlySet<string> {
-    if (operation.phase !== 'enter' || !operation.started) return operation.excluded
-
-    const changes = prepareLayerTakeovers(operation.normal, normal)
-
-    if (changes.length === 0) return operation.excluded
-
-    const targets = new Set(changes.map((change) => change.target))
-    const receivers = new Map<
-      number,
-      Map<
-        string,
-        {
-          receiver: number
-          target: string
-          previous: DeclarationAddresses
-          next: DeclarationAddresses
-        }
-      >
-    >()
-    const observed = new Map<number, Map<string, readonly string[]>>()
-
-    for (const { item, receiver } of operation.sources) {
-      const target = item.track.target
-
-      if (!targets.has(target)) continue
-
-      const facts = receivers.get(receiver) ?? new Map()
-      receivers.set(receiver, facts)
-
-      if (facts.has(target)) continue
-
-      // Before/after ownership shares writing-context facts within this read-only
-      // calculation. Validation facts are never reused after terminal writes.
-      const addresses = observed.get(receiver) ?? new Map<string, readonly string[]>()
-      observed.set(receiver, addresses)
-      facts.set(target, {
-        receiver,
-        target,
-        previous: this.declarationAddresses(
-          operation.normal,
-          item.element,
-          target,
-          undefined,
-          addresses,
-        ),
-        next: this.declarationAddresses(normal, item.element, target, undefined, addresses),
-      })
+    const facts = {
+      phase: operation.phase,
+      started: operation.started,
+      excluded: operation.excluded,
+      previous: operation.normal,
+      sources: operation.sources.map((source) => ({
+        receiver: source.receiver,
+        target: source.item.track.target,
+      })),
     }
 
-    return new Set([
-      ...operation.excluded,
-      ...planLayerTakeovers(
-        changes,
-        [...receivers.values()].flatMap((facts) => [...facts.values()]),
-      ),
-    ])
+    return this.environment
+      ? this.environment.operationExclusions(facts, normal)
+      : coordinateOperationExclusions(this, facts, normal)
   }
 
   validatePresentation(values: VariableValues, candidate: LayerResolution) {
@@ -637,7 +634,7 @@ export class PresentationExecutor {
           }
         }
 
-        const receiver = this.receiverId(item.element)
+        const receiver = operation.receivers.get(item)!.id
         const id = `@presence:${operation.id}:${workKey(item.track)}`
         const property = trackLayer(id, receiver, [track], !operation.started).targets[0]
           .properties[0]
@@ -677,22 +674,23 @@ export class PresentationExecutor {
     ]
   }
 
-  private receiverNames(element: HTMLElement): ReadonlySet<string> {
+  private receiverNames(receiver: Receiver): ReadonlySet<string> {
     const names = new Set(
-      [...this.targetElements]
-        .filter(([, elements]) => elements.includes(element))
+      [...this.targetReceivers]
+        .filter(([, receivers]) => receivers.includes(receiver))
         .map(([name]) => name),
     )
 
     for (const operation of this.operations)
-      for (const item of operation.work) if (item.element === element) names.add(item.track.target)
+      for (const item of operation.work)
+        if (operation.receivers.get(item) === receiver) names.add(item.track.target)
 
     return names
   }
 
-  private effectiveResolution(normal: LayerResolution, element: HTMLElement): LayerResolution {
-    const names = this.receiverNames(element)
-    const presentation = composeRuntimeLayers(this.runtimeLayers(normal), this.receiverId(element))
+  private effectiveResolution(normal: LayerResolution, receiver: Receiver): LayerResolution {
+    const names = this.receiverNames(receiver)
+    const presentation = composeRuntimeLayers(this.runtimeLayers(normal), receiver.id)
 
     return {
       ...normal,
@@ -706,7 +704,10 @@ export class PresentationExecutor {
   receives(item: LifecycleWork) {
     return (
       item[lifecycleOrigin]?.executor === this ||
-      (this.targetElements.get(item.track.target)?.includes(item.element) ?? false)
+      (this.targetReceivers
+        .get(item.track.target)
+        ?.some((receiver) => receiver.element === item.element) ??
+        false)
     )
   }
 
@@ -726,10 +727,14 @@ export class PresentationExecutor {
           ).getPropertyValue(item.track.property),
         ] as const,
     )
+    const register = this.receiverRegistration(true)
+    const receivers = new Map(
+      work.map((item) => [item, register(item.element, item[lifecycleOrigin]?.receiver)]),
+    )
     const bindings = new Map<number, Set<string>>()
 
     for (const item of work) {
-      const receiver = this.receiverId(item.element)
+      const receiver = receivers.get(item)!.id
       const addresses = bindings.get(receiver) ?? new Set<string>()
       addresses.add(item.track.property)
 
@@ -754,6 +759,7 @@ export class PresentationExecutor {
       started: false,
       initialized: false,
       held,
+      receivers,
     }
     this.operations.add(operation)
 
@@ -765,6 +771,7 @@ export class PresentationExecutor {
       this.updateOperations(this.layerResolution)
     } catch (error) {
       this.operations.delete(operation)
+      this.pruneReceivers()
 
       if (this.disposed && this.operations.size === 0) this.stopMotion()
 
@@ -804,11 +811,9 @@ export class PresentationExecutor {
 
     for (const { item, track } of operation.sources) {
       this.write(item.element, item.track.property, track.keyframes[0].value)
-      this.receiver(item.element).resolution = this.effectiveResolution(
-        this.layerResolution,
-        item.element,
-      )
-      this.receiver(item.element).layers = this.runtimeLayers(this.layerResolution)
+      const receiver = operation.receivers.get(item)!
+      receiver.resolution = this.effectiveResolution(this.layerResolution, receiver)
+      receiver.layers = this.runtimeLayers(this.layerResolution)
     }
   }
 
@@ -818,7 +823,11 @@ export class PresentationExecutor {
 
       if (!capture) continue
 
-      for (const [key, observation] of capture.motion) this.pendingHandoffs.set(key, observation)
+      for (const [key, observation] of capture.motion) {
+        const receiver = operation.receivers.get(item)!
+        const address = key.slice(key.indexOf('\0'))
+        this.pendingHandoffs.set(`${receiver.id}${address}`, observation)
+      }
     }
   }
 
@@ -839,16 +848,6 @@ export class PresentationExecutor {
       : JSON.stringify([finalReference, animationReference])
   }
 
-  private observeMotion(element: HTMLElement, track: ResolvedTrack) {
-    const observation = this.propertyMotion.observeSpring(
-      element,
-      track.property,
-      trackObservationNeeds(track, false, true).endpoint,
-    )
-    const captured = this.pendingHandoffs.get(`${this.receiverId(element)}\0${track.property}`)
-    return captured ? planMotionHandoff(observation, captured, performance.now()) : observation
-  }
-
   playOperation(operation: PresenceOperation) {
     operation.started = true
     this.retainHandoffs(operation)
@@ -865,42 +864,65 @@ export class PresentationExecutor {
   }
 
   endOperation(operation: PresenceOperation, result: CompletionResult) {
+    if (this.environment) this.environment.operationEnded(operation.id, result)
+    else coordinateOperationEnd(this, this.layerResolution, this.values, operation.id, result)
+  }
+
+  releasePresence(id: number): ReleasedPresence {
+    // Completion groups identify an operation still registered by this executor.
+    const operation = [...this.operations].find((candidate) => candidate.id === id)!
     this.operations.delete(operation)
 
-    for (const item of operation.work)
-      for (const key of item[lifecycleOrigin]?.motion.keys() ?? []) this.pendingHandoffs.delete(key)
+    for (const item of operation.work) {
+      const receiver = operation.receivers.get(item)!
 
-    if (this.environment && this.presentationMode === 'live')
-      this.layerResolution = this.controllerResolution(
-        this.layerResolution,
-        this.values,
-        performance.now(),
-      )
-
-    const ended = this.active.filter((entry) => entry.operation === operation)
-    this.active = this.active.filter((entry) => entry.operation !== operation)
-
-    for (const entry of ended) entry.animation.cancel()
-
-    for (const element of new Set(operation.work.map((item) => item.element))) {
-      this.restore(this.operations.size > 0, element)
-      this.settle(element)
+      for (const key of item[lifecycleOrigin]?.motion.keys() ?? [])
+        this.pendingHandoffs.delete(`${receiver.id}${key.slice(key.indexOf('\0'))}`)
     }
 
-    if (result === 'completed' && operation.phase === 'enter') {
-      for (const item of operation.work) {
-        if (!item.restoreOnCompletion)
-          item.element.style.setProperty(item.track.property, item.track.destinationValue)
-      }
+    return {
+      phase: operation.phase,
+      receivers: [...new Set(operation.receivers.values())].map((receiver) => ({
+        id: receiver.id,
+        names: [
+          ...this.receiverNames(receiver),
+          ...operation.work
+            .filter((item) => operation.receivers.get(item) === receiver)
+            .map((item) => item.track.target),
+        ],
+      })),
+      work: operation.work.map((item) => ({
+        receiver: operation.receivers.get(item)!.id,
+        property: item.track.property,
+        destination: item.track.destinationValue,
+        restoreOnCompletion: item.restoreOnCompletion,
+      })),
     }
+  }
 
+  observeReleasedReceiver(
+    id: number,
+    names: readonly string[],
+    next: LayerResolution,
+  ): PresencePreparation['receivers'][number] {
+    const receiver = this.receiver(id)
+    const normal = this.disposed || this.suspended ? emptyResolution() : next
+
+    return {
+      id,
+      names: [...new Set(names)],
+      normal,
+      previous: receiver.resolution,
+      from: receiver.layers,
+      to: this.runtimeLayers(normal),
+    }
+  }
+
+  finishPresenceRelease() {
+    this.pruneReceivers()
     this.scheduleReferences()
 
     if (this.disposed && this.operations.size === 0) this.stopMotion()
-  }
-
-  snapshotValues(definition: Definition): VariableValues {
-    return this.environment?.snapshotValues(definition) ?? this.retainedValues
   }
 
   disconnectBindings() {
@@ -919,9 +941,9 @@ export class PresentationExecutor {
    * @yields Logical target names paired with their last accepted receiving element.
    */
   private *representativeTargets() {
-    for (const [name, elements] of this.targetElements) {
+    for (const [name, elements] of this.targetReceivers) {
       // bind creates each group with its first element, so every tuple is nonempty.
-      yield [name, elements[elements.length - 1]] as const
+      yield [name, elements[elements.length - 1].element] as const
     }
   }
 
@@ -951,14 +973,14 @@ export class PresentationExecutor {
     // A definition replacement does not validate previously rejected duplicate entries.
     this.bindingStatus = this.resolveBindingStatus(
       definition,
-      this.targetElements,
+      this.targetReceivers,
       this.bindingStatus === 'duplicate',
     )
   }
 
   private resolveBindingStatus(
     definition: Definition,
-    targets: ReadonlyMap<string, TargetElements>,
+    targets: ReadonlyMap<string, unknown>,
     duplicate: boolean,
   ): BindingStatus {
     if (duplicate) return 'duplicate'
@@ -982,19 +1004,16 @@ export class PresentationExecutor {
     sessions.add(session)
     session.retain(this)
 
-    void session.finished.then(() => {
-      // Removal also invalidates callbacks queued before cancellation or disposal.
-      if (!sessions.has(session)) return undefined
+    void session.finished
+      .then(() => {
+        if (!sessions.has(session)) return undefined
 
-      // Sessions mark themselves finished before their Promise callbacks run, so
-      // several presence boundaries may already be done here. Remove them together;
-      // later callbacks observe their removal and skip repeated restoration.
-      for (const completed of sessions) {
-        if (completed.isFinished) sessions.delete(completed)
-      }
+        if (this.environment) this.environment.lifecycleSettled()
+        else sessions.delete(session)
 
-      return undefined
-    })
+        return undefined
+      })
+      .catch((error) => this.report({ code: 'runtime.animation', message: String(error), error }))
   }
 
   captureLifecycle(phase: 'enter' | 'leave', names: readonly string[], element?: HTMLElement) {
@@ -1008,7 +1027,8 @@ export class PresentationExecutor {
         .filter(([name]) => names.includes(name))
         .map(([name, target]) => [name, element ?? target]),
     )
-    const observations: { element: HTMLElement; displayed: string }[] = []
+    const register = this.receiverRegistration(false)
+    const observations: { element: HTMLElement; receiver: Receiver; displayed: string }[] = []
     const tracks = resolveLifecycleTracks(
       phase,
       captureLifecycleDefinition(definition, phase, this.values),
@@ -1021,7 +1041,7 @@ export class PresentationExecutor {
         const value = (
           receiver.isConnected ? getComputedStyle(receiver) : receiver.style
         ).getPropertyValue(property)
-        observations.push({ element: receiver, displayed: value })
+        observations.push({ element: receiver, receiver: register(receiver), displayed: value })
 
         return value
       },
@@ -1033,7 +1053,7 @@ export class PresentationExecutor {
         .filter((item) =>
           this.active.some(
             (entry) =>
-              entry.element === item.element &&
+              entry.receiver.element === item.element &&
               (phase === 'leave' || entry.group !== undefined) &&
               (entry.sourceProperty === item.track.property ||
                 propertyAddresses(item.element, item.track.property).includes(
@@ -1051,7 +1071,7 @@ export class PresentationExecutor {
       if (!trackObservationNeeds(item.track, false, true).motion) continue
 
       for (const track of canonicalTracks(item.element, item.track)) {
-        const key = `${this.receiverId(item.element)}\0${track.property}`
+        const key = `${item.receiver.id}\0${track.property}`
 
         if (motion.has(key)) continue
 
@@ -1069,6 +1089,7 @@ export class PresentationExecutor {
     return work.map((item) => {
       const captured: CapturedPresence = {
         executor: this,
+        receiver: item.receiver,
         source,
         environment,
         original: item.track,
@@ -1091,7 +1112,7 @@ export class PresentationExecutor {
       (entry) =>
         !entry.group &&
         names.includes(entry.track.target) &&
-        entry.element === element &&
+        entry.receiver.element === element &&
         (properties === undefined ||
           properties.includes(entry.track.property) ||
           properties.includes(entry.sourceProperty)),
@@ -1148,14 +1169,11 @@ export class PresentationExecutor {
     resolution: LayerResolution,
     element: HTMLElement,
     target: string,
-    source?: string,
     observed = new Map<string, readonly string[]>(),
   ): DeclarationAddresses {
     const names = resolution.presentation.targets
       .filter((item) => item.name === target)
       .flatMap((item) => item.properties.map((property) => property.name))
-
-    if (source) names.push(source)
 
     return [...new Set(names)].map((name) => {
       const previous = observed.get(name)
@@ -1166,70 +1184,13 @@ export class PresentationExecutor {
     })
   }
 
-  /** Formats supplied snapshots/fallbacks without acquiring, releasing or controlling a receiver. */
   private controllerBaseline(
     resolution: LayerResolution,
     values: VariableValues,
     definition: Definition,
   ) {
-    // Re-resolve the selected composition without bindings so an unreadable
-    // controller can reveal the normal declaration hidden beneath it.
-    const normal = resolveComposition(
-      {
-        ...definition,
-        layers: definition.layers.map((layer) => ({
-          ...layer,
-          targets: layer.targets.map((target) => ({
-            ...target,
-            properties: target.properties.filter((property) => property.value.kind !== 'binding'),
-          })),
-          states: layer.states?.map((state) => ({
-            ...state,
-            targets: state.targets.map((target) => ({
-              ...target,
-              properties: target.properties.filter((property) => property.value.kind !== 'binding'),
-            })),
-          })),
-        })),
-      },
-      values,
-      resolution.composition,
-    )
-
-    // Occluded controllers retain their last logical baseline while input records
-    // remain live for expressions. Reacquisition later rebases from displayed CSS.
-    const provisional = {
-      ...resolution,
-      presentation: {
-        ...resolution.presentation,
-        targets: resolution.presentation.targets.map((target) => ({
-          ...target,
-          properties: target.properties.flatMap((property) => {
-            if (!property.binding) return [property]
-
-            const previous = this.layerResolution.presentation.targets
-              .find((item) => item.name === target.name)
-              ?.properties.find(
-                (item) =>
-                  item.name === property.name && item.owner === property.owner && item.binding,
-              )
-            const snapshot = evaluate(property.binding, values)
-            const value =
-              previous?.value ?? propertyController(snapshot).render(property.name, snapshot)
-            const fallback = normal.presentation.targets
-              .find((item) => item.name === target.name)
-              ?.properties.find((item) => item.name === property.name)
-
-            return value !== undefined ? [{ ...property, value }] : fallback ? [fallback] : []
-          }),
-        })),
-      },
-    }
-
-    // A fallback may belong to an earlier declaration than the unavailable
-    // binding. Both candidate applicability and accepted exclusions need the
-    // substituted owner's source order before deciding effective components.
-    return { normal, provisional: orderedResolution(provisional, definition) }
+    // Candidate validation belongs to the attached Runtime and never runs after disposal.
+    return this.environment!.controllerBaseline(resolution, values, definition)
   }
 
   /**
@@ -1256,106 +1217,125 @@ export class PresentationExecutor {
     definition = this.definition,
     live = true,
   ): LayerResolution {
-    // Declaration order determines ownership, including overlapping shorthand,
-    // longhand, and logical properties that address the same physical CSS property.
-    resolution = orderedResolution(resolution, definition)
+    // Live callers are attached; detached operations use their retained evaluated layers.
+    return this.environment!.controllerResolution(resolution, values, time, definition, live)
+  }
 
-    if (!hasControllerBindings(resolution)) {
-      // Without effective bindings, live control ends for every previous owner.
-      if (live) {
-        this.releaseControllers(time)
-        this.updateOperations(resolution, values)
-      }
+  updatePresence(resolution: LayerResolution, values: VariableValues) {
+    this.updateOperations(resolution, values)
+  }
 
-      return orderedResolution(resolution, definition)
+  private nextSessionId = 0
+  private readonly sessionIds = new WeakMap<LifecycleSession, number>()
+
+  private sessionId(session: LifecycleSession) {
+    let id = this.sessionIds.get(session)
+
+    if (id === undefined) {
+      id = this.nextSessionId++
+      this.sessionIds.set(session, id)
     }
 
-    const { normal, provisional } = this.controllerBaseline(resolution, values, definition)
+    return id
+  }
 
-    if (live) this.updateOperations(provisional, values)
+  /** Metadata has no live style values; Runtime chooses which CSS observations follow. */
+  presentationFacts(_resolution: LayerResolution): PresentationFacts {
+    const receivers = [...this.targetReceivers].flatMap(([target, bindings]) =>
+      bindings.map((receiver) => ({ id: receiver.id, target })),
+    )
+    const lifecycle: LifecycleFacts[] = [
+      ...[...this.enterSessions].map((session) => ({
+        id: this.sessionId(session),
+        phase: 'enter' as const,
+        finished: session.isFinished,
+        managed: true,
+        protected: [],
+      })),
+      ...[...this.leaveSessions].map((session) => ({
+        id: this.sessionId(session),
+        phase: 'leave' as const,
+        finished: session.isFinished,
+        managed: true,
+        protected: [],
+      })),
+    ]
 
-    const nextOwners = new Map<string, PropertyController>()
-    const targets = resolution.presentation.targets.map((target) => ({
-      ...target,
-      properties: target.properties.flatMap((property) => {
-        if (!property.binding) return [property]
+    return {
+      mode: this.presentationMode,
+      lifecycle,
+      suspended: this.suspended,
+      reduced: this.motion.matches,
+      preserveLifecycle: lifecycle.length > 0,
+      receivers: receivers.map((receiver) => ({
+        ...receiver,
+        // Normalized presence ownership is represented by effective runtime layers.
+        protected: [],
+      })),
+      active: this.active.map((entry) => ({
+        id: entry.id,
+        receiver: entry.receiver.id,
+        target: entry.track.target,
+        property: entry.track.property,
+        sourceProperty: entry.sourceProperty,
+        sourceDestination: entry.sourceDestination,
+        track: entry.track,
+      })),
+    }
+  }
 
-        // A binding must own every physical property it affects on each receiver;
-        // otherwise omit it so it cannot overwrite a winning declaration.
-        const elements = this.targetElements.get(target.name) ?? []
-        const obscured = elements.some((element) =>
-          propertyAddresses(element, property.name).some(
-            (address) =>
-              !ownsCanonicalProperty(
-                this.declarationAddresses(resolution, element, target.name, property.name),
-                property.name,
-                address,
-              ),
-          ),
-        )
+  observeReceivers(
+    resolution: LayerResolution,
+    targets: ReadonlySet<string>,
+  ): readonly ReceiverAddresses[] {
+    const receivers = this.presentationFacts(resolution).receivers
 
-        if (obscured) return []
+    return resolution.presentation.targets
+      .filter((target) => targets.has(target.name))
+      .flatMap((target) => {
+        const names = target.properties.map((property) => property.name)
 
-        const presenceObscured =
-          live &&
-          this.operations.size > 0 &&
-          elements.some((element) => {
-            const effective = this.effectiveResolution(provisional, element)
-            const owner = effective.presentation.targets
-              .find((item) => item.name === target.name)
-              ?.properties.find((item) => item.name === property.name)?.owner
+        return receivers
+          .filter((receiver) => receiver.target === target.name)
+          .map((receiver) => {
+            const element = this.receivingElement(receiver.id)
 
-            return (
-              owner !== property.owner ||
-              propertyAddresses(element, property.name).some(
-                (address) =>
-                  !ownsCanonicalProperty(
-                    this.declarationAddresses(effective, element, target.name),
-                    property.name,
-                    address,
-                  ),
-              )
-            )
+            return {
+              ...receiver,
+              addresses: names.map((name) => ({
+                name,
+                addresses: propertyAddresses(element, name),
+              })),
+            }
           })
+      })
+  }
 
-        if (presenceObscured) {
-          const baseline = provisional.presentation.targets
-            .find((item) => item.name === target.name)
-            ?.properties.find((item) => item.name === property.name)
+  /** Runtime passes only selected bindings; capability objects remain within existing controller APIs. */
+  applyControllers(
+    bindings: readonly ControllerBinding[],
+    values: VariableValues,
+    time: number,
+    live: boolean,
+  ): ReadonlyMap<string, string | undefined> {
+    const nextOwners = new Map<string, PropertyController>()
+    const outputs = new Map<string, string | undefined>()
 
-          return baseline ? [baseline] : []
-        }
+    for (const binding of bindings) {
+      const snapshot = evaluate(binding.expression, values)
+      const controller = propertyController(snapshot)
+      const key = layerPropertyKey(binding.target, binding.property)
+      nextOwners.set(key, controller)
 
-        // Live control acquires from the displayed pose. Inspection and preview
-        // only format the supplied snapshot, leaving live ownership unchanged.
-        const snapshot = evaluate(property.binding, values)
-        const controller = propertyController(snapshot)
-        const key = layerPropertyKey(target.name, property.name)
-        nextOwners.set(key, controller)
+      if (live) controller.acquire(time)
 
-        if (live) controller.acquire(time)
+      outputs.set(
+        key,
+        live ? controller.control()?.value : controller.render(binding.property, snapshot),
+      )
+    }
 
-        const value = live
-          ? controller.control()?.value
-          : controller.render(property.name, snapshot)
-
-        if (value !== undefined) return [{ ...property, value }]
-
-        // Missing controller output falls back to the same property's normal
-        // declaration; omit the property if no such declaration exists.
-        const fallback = normal.presentation.targets
-          .find((candidate) => candidate.name === target.name)
-          ?.properties.find((candidate) => candidate.name === property.name)
-
-        return fallback ? [fallback] : []
-      }),
-    }))
-
-    // Release replaced or obscured owners before the caller prepares transitions,
-    // allowing their input velocity to be handed to the next spring.
     if (live) {
-      // Live controllers were registered before binding; candidate inspections
-      // never publish their ownership into this registry.
       for (const [controller, state] of this.controllers) {
         const selected = nextOwners.get(state.key) === controller
 
@@ -1365,111 +1345,200 @@ export class PresentationExecutor {
       }
     }
 
-    // A fallback can belong to an earlier declaration, so restore cascade order
-    // before the caller applies styles or checks physical property ownership.
-    return orderedResolution(
-      { ...resolution, presentation: { ...resolution.presentation, targets } },
-      definition,
-    )
+    return outputs
   }
 
-  inspectLifecycle(
-    phase: 'enter' | 'leave',
-    composition: Composition,
-    definition = this.definition,
-  ) {
-    const values = this.snapshotValues(definition)
+  expandTracks(
+    tracks: readonly {
+      readonly receiver: number
+      readonly source: ResolvedTrack
+      readonly declarations?: ReceiverAddresses['addresses']
+    }[],
+  ): readonly TrackCandidate[] {
+    return tracks.flatMap(({ receiver, source, declarations }) => {
+      const element = this.receivingElement(receiver)
 
-    return {
-      presentation: this.controllerResolution(
-        resolveComposition(definition, values, composition),
-        values,
-        performance.now(),
-        definition,
-        false,
-      ).presentation,
-      transition: captureLifecycleDefinition(definition, phase, values),
-    }
+      return canonicalTracks(element, source).map((track) => ({
+        receiver,
+        source,
+        track,
+        declarations: declarations ?? [
+          { name: source.property, addresses: propertyAddresses(element, source.property) },
+        ],
+        protected: false,
+      }))
+    })
   }
 
-  inspectComposition(
-    composition: Composition,
-    from?: Composition,
-    transitions: readonly CompositionTransition[] = [],
-    definition = this.definition,
-  ): LayerResolution {
-    try {
-      const values = this.snapshotValues(definition)
+  observeDisplayed(requests: readonly DisplayedRequest[]): readonly DisplayedValue[] {
+    const styles = new Map<number, CSSStyleDeclaration>()
 
-      const resolution = this.controllerResolution(
-        resolveComposition(definition, values, composition, from, transitions),
-        values,
-        performance.now(),
-        definition,
-        false,
-      )
+    return requests.map((request) => {
+      let style = styles.get(request.receiver)
+
+      if (!style) {
+        style = getComputedStyle(this.receivingElement(request.receiver))
+        styles.set(request.receiver, style)
+      }
+
+      return { ...request, value: style.getPropertyValue(request.property) }
+    })
+  }
+
+  observeTracks(requests: readonly TrackObservationRequest[]): readonly TrackSnapshot[] {
+    return requests.map((request) => {
+      const element = this.receivingElement(request.receiver)
+      const captured = request.needs.motion
+        ? this.pendingHandoffs.get(`${request.receiver}\0${request.track.property}`)
+        : undefined
 
       return {
-        ...resolution,
-        transitions: new Map(
-          [...resolution.transitions].flatMap(([name, transition]) => {
-            const targets = transition.transition.targets.flatMap((target) => {
-              const properties = target.properties.filter((property) =>
-                resolution.presentation.targets
-                  .find((item) => item.name === target.name)
-                  ?.properties.some((item) => item.name === property.name && item.owner === name),
-              )
-
-              return resolution.presentation.targets.some(
-                (item) =>
-                  item.name === target.name &&
-                  item.properties.some((property) => property.owner === name),
-              )
-                ? [{ ...target, properties }]
-                : []
-            })
-
-            if (
-              !resolution.presentation.targets.some((target) =>
-                target.properties.some((property) => property.owner === name),
-              )
+        handoff: captured ? { captured, time: performance.now() } : undefined,
+        id: nextEffectId++,
+        receiver: request.receiver,
+        source: request.source,
+        track: request.track,
+        declarations: request.declarations,
+        interrupted: request.interrupted,
+        displayed: request.needs.displayed
+          ? (element.isConnected ? getComputedStyle(element) : element.style).getPropertyValue(
+              request.track.property,
             )
-              return []
-
-            const rendered = renderTransition({ ...transition.transition, targets }, values)
-
-            return [
-              [
-                name,
-                {
-                  ...transition,
-                  transition: {
-                    timing: rendered.timing,
-                    targets: rendered.targets.map((target) => ({
-                      name: target.name,
-                      timingProperties: target.timingProperties,
-                      timing: target.timing,
-                      properties: target.properties.map((property) => ({
-                        name: property.name,
-                        timing: property.timing,
-                        keyframes: property.keyframes?.map((frame) => ({
-                          offset: frame.offset,
-                          value: frame.value,
-                          easing: frame.easing,
-                        })),
-                      })),
-                    })),
-                  },
-                },
-              ] as const,
-            ]
-          }),
-        ),
+          : undefined,
+        motion: request.needs.motion
+          ? this.propertyMotion.observeSpring(
+              element,
+              request.track.property,
+              request.needs.endpoint,
+            )
+          : undefined,
+        reference: request.reference
+          ? this.referenceValue(
+              element,
+              (request.source.authored ?? request.source).property,
+              (request.source.authored ?? request.source).destinationValue,
+              trackObservationNeeds(request.source.authored ?? request.source, false, false)
+                .endpoint,
+            )
+          : undefined,
       }
-    } catch (error) {
-      this.report({ code: 'runtime.inspection', message: String(error), error })
-      throw error
+    })
+  }
+
+  preparePresence(
+    next: LayerResolution,
+    values: VariableValues,
+    retargets: ReadonlySet<string>,
+  ): PresencePreparation {
+    this.updateOperations(next, values, retargets)
+    const receivers = new Map<Receiver, Set<string>>()
+
+    for (const [name, bindings] of this.targetReceivers) {
+      for (const receiver of bindings) {
+        const names = receivers.get(receiver) ?? new Set<string>()
+        names.add(name)
+        receivers.set(receiver, names)
+      }
     }
+
+    for (const operation of this.operations) {
+      for (const item of operation.work) {
+        const receiver = operation.receivers.get(item)!
+        const names = receivers.get(receiver) ?? new Set<string>()
+        names.add(item.track.target)
+        receivers.set(receiver, names)
+      }
+    }
+
+    const normal = this.disposed || this.suspended ? emptyResolution() : next
+
+    return {
+      reduced: this.motion.matches,
+      preserve: this.operations.size > 0,
+      receivers: [...receivers].map(([receiver, names]) => ({
+        id: receiver.id,
+        names: [...names],
+        normal,
+        previous: receiver.resolution,
+        from: receiver.layers,
+        to: this.runtimeLayers(normal),
+      })),
+      active: this.active.map((entry) => ({
+        id: entry.id,
+        receiver: entry.receiver.id,
+        target: entry.track.target,
+        property: entry.track.property,
+        sourceProperty: entry.sourceProperty,
+        sourceDestination: entry.sourceDestination,
+        track: entry.track,
+        operation: entry.operation?.id,
+        finished: entry.group?.isFinished,
+      })),
+      operations: [...this.operations].map((operation) => ({
+        id: operation.id,
+        finished: operation.group.isFinished,
+        layers: operation.layers.map((layer) => layer.id),
+        bindings: [...operation.bindings].map(([receiver, properties]) => ({
+          receiver,
+          properties: [...properties],
+        })),
+      })),
+    }
+  }
+
+  observeReceiverStarts(receiver: number, templates: readonly LayerTrackTemplate[]) {
+    const element = this.receivingElement(receiver)
+    const implicit = templates.filter((track) => track.implicitStart)
+    const displayed = new Map<string, string>()
+
+    if (implicit.length > 0) {
+      const style = element.isConnected ? getComputedStyle(element) : element.style
+
+      for (const track of implicit)
+        displayed.set(workKey(track), style.getPropertyValue(track.property))
+    }
+
+    return displayed
+  }
+
+  observeReceiverAddresses(
+    receiver: number,
+    resolution: LayerResolution,
+    targets: ReadonlySet<string>,
+  ) {
+    const element = this.receivingElement(receiver)
+
+    return resolution.presentation.targets
+      .filter((target) => targets.has(target.name))
+      .map((target) => ({
+        target: target.name,
+        addresses: this.declarationAddresses(resolution, element, target.name),
+      }))
+  }
+
+  observeTakeoverAddresses(
+    previous: LayerResolution,
+    next: LayerResolution,
+    sources: readonly { readonly receiver: number; readonly target: string }[],
+  ) {
+    const unique = new Map(
+      sources.map((source) => [`${source.receiver}\0${source.target}`, source]),
+    )
+
+    return [...unique.values()].map((source) => {
+      const element = this.receivingElement(source.receiver)
+      const observed = new Map<string, readonly string[]>()
+
+      return {
+        ...source,
+        previous: this.declarationAddresses(previous, element, source.target, observed),
+        next: this.declarationAddresses(next, element, source.target, observed),
+      }
+    })
+  }
+
+  abortPresencePlanning() {
+    this.pendingHandoffs.clear()
   }
 
   private clearReferenceFrame() {
@@ -1487,7 +1556,7 @@ export class PresentationExecutor {
     for (const entry of this.active) {
       if (entry.reference === undefined || entry.animation.playState === 'paused') continue
       const next = this.referenceValue(
-        entry.element,
+        entry.receiver.element,
         entry.source.property,
         entry.source.destinationValue,
         trackObservationNeeds(entry.source, false, false).endpoint,
@@ -1499,7 +1568,8 @@ export class PresentationExecutor {
 
     if (retargets.size > 0) {
       try {
-        this.applyLayerChange(this.layerResolution, this.layerResolution, retargets)
+        if (this.environment) this.environment.retarget(retargets)
+        else this.applyLayerChange(this.layerResolution, this.layerResolution, retargets)
       } catch (error) {
         this.report({ code: 'runtime.animation', message: String(error), error })
       }
@@ -1520,13 +1590,8 @@ export class PresentationExecutor {
   }
 
   private motionChanged = () => {
-    if (this.motion.matches && this.presentationMode !== 'preview') {
-      const retargets = new Set(
-        this.active.map((entry) => layerPropertyKey(entry.track.target, entry.sourceProperty)),
-      )
-
-      this.applyLayerChange(this.layerResolution, this.layerResolution, retargets)
-    }
+    if (this.environment) this.environment.motionChanged()
+    else coordinateMotionChange(this, this.layerResolution, this.values, this.report)
   }
 
   /** Detaches owners before ending sessions so their queued callbacks cannot restore styles again. */
@@ -1629,14 +1694,23 @@ export class PresentationExecutor {
   }
 
   private lifecycleProperties(element: HTMLElement): ReadonlySet<string> {
-    const receiver = this.receiverId(element)
+    const receivers = new Set(
+      [...this.operations].flatMap((operation) =>
+        [...operation.receivers.values()]
+          .filter((receiver) => receiver.element === element)
+          .map((receiver) => receiver.id),
+      ),
+    )
 
     return new Set(
       [...this.operations]
         .filter((operation) => !operation.group.isFinished)
         .flatMap((operation) =>
           operation.layers
-            .filter((layer) => layer.scope === 'all' || layer.scope.includes(receiver))
+            .filter(
+              (layer) =>
+                layer.scope === 'all' || layer.scope.some((receiver) => receivers.has(receiver)),
+            )
             .flatMap((layer) =>
               layer.targets.flatMap((target) => target.properties.map((property) => property.name)),
             ),
@@ -1651,7 +1725,7 @@ export class PresentationExecutor {
     for (const [element, properties] of pending) {
       const protectedAddresses = new Set(
         this.active
-          .filter((entry) => entry.element === element)
+          .filter((entry) => entry.receiver.element === element)
           .flatMap((entry) => [...propertyAddresses(element, entry.track.property)]),
       )
 
@@ -1720,29 +1794,10 @@ export class PresentationExecutor {
     })
   }
 
-  /** Reconciles presentation, optionally restricting writes to one receiving element. */
-  settle(receivingElement?: HTMLElement) {
-    const elements = new Set([...this.targetElements.values()].flat())
-
-    if (receivingElement) elements.add(receivingElement)
-
-    for (const operation of this.operations)
-      for (const item of operation.work) elements.add(item.element)
-
-    for (const element of elements) {
-      if (receivingElement && element !== receivingElement) continue
-
-      const normal = this.disposed || this.suspended ? emptyResolution() : this.layerResolution
-      const resolution = this.effectiveResolution(normal, element)
-      for (const target of resolution.presentation.targets) {
-        for (const property of target.properties) this.write(element, property.name, property.value)
-      }
-
-      this.receiver(element).resolution = resolution
-      this.receiver(element).layers = this.runtimeLayers(normal)
-    }
-
-    this.flushMotionSamples()
+  /** Requests reconciliation after binding or ending a preview on the attached Runtime. */
+  private settle() {
+    // All callers are binding/preview APIs; detached retained presence uses the coordinator.
+    this.environment!.reconcile()
   }
 
   bind(entries: readonly (readonly [string, HTMLElement])[]) {
@@ -1765,8 +1820,10 @@ export class PresentationExecutor {
     const unchanged =
       status === 'ready' &&
       !this.suspended &&
-      entries.length === [...this.targetElements.values()].flat().length &&
-      entries.every(([key, value]) => this.targetElements.get(key)?.includes(value))
+      entries.length === [...this.targetReceivers.values()].flat().length &&
+      entries.every(([key, value]) =>
+        this.targetReceivers.get(key)?.some((receiver) => receiver.element === value),
+      )
 
     if (unchanged) return
 
@@ -1782,7 +1839,7 @@ export class PresentationExecutor {
     this.dirtyProperties.clear()
     this.cancel(false)
     this.restore(this.enterSessions.size > 0)
-    this.targetElements = next
+    this.replaceReceivers(next)
     this.bindingStatus = status
 
     this.environment?.rebound(previousInputs !== JSON.stringify(this.values))
@@ -1797,146 +1854,25 @@ export class PresentationExecutor {
     }
   }
 
-  /** Preview explicit selections while retaining the application's definition and machine history. */
-  previewComposition(
-    from: Composition,
-    to: Composition,
-    transitions: readonly CompositionTransition[] = [],
-    definition = this.definition,
-  ): void {
-    this.prepareCompositionPreview(from, to, transitions, definition)
+  beginPreview(writes: readonly StyleWrite[]) {
+    for (const controller of this.controllers.keys()) controller.setPreview(true)
+
+    this.cancel(true, true)
+    this.restore()
+    this.dirtyProperties.clear()
+    this.presentationMode = 'preparing-preview'
+    this.applyWrites(writes)
   }
 
-  private prepareCompositionPreview(
-    from: Composition,
-    to: Composition,
-    transitions: readonly CompositionTransition[],
-    definition: Definition,
-    phase?: 'enter' | 'leave',
-  ): void {
-    if (this.disposed || this.suspended) {
-      throw new Error('Composition preview requires a mounted layer instance')
-    }
+  abortPreview() {
+    this.cancel()
+    this.restore()
+    this.settle()
+  }
 
-    const prepared: ActiveTrack[] = []
-
-    try {
-      const values = this.snapshotValues(definition)
-      const previous = this.controllerResolution(
-        resolveComposition(definition, values, from),
-        values,
-        performance.now(),
-        definition,
-        false,
-      )
-      const next = this.controllerResolution(
-        resolveComposition(definition, values, to, from, transitions),
-        values,
-        performance.now(),
-        definition,
-        false,
-      )
-      const lifecycle = phase ? captureLifecycleDefinition(definition, phase, values) : undefined
-
-      for (const controller of this.controllers.keys()) controller.setPreview(true)
-      this.cancel(true, true)
-      this.restore()
-      this.propertyMotion.reset()
-      this.dirtyProperties.clear()
-      this.presentationMode = 'preparing-preview'
-
-      const present = (resolution: LayerResolution) => {
-        for (const target of resolution.presentation.targets) {
-          for (const element of this.targetElements.get(target.name) ?? []) {
-            for (const property of target.properties) {
-              this.write(element, property.name, property.value)
-            }
-          }
-        }
-      }
-
-      present(previous)
-
-      for (const [target, elements] of this.targetElements) {
-        const targetResolution = {
-          ...next,
-          presentation: {
-            ...next.presentation,
-            targets: next.presentation.targets.filter((item) => item.name === target),
-          },
-        }
-
-        for (const element of elements) {
-          const tracks = phase
-            ? resolveLifecycleTracks(phase, lifecycle, next.presentation, (name, property) =>
-                name === target ? getComputedStyle(element).getPropertyValue(property) : undefined,
-              )
-            : resolveLayerTracks(
-                previous,
-                targetResolution,
-                values,
-                (_name, property) => getComputedStyle(element).getPropertyValue(property),
-                (message) => this.report({ code: 'runtime.endpoint', message }),
-                () => true,
-              )
-
-          if (tracks.length === 0) continue
-
-          // Lifecycle previews use their own declarations, so ordinary cascade
-          // addresses would add unused writing-context observations.
-          const addresses = phase ? undefined : this.declarationAddresses(next, element, target)
-
-          for (const source of tracks) {
-            const timing = trackTiming(source)
-
-            for (const track of canonicalTracks(element, source)) {
-              const needs = trackObservationNeeds(track, false, false)
-              const plan = planTrack(
-                {
-                  id: nextEffectId++,
-                  receiver: this.receiverId(element),
-                  source,
-                  track,
-                  declarations: addresses ?? [
-                    {
-                      name: source.property,
-                      addresses: propertyAddresses(element, source.property),
-                    },
-                  ],
-                  displayed: needs.displayed
-                    ? getComputedStyle(element).getPropertyValue(track.property)
-                    : undefined,
-                  interrupted: false,
-                },
-                timing,
-                phase === 'leave' ? 'both' : 'backwards',
-              )
-
-              if (plan) prepared.push(this.prepareEffect(plan, element))
-            }
-          }
-        }
-      }
-
-      this.restore()
-      present(next)
-      this.active.push(...prepared)
-      this.presentationMode = 'preview'
-
-      for (const { animation } of prepared) {
-        animation.pause()
-        animation.currentTime = 0
-      }
-    } catch (cause) {
-      for (const { animation } of prepared) animation.cancel()
-
-      this.cancel()
-      this.restore()
-      this.settle()
-      const error = new Error('Could not prepare composition preview', { cause })
-      this.report({ code: 'runtime.preview', message: error.message, error })
-      throw error
-    }
+  private applyWrites(writes: readonly StyleWrite[]) {
+    for (const write of writes)
+      this.write(this.receivingElement(write.receiver), write.property, write.value)
   }
 
   endCompositionPreview(): void {
@@ -1948,15 +1884,6 @@ export class PresentationExecutor {
     this.scheduleReferences()
   }
 
-  /** Prepare scrub-ready lifecycle effects without invoking presence removal callbacks. */
-  previewLifecycle(
-    phase: 'enter' | 'leave',
-    composition = this.layerResolution.composition,
-    definition = this.definition,
-  ): void {
-    this.prepareCompositionPreview(composition, composition, [], definition, phase)
-  }
-
   applyLayerResolution(previous: LayerResolution, next: LayerResolution) {
     this.applyLayerChange(previous, next, new Set())
   }
@@ -1966,204 +1893,19 @@ export class PresentationExecutor {
     next: LayerResolution,
     retargets: ReadonlySet<string>,
   ) {
-    this.updateOperations(next, this.values, retargets)
-    const receivers = new Map<HTMLElement, Set<string>>()
+    coordinatePresencePresentation(this, next, this.values, retargets, this.report)
+  }
 
-    for (const [name, elements] of this.targetElements) {
-      for (const element of elements) {
-        const names = receivers.get(element) ?? new Set<string>()
-        names.add(name)
-        receivers.set(element, names)
-      }
-    }
-
-    for (const operation of this.operations) {
-      for (const item of operation.work) {
-        const names = receivers.get(item.element) ?? new Set<string>()
-        names.add(item.track.target)
-        receivers.set(item.element, names)
-      }
-    }
-
+  applyPlan(plan: PresentationPlan) {
     const prepared: ActiveTrack[] = []
-    const replaced = new Set<ActiveTrack>()
-    const presentations: {
-      element: HTMLElement
-      next: LayerResolution
-      changed: ReadonlySet<string>
-      removed: boolean
-    }[] = []
 
     try {
-      for (const [element, names] of receivers) {
-        const normal = this.disposed || this.suspended ? emptyResolution() : next
-        const effective = this.effectiveResolution(normal, element)
-        const after = {
-          ...effective,
-          presentation: {
-            ...effective.presentation,
-            targets: effective.presentation.targets.filter((target) => names.has(target.name)),
-          },
-        }
-        const before = this.receiver(element).resolution
-        const change: LayerChange = {
-          from: this.receiver(element).layers,
-          to: this.runtimeLayers(normal),
-        }
-        const oldPresentation = composeRuntimeLayers(change.from, this.receiverId(element))
-        const newPresentation = composeRuntimeLayers(change.to, this.receiverId(element))
-        const from = {
-          ...before,
-          presentation: {
-            ...oldPresentation,
-            targets: oldPresentation.targets.filter((target) =>
-              before.presentation.targets.some(
-                (previousTarget) => previousTarget.name === target.name,
-              ),
-            ),
-          },
-        }
-        const to = {
-          ...after,
-          presentation: {
-            ...newPresentation,
-            targets: newPresentation.targets.filter((target) => names.has(target.name)),
-          },
-        }
-        const active = this.active.filter((entry) => entry.element === element)
-        const preparation = prepareLayerChange({
-          previous: from,
-          next: to,
-          values: this.values,
-          active: active.map((entry) => ({ track: entry.track })),
-          retargets,
-        })
-        const displayed = new Map<string, string>()
-        const implicit = preparation.templates.filter((track) => track.implicitStart)
-
-        if (implicit.length > 0) {
-          const style = element.isConnected ? getComputedStyle(element) : element.style
-
-          for (const track of implicit)
-            displayed.set(workKey(track), style.getPropertyValue(track.property))
-        }
-
-        const affected = new Set(preparation.templates.map((track) => track.target))
-
-        for (const target of after.presentation.targets) {
-          if (
-            target.properties.some((property) =>
-              preparation.changed.has(layerPropertyKey(target.name, property.name)),
-            )
-          )
-            affected.add(target.name)
-        }
-
-        const facts = after.presentation.targets
-          .filter((target) => affected.has(target.name))
-          .map((target) => ({
-            target: target.name,
-            addresses: this.declarationAddresses(after, element, target.name),
-          }))
-        const plan = planLayerChange(preparation, displayed, facts)
-        const changed = plan.changed
-
-        for (const message of plan.diagnostics) this.report({ code: 'runtime.endpoint', message })
-
-        if (!this.motion.matches) {
-          for (const { target, addresses } of facts) {
-            for (const source of plan.tracks.filter((track) => track.target === target)) {
-              changed.add(workKey(source))
-              const timing = trackTiming(source)
-
-              if (timing.durationMs === 0) continue
-
-              for (const track of canonicalTracks(element, source)) {
-                if (!ownsCanonicalProperty(addresses, source.property, track.property)) continue
-
-                changed.add(workKey(track))
-                const owner = after.presentation.targets
-                  .find((candidateTarget) => candidateTarget.name === source.target)
-                  ?.properties.find((property) => property.name === source.property)?.owner
-                const operation =
-                  [...this.operations].find((candidate) =>
-                    candidate.layers.some((layer) => layer.id === owner),
-                  ) ??
-                  active.findLast(
-                    (entry) => entry.track.property === track.property && !entry.group?.isFinished,
-                  )?.operation ??
-                  [...this.operations].findLast(
-                    (candidate) =>
-                      !candidate.group.isFinished &&
-                      (candidate.bindings.get(this.receiverId(element))?.has(source.property) ||
-                        candidate.bindings.get(this.receiverId(element))?.has(track.property)),
-                  )
-                const interrupted = active.some((entry) => entry.track.property === track.property)
-                const needs = trackObservationNeeds(track, interrupted, true)
-                const motion = needs.motion ? this.observeMotion(element, track) : undefined
-
-                const authored = source.authored ?? source
-                const trackPlan = planTrack(
-                  {
-                    id: nextEffectId++,
-                    receiver: this.receiverId(element),
-                    source,
-                    track,
-                    declarations: addresses,
-                    displayed: needs.displayed
-                      ? (element.isConnected
-                          ? getComputedStyle(element)
-                          : element.style
-                        ).getPropertyValue(track.property)
-                      : undefined,
-                    interrupted,
-                    motion,
-                    reference: this.referenceValue(
-                      element,
-                      authored.property,
-                      authored.destinationValue,
-                      trackObservationNeeds(authored, false, false).endpoint,
-                    ),
-                  },
-                  timing,
-                  'both',
-                )
-
-                if (trackPlan) {
-                  const entry = this.prepareEffect(trackPlan, element)
-                  entry.operation = operation
-                  entry.group = operation?.group
-                  prepared.push(entry)
-                }
-              }
-            }
-          }
-        }
-
-        const replacedIds = new Set(
-          planEffectChanges(
-            before,
-            after,
-            active.map((entry) => ({
-              id: entry.id,
-              target: entry.track.target,
-              sourceProperty: entry.sourceProperty,
-              property: entry.track.property,
-              track: entry.track,
-            })),
-            retargets,
-            facts,
-          ),
-        )
-
-        for (const entry of active) if (replacedIds.has(entry.id)) replaced.add(entry)
-
-        presentations.push({
-          element,
-          next: after,
-          changed: plan.writes,
-          removed: plan.removedProperties.size > 0,
-        })
+      for (const track of plan.start) {
+        const entry = this.prepareEffect(track, this.receiver(track.receiver))
+        const operation = [...this.operations].find((candidate) => candidate.id === track.operation)
+        entry.operation = operation
+        entry.group = operation?.group
+        prepared.push(entry)
       }
     } catch (error) {
       for (const entry of prepared) entry.animation.cancel()
@@ -2171,6 +1913,19 @@ export class PresentationExecutor {
       this.pendingHandoffs.clear()
       throw error
     }
+
+    if (plan.lifecycle) {
+      for (const sessions of [this.enterSessions, this.leaveSessions]) {
+        for (const session of sessions) {
+          const id = this.sessionId(session)
+
+          if (plan.lifecycle.release.includes(id)) sessions.delete(session)
+        }
+      }
+    }
+
+    const cancelled = new Set(plan.cancel)
+    const replaced = new Set(this.active.filter((entry) => cancelled.has(entry.id)))
 
     const groups = new Set(
       [...replaced, ...prepared].flatMap((entry) => (entry.group ? [entry.group] : [])),
@@ -2188,25 +1943,36 @@ export class PresentationExecutor {
 
     for (const entry of replaced) entry.animation.cancel()
 
-    this.layerResolution = next
-    this.environment?.acceptPresentation(next)
+    if (plan.mode === 'live') {
+      this.layerResolution = plan.resolution
+      this.environment?.acceptPresentation(plan.resolution)
+    }
 
-    for (const presentation of presentations) {
-      const { element, next: resolution, changed, removed } = presentation
+    if (plan.restore) this.restore(plan.preserveLifecycle)
 
-      if (removed) this.restore(this.operations.size > 0, element)
+    for (const presentation of plan.presentations ?? []) {
+      const receiver = this.receiver(presentation.receiver)
 
-      for (const target of resolution.presentation.targets) {
-        for (const property of target.properties) {
-          if (removed || changed.has(layerPropertyKey(target.name, property.name)))
-            this.write(element, property.name, property.value)
-        }
+      if (presentation.restore) this.restore(presentation.preserveLifecycle, receiver.element)
+
+      receiver.resolution = presentation.resolution
+      receiver.layers = presentation.layers
+    }
+
+    this.applyWrites(plan.writes)
+
+    if (plan.mode === 'maintenance') return
+
+    if (plan.mode === 'preview') {
+      this.active.push(...prepared)
+      this.presentationMode = 'preview'
+
+      for (const { animation } of prepared) {
+        animation.pause()
+        animation.currentTime = 0
       }
 
-      this.receiver(element).resolution = resolution
-      this.receiver(element).layers = this.runtimeLayers(
-        this.disposed || this.suspended ? emptyResolution() : next,
-      )
+      return
     }
 
     this.pendingHandoffs.clear()
@@ -2215,55 +1981,67 @@ export class PresentationExecutor {
 
     for (const entry of prepared) {
       entry.animation.play()
-      trackLayoutAnimation(entry.element, entry.track.property, entry.animation)
+      trackLayoutAnimation(entry.receiver.element, entry.track.property, entry.animation)
       this.propertyMotion.register(
-        entry.element,
+        entry.receiver.element,
         entry.track.property,
         entry.animation,
         entry.trajectory,
       )
       void entry.animation.finished
-        .then(() => {
-          if (!this.active.includes(entry)) return undefined
+        .then(
+          () => {
+            if (!this.active.includes(entry)) return undefined
 
-          if (
-            entry.reference !== undefined &&
-            this.referenceValue(
-              entry.element,
-              entry.source.property,
-              entry.source.destinationValue,
-              trackObservationNeeds(entry.source, false, false).endpoint,
-            ) !== entry.reference
-          ) {
-            this.refreshReferences()
+            if (
+              entry.reference !== undefined &&
+              this.referenceValue(
+                entry.receiver.element,
+                entry.source.property,
+                entry.source.destinationValue,
+                trackObservationNeeds(entry.source, false, false).endpoint,
+              ) !== entry.reference
+            ) {
+              this.refreshReferences()
+
+              return undefined
+            }
+
+            if (entry.group) {
+              entry.animation.cancel()
+              this.active = this.active.filter((item) => item !== entry)
+              entry.group.settle(entry.id, 'completed')
+            } else {
+              // Non-presence effects belong to an attached Runtime; disposal cancels them first.
+              this.environment!.completeEffect(entry.id)
+              this.propertyMotion.beginControl(
+                entry.receiver.element,
+                entry.track.property,
+                performance.now(),
+              )
+            }
 
             return undefined
-          }
-
-          entry.animation.cancel()
-          this.active = this.active.filter((item) => item !== entry)
-
-          if (entry.group) entry.group.settle(entry.id, 'completed')
-          else {
-            this.write(entry.element, entry.sourceProperty, entry.sourceDestination)
-            this.settle(entry.element)
-            this.propertyMotion.beginControl(entry.element, entry.track.property, performance.now())
-          }
-
-          return undefined
-        })
-        .catch((error) => {
-          if (!this.active.includes(entry)) return
-
-          this.active = this.active.filter((item) => item !== entry)
-
-          if (entry.group) {
-            if (entry.group.settle(entry.id, 'failed')) entry.operation?.report(error)
-          } else this.report({ code: 'runtime.animation', message: String(error), error })
-        })
+          },
+          (error) => {
+            if (this.active.includes(entry)) this.failTrack(entry, error)
+          },
+        )
+        .catch((error) => this.failTrack(entry, error))
     }
 
     this.scheduleReferences()
+  }
+
+  /** Native failures release effect membership before reporting, including completion callbacks. */
+  private failTrack(entry: ActiveTrack, error: unknown) {
+    this.active = this.active.filter((item) => item !== entry)
+    entry.animation.cancel()
+
+    if (entry.group) {
+      // Group membership is assigned only with its owning presence operation.
+      if (entry.group.settle(entry.id, 'failed')) entry.operation!.report(error)
+    } else this.report({ code: 'runtime.animation', message: String(error), error })
   }
 
   dispose() {
@@ -2279,7 +2057,8 @@ export class PresentationExecutor {
     // Teardown writes are not a new motion source, and must not retain receivers
     // unrelated to the continuing operation's work.
     this.dirtyProperties.clear()
-    this.targetElements.clear()
+    this.targetReceivers.clear()
+    this.pruneReceivers()
     this.controllers.clear()
 
     if (this.operations.size === 0) this.stopMotion()
