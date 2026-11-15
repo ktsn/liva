@@ -48,6 +48,53 @@ function updateMode(instance: LivaInstance, mode: string, options: { paused?: bo
   }
 }
 
+function setupRepeatedThumb() {
+  const source: PropertyIRDefinition = {
+    ...definition,
+    enter: { targets: [] },
+    leave: {
+      timing: { kind: 'tween', durationMs: 100, easing: 'linear' },
+      targets: [
+        {
+          name: 'thumb',
+          properties: [
+            {
+              name: 'opacity',
+              keyframes: [{ offset: 1, value: { kind: 'literal', value: '0' } }],
+            },
+          ],
+        },
+      ],
+    },
+    letBindings: [
+      {
+        name: 'receiver',
+        initializer: {
+          kind: 'call',
+          function: 'interaction',
+          arguments: [{ name: 'target', value: { kind: 'reference', path: ['thumb'] } }],
+        },
+      },
+    ],
+    events: [{ name: 'focus', when: { kind: 'reference', path: ['receiver', 'focus'] } }],
+  }
+
+  const { instance, targets, errors } = setup(source)
+  // The toggle fixture declares thumb, and setup binds every declared target.
+  const first = targets.get('thumb')!
+  const second = document.createElement('div')
+  first.tabIndex = 0
+  first.style.opacity = '0.2'
+  second.tabIndex = 0
+  second.style.opacity = '0.8'
+
+  document.body.append(second)
+  elements.push(second)
+  instance.bind([...targets, ['thumb', second]])
+
+  return { instance, targets, first, second, errors }
+}
+
 afterEach(() => {
   for (const instance of instances.splice(0)) instance.dispose()
 
@@ -55,6 +102,73 @@ afterEach(() => {
 })
 
 describe('browser animation execution', () => {
+  it.each([false, true])(
+    'captures a repeated target from the last receiver unless overridden (override=%s)',
+    (override) => {
+      const { instance, first, second, errors } = setupRepeatedThumb()
+
+      const work = instance.captureLifecycle('leave', ['thumb'], override ? first : undefined)
+
+      expect(work).toHaveLength(1)
+      expect(work[0].element).toBe(override ? first : second)
+      expect(work[0].track.keyframes[0].value).toBe(override ? '0.2' : '0.8')
+      expect(errors).toEqual([])
+    },
+  )
+
+  it.each(['identical', 'reordered', 'repeated'] as const)(
+    'preserves accepted receivers and effects for %s entries matching the unchanged check',
+    (order) => {
+      const { instance, targets, first, second, errors } = setupRepeatedThumb()
+
+      updateMode(instance, 'on', { paused: true })
+      const animations = instance.animations
+
+      expect(animations.length).toBeGreaterThan(0)
+
+      const entries: (readonly [string, HTMLElement])[] =
+        order === 'reordered'
+          ? [['thumb', second], ...targets]
+          : [...targets, ['thumb', order === 'repeated' ? first : second]]
+
+      instance.bind(entries)
+
+      expect(instance.animations).toEqual(animations)
+      expect(instance.captureLifecycle('leave', ['thumb'])[0].element).toBe(second)
+      expect(first.style.translate).toBe('24px')
+      expect(second.style.translate).toBe('24px')
+      expect(errors).toEqual([])
+    },
+  )
+
+  it('connects reactive calls to the last receiver and reconnects when that receiver is removed', async () => {
+    const { instance, targets, first, second, errors } = setupRepeatedThumb()
+    const focused = vi.fn<(name: string) => void>()
+    instance.onEvent = focused
+
+    first.focus()
+
+    await new Promise(requestAnimationFrame)
+
+    expect(focused).not.toHaveBeenCalled()
+
+    second.focus()
+
+    await new Promise(requestAnimationFrame)
+
+    expect(focused).toHaveBeenCalledExactlyOnceWith('focus')
+
+    instance.bind([...targets])
+    focused.mockClear()
+    first.focus()
+
+    await new Promise(requestAnimationFrame)
+
+    expect(focused).toHaveBeenCalledExactlyOnceWith('focus')
+    expect(second.style.translate).toBe('')
+    expect(errors).toEqual([])
+  })
+
   it('does not observe styles for unchanged untimed presentations', () => {
     const source: PropertyIRDefinition = {
       name: 'untimed',

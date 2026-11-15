@@ -76,6 +76,9 @@ type BindingStatus = 'unbound' | 'ready' | 'missing' | 'duplicate'
 /** Preparing previews suppress live restoration; completed previews also survive reduced-motion changes. */
 type PresentationMode = 'live' | 'preparing-preview' | 'preview'
 
+/** Each registered name retains its receiving elements in accepted binding order. */
+type TargetElements = [HTMLElement, ...HTMLElement[]]
+
 export class PresentationExecutor {
   private layerResolution!: LayerResolution
   private environment!: ExecutionEnvironment
@@ -104,8 +107,7 @@ export class PresentationExecutor {
     }
   }
 
-  private targets = new Map<string, HTMLElement>()
-  private targetElements = new Map<string, HTMLElement[]>()
+  private targetElements = new Map<string, TargetElements>()
   private active: ActiveTrack[] = []
   private readonly propertyMotion = new PropertyMotion()
   private readonly dirtyProperties = new Map<HTMLElement, Set<string>>()
@@ -142,7 +144,18 @@ export class PresentationExecutor {
   }
 
   connectBindings(graph: LetBindingGraph, notify: (notification?: ReactiveNotification) => void) {
-    this.letBindingCleanups.push(...graph.bind(this.targets, notify))
+    this.letBindingCleanups.push(...graph.bind(new Map(this.representativeTargets()), notify))
+  }
+
+  /**
+   * Single-receiver consumers use the last entry, matching Map construction from bind entries.
+   * @yields Logical target names paired with their last accepted receiving element.
+   */
+  private *representativeTargets() {
+    for (const [name, elements] of this.targetElements) {
+      // bind creates each group with its first element, so every tuple is nonempty.
+      yield [name, elements[elements.length - 1]] as const
+    }
   }
 
   resetPresentation() {
@@ -168,14 +181,14 @@ export class PresentationExecutor {
     // A definition replacement does not validate previously rejected duplicate entries.
     this.bindingStatus = this.resolveBindingStatus(
       definition,
-      this.targets,
+      this.targetElements,
       this.bindingStatus === 'duplicate',
     )
   }
 
   private resolveBindingStatus(
     definition: Definition,
-    targets: ReadonlyMap<string, HTMLElement>,
+    targets: ReadonlyMap<string, TargetElements>,
     duplicate: boolean,
   ): BindingStatus {
     if (duplicate) return 'duplicate'
@@ -228,7 +241,7 @@ export class PresentationExecutor {
   captureLifecycle(phase: 'enter' | 'leave', names: readonly string[], element?: HTMLElement) {
     const definition = this.definition
     const targets = new Map(
-      [...this.targets]
+      [...this.representativeTargets()]
         .filter(([name]) => names.includes(name))
         .map(([name, target]) => [name, element ?? target]),
     )
@@ -779,7 +792,18 @@ export class PresentationExecutor {
   bind(entries: readonly (readonly [string, HTMLElement])[]) {
     if (this.disposed) return
 
-    const next = new Map(entries)
+    const next = new Map<string, TargetElements>()
+
+    for (const [name, element] of entries) {
+      const elements = next.get(name)
+
+      if (elements) {
+        elements.push(element)
+      } else {
+        next.set(name, [element])
+      }
+    }
+
     const duplicate = next.size !== entries.length && !hasLifecycle(this.definition)
     const status = this.resolveBindingStatus(this.definition, next, duplicate)
     const unchanged =
@@ -801,13 +825,7 @@ export class PresentationExecutor {
     this.dirtyProperties.clear()
     this.cancel(false)
     this.restore(this.enterSessions.size > 0)
-    this.targets = next
-    this.targetElements.clear()
-    for (const [name, element] of entries) {
-      const elements = this.targetElements.get(name) ?? []
-      elements.push(element)
-      this.targetElements.set(name, elements)
-    }
+    this.targetElements = next
     this.bindingStatus = status
 
     this.environment.rebound(previousInputs !== JSON.stringify(this.values))
@@ -1015,7 +1033,7 @@ export class PresentationExecutor {
 
       if (implicit.length === 0) continue
 
-      const element = this.targets.get(target.name)
+      const element = this.targetElements.get(target.name)?.at(-1)
       const style = element ? getComputedStyle(element) : undefined
 
       for (const track of implicit)
@@ -1208,7 +1226,6 @@ export class PresentationExecutor {
     this.cancel()
     this.restore()
     this.motion.removeEventListener('change', this.motionChanged)
-    this.targets.clear()
     this.targetElements.clear()
     this.disposed = true
   }
