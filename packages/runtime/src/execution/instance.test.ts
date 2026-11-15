@@ -181,3 +181,78 @@ describe('composition snapshots', () => {
     expect(second.composition).toEqual({ layers: { visible: false }, states: { history: 'idle' } })
   })
 })
+
+describe('public facade compatibility', () => {
+  it.each(['onEvent', 'onUpdate'] as const)(
+    'calls %s with the public instance as receiver',
+    (callback) => {
+      const instance = createInstance(false)
+      const observed: LivaInstance[] = []
+      instance[callback] = function (this: LivaInstance) {
+        observed.push(this)
+      }
+
+      instance.updateParameters({ ready: true })
+
+      expect(observed).toHaveLength(1)
+      expect(observed[0]).toBe(instance)
+    },
+  )
+
+  it.each(['onEvent', 'onUpdate'] as const)('stops calling a deleted %s property', (callback) => {
+    const instance = createInstance(false)
+    let calls = 0
+    instance[callback] = () => {
+      calls++
+    }
+
+    delete instance[callback]
+    instance.updateParameters({ ready: true })
+
+    expect(calls).toBe(0)
+    expect(Object.hasOwn(instance, callback)).toBe(false)
+  })
+
+  it('calls diagnostics with the public instance as receiver', () => {
+    const observed: LivaInstance[] = []
+    const instance = new LivaInstance(definition, { ready: false }, function (this: LivaInstance) {
+      observed.push(this)
+    })
+    instances.push(instance)
+
+    instance.updateParameters({ ready: 'invalid' })
+
+    expect(observed).toHaveLength(1)
+    expect(observed[0]).toBe(instance)
+  })
+
+  it('uses a directly assigned definition for subsequent event evaluation', () => {
+    const instance = createInstance(false)
+    const replacement: Definition = {
+      ...definition,
+      events: [{ name: 'replacement', when: { kind: 'reference', path: ['ready'] } }],
+    }
+    const emitted: string[] = []
+    instance.definition = replacement
+    instance.onEvent = (name) => emitted.push(name)
+
+    instance.updateParameters({ ready: true })
+    instance.updateParameters({ ready: false })
+    instance.updateParameters({ ready: true })
+
+    expect(instance.definition).toBe(replacement)
+    expect(emitted).toEqual(['replacement'])
+  })
+
+  it('returns the assigned update callback', () => {
+    const instance = createInstance(false)
+    const observed: boolean[] = []
+    const update = () => observed.push(instance.composition.layers.idle)
+    instance.onUpdate = update
+
+    instance.updateParameters({ ready: true })
+
+    expect(instance.onUpdate).toBe(update)
+    expect(observed).toEqual([true])
+  })
+})

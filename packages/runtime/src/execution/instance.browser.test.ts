@@ -1,5 +1,5 @@
 import type { Definition as PropertyIRDefinition } from '../model/definition.ts'
-import { afterEach, describe, expect, it } from 'vite-plus/test'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { cdp, userEvent } from 'vite-plus/test/browser'
 import type { CDPSession } from '@vitest/browser-playwright'
 import constrainedFixture from '../../../../fixtures/constrained.json'
@@ -48,6 +48,53 @@ function updateMode(instance: LivaInstance, mode: string, options: { paused?: bo
   }
 }
 
+function setupRepeatedThumb() {
+  const source: PropertyIRDefinition = {
+    ...definition,
+    enter: { targets: [] },
+    leave: {
+      timing: { kind: 'tween', durationMs: 100, easing: 'linear' },
+      targets: [
+        {
+          name: 'thumb',
+          properties: [
+            {
+              name: 'opacity',
+              keyframes: [{ offset: 1, value: { kind: 'literal', value: '0' } }],
+            },
+          ],
+        },
+      ],
+    },
+    letBindings: [
+      {
+        name: 'receiver',
+        initializer: {
+          kind: 'call',
+          function: 'interaction',
+          arguments: [{ name: 'target', value: { kind: 'reference', path: ['thumb'] } }],
+        },
+      },
+    ],
+    events: [{ name: 'focus', when: { kind: 'reference', path: ['receiver', 'focus'] } }],
+  }
+
+  const { instance, targets, errors } = setup(source)
+  // The toggle fixture declares thumb, and setup binds every declared target.
+  const first = targets.get('thumb')!
+  const second = document.createElement('div')
+  first.tabIndex = 0
+  first.style.opacity = '0.2'
+  second.tabIndex = 0
+  second.style.opacity = '0.8'
+
+  document.body.append(second)
+  elements.push(second)
+  instance.bind([...targets, ['thumb', second]])
+
+  return { instance, targets, first, second, errors }
+}
+
 afterEach(() => {
   for (const instance of instances.splice(0)) instance.dispose()
 
@@ -55,6 +102,100 @@ afterEach(() => {
 })
 
 describe('browser animation execution', () => {
+  it('captures a repeated target from its last accepted receiver', () => {
+    const { instance, second, errors } = setupRepeatedThumb()
+
+    const work = instance.captureLifecycle('leave', ['thumb'])
+
+    expect(work).toHaveLength(1)
+    expect(work[0].element).toBe(second)
+    expect(work[0].track.keyframes[0].value).toBe('0.8')
+    expect(errors).toEqual([])
+  })
+
+  it.each(['reordered', 'repeated'] as const)(
+    'preserves accepted receivers and effects for %s entries matching the unchanged check',
+    (order) => {
+      const { instance, targets, first, second, errors } = setupRepeatedThumb()
+
+      updateMode(instance, 'on', { paused: true })
+      const animations = instance.animations
+
+      expect(animations.length).toBeGreaterThan(0)
+
+      const entries: (readonly [string, HTMLElement])[] =
+        order === 'reordered' ? [['thumb', second], ...targets] : [...targets, ['thumb', first]]
+
+      instance.bind(entries)
+
+      expect(instance.animations).toEqual(animations)
+      expect(instance.captureLifecycle('leave', ['thumb'])[0].element).toBe(second)
+      expect(first.style.translate).toBe('24px')
+      expect(second.style.translate).toBe('24px')
+      expect(errors).toEqual([])
+    },
+  )
+
+  it('connects reactive calls to the last receiver and reconnects when that receiver is removed', async () => {
+    const { instance, targets, first, second, errors } = setupRepeatedThumb()
+    const focused = vi.fn<(name: string) => void>()
+    instance.onEvent = focused
+
+    first.focus()
+
+    await new Promise(requestAnimationFrame)
+
+    expect(focused).not.toHaveBeenCalled()
+
+    second.focus()
+
+    await new Promise(requestAnimationFrame)
+
+    expect(focused).toHaveBeenCalledExactlyOnceWith('focus')
+
+    instance.bind([...targets])
+    focused.mockClear()
+    first.focus()
+
+    await new Promise(requestAnimationFrame)
+
+    expect(focused).toHaveBeenCalledExactlyOnceWith('focus')
+    expect(second.style.translate).toBe('')
+    expect(errors).toEqual([])
+  })
+
+  it('does not observe styles for unchanged untimed presentations', () => {
+    const source: PropertyIRDefinition = {
+      name: 'untimed',
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'box',
+              properties: [
+                { name: 'opacity', value: { kind: 'literal', value: '1' } },
+                { name: 'width', value: { kind: 'literal', value: '10px' } },
+                { name: 'height', value: { kind: 'literal', value: '20px' } },
+              ],
+            },
+          ],
+        },
+      ],
+    }
+    const { instance } = setup(source)
+    const observe = vi.spyOn(window, 'getComputedStyle')
+
+    try {
+      for (let update = 0; update < 10; update++) instance.updateParameters({})
+
+      expect(observe).not.toHaveBeenCalled()
+      expect(instance.animations).toEqual([])
+    } finally {
+      observe.mockRestore()
+    }
+  })
+
   it('plays compiled explicit self properties on the root with their shared timing', async () => {
     const source = decodeBundle(JSON.stringify(selfFixture)).definitions[0]
     const { instance, targets, errors } = setup(source, { active: false })
@@ -137,6 +278,27 @@ describe('browser animation execution', () => {
     instance.bind([...targets])
 
     expect(targets.get('body')!.style.opacity).toBe('1')
+  })
+
+  it('keeps rejected duplicates suspended when replacement adds lifecycle support until rebinding', () => {
+    const { instance, targets, errors } = setup()
+    // setup binds every target declared by the toggle fixture, including thumb.
+    const thumb = targets.get('thumb')!
+    const duplicate = [...targets, ['thumb', thumb] as const]
+
+    instance.bind(duplicate)
+    instance.replaceDefinition({ ...definition, enter: { targets: [] } })
+    updateMode(instance, 'on')
+
+    expect(thumb.style.translate).toBe('')
+    expect(instance.animations).toHaveLength(0)
+    expect(errors).toEqual([
+      expect.objectContaining({ code: 'runtime.targets', message: 'Duplicate target binding' }),
+    ])
+
+    instance.bind(duplicate)
+
+    expect(thumb.style.translate).toBe('24px')
   })
 
   it('interpolates a paused transition and restores owned styles on disposal', () => {

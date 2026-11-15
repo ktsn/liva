@@ -1205,6 +1205,31 @@ function start(phase: 'enter' | 'leave', instance: LivaInstance, element: HTMLEl
   return session
 }
 
+/** Dispatches a native media-query event in the test's call stack, before Promise callbacks can run. */
+function setupWithSynchronousMotionChange(
+  source: Definition,
+  inputs: ConstructorParameters<typeof LivaInstance>[1],
+) {
+  const media = matchMedia('(prefers-reduced-motion: reduce)')
+  const observe = vi.spyOn(window, 'matchMedia').mockReturnValue(media)
+
+  try {
+    const fixture = setup(source, inputs)
+
+    return {
+      ...fixture,
+      reduceMotion: () => {
+        const matches = vi.spyOn(media, 'matches', 'get').mockReturnValue(true)
+        cleanup.push(() => matches.mockRestore())
+
+        media.dispatchEvent(new Event('change'))
+      },
+    }
+  } finally {
+    observe.mockRestore()
+  }
+}
+
 describe('layer lifecycle snapshots', () => {
   const lifecycle: import('../model/definition.ts').Transition = {
     timing: { kind: 'tween', durationMs: 1000, easing: 'linear' } as const,
@@ -1250,6 +1275,93 @@ describe('layer lifecycle snapshots', () => {
 
     expect(element.style.scale).toBe('0.9')
     expect(element.style.opacity).toBe('0.5')
+  })
+
+  it('restores removed enter styles synchronously on cancellation while preserving a running leave', async () => {
+    const source: Definition = {
+      ...definition,
+      layers: definition.layers.filter((layer) => layer.name === 'press'),
+      enter: lifecycle,
+      leave: {
+        timing: lifecycle.timing,
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'opacity',
+                keyframes: [{ offset: 1, value: { kind: 'literal', value: '0' } }],
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const { instance, element, errors, reduceMotion } = setupWithSynchronousMotionChange(source, {
+      hover: false,
+      press: true,
+      size: 1,
+    })
+    const enter = start('enter', instance, element)
+    const leave = start('leave', instance, element)
+    const effects = element.getAnimations()
+
+    expect(effects).toHaveLength(2)
+
+    effects[1].currentTime = 500
+    instance.updateParameters({ hover: false, press: false, size: 1 })
+
+    expect(getComputedStyle(element).scale).toBe('0.5')
+
+    reduceMotion()
+
+    // These checks run before the cancelled session's resolved Promise is delivered.
+    expect(enter.isFinished).toBe(true)
+    expect(element.style.scale).toBe('')
+    expect(element.style.opacity).toBe('0.5')
+    expect(leave.isFinished).toBe(false)
+    expect(element.getAnimations()).toHaveLength(1)
+    expect(getComputedStyle(element).opacity).toBe('0.25')
+
+    expect(await enter.finished).toBe('superseded')
+    expect(errors).toEqual([])
+  })
+
+  it.each(['preview', 'replacement'] as const)(
+    'ignores queued enter completion after cancellation through %s',
+    async (operation) => {
+      const source = { ...timedDefinition(), enter: lifecycle }
+      const { instance, element } = setup(source)
+      const session = start('enter', instance, element)
+
+      if (operation === 'preview') {
+        instance.previewComposition(instance.composition, instance.composition)
+        instance.endCompositionPreview()
+      } else {
+        instance.replaceDefinition(source)
+      }
+
+      expect(session.isFinished).toBe(true)
+
+      element.style.scale = '1.7'
+
+      await session.finished
+
+      expect(element.style.scale).toBe('1.7')
+    },
+  )
+
+  it('does not register an already finished lifecycle session for later restoration', async () => {
+    const { instance, element } = setup(timedDefinition())
+    const session = new LifecycleSession([], 'enter')
+    session.cancel('superseded')
+
+    instance.retainLifecycle('enter', session)
+    element.style.scale = '1.7'
+
+    await session.finished
+
+    expect(element.style.scale).toBe('1.7')
   })
 
   it.each(['finished', 'reduced motion'] as const)(
