@@ -116,7 +116,6 @@ export class PresentationExecutor {
   private controllerInstances = new Set<PropertyController>()
   private enterSessions = new Set<LifecycleSession>()
   private leaveSessions = new Set<LifecycleSession>()
-  private settledLifecycleSessions = new WeakSet<LifecycleSession>()
   private owned: OwnedElement[] = []
   private presentationMode: PresentationMode = 'live'
   private bindingStatus: BindingStatus = 'unbound'
@@ -203,26 +202,23 @@ export class PresentationExecutor {
     return missing ? 'missing' : 'ready'
   }
 
+  /** Retains live ownership; already finished sessions and duplicate registrations are ignored. */
   retainLifecycle(phase: 'enter' | 'leave', session: LifecycleSession) {
     const sessions = phase === 'enter' ? this.enterSessions : this.leaveSessions
 
-    if (sessions.has(session)) return
+    if (session.isFinished || sessions.has(session)) return
 
     sessions.add(session)
 
     void session.finished.then(() => {
-      if (this.settledLifecycleSessions.has(session)) return undefined
-
-      this.settledLifecycleSessions.add(session)
+      // Removal also invalidates callbacks queued before cancellation or disposal.
+      if (!sessions.has(session)) return undefined
 
       // Sessions mark themselves finished before their Promise callbacks run, so
-      // several presence boundaries may already be done here. Remove them together
-      // and mark their callbacks handled to avoid repeating restore/settle for each.
+      // several presence boundaries may already be done here. Remove them together;
+      // later callbacks observe their removal and skip repeated restoration.
       for (const completed of sessions) {
-        if (completed.isFinished) {
-          sessions.delete(completed)
-          this.settledLifecycleSessions.add(completed)
-        }
+        if (completed.isFinished) sessions.delete(completed)
       }
 
       if (phase === 'enter' && !this.disposed && this.presentationMode === 'live') {
@@ -594,8 +590,19 @@ export class PresentationExecutor {
   private motionChanged = () => {
     if (this.motion.matches && this.presentationMode !== 'preview') {
       this.cancel()
+      // Cancelled enters no longer restore from a later completion callback.
+      // Remove stale declarations now, preserving independently running leaves.
+      this.restore(this.leaveSessions.size > 0)
       this.settle()
     }
+  }
+
+  /** Detaches owners before ending sessions so their queued callbacks cannot restore styles again. */
+  private cancelEnterSessions(reason: 'superseded' | 'owner-teardown') {
+    const sessions = [...this.enterSessions]
+    this.enterSessions.clear()
+
+    for (const session of sessions) session.cancel(reason)
   }
 
   private cancel(cancelEnter = true, preserveControllerSnapshot = false) {
@@ -606,10 +613,7 @@ export class PresentationExecutor {
     }
     this.propertyMotion.reset()
     this.dirtyProperties.clear()
-    if (cancelEnter) {
-      for (const session of this.enterSessions) session.cancel('superseded')
-      this.enterSessions.clear()
-    }
+    if (cancelEnter) this.cancelEnterSessions('superseded')
 
     for (const { animation } of this.active) {
       animation.cancel()
@@ -1217,9 +1221,7 @@ export class PresentationExecutor {
     this.releaseControllers()
     this.leaveSessions.clear()
 
-    for (const session of this.enterSessions) session.cancel('owner-teardown')
-
-    this.enterSessions.clear()
+    this.cancelEnterSessions('owner-teardown')
     this.disconnectBindings()
     this.propertyMotion.reset()
     this.dirtyProperties.clear()
