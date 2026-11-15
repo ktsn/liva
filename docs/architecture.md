@@ -104,7 +104,12 @@ cascade, including declarations removed during entry; settlement during a previe
 only releases registrations and leaves preview effects untouched.
 
 Runtime also coordinates inspection and preview planning. Element IDs identify
-physical receivers, while logical target names identify declaration scopes. Preview
+physical receivers, while logical target names identify declaration scopes. The
+executor stores each current physical receiver as one `{ id, element }` record;
+target aliases and active tracks share that record. Only a current ID-to-receiver
+index persists. Element deduplication uses a temporary map during binding, and
+rebinding/disposal releases the old binding indexes. Receiver IDs are valid for the
+current binding; plans never retain DOM-bearing Receiver records. Preview
 templates are keyed by target name, and observed declaration addresses are matched
 by both target name and receiver ID, so a root and its alias cannot overwrite each
 other's tracks. Preview controllers remain frozen, live velocity is not inherited,

@@ -65,11 +65,16 @@ function inlineDeclarations(element: HTMLElement): Map<string, InlineValue> {
 
 let nextEffectId = 0
 
+/** One physical receiver shared by every logical target alias in the current binding. */
+type Receiver = {
+  readonly id: number
+  readonly element: HTMLElement
+}
+
 type ActiveTrack = {
   id: number
-  receiver: number
+  receiver: Receiver
   track: ResolvedTrack
-  element: HTMLElement
   animation: Animation
   sourceProperty: string
   sourceDestination: string
@@ -83,8 +88,11 @@ type BindingStatus = 'unbound' | 'ready' | 'missing' | 'duplicate'
 /** Preparing previews suppress live restoration; completed previews also survive reduced-motion changes. */
 type PresentationMode = 'live' | 'preparing-preview' | 'preview'
 
-/** Each registered name retains its receiving elements in accepted binding order. */
+/** Nonempty input group assembled while validating bind entries. */
 type TargetElements = [HTMLElement, ...HTMLElement[]]
+
+/** Accepted receiver order for one logical target; aliases can share Receiver records. */
+type TargetReceivers = [Receiver, ...Receiver[]]
 
 /** Configured instances remain registered while another controller/declaration owns their address. */
 type ControllerState = {
@@ -123,36 +131,46 @@ export class PresentationExecutor {
     }
   }
 
-  private readonly receiverIds = new WeakMap<HTMLElement, number>()
   private nextReceiverId = 0
-  private readonly receivingElements = new Map<number, HTMLElement>()
+  private readonly receivers = new Map<number, Receiver>()
 
-  private receiverId(element: HTMLElement): number {
-    const previous = this.receiverIds.get(element)
-
-    if (previous !== undefined) return previous
-
-    const id = this.nextReceiverId++
-    this.receiverIds.set(element, id)
-    this.receivingElements.set(id, element)
-
-    return id
+  private receiver(id: number): Receiver {
+    // Requests/plans are synchronous and use IDs supplied for the current binding.
+    return this.receivers.get(id)!
   }
 
-  private receivingElement(id: number): HTMLElement {
-    // Requests/plans are synchronous and use IDs supplied by this executor for the current binding.
-    return this.receivingElements.get(id)!
+  /** Replaces both binding indexes; the element lookup exists only during registration. */
+  private replaceReceivers(targets: ReadonlyMap<string, TargetElements>) {
+    const byElement = new Map<HTMLElement, Receiver>()
+    this.receivers.clear()
+    this.targetReceivers.clear()
+
+    const register = (element: HTMLElement): Receiver => {
+      const previous = byElement.get(element)
+
+      if (previous) return previous
+
+      const receiver = { id: this.nextReceiverId++, element }
+      byElement.set(element, receiver)
+      this.receivers.set(receiver.id, receiver)
+
+      return receiver
+    }
+
+    for (const [target, elements] of targets) {
+      const [first, ...rest] = elements
+      this.targetReceivers.set(target, [register(first), ...rest.map(register)])
+    }
   }
 
   /** Materializes a final identifier-based plan; all timing/frame decisions are already pure. */
-  private prepareEffect(plan: TrackPlan, element: HTMLElement): ActiveTrack {
-    const animation = materializeEffect(plan, element)
+  private prepareEffect(plan: TrackPlan, receiver: Receiver): ActiveTrack {
+    const animation = materializeEffect(plan, receiver.element)
 
     return {
       id: plan.id,
-      receiver: plan.receiver,
+      receiver,
       track: plan.track,
-      element,
       animation,
       sourceProperty: plan.sourceProperty,
       sourceDestination: plan.sourceDestination,
@@ -161,7 +179,7 @@ export class PresentationExecutor {
     }
   }
 
-  private targetElements = new Map<string, TargetElements>()
+  private readonly targetReceivers = new Map<string, TargetReceivers>()
   private active: ActiveTrack[] = []
   private readonly propertyMotion = new PropertyMotion()
   private readonly dirtyProperties = new Map<HTMLElement, Set<string>>()
@@ -203,9 +221,9 @@ export class PresentationExecutor {
    * @yields Logical target names paired with their last accepted receiving element.
    */
   private *representativeTargets() {
-    for (const [name, elements] of this.targetElements) {
-      // bind creates each group with its first element, so every tuple is nonempty.
-      yield [name, elements[elements.length - 1]] as const
+    for (const [name, receivers] of this.targetReceivers) {
+      // bind creates each group with its first receiver, so every tuple is nonempty.
+      yield [name, receivers[receivers.length - 1].element] as const
     }
   }
 
@@ -234,14 +252,14 @@ export class PresentationExecutor {
     // A definition replacement does not validate previously rejected duplicate entries.
     this.bindingStatus = this.resolveBindingStatus(
       definition,
-      this.targetElements,
+      this.targetReceivers,
       this.bindingStatus === 'duplicate',
     )
   }
 
   private resolveBindingStatus(
     definition: Definition,
-    targets: ReadonlyMap<string, TargetElements>,
+    targets: ReadonlyMap<string, unknown>,
     duplicate: boolean,
   ): BindingStatus {
     if (duplicate) return 'duplicate'
@@ -300,7 +318,7 @@ export class PresentationExecutor {
     const interrupted = this.active.filter(
       (entry) =>
         names.includes(entry.track.target) &&
-        entry.element === element &&
+        entry.receiver.element === element &&
         (properties === undefined || properties.includes(entry.track.property)),
     )
     this.active = this.active.filter((entry) => !interrupted.includes(entry))
@@ -352,15 +370,15 @@ export class PresentationExecutor {
 
   /** Metadata has no live style values; Runtime chooses which CSS observations follow. */
   presentationFacts(resolution: LayerResolution): PresentationFacts {
-    const receivers = [...this.targetElements].flatMap(([target, elements]) =>
-      elements.map((element) => ({ id: this.receiverId(element), target })),
+    const receivers = [...this.targetReceivers].flatMap(([target, bindings]) =>
+      bindings.map((receiver) => ({ id: receiver.id, target })),
     )
     const lifecycle = [...this.lifecycleSessions].map(([id, { phase, session }]) => ({
       id,
       phase,
       finished: session.isFinished,
       protected: receivers.flatMap((receiver) => {
-        const element = this.receivingElement(receiver.id)
+        const element = this.receiver(receiver.id).element
 
         return resolution.presentation.targets
           .filter((target) => target.name === receiver.target)
@@ -388,7 +406,7 @@ export class PresentationExecutor {
       })),
       active: this.active.map((entry) => ({
         id: entry.id,
-        receiver: entry.receiver,
+        receiver: entry.receiver.id,
         target: entry.track.target,
         property: entry.track.property,
         sourceProperty: entry.sourceProperty,
@@ -412,7 +430,7 @@ export class PresentationExecutor {
         return receivers
           .filter((receiver) => receiver.target === target.name)
           .map((receiver) => {
-            const element = this.receivingElement(receiver.id)
+            const element = this.receiver(receiver.id).element
 
             return {
               ...receiver,
@@ -470,7 +488,7 @@ export class PresentationExecutor {
       if (!track.implicitStart) continue
 
       if (!styles.has(track.target)) {
-        const element = this.targetElements.get(track.target)?.at(-1)
+        const element = this.targetReceivers.get(track.target)?.at(-1)?.element
         styles.set(track.target, element ? getComputedStyle(element) : undefined)
       }
 
@@ -491,7 +509,7 @@ export class PresentationExecutor {
     }[],
   ): readonly TrackCandidate[] {
     return tracks.flatMap(({ receiver, source, declarations }) => {
-      const element = this.receivingElement(receiver)
+      const element = this.receiver(receiver).element
 
       return canonicalTracks(element, source).map((track) => ({
         receiver,
@@ -512,7 +530,7 @@ export class PresentationExecutor {
       let style = styles.get(request.receiver)
 
       if (!style) {
-        style = getComputedStyle(this.receivingElement(request.receiver))
+        style = getComputedStyle(this.receiver(request.receiver).element)
         styles.set(request.receiver, style)
       }
 
@@ -522,7 +540,7 @@ export class PresentationExecutor {
 
   observeTracks(requests: readonly TrackObservationRequest[]): readonly TrackSnapshot[] {
     return requests.map((request) => {
-      const element = this.receivingElement(request.receiver)
+      const element = this.receiver(request.receiver).element
 
       return {
         id: nextEffectId++,
@@ -563,7 +581,7 @@ export class PresentationExecutor {
     for (const entry of this.active) {
       if (entry.reference === undefined || entry.animation.playState === 'paused') continue
       const next = propertyReference(
-        entry.element,
+        entry.receiver.element,
         entry.track.property,
         entry.track.destinationValue,
       )
@@ -703,7 +721,7 @@ export class PresentationExecutor {
     for (const [element, properties] of pending) {
       const protectedAddresses = new Set(
         this.active
-          .filter((entry) => entry.element === element)
+          .filter((entry) => entry.receiver.element === element)
           .flatMap((entry) => [...propertyAddresses(element, entry.track.property)]),
       )
 
@@ -803,8 +821,10 @@ export class PresentationExecutor {
     const unchanged =
       status === 'ready' &&
       !this.suspended &&
-      entries.length === [...this.targetElements.values()].flat().length &&
-      entries.every(([key, value]) => this.targetElements.get(key)?.includes(value))
+      entries.length === [...this.targetReceivers.values()].flat().length &&
+      entries.every(([key, value]) =>
+        this.targetReceivers.get(key)?.some((receiver) => receiver.element === value),
+      )
 
     if (unchanged) return
 
@@ -819,12 +839,7 @@ export class PresentationExecutor {
     this.dirtyProperties.clear()
     this.cancel(false)
     this.restore([...this.lifecycleSessions.values()].some((entry) => entry.phase === 'enter'))
-    this.receivingElements.clear()
-    this.targetElements = next
-
-    for (const elements of next.values()) {
-      for (const element of elements) this.receivingElements.set(this.receiverId(element), element)
-    }
+    this.replaceReceivers(next)
 
     this.bindingStatus = status
 
@@ -859,7 +874,7 @@ export class PresentationExecutor {
 
   private applyWrites(writes: readonly StyleWrite[]) {
     for (const write of writes)
-      this.write(this.receivingElement(write.receiver), write.property, write.value)
+      this.write(this.receiver(write.receiver).element, write.property, write.value)
   }
 
   endCompositionPreview(): void {
@@ -875,7 +890,7 @@ export class PresentationExecutor {
 
     try {
       for (const track of plan.start)
-        prepared.push(this.prepareEffect(track, this.receivingElement(track.receiver)))
+        prepared.push(this.prepareEffect(track, this.receiver(track.receiver)))
     } catch (error) {
       for (const entry of prepared) entry.animation.cancel()
 
@@ -931,9 +946,9 @@ export class PresentationExecutor {
 
     for (const entry of prepared) {
       entry.animation.play()
-      trackLayoutAnimation(entry.element, entry.track.property, entry.animation)
+      trackLayoutAnimation(entry.receiver.element, entry.track.property, entry.animation)
       this.propertyMotion.register(
-        entry.element,
+        entry.receiver.element,
         entry.track.property,
         entry.animation,
         entry.trajectory,
@@ -945,8 +960,11 @@ export class PresentationExecutor {
 
             if (
               entry.reference !== undefined &&
-              propertyReference(entry.element, entry.sourceProperty, entry.sourceDestination) !==
-                entry.reference
+              propertyReference(
+                entry.receiver.element,
+                entry.sourceProperty,
+                entry.sourceDestination,
+              ) !== entry.reference
             ) {
               this.refreshReferences()
 
@@ -954,7 +972,11 @@ export class PresentationExecutor {
             }
 
             this.environment.completeEffect(entry.id)
-            this.propertyMotion.beginControl(entry.element, entry.track.property, performance.now())
+            this.propertyMotion.beginControl(
+              entry.receiver.element,
+              entry.track.property,
+              performance.now(),
+            )
 
             return undefined
           },
@@ -987,8 +1009,8 @@ export class PresentationExecutor {
     this.cancel()
     this.restore()
     this.motion.removeEventListener('change', this.motionChanged)
-    this.targetElements.clear()
-    this.receivingElements.clear()
+    this.targetReceivers.clear()
+    this.receivers.clear()
     this.disposed = true
   }
 }

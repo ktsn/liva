@@ -359,6 +359,44 @@ describe('browser animation execution', () => {
     },
   )
 
+  it('rebuilds unbound receivers and completes new effects through aliases of the same element', async () => {
+    const { instance, second, errors } = setupRepeatedThumb()
+
+    updateMode(instance, 'on', { paused: true })
+    const previous = [...instance.animations]
+
+    expect(previous.length).toBeGreaterThan(0)
+
+    instance.bind([])
+
+    expect(instance.animations).toEqual([])
+    expect(previous.every((animation) => animation.playState === 'idle')).toBe(true)
+
+    instance.bind([
+      ['thumb', second],
+      ['track', second],
+    ])
+    updateMode(instance, 'off', { paused: true })
+    const replacements = [...instance.animations]
+    const finished = replacements.map((animation) => animation.finished)
+
+    expect(replacements.length).toBeGreaterThan(0)
+    expect(
+      replacements.every(
+        (animation) =>
+          animation.effect instanceof KeyframeEffect && animation.effect.target === second,
+      ),
+    ).toBe(true)
+
+    for (const animation of replacements) animation.finish()
+
+    await Promise.all(finished)
+
+    expect(instance.animations).toEqual([])
+    expect(Number.parseFloat(getComputedStyle(second).translate)).toBe(0)
+    expect(errors).toEqual([])
+  })
+
   it('connects reactive calls to the last receiver and reconnects when that receiver is removed', async () => {
     const { instance, targets, first, second, errors } = setupRepeatedThumb()
     const focused = vi.fn<(name: string) => void>()
