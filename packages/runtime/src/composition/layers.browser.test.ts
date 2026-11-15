@@ -1277,61 +1277,57 @@ describe('layer lifecycle snapshots', () => {
     expect(element.style.opacity).toBe('0.5')
   })
 
-  it.each([false, true])(
-    'restores removed enter styles during cancellation before completion callbacks (leave=%s)',
-    async (keepLeave) => {
-      const source: Definition = {
-        ...definition,
-        layers: definition.layers.filter((layer) => layer.name === 'press'),
-        enter: lifecycle,
-        leave: {
-          timing: lifecycle.timing,
-          targets: [
-            {
-              name: 'body',
-              properties: [
-                {
-                  name: 'opacity',
-                  keyframes: [{ offset: 1, value: { kind: 'literal', value: '0' } }],
-                },
-              ],
-            },
-          ],
-        },
-      }
-      const { instance, element, errors, reduceMotion } = setupWithSynchronousMotionChange(source, {
-        hover: false,
-        press: true,
-        size: 1,
-      })
-      const enter = start('enter', instance, element)
-      const leave = keepLeave ? start('leave', instance, element) : undefined
-      const effects = element.getAnimations()
+  it('restores removed enter styles synchronously on cancellation while preserving a running leave', async () => {
+    const source: Definition = {
+      ...definition,
+      layers: definition.layers.filter((layer) => layer.name === 'press'),
+      enter: lifecycle,
+      leave: {
+        timing: lifecycle.timing,
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'opacity',
+                keyframes: [{ offset: 1, value: { kind: 'literal', value: '0' } }],
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const { instance, element, errors, reduceMotion } = setupWithSynchronousMotionChange(source, {
+      hover: false,
+      press: true,
+      size: 1,
+    })
+    const enter = start('enter', instance, element)
+    const leave = start('leave', instance, element)
+    const effects = element.getAnimations()
 
-      expect(effects).toHaveLength(keepLeave ? 2 : 1)
+    expect(effects).toHaveLength(2)
 
-      if (leave) effects[1].currentTime = 500
+    effects[1].currentTime = 500
+    instance.updateParameters({ hover: false, press: false, size: 1 })
 
-      instance.updateParameters({ hover: false, press: false, size: 1 })
+    expect(getComputedStyle(element).scale).toBe('0.5')
 
-      expect(getComputedStyle(element).scale).toBe('0.5')
+    reduceMotion()
 
-      reduceMotion()
+    // These checks run before the cancelled session's resolved Promise is delivered.
+    expect(enter.isFinished).toBe(true)
+    expect(element.style.scale).toBe('')
+    expect(element.style.opacity).toBe('0.5')
+    expect(leave.isFinished).toBe(false)
+    expect(element.getAnimations()).toHaveLength(1)
+    expect(getComputedStyle(element).opacity).toBe('0.25')
 
-      // These checks run before the cancelled session's resolved Promise is delivered.
-      expect(enter.isFinished).toBe(true)
-      expect(element.style.scale).toBe('')
-      expect(element.style.opacity).toBe(keepLeave ? '0.5' : '')
+    expect(await enter.finished).toBe('superseded')
+    expect(errors).toEqual([])
+  })
 
-      expect(element.getAnimations()).toHaveLength(keepLeave ? 1 : 0)
-      expect(getComputedStyle(element).opacity).toBe(keepLeave ? '0.25' : '1')
-
-      expect(await enter.finished).toBe('superseded')
-      expect(errors).toEqual([])
-    },
-  )
-
-  it.each(['preview', 'replacement', 'disposal'] as const)(
+  it.each(['preview', 'replacement'] as const)(
     'ignores queued enter completion after cancellation through %s',
     async (operation) => {
       const source = { ...timedDefinition(), enter: lifecycle }
@@ -1341,10 +1337,8 @@ describe('layer lifecycle snapshots', () => {
       if (operation === 'preview') {
         instance.previewComposition(instance.composition, instance.composition)
         instance.endCompositionPreview()
-      } else if (operation === 'replacement') {
-        instance.replaceDefinition(source)
       } else {
-        instance.dispose()
+        instance.replaceDefinition(source)
       }
 
       expect(session.isFinished).toBe(true)

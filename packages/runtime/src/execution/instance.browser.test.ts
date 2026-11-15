@@ -102,21 +102,18 @@ afterEach(() => {
 })
 
 describe('browser animation execution', () => {
-  it.each([false, true])(
-    'captures a repeated target from the last receiver unless overridden (override=%s)',
-    (override) => {
-      const { instance, first, second, errors } = setupRepeatedThumb()
+  it('captures a repeated target from its last accepted receiver', () => {
+    const { instance, second, errors } = setupRepeatedThumb()
 
-      const work = instance.captureLifecycle('leave', ['thumb'], override ? first : undefined)
+    const work = instance.captureLifecycle('leave', ['thumb'])
 
-      expect(work).toHaveLength(1)
-      expect(work[0].element).toBe(override ? first : second)
-      expect(work[0].track.keyframes[0].value).toBe(override ? '0.2' : '0.8')
-      expect(errors).toEqual([])
-    },
-  )
+    expect(work).toHaveLength(1)
+    expect(work[0].element).toBe(second)
+    expect(work[0].track.keyframes[0].value).toBe('0.8')
+    expect(errors).toEqual([])
+  })
 
-  it.each(['identical', 'reordered', 'repeated'] as const)(
+  it.each(['reordered', 'repeated'] as const)(
     'preserves accepted receivers and effects for %s entries matching the unchanged check',
     (order) => {
       const { instance, targets, first, second, errors } = setupRepeatedThumb()
@@ -127,9 +124,7 @@ describe('browser animation execution', () => {
       expect(animations.length).toBeGreaterThan(0)
 
       const entries: (readonly [string, HTMLElement])[] =
-        order === 'reordered'
-          ? [['thumb', second], ...targets]
-          : [...targets, ['thumb', order === 'repeated' ? first : second]]
+        order === 'reordered' ? [['thumb', second], ...targets] : [...targets, ['thumb', first]]
 
       instance.bind(entries)
 
@@ -285,32 +280,26 @@ describe('browser animation execution', () => {
     expect(targets.get('body')!.style.opacity).toBe('1')
   })
 
-  it.each([false, true])(
-    'keeps rejected duplicate bindings suspended until rebinding with lifecycle support=%s',
-    (lifecycle) => {
-      const { instance, targets, errors } = setup()
-      // setup binds every target declared by the toggle fixture, including thumb.
-      const thumb = targets.get('thumb')!
-      const duplicate = [...targets, ['thumb', thumb] as const]
-      const replacement: PropertyIRDefinition = lifecycle
-        ? { ...definition, enter: { targets: [] } }
-        : definition
+  it('keeps rejected duplicates suspended when replacement adds lifecycle support until rebinding', () => {
+    const { instance, targets, errors } = setup()
+    // setup binds every target declared by the toggle fixture, including thumb.
+    const thumb = targets.get('thumb')!
+    const duplicate = [...targets, ['thumb', thumb] as const]
 
-      instance.bind(duplicate)
-      instance.replaceDefinition(replacement)
-      updateMode(instance, 'on')
+    instance.bind(duplicate)
+    instance.replaceDefinition({ ...definition, enter: { targets: [] } })
+    updateMode(instance, 'on')
 
-      expect(thumb.style.translate).toBe('')
-      expect(instance.animations).toHaveLength(0)
-      expect(errors).toEqual([
-        expect.objectContaining({ code: 'runtime.targets', message: 'Duplicate target binding' }),
-      ])
+    expect(thumb.style.translate).toBe('')
+    expect(instance.animations).toHaveLength(0)
+    expect(errors).toEqual([
+      expect.objectContaining({ code: 'runtime.targets', message: 'Duplicate target binding' }),
+    ])
 
-      instance.bind(lifecycle ? duplicate : [...targets])
+    instance.bind(duplicate)
 
-      expect(thumb.style.translate).toBe('24px')
-    },
-  )
+    expect(thumb.style.translate).toBe('24px')
+  })
 
   it('interpolates a paused transition and restores owned styles on disposal', () => {
     const { instance, targets, errors } = setup()

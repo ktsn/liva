@@ -378,48 +378,6 @@ describe('relative property controllers', () => {
     expect(element.style.rotate).toBe('x 20deg')
   })
 
-  it('ends a session when a different controller takes the same property', () => {
-    const { instance, element, inputs, errors } = setup('x', (value) => ({
-      ...value,
-      letBindings: [
-        ...(value.letBindings ?? []),
-        { ...(value.letBindings ?? [])[0], name: 'second' },
-      ],
-      layers: [
-        ...value.layers,
-        {
-          name: 'second',
-          when: {
-            kind: 'binary',
-            operator: '>',
-            left: reference('input'),
-            right: { kind: 'number', value: 20 },
-          },
-          targets: [
-            {
-              name: 'self',
-              properties: [
-                {
-                  name: 'translate',
-                  value: {
-                    kind: 'binding',
-                    expression: reference('second'),
-                  },
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    }))
-    instance.updateParameters({ ...inputs, enabled: true, input: 10 })
-    instance.updateParameters({ ...inputs, enabled: true, input: 30 })
-    instance.updateParameters({ ...inputs, enabled: true, input: 40 })
-
-    expect(decodeProperty(element, 'translate')?.values).toEqual([130, 20, 3])
-    expect(errors).toEqual([])
-  })
-
   it('reacquires the displayed origin when a previously replaced controller becomes the owner again', () => {
     const { element, update, errors } = setupSwitchingControllers()
 

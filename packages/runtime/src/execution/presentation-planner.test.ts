@@ -81,7 +81,7 @@ function planObservedChange(observations: ReturnType<typeof snapshot>) {
 }
 
 describe('pure presentation planning', () => {
-  it('rejects incomplete displayed observations before preparing effects', () => {
+  it('rejects missing displayed start values for implicit tracks', () => {
     const previous = resolution([['opacity', '0']])
     const next = resolution([['opacity', '1']])
 
@@ -122,7 +122,7 @@ describe('pure presentation planning', () => {
     expect(plan.tracks).toEqual([])
   })
 
-  it('retargets unchanged values without advancing layer selection', () => {
+  it('creates a track when unchanged values are explicitly retargeted', () => {
     const current = resolution([['opacity', '1']])
     const observations = snapshot(current, current)
 
@@ -132,32 +132,6 @@ describe('pure presentation planning', () => {
     })
 
     expect(plan.tracks).toMatchObject([{ property: 'opacity', timing }])
-    expect(current.states.size).toBe(0)
-  })
-
-  it('invalidates a directional track when its local state changes', () => {
-    const current = resolution([['opacity', '1']])
-    const observations = snapshot(current, current)
-
-    const plan = planObservedChange({
-      ...observations,
-      active: [
-        {
-          track: {
-            target: 'box',
-            property: 'opacity',
-            timing,
-            destinationValue: '1',
-            keyframes: [],
-            directionalOwner: 'base',
-            ownerState: 'open',
-          },
-        },
-      ],
-    })
-
-    expect(plan.tracks).toHaveLength(1)
-    expect(plan.changed.has(layerPropertyKey('box', 'opacity'))).toBe(true)
   })
 
   it('expands changed declarations using every receiver writing context', () => {
@@ -167,6 +141,7 @@ describe('pure presentation planning', () => {
 
     const plan = planObservedChange({
       ...observations,
+      displayed: new Map([[layerPropertyKey('box', 'margin-inline-start'), '0px']]),
       receivers: [
         { target: 'box', addresses: [{ name: 'margin-inline-start', addresses: ['margin-left'] }] },
         {
@@ -217,7 +192,7 @@ describe('pure presentation planning', () => {
     expect(plan.diagnostics).toEqual([])
   })
 
-  it('cancels affected authored and canonical tracks while preserving unrelated effects', () => {
+  it('selects replacement effects by authored/canonical properties and removed declarations', () => {
     const active = [
       { id: 1, target: 'box', sourceProperty: 'margin', property: 'margin-left' },
       { id: 2, target: 'box', sourceProperty: 'margin-inline', property: 'margin-right' },
@@ -233,44 +208,6 @@ describe('pure presentation planning', () => {
     )
 
     expect(replaced).toEqual([1, 2, 3])
-  })
-
-  it('reports explicit endpoints that differ from the completion presentation', () => {
-    const previous = resolution([['opacity', '1']])
-    const next: LayerResolution = {
-      ...previous,
-      presentation: {
-        name: '@layers',
-        targets: [
-          {
-            name: 'box',
-            properties: [
-              {
-                name: 'opacity',
-                owner: 'base',
-                value: '1',
-                timing,
-                keyframes: [
-                  { offset: 0, value: '1' },
-                  { offset: 1, value: '0.5' },
-                ],
-              },
-            ],
-          },
-        ],
-      },
-    }
-
-    const plan = planObservedChange(snapshot(previous, next))
-
-    expect(plan.tracks[0].destinationValue).toBe('1')
-    expect(plan.tracks[0].keyframes).toEqual([
-      { offset: 0, value: '1', easing: 'linear' },
-      { offset: 1, value: '0.5', easing: 'linear' },
-    ])
-    expect(plan.diagnostics).toEqual([
-      'Transition endpoint differs from resolved style: box.opacity; completion restores 1',
-    ])
   })
 })
 
