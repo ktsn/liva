@@ -70,6 +70,12 @@ type ActiveTrack = {
   trajectory?: (milliseconds: number) => MotionSample
 }
 
+/** Binding validity is retained until rebinding or an explicit definition refresh. */
+type BindingStatus = 'unbound' | 'ready' | 'missing' | 'duplicate'
+
+/** Preparing previews suppress live restoration; completed previews also survive reduced-motion changes. */
+type PresentationMode = 'live' | 'preparing-preview' | 'preview'
+
 export class PresentationExecutor {
   private layerResolution!: LayerResolution
   private environment!: ExecutionEnvironment
@@ -104,23 +110,24 @@ export class PresentationExecutor {
   private readonly propertyMotion = new PropertyMotion()
   private readonly dirtyProperties = new Map<HTMLElement, Set<string>>()
   private referenceFrame?: number
-  private readonly referenceRetargets = new Set<string>()
   private controllers = new Map<string, PropertyController>()
   private controllerInstances = new Set<PropertyController>()
   private enterSessions = new Set<LifecycleSession>()
   private leaveSessions = new Set<LifecycleSession>()
   private settledLifecycleSessions = new WeakSet<LifecycleSession>()
   private owned: OwnedElement[] = []
-  private manuallyPaused = false
-  private compositionPreview = false
+  private presentationMode: PresentationMode = 'live'
+  private bindingStatus: BindingStatus = 'unbound'
   private disposed = false
-  private suspended = true
-  private duplicateBindings = false
   private motion!: MediaQueryList
   private readonly report: (diagnostic: RuntimeDiagnostic) => void
 
   constructor(report: (diagnostic: RuntimeDiagnostic) => void) {
     this.report = report
+  }
+
+  private get suspended() {
+    return this.bindingStatus !== 'ready'
   }
 
   snapshotValues(definition: Definition): VariableValues {
@@ -158,15 +165,29 @@ export class PresentationExecutor {
   }
 
   refreshSuspension(definition: Definition) {
-    this.suspended =
-      this.duplicateBindings ||
-      (!hasLifecycle(definition) &&
-        layerTargets(definition).some(
-          (target) =>
-            target.properties.length > 0 &&
-            !this.optionalControllerTargets(definition).has(target.name) &&
-            !this.targets.has(target.name),
-        ))
+    // A definition replacement does not validate previously rejected duplicate entries.
+    this.bindingStatus = this.resolveBindingStatus(
+      definition,
+      this.targets,
+      this.bindingStatus === 'duplicate',
+    )
+  }
+
+  private resolveBindingStatus(
+    definition: Definition,
+    targets: ReadonlyMap<string, HTMLElement>,
+    duplicate: boolean,
+  ): BindingStatus {
+    if (duplicate) return 'duplicate'
+    if (hasLifecycle(definition)) return 'ready'
+
+    const optional = this.optionalControllerTargets(definition)
+    const missing = layerTargets(definition).some(
+      (target) =>
+        target.properties.length > 0 && !optional.has(target.name) && !targets.has(target.name),
+    )
+
+    return missing ? 'missing' : 'ready'
   }
 
   retainLifecycle(phase: 'enter' | 'leave', session: LifecycleSession) {
@@ -191,7 +212,7 @@ export class PresentationExecutor {
         }
       }
 
-      if (phase === 'enter' && !this.disposed && !this.compositionPreview) {
+      if (phase === 'enter' && !this.disposed && this.presentationMode === 'live') {
         // Layers may change while enter plays toward its captured destination.
         // Restore first to clear styles absent from the latest presentation, then
         // apply that presentation. Preserve properties owned by remaining lifecycle
@@ -521,7 +542,9 @@ export class PresentationExecutor {
   private refreshReferences = () => {
     this.clearReferenceFrame()
     /* v8 ignore if -- @preserve: cancel() removes the RAF and active effects before disposal/preview; finished callbacks check active membership. */
-    if (this.disposed || this.compositionPreview) return
+    if (this.disposed || this.presentationMode !== 'live') return
+
+    const retargets = new Set<string>()
 
     for (const entry of this.active) {
       if (entry.reference === undefined || entry.animation.playState === 'paused') continue
@@ -532,16 +555,14 @@ export class PresentationExecutor {
       )
 
       if (next !== entry.reference)
-        this.referenceRetargets.add(layerPropertyKey(entry.track.target, entry.sourceProperty))
+        retargets.add(layerPropertyKey(entry.track.target, entry.sourceProperty))
     }
 
-    if (this.referenceRetargets.size > 0) {
+    if (retargets.size > 0) {
       try {
-        this.applyLayerResolution(this.layerResolution, this.layerResolution)
+        this.applyLayerChange(this.layerResolution, this.layerResolution, retargets)
       } catch (error) {
         this.report({ code: 'runtime.animation', message: String(error), error })
-      } finally {
-        this.referenceRetargets.clear()
       }
     }
 
@@ -558,16 +579,15 @@ export class PresentationExecutor {
   }
 
   private motionChanged = () => {
-    if (this.motion.matches && !this.manuallyPaused) {
+    if (this.motion.matches && this.presentationMode !== 'preview') {
       this.cancel()
       this.settle()
     }
   }
 
   private cancel(cancelEnter = true, preserveControllerSnapshot = false) {
-    this.compositionPreview = false
+    this.presentationMode = 'live'
     this.clearReferenceFrame()
-    this.referenceRetargets.clear()
     if (!preserveControllerSnapshot) {
       for (const controller of this.controllerInstances) controller.setPreview(false)
     }
@@ -577,7 +597,6 @@ export class PresentationExecutor {
       for (const session of this.enterSessions) session.cancel('superseded')
       this.enterSessions.clear()
     }
-    this.manuallyPaused = false
 
     for (const { animation } of this.active) {
       animation.cancel()
@@ -762,14 +781,9 @@ export class PresentationExecutor {
 
     const next = new Map(entries)
     const duplicate = next.size !== entries.length && !hasLifecycle(this.definition)
-    const optional = this.optionalControllerTargets(this.definition)
-    const missing = layerTargets(this.definition).some(
-      (target) =>
-        target.properties.length > 0 && !optional.has(target.name) && !next.has(target.name),
-    )
+    const status = this.resolveBindingStatus(this.definition, next, duplicate)
     const unchanged =
-      !duplicate &&
-      (!missing || hasLifecycle(this.definition)) &&
+      status === 'ready' &&
       !this.suspended &&
       entries.length === [...this.targetElements.values()].flat().length &&
       entries.every(([key, value]) => this.targetElements.get(key)?.includes(value))
@@ -794,15 +808,14 @@ export class PresentationExecutor {
       elements.push(element)
       this.targetElements.set(name, elements)
     }
-    this.duplicateBindings = duplicate
-    this.suspended = duplicate || (missing && !hasLifecycle(this.definition))
+    this.bindingStatus = status
 
     this.environment.rebound(previousInputs !== JSON.stringify(this.values))
 
     if (this.suspended) {
       this.report({
         code: 'runtime.targets',
-        message: duplicate ? 'Duplicate target binding' : 'Missing target binding',
+        message: status === 'duplicate' ? 'Duplicate target binding' : 'Missing target binding',
       })
     } else {
       this.settle()
@@ -855,7 +868,7 @@ export class PresentationExecutor {
       this.restore()
       this.propertyMotion.reset()
       this.dirtyProperties.clear()
-      this.compositionPreview = true
+      this.presentationMode = 'preparing-preview'
 
       const present = (resolution: LayerResolution) => {
         for (const target of resolution.presentation.targets) {
@@ -928,7 +941,7 @@ export class PresentationExecutor {
       this.restore()
       present(next)
       this.active = prepared
-      this.manuallyPaused = true
+      this.presentationMode = 'preview'
 
       for (const { animation } of prepared) {
         animation.pause()
@@ -947,7 +960,7 @@ export class PresentationExecutor {
   }
 
   endCompositionPreview(): void {
-    if (!this.compositionPreview) return
+    if (this.presentationMode === 'live') return
 
     this.cancel()
     this.restore()
@@ -964,13 +977,21 @@ export class PresentationExecutor {
   }
 
   applyLayerResolution(previous: LayerResolution, next: LayerResolution) {
+    this.applyLayerChange(previous, next, new Set())
+  }
+
+  private applyLayerChange(
+    previous: LayerResolution,
+    next: LayerResolution,
+    retargets: ReadonlySet<string>,
+  ) {
     const prepared: ActiveTrack[] = []
     const preparation = prepareLayerChange({
       previous,
       next,
       values: this.values,
       active: this.active.map((entry) => ({ track: entry.track })),
-      retargets: this.referenceRetargets,
+      retargets,
     })
     const affectedTargets = new Set(preparation.templates.map((track) => track.target))
 

@@ -171,6 +171,33 @@ describe('browser animation execution', () => {
     expect(targets.get('body')!.style.opacity).toBe('1')
   })
 
+  it.each([false, true])(
+    'keeps rejected duplicate bindings suspended until rebinding with lifecycle support=%s',
+    (lifecycle) => {
+      const { instance, targets, errors } = setup()
+      // setup binds every target declared by the toggle fixture, including thumb.
+      const thumb = targets.get('thumb')!
+      const duplicate = [...targets, ['thumb', thumb] as const]
+      const replacement: PropertyIRDefinition = lifecycle
+        ? { ...definition, enter: { targets: [] } }
+        : definition
+
+      instance.bind(duplicate)
+      instance.replaceDefinition(replacement)
+      updateMode(instance, 'on')
+
+      expect(thumb.style.translate).toBe('')
+      expect(instance.animations).toHaveLength(0)
+      expect(errors).toEqual([
+        expect.objectContaining({ code: 'runtime.targets', message: 'Duplicate target binding' }),
+      ])
+
+      instance.bind(lifecycle ? duplicate : [...targets])
+
+      expect(thumb.style.translate).toBe('24px')
+    },
+  )
+
   it('interpolates a paused transition and restores owned styles on disposal', () => {
     const { instance, targets, errors } = setup()
     const thumb = targets.get('thumb')!
