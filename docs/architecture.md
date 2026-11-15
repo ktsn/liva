@@ -50,34 +50,71 @@ receive elements or native effects. `execution-contracts.ts` defines the logical
 execution requests and evaluation callbacks shared by these modules; the executor
 does not import Runtime.
 
-`presentation-planner.ts` calculates declaration order, canonical ownership,
-changed/removed properties, tracks, and affected effect identities from supplied
-values and snapshots. It reuses `composition/layers.ts` for timing and frame
-resolution. Receiver-specific canonical addresses preserve target-wide controller
-ownership when the same logical target has multiple receiving elements. Planning
-reads neither browser state nor clocks. Pure track selection first identifies
-which omitted starting endpoints need displayed observations; unchanged updates
-read no CSSOM state. The executor captures only those endpoints and canonical
-facts for affected targets, reusing each receiver's facts during track preparation.
-Incomplete displayed observations reject planning before replacement effects are
-published.
+`presentation-planner.ts` calculates declaration order, target-wide controller
+ownership, changed/removed properties, observation needs, final tracks, ordered
+writes, and affected effect identities from supplied values and snapshots. It
+reuses `composition/layers.ts` for timing and frame resolution. Runtime invokes
+these pure calculations and passes a completed `PresentationPlan` to the executor;
+the executor does not select tracks or invoke the planner. Plans contain receiver
+and effect identifiers, never elements or native effects.
+
+Runtime coordinates synchronous planning phases through `ExecutionPort`:
+
+1. After expression evaluation, event delivery, and revision checks, request the
+   terminal controller writes and motion-history recording.
+2. Request receiver-specific canonical addresses. Calculate target-wide controller
+   ownership, ask the executor to acquire selected controllers and release old
+   owners, then resolve supplied controller CSS values or normal fallbacks.
+3. Select changed declarations and omitted starting endpoints. Request displayed
+   starts and addresses only for affected targets. Browser CSS shorthand splitting
+   remains an observation operation; the planner decides canonical ownership and
+   receiver-specific interruption from the resulting facts.
+4. Request only needed displayed/motion/reference observations after controller
+   release has transferred velocity. Calculate final frames, timing, cancellation,
+   restoration, and ordered writes, then hand the complete plan to the executor.
+
+Notification-time expression snapshots and later displayed snapshots have separate
+lifetimes. They cannot be reused across terminal writes or controller acquisition
+and release. Observations and plans are consumed synchronously against the current
+binding; rebinding/disposal invalidates queued input work and releases receiver
+references. Unchanged untimed updates require no CSSOM reads. Numeric facts use
+canonical component units and units per millisecond; the existing property codec
+and spring solver supply serialization and trajectories. `PropertyMotion.prepareSpring`
+remains a browser-observing compatibility adapter over the shared pure calculation.
 
 The executor owns DOM bindings and subscription connections, controller operations,
-style restoration, motion history, effect preparation/replacement, reference
-tracking, and previews. Notification-time expression snapshots and later displayed
-snapshots have separate lifetimes: terminal controller writes are applied and
-recorded, ownership is reconciled and released velocity is transferred, then the
-executor captures displayed values for planning. The planner produces final
-identifier-based `TrackPlan` values, including ownership, displayed-start frames,
-scalar timing or supported numeric spring samples, and playback fill. Numeric facts
-use canonical component units and units per millisecond; the existing property codec
-and spring solver supply serialization and trajectories. No native effect or element
-is part of a track plan. Ordinary playback and paused previews use the same final
-planner and effect materialization; previews retain their frozen-controller policy
-and do not inherit live input velocity. `PropertyMotion.prepareSpring` remains a
-browser-observing compatibility adapter over the shared pure spring calculation.
-Replacement effects are prepared before affected old effects are cancelled;
-unrelated effects remain active.
+style restoration, motion history, native effects, and reference observation.
+It prepares all replacement effects before accepting a live plan. Preparation
+failure cancels newly prepared effects and preserves old effects and composition.
+On acceptance it publishes the resolution to Runtime, cancels affected old effects,
+and applies planned writes/playback; unrelated effects remain active. Earlier
+accepted reactive calls, events, and terminal writes are not rolled back. Style
+restoration still protects external edits inside the executor.
+
+Reference changes request Runtime planning without advancing guards or events.
+Completed effects likewise request an identifier-based completion plan, which
+reconciles only their receiving element. Media-query changes and lifecycle settlement
+also notify Runtime before any presentation policy is applied. The planner chooses
+ordinary effect cancellation, enter-session cancellation, settled-registration
+release, motion-history reset, and restoration around the remaining session owners.
+The executor retains one native-session registry, supplies identifier-based ownership
+facts, and executes the selected cleanup. Reduced motion preserves manually seekable
+previews and independent leaves. A finished enter restores the latest application
+cascade, including declarations removed during entry; settlement during a preview
+only releases registrations and leaves preview effects untouched.
+
+Runtime also coordinates inspection and preview planning. Element IDs identify
+physical receivers, while logical target names identify declaration scopes. Preview
+templates are keyed by target name, and observed declaration addresses are matched
+by both target name and receiver ID, so a root and its alias cannot overwrite each
+other's tracks. Preview controllers remain frozen, live velocity is not inherited,
+and preview plans do not publish ordinary composition. The executor applies the
+planned starting presentation before observations, then materializes paused effects;
+ending or failing a preview restores application presentation. Ordinary playback,
+previews, and the detached lifecycle compatibility coordinator share final track
+planning and `native-effect.ts` materialization. The compatibility coordinator
+retains its captured environment and native-effect ownership independently of a
+live Runtime; this separation does not change presence animation semantics.
 
 ## Rust syntax infrastructure
 

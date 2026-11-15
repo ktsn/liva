@@ -1,9 +1,32 @@
-import type { Composition, LayerResolution } from '../composition/layers.ts'
+import type { Composition, LayerResolution, LayerTrackTemplate } from '../composition/layers.ts'
 import type { ResolvedTrack } from '../composition/resolve.ts'
 import type { LetBindingGraph } from '../evaluation/let-bindings.ts'
 import type { ReactiveNotification } from '../evaluation/events.ts'
 import type { VariableValues } from '../evaluation/expression.ts'
 import type { Definition } from '../model/definition.ts'
+import type {
+  ControllerBinding,
+  PresentationFacts,
+  PresentationPlan,
+  ReceiverAddresses,
+  StyleWrite,
+  TrackCandidate,
+  TrackObservationRequest,
+  TrackSnapshot,
+} from './presentation-planner.ts'
+
+/** Logical declaration identity, distinct from receiver-specific canonical addresses. */
+export const layerPropertyKey = (target: string, property: string) => `${target}\0${property}`
+
+/** Explicit displayed-value requests; all receivers must belong to the current binding. */
+export interface DisplayedRequest {
+  readonly receiver: number
+  readonly property: string
+}
+
+export interface DisplayedValue extends DisplayedRequest {
+  readonly value: string
+}
 
 export interface RuntimeDiagnostic {
   /** Operation category, such as runtime.expression or runtime.animation. */
@@ -37,13 +60,6 @@ export interface ExecutionEnvironment {
   readonly values: () => VariableValues
 
   /**
-   * Evaluates a candidate definition's lets against current values for inspection
-   * or preview. Preserves the live graph and accepted values, releases temporary
-   * calls, and propagates evaluation errors.
-   */
-  readonly snapshotValues: (definition: Definition) => VariableValues
-
-  /**
    * Advances the binding revision and discards queued updates before rebinding.
    * An in-flight update checks the revision after event callbacks and stops if stale.
    * Does not disconnect subscriptions or reevaluate values.
@@ -71,6 +87,21 @@ export interface ExecutionEnvironment {
    * written. Does not reevaluate expressions or emit update/event callbacks.
    */
   readonly acceptPresentation: (resolution: LayerResolution) => void
+
+  /** Requests reference-only planning without advancing guards or emitting input events. */
+  readonly retarget: (properties: ReadonlySet<string>) => void
+
+  /** Reconciles a still-current completed effect against the accepted cascade. */
+  readonly completeEffect: (id: number) => void
+
+  /** Requests planned application of the accepted cascade after browser-owned restoration. */
+  readonly reconcile: () => void
+
+  /** Reports media-query changes; Runtime/planner decide preservation, cancellation, and restoration. */
+  readonly motionChanged: () => void
+
+  /** Reports a registered session settling; Runtime/planner decide releases and presentation recovery. */
+  readonly lifecycleSettled: () => void
 }
 
 /**
@@ -128,40 +159,69 @@ export interface ExecutionPort {
   /** Rechecks required targets for definition, retaining the last bind's duplicate-binding status. */
   refreshSuspension(definition: Definition): void
 
-  /**
-   * Returns a resolution with controller bindings rendered in receiver-specific
-   * cascade order. Unreadable controllers reveal a normal declaration if present,
-   * otherwise omit the property. Does not apply returned CSS values to the DOM.
-   * definition defaults to the attached environment's definition; live defaults to
-   * true and acquires/releases ownership at time. false inspects without changing
-   * ownership. time uses performance-clock ms; live updates run after terminalControls.
-   * Expression evaluation or invalid controller capabilities may throw.
-   */
-  controllerResolution(
+  /** Current receiver/effect metadata and playback policy; performs no CSSOM reads. */
+  presentationFacts(resolution: LayerResolution): PresentationFacts
+
+  /** Captures canonical addresses only for selected targets, in declaration order. */
+  observeReceivers(
     resolution: LayerResolution,
-    values: VariableValues,
-    time: number,
-    definition?: Definition,
-    live?: boolean,
-  ): LayerResolution
+    targets: ReadonlySet<string>,
+  ): readonly ReceiverAddresses[]
 
   /**
-   * Uses accepted environment values to plan changes from previous to next.
-   * Prepares replacement effects before cancelling affected old effects; preparation
-   * failures throw. On acceptance, retains next and calls acceptPresentation before
-   * writing styles/starting effects. Unaffected effects and lifecycle-owned styles
-   * are preserved; suspended execution accepts next without applying it to the DOM.
+   * Executes selected bindings in source order, then releases deselected old owners.
+   * Returns only CSS values keyed by logical target/property. In preview/inspection,
+   * formats supplied snapshots without acquiring/releasing or reading live control.
+   * Caller must finish this phase before observing spring/displayed start values.
    */
-  applyLayerResolution(previous: LayerResolution, next: LayerResolution): void
+  applyControllers(
+    bindings: readonly ControllerBinding[],
+    values: VariableValues,
+    time: number,
+    live: boolean,
+  ): ReadonlyMap<string, string | undefined>
+
+  /** Reads implicit starts from the last receiver of each logical target. Missing targets yield empty CSS. */
+  observeLayerStarts(templates: readonly LayerTrackTemplate[]): ReadonlyMap<string, string>
+
+  /**
+   * Browser CSS normalization only; ownership and interruption are decided by the planner.
+   * Omitted declarations give each source its own scope, as required by lifecycle previews.
+   */
+  expandTracks(
+    tracks: readonly {
+      readonly receiver: number
+      readonly source: ResolvedTrack
+      readonly declarations?: ReceiverAddresses['addresses']
+    }[],
+  ): readonly TrackCandidate[]
+
+  /** Reads exactly the requested displayed values, without advancing runtime state. */
+  observeDisplayed(requests: readonly DisplayedRequest[]): readonly DisplayedValue[]
+
+  /**
+   * Captures requested start/motion/reference facts after terminal writes and controller
+   * release. Results retain request order, source/track object identity, declaration
+   * addresses, and interruption decisions; only observations and fresh effect IDs are added.
+   */
+  observeTracks(requests: readonly TrackObservationRequest[]): readonly TrackSnapshot[]
+
+  /**
+   * Materializes every start before cancelling old effects. On successful preparation,
+   * notifies acceptPresentation before applying writes/playback. A preparation failure
+   * cancels only newly prepared effects and leaves the accepted presentation unchanged.
+   * Preview plans never publish ordinary composition and start paused at time zero.
+   */
+  applyPlan(plan: PresentationPlan): void
+
+  /** Freezes controller snapshots, clears old preview/live effects, and writes the planned baseline. */
+  beginPreview(writes: readonly StyleWrite[]): void
+
+  /** Restores application presentation after preview evaluation, observation, or preparation failed. */
+  abortPreview(): void
 
   /** Ends an active preview and restores the accepted presentation; otherwise does nothing. */
   endCompositionPreview(): void
-
-  /**
-   * Applies retained presentation values except properties owned by enter/leave
-   * sessions, then records motion samples. Does nothing when suspended or disposed.
-   */
-  settle(): void
 
   /**
    * Releases subscriptions, controllers, effects, motion history, target references,
