@@ -1205,31 +1205,6 @@ function start(phase: 'enter' | 'leave', instance: LivaInstance, element: HTMLEl
   return session
 }
 
-/** Dispatches a native media-query event in the test's call stack, before Promise callbacks can run. */
-function setupWithSynchronousMotionChange(
-  source: Definition,
-  inputs: ConstructorParameters<typeof LivaInstance>[1],
-) {
-  const media = matchMedia('(prefers-reduced-motion: reduce)')
-  const observe = vi.spyOn(window, 'matchMedia').mockReturnValue(media)
-
-  try {
-    const fixture = setup(source, inputs)
-
-    return {
-      ...fixture,
-      reduceMotion: () => {
-        const matches = vi.spyOn(media, 'matches', 'get').mockReturnValue(true)
-        cleanup.push(() => matches.mockRestore())
-
-        media.dispatchEvent(new Event('change'))
-      },
-    }
-  } finally {
-    observe.mockRestore()
-  }
-}
-
 describe('layer lifecycle snapshots', () => {
   const lifecycle: import('../model/definition.ts').Transition = {
     timing: { kind: 'tween', durationMs: 1000, easing: 'linear' } as const,
@@ -1281,10 +1256,18 @@ describe('layer lifecycle snapshots', () => {
     expect(element.style.opacity).toBe('0.5')
   })
 
-  it('restores removed enter styles synchronously on cancellation while preserving a running leave', async () => {
+  it('restores enter-only styles synchronously on cancellation while preserving a running leave', async () => {
     const source: Definition = {
       ...definition,
-      layers: definition.layers.filter((layer) => layer.name === 'press'),
+      layers: definition.layers
+        .filter((layer) => layer.name === 'press')
+        .map((layer) => ({
+          ...layer,
+          targets: layer.targets.map((target) => ({
+            ...target,
+            properties: target.properties.filter((property) => property.name !== 'scale'),
+          })),
+        })),
       enter: lifecycle,
       leave: {
         timing: lifecycle.timing,
@@ -1301,7 +1284,7 @@ describe('layer lifecycle snapshots', () => {
         ],
       },
     }
-    const { instance, element, errors, reduceMotion } = setupWithSynchronousMotionChange(source, {
+    const { instance, element, errors } = setup(source, {
       hover: false,
       press: true,
       size: 1,
@@ -1313,18 +1296,17 @@ describe('layer lifecycle snapshots', () => {
     expect(effects).toHaveLength(2)
 
     effects[1].currentTime = 500
-    instance.updateParameters({ hover: false, press: false, size: 1 })
 
     expect(getComputedStyle(element).scale).toBe('0.5')
 
-    reduceMotion()
+    enter.cancel('superseded')
 
     // These checks run before the cancelled session's resolved Promise is delivered.
     expect(enter.isFinished).toBe(true)
     expect(element.style.scale).toBe('')
-    expect(element.style.opacity).toBe('0.5')
+    expect(element.style.opacity).toBe('0')
     expect(leave.isFinished).toBe(false)
-    expect(element.getAnimations()).toHaveLength(1)
+    expect(element.getAnimations()).toEqual([effects[1]])
     expect(getComputedStyle(element).opacity).toBe('0.25')
 
     expect(await enter.finished).toBe('superseded')

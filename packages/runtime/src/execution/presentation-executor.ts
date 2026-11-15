@@ -526,7 +526,11 @@ export class PresentationExecutor {
     }
   }
 
-  private updateOperations(normal: LayerResolution, values = this.values) {
+  private updateOperations(
+    normal: LayerResolution,
+    values = this.values,
+    retargets: ReadonlySet<string> = new Set(),
+  ) {
     if (
       this.environment &&
       !this.retainingEnvironment &&
@@ -638,7 +642,7 @@ export class PresentationExecutor {
         const property = trackLayer(id, receiver, [track], !operation.started).targets[0]
           .properties[0]
         const retarget = previous?.canonical.some((fact) =>
-          this.referenceRetargets.has(layerPropertyKey(fact.track.target, fact.track.property)),
+          retargets.has(layerPropertyKey(fact.track.target, fact.track.property)),
         )
         // Cache only derived normalization for identical evaluated data. A source
         // change or reference refresh observes current writing context again;
@@ -1962,7 +1966,7 @@ export class PresentationExecutor {
     next: LayerResolution,
     retargets: ReadonlySet<string>,
   ) {
-    this.updateOperations(next)
+    this.updateOperations(next, this.values, retargets)
     const receivers = new Map<HTMLElement, Set<string>>()
 
     for (const [name, elements] of this.targetElements) {
@@ -2032,7 +2036,7 @@ export class PresentationExecutor {
           next: to,
           values: this.values,
           active: active.map((entry) => ({ track: entry.track })),
-          retargets: retargets,
+          retargets,
         })
         const displayed = new Map<string, string>()
         const implicit = preparation.templates.filter((track) => track.implicitStart)
