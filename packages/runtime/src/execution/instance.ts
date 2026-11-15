@@ -65,7 +65,7 @@ export class LivaInstance {
     composition: Composition,
     definition = this.definition,
   ) {
-    return this.executor.inspectLifecycle(phase, composition, definition)
+    return this.runtime.inspectLifecycle(phase, composition, definition)
   }
 
   inspectComposition(
@@ -74,7 +74,7 @@ export class LivaInstance {
     transitions: readonly CompositionTransition[] = [],
     definition = this.definition,
   ) {
-    return this.executor.inspectComposition(composition, from, transitions, definition)
+    return this.runtime.inspectComposition(composition, from, transitions, definition)
   }
 
   replaceDefinition(definition: Definition) {
@@ -87,7 +87,7 @@ export class LivaInstance {
     transitions: readonly CompositionTransition[] = [],
     definition = this.definition,
   ): void {
-    this.executor.previewComposition(from, to, transitions, definition)
+    this.runtime.previewComposition(from, to, transitions, definition)
   }
 
   endCompositionPreview(): void {
@@ -99,7 +99,7 @@ export class LivaInstance {
     composition = this.composition,
     definition = this.definition,
   ): void {
-    this.executor.previewLifecycle(phase, composition, definition)
+    this.runtime.previewLifecycle(phase, composition, definition)
   }
 
   updateParameters(inputs: Readonly<Record<string, unknown>>) {

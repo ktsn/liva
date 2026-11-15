@@ -48,6 +48,89 @@ function updateMode(instance: LivaInstance, mode: string, options: { paused?: bo
   }
 }
 
+function invalidScaleEasing(source = definition) {
+  return {
+    ...source,
+    layers: source.layers.map((layer) => ({
+      ...layer,
+      transitions: layer.transitions?.map((transition) => ({
+        ...transition,
+        transition: {
+          ...transition.transition,
+          targets: transition.transition.targets.map((target) => ({
+            ...target,
+            properties: target.properties.map((property) =>
+              property.name === 'scale'
+                ? {
+                    ...property,
+                    timing: { kind: 'tween' as const, durationMs: 100, easing: 'invalid' },
+                  }
+                : property,
+            ),
+          })),
+        },
+      })),
+    })),
+  }
+}
+
+const lifecyclePolicyDefinition: PropertyIRDefinition = {
+  name: 'lifecycle-policy',
+  parameters: [{ name: 'enabled', type: 'boolean' }],
+  layers: [
+    {
+      name: 'base',
+      targets: [
+        { name: 'box', properties: [{ name: 'opacity', value: { kind: 'literal', value: '1' } }] },
+        { name: 'exit', properties: [{ name: 'opacity', value: { kind: 'literal', value: '1' } }] },
+      ],
+    },
+    {
+      name: 'optional',
+      when: { kind: 'reference', path: ['enabled'] },
+      targets: [
+        { name: 'box', properties: [{ name: 'width', value: { kind: 'literal', value: '50px' } }] },
+      ],
+    },
+  ],
+  enter: {
+    timing: { kind: 'tween', durationMs: 10000, easing: 'linear' },
+    targets: [
+      {
+        name: 'box',
+        properties: [
+          { name: 'opacity', keyframes: [{ offset: 0, value: { kind: 'literal', value: '0' } }] },
+          { name: 'width', keyframes: [{ offset: 0, value: { kind: 'literal', value: '0px' } }] },
+        ],
+      },
+    ],
+  },
+  leave: {
+    timing: { kind: 'tween', durationMs: 10000, easing: 'linear' },
+    targets: [
+      {
+        name: 'exit',
+        properties: [
+          { name: 'opacity', keyframes: [{ offset: 1, value: { kind: 'literal', value: '0' } }] },
+        ],
+      },
+    ],
+  },
+}
+
+function startRegisteredLifecycle(
+  instance: LivaInstance,
+  phase: 'enter' | 'leave',
+  target: string,
+) {
+  const session = new LifecycleSession(instance.captureLifecycle(phase, [target]), phase)
+  instance.retainLifecycle(phase, session)
+  session.initialize()
+  session.play()
+
+  return session
+}
+
 function setupRepeatedThumb() {
   const source: PropertyIRDefinition = {
     ...definition,
@@ -102,6 +185,146 @@ afterEach(() => {
 })
 
 describe('browser animation execution', () => {
+  it('previews distinct properties through self and an alias of the same element', async () => {
+    const tween = { kind: 'tween', durationMs: 1000, easing: 'linear' } as const
+    const source: PropertyIRDefinition = {
+      name: 'alias-preview',
+      layers: [
+        {
+          name: 'base',
+          timing: tween,
+          targets: [
+            {
+              name: 'self',
+              properties: [{ name: 'opacity', value: { kind: 'literal', value: '0' } }],
+            },
+            {
+              name: 'alias',
+              properties: [{ name: 'width', value: { kind: 'literal', value: '10px' } }],
+            },
+          ],
+        },
+        {
+          name: 'active',
+          when: { kind: 'boolean', value: false },
+          timing: tween,
+          targets: [
+            {
+              name: 'self',
+              properties: [{ name: 'opacity', value: { kind: 'literal', value: '1' } }],
+            },
+            {
+              name: 'alias',
+              properties: [{ name: 'width', value: { kind: 'literal', value: '30px' } }],
+            },
+          ],
+        },
+      ],
+    }
+    const { instance, targets, errors } = setup(source)
+    const root = targets.get('self')!
+    instance.bind([
+      ['self', root],
+      ['alias', root],
+    ])
+
+    instance.previewComposition(
+      { layers: { base: true, active: false }, states: {} },
+      { layers: { base: true, active: true }, states: {} },
+    )
+
+    await Promise.all(instance.animations.map((animation) => animation.ready))
+
+    for (const animation of instance.animations) animation.currentTime = 500
+
+    expect(instance.animations).toHaveLength(2)
+    expect(getComputedStyle(root).opacity).toBe('0.5')
+    expect(getComputedStyle(root).width).toBe('20px')
+    expect(errors).toEqual([])
+
+    instance.endCompositionPreview()
+
+    expect(root.style.opacity).toBe('0')
+    expect(root.style.width).toBe('10px')
+  })
+
+  it('uses each alias target cascade when expanding overlapping preview properties', async () => {
+    const tween = { kind: 'tween', durationMs: 1000, easing: 'linear' } as const
+    const source: PropertyIRDefinition = {
+      name: 'alias-ownership',
+      layers: [
+        {
+          name: 'base',
+          timing: tween,
+          targets: [
+            {
+              name: 'self',
+              properties: [
+                { name: 'inset', value: { kind: 'literal', value: '0px' } },
+                { name: 'left', value: { kind: 'literal', value: '20px' } },
+              ],
+            },
+            {
+              name: 'alias',
+              properties: [{ name: 'inset', value: { kind: 'literal', value: '0px' } }],
+            },
+          ],
+        },
+        {
+          name: 'active',
+          when: { kind: 'boolean', value: false },
+          timing: tween,
+          targets: [
+            {
+              name: 'alias',
+              properties: [{ name: 'inset', value: { kind: 'literal', value: '10px' } }],
+            },
+          ],
+        },
+      ],
+    }
+    const { instance, targets, errors } = setup(source)
+    const root = targets.get('self')!
+    root.style.position = 'relative'
+    instance.bind([
+      ['self', root],
+      ['alias', root],
+    ])
+
+    instance.previewComposition(
+      { layers: { base: true, active: false }, states: {} },
+      { layers: { base: true, active: true }, states: {} },
+    )
+
+    await Promise.all(instance.animations.map((animation) => animation.ready))
+
+    for (const animation of instance.animations) animation.currentTime = 500
+
+    expect(instance.animations).toHaveLength(8)
+    expect(getComputedStyle(root).left).toBe('5px')
+    expect(errors).toEqual([])
+
+    instance.endCompositionPreview()
+  })
+
+  it('preserves existing effects and composition when replacement preparation fails', () => {
+    const { instance, errors } = setup()
+
+    updateMode(instance, 'on', { paused: true })
+    const previous = instance.composition
+    const animations = [...instance.animations]
+
+    expect(animations.length).toBeGreaterThan(0)
+
+    instance.definition = invalidScaleEasing()
+    updateMode(instance, 'off')
+
+    expect(instance.composition).toEqual(previous)
+    expect(instance.animations).toEqual(animations)
+    expect(animations.every((animation) => animation.playState === 'paused')).toBe(true)
+    expect(errors.at(-1)?.code).toBe('runtime.expression')
+  })
+
   it('captures a repeated target from its last accepted receiver', () => {
     const { instance, second, errors } = setupRepeatedThumb()
 
@@ -136,6 +359,44 @@ describe('browser animation execution', () => {
     },
   )
 
+  it('rebuilds unbound receivers and completes new effects through aliases of the same element', async () => {
+    const { instance, second, errors } = setupRepeatedThumb()
+
+    updateMode(instance, 'on', { paused: true })
+    const previous = [...instance.animations]
+
+    expect(previous.length).toBeGreaterThan(0)
+
+    instance.bind([])
+
+    expect(instance.animations).toEqual([])
+    expect(previous.every((animation) => animation.playState === 'idle')).toBe(true)
+
+    instance.bind([
+      ['thumb', second],
+      ['track', second],
+    ])
+    updateMode(instance, 'off', { paused: true })
+    const replacements = [...instance.animations]
+    const finished = replacements.map((animation) => animation.finished)
+
+    expect(replacements.length).toBeGreaterThan(0)
+    expect(
+      replacements.every(
+        (animation) =>
+          animation.effect instanceof KeyframeEffect && animation.effect.target === second,
+      ),
+    ).toBe(true)
+
+    for (const animation of replacements) animation.finish()
+
+    await Promise.all(finished)
+
+    expect(instance.animations).toEqual([])
+    expect(Number.parseFloat(getComputedStyle(second).translate)).toBe(0)
+    expect(errors).toEqual([])
+  })
+
   it('connects reactive calls to the last receiver and reconnects when that receiver is removed', async () => {
     const { instance, targets, first, second, errors } = setupRepeatedThumb()
     const focused = vi.fn<(name: string) => void>()
@@ -161,6 +422,139 @@ describe('browser animation execution', () => {
 
     expect(focused).toHaveBeenCalledExactlyOnceWith('focus')
     expect(second.style.translate).toBe('')
+    expect(errors).toEqual([])
+  })
+
+  it.each(['enter', 'leave'] as const)(
+    'does not observe unused ordinary addresses during %s previews',
+    async (phase) => {
+      const source: PropertyIRDefinition = {
+        name: 'lifecycle-observations',
+        layers: [
+          {
+            name: 'base',
+            targets: [
+              {
+                name: 'box',
+                properties: [
+                  { name: 'width', value: { kind: 'literal', value: '10px' } },
+                  { name: 'height', value: { kind: 'literal', value: '20px' } },
+                  { name: 'opacity', value: { kind: 'literal', value: '1' } },
+                ],
+              },
+              {
+                name: 'unrelated',
+                properties: [
+                  { name: 'width', value: { kind: 'literal', value: '30px' } },
+                  { name: 'height', value: { kind: 'literal', value: '40px' } },
+                ],
+              },
+            ],
+          },
+        ],
+        [phase]: {
+          timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
+          targets: [
+            {
+              name: 'box',
+              properties: [
+                {
+                  name: 'opacity',
+                  keyframes: [
+                    { offset: phase === 'enter' ? 0 : 1, value: { kind: 'literal', value: '0' } },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      }
+      const { instance, targets, errors } = setup(source)
+      const element = targets.get('box')
+      const unrelated = targets.get('unrelated')
+
+      expect(element).toBeDefined()
+      expect(unrelated).toBeDefined()
+
+      const observe = vi.spyOn(window, 'getComputedStyle')
+      let reads: number
+      let unrelatedReads: number
+
+      try {
+        instance.previewLifecycle(phase)
+        reads = observe.mock.calls.length
+        unrelatedReads = observe.mock.calls.filter(([receiver]) => receiver === unrelated).length
+      } finally {
+        observe.mockRestore()
+      }
+
+      await Promise.all(instance.animations.map((animation) => animation.ready))
+
+      for (const animation of instance.animations) animation.currentTime = 100
+
+      // Only the phase's opacity can need a displayed snapshot; ordinary lengths
+      // and the target without phase tracks require no writing-context observation.
+      expect(reads).toBeLessThanOrEqual(1)
+      expect(unrelatedReads).toBe(0)
+      expect(getComputedStyle(element!).opacity).toBe('0.5')
+      expect(errors).toEqual([])
+
+      instance.endCompositionPreview()
+    },
+  )
+
+  it('scrubs canonical preview tracks with the same overlapping-property ownership as playback', async () => {
+    const tween = { kind: 'tween', durationMs: 1000, easing: 'linear' } as const
+    const source: PropertyIRDefinition = {
+      name: 'canonical-preview',
+      layers: [
+        {
+          name: 'base',
+          timing: tween,
+          targets: [
+            {
+              name: 'box',
+              properties: [
+                { name: 'inset', value: { kind: 'literal', value: '0px' } },
+                { name: 'left', value: { kind: 'literal', value: '20px' } },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'active',
+          when: { kind: 'boolean', value: false },
+          timing: tween,
+          targets: [
+            {
+              name: 'box',
+              properties: [{ name: 'inset', value: { kind: 'literal', value: '10px' } }],
+            },
+          ],
+        },
+      ],
+    }
+    const { instance, targets, errors } = setup(source)
+    const element = targets.get('box')
+
+    expect(element).toBeDefined()
+
+    instance.previewComposition(
+      { layers: { base: true, active: false }, states: {} },
+      { layers: { base: true, active: true }, states: {} },
+    )
+    await Promise.all(instance.animations.map((animation) => animation.ready))
+
+    for (const animation of instance.animations) animation.currentTime = 500
+
+    expect(instance.animations).toHaveLength(4)
+    expect(getComputedStyle(element!).left).toBe('15px')
+    expect(getComputedStyle(element!).right).toBe('5px')
+
+    instance.endCompositionPreview()
+
+    expect(element!.style.left).toBe('20px')
+    expect(instance.animations).toEqual([])
     expect(errors).toEqual([])
   })
 
@@ -633,6 +1027,77 @@ it('skips zero-duration layer effects', () => {
   expect(targets.get('box')!.style.opacity).toBe('1')
 })
 
+it('plans enter cancellation on reduced motion while preserving an independent leave', async () => {
+  const { instance, targets, errors } = setup(lifecyclePolicyDefinition, { enabled: true })
+  const enter = startRegisteredLifecycle(instance, 'enter', 'box')
+  const leave = startRegisteredLifecycle(instance, 'leave', 'exit')
+  const media: CDPSession = cdp()
+
+  try {
+    await media.send('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
+    })
+
+    expect(await enter.finished).toBe('superseded')
+    expect(leave.isFinished).toBe(false)
+    expect(leave.owns(targets.get('exit')!, 'opacity')).toBe(true)
+    expect(targets.get('exit')!.getAnimations()).toHaveLength(1)
+    expect(targets.get('box')!.style.opacity).toBe('1')
+    expect(targets.get('box')!.style.width).toBe('50px')
+    expect(errors).toEqual([])
+  } finally {
+    leave.cancel('owner-teardown')
+
+    await media.send('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+    })
+  }
+})
+
+it('reports asynchronous enter settlement failures after the native session completes', async () => {
+  const { instance, targets, errors } = setup(lifecyclePolicyDefinition, { enabled: true })
+  const enter = new LifecycleSession([], 'enter')
+  instance.retainLifecycle('enter', enter)
+  const failure = new Error('Failed to apply lifecycle settlement')
+  const write = vi.spyOn(targets.get('box')!.style, 'setProperty').mockImplementationOnce(() => {
+    throw failure
+  })
+
+  try {
+    enter.play()
+
+    expect(await enter.finished).toBe('completed')
+
+    await new Promise(requestAnimationFrame)
+
+    expect(errors).toEqual([expect.objectContaining({ code: 'runtime.animation', error: failure })])
+  } finally {
+    write.mockRestore()
+  }
+})
+
+it('plans enter completion restoration of removed declarations without cancelling a concurrent leave', async () => {
+  const { instance, targets, errors } = setup(lifecyclePolicyDefinition, { enabled: true })
+  const enter = startRegisteredLifecycle(instance, 'enter', 'box')
+  const leave = startRegisteredLifecycle(instance, 'leave', 'exit')
+  const box = targets.get('box')!
+
+  try {
+    instance.updateParameters({ enabled: false })
+
+    for (const animation of box.getAnimations()) animation.finish()
+
+    expect(await enter.finished).toBe('completed')
+    expect(box.style.width).toBe('')
+    expect(box.style.opacity).toBe('1')
+    expect(leave.isFinished).toBe(false)
+    expect(leave.owns(targets.get('exit')!, 'opacity')).toBe(true)
+    expect(errors).toEqual([])
+  } finally {
+    leave.cancel('owner-teardown')
+  }
+})
+
 it('settles active effects when reduced motion is enabled but preserves manual previews', async () => {
   const { instance, targets } = setup()
 
@@ -1051,29 +1516,8 @@ it('updates template snapshots while lifecycle targets are absent', () => {
 })
 
 it('cancels effects prepared before a later track fails browser validation', () => {
-  const broken = {
-    ...definition,
-    layers: definition.layers.map((layer) => ({
-      ...layer,
-      transitions: layer.transitions?.map((transition) => ({
-        ...transition,
-        transition: {
-          ...transition.transition,
-          targets: transition.transition.targets.map((target) => ({
-            ...target,
-            properties: target.properties.map((property) =>
-              property.name === 'scale'
-                ? {
-                    ...property,
-                    timing: { kind: 'tween' as const, durationMs: 100, easing: 'invalid' },
-                  }
-                : property,
-            ),
-          })),
-        },
-      })),
-    })),
-  }
+  const broken = invalidScaleEasing()
+
   const { instance, errors } = setup(broken)
 
   updateMode(instance, 'on')

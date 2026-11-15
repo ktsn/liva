@@ -3,8 +3,8 @@ import type { Definition, Transition } from '../model/definition.ts'
 import type { RenderedState } from '../model/presentation.ts'
 import { renderFrame, renderTransition, type VariableValues } from '../evaluation/expression.ts'
 import type { ResolvedTrack } from '../composition/resolve.ts'
-import { sampleSpring } from '../motion/spring.ts'
-import { waapiProperty } from '../motion/animation.ts'
+import { planTrack, trackTiming } from './presentation-planner.ts'
+import { materializeEffect } from './native-effect.ts'
 
 export function lifecycleTransitions(
   definition: Definition,
@@ -167,23 +167,27 @@ export class LifecycleSession {
       const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
 
       for (const { element, track } of this.work) {
-        const timing =
-          track.timing.kind === 'tween'
-            ? { durationMs: track.timing.durationMs, easing: 'linear' }
-            : sampleSpring(track.timing)
+        const timing = trackTiming(track)
 
         if (reduced || timing.durationMs === 0) continue
 
-        const effect = new KeyframeEffect(
-          element,
-          track.keyframes.map((frame) => ({
-            [waapiProperty(track.property)]: frame.value,
-            offset: frame.offset,
-            easing: frame.easing,
-          })),
-          { duration: timing.durationMs, easing: timing.easing, fill: 'both' },
+        // This compatibility coordinator outlives Runtime. Its captured track already
+        // contains resolved endpoints; it neither acquires controllers nor inherits live velocity.
+        const plan = planTrack(
+          {
+            id: this.effects.length,
+            receiver: this.effects.length,
+            source: track,
+            track,
+            declarations: [{ name: track.property, addresses: [track.property] }],
+            displayed: track.keyframes[0]?.value,
+            interrupted: false,
+          },
+          timing,
+          'both',
         )
-        const animation = new Animation(effect, document.timeline)
+        // The sole declaration owns its own property, so the planner cannot omit this track.
+        const animation = materializeEffect(plan!, element)
         this.effects.push(animation)
         animation.play()
         trackLayoutAnimation(element, track.property, animation)

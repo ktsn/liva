@@ -37,6 +37,85 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
+test('canonical previews seek both directions and restore overlapping declarations', async ({
+  page,
+}) => {
+  const result = await page.evaluate(async () => {
+    const timing = { kind: 'tween', durationMs: 1000, easing: 'linear' } as const
+    const definition: Runtime.Definition = {
+      name: 'canonical-preview',
+      layers: [
+        {
+          name: 'base',
+          timing,
+          targets: [
+            {
+              name: 'box',
+              properties: [
+                { name: 'inset', value: { kind: 'literal', value: '0px' } },
+                { name: 'left', value: { kind: 'literal', value: '20px' } },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'active',
+          when: { kind: 'boolean', value: false },
+          timing,
+          targets: [
+            {
+              name: 'box',
+              properties: [{ name: 'inset', value: { kind: 'literal', value: '10px' } }],
+            },
+          ],
+        },
+      ],
+    }
+    const element = document.createElement('div')
+    const instance = new window.liva.LivaInstance(definition)
+    document.body.append(element)
+
+    try {
+      instance.bind([['box', element]])
+      instance.previewComposition(
+        { layers: { base: true, active: false }, states: {} },
+        { layers: { base: true, active: true }, states: {} },
+      )
+
+      await Promise.all(instance.animations.map((animation) => animation.ready))
+
+      const count = instance.animations.length
+      const samples = [750, 250].map((time) => {
+        for (const animation of instance.animations) animation.currentTime = time
+
+        const style = getComputedStyle(element)
+
+        return { left: style.left, right: style.right }
+      })
+
+      instance.endCompositionPreview()
+
+      return {
+        count,
+        samples,
+        restored: getComputedStyle(element).left,
+        remaining: element.getAnimations().length,
+      }
+    } finally {
+      instance.dispose()
+      element.remove()
+    }
+  })
+
+  expect(result.count).toBe(4)
+  expect(result.samples).toEqual([
+    { left: '12.5px', right: '7.5px' },
+    { left: '17.5px', right: '2.5px' },
+  ])
+  expect(result.restored).toBe('20px')
+  expect(result.remaining).toBe(0)
+})
+
 test('interpolates three properties, coordinates time, and cleans completed effects', async ({
   page,
   browser,

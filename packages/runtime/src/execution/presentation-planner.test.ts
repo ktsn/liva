@@ -2,6 +2,19 @@ import { describe, expect, it } from 'vite-plus/test'
 import { resolveLayers, type LayerResolution } from '../composition/layers.ts'
 import type { Definition } from '../model/definition.ts'
 import {
+  planTrack,
+  planControllerBindings,
+  planControllerPresentation,
+  planTrackObservations,
+  planPresentation,
+  planEffectCompletion,
+  planPreviewPresentation,
+  planMotionChange,
+  planLifecycleSettlement,
+  type PresentationFacts,
+  trackTiming,
+  trackObservationNeeds,
+  type TrackSnapshot,
   replacedEffects,
   layerPropertyKey,
   orderedResolution,
@@ -37,7 +50,7 @@ function resolution(properties: readonly [string, string][]): LayerResolution {
   )
 }
 
-function snapshot(
+function layerSnapshot(
   previous: LayerResolution,
   next: LayerResolution,
 ): LayerPlanningSnapshot & {
@@ -72,7 +85,7 @@ function snapshot(
   }
 }
 
-function planObservedChange(observations: ReturnType<typeof snapshot>) {
+function planObservedChange(observations: ReturnType<typeof layerSnapshot>) {
   return planLayerChange(
     prepareLayerChange(observations),
     observations.displayed,
@@ -85,9 +98,9 @@ describe('pure presentation planning', () => {
     const previous = resolution([['opacity', '0']])
     const next = resolution([['opacity', '1']])
 
-    expect(() => planObservedChange({ ...snapshot(previous, next), displayed: new Map() })).toThrow(
-      'Missing displayed snapshot: box.opacity',
-    )
+    expect(() =>
+      planObservedChange({ ...layerSnapshot(previous, next), displayed: new Map() }),
+    ).toThrow('Missing displayed snapshot: box.opacity')
   })
 
   it('uses the supplied displayed start and preserves unrelated properties', () => {
@@ -100,7 +113,7 @@ describe('pure presentation planning', () => {
       ['color', 'red'],
     ])
 
-    const plan = planObservedChange(snapshot(previous, next))
+    const plan = planObservedChange(layerSnapshot(previous, next))
 
     expect(plan.tracks).toMatchObject([
       { property: 'opacity', keyframes: [{ value: '0.4' }, { value: '1' }] },
@@ -116,7 +129,7 @@ describe('pure presentation planning', () => {
     ])
     const next = resolution([['opacity', '1']])
 
-    const plan = planObservedChange(snapshot(previous, next))
+    const plan = planObservedChange(layerSnapshot(previous, next))
 
     expect([...plan.removedProperties]).toEqual([layerPropertyKey('box', 'color')])
     expect(plan.tracks).toEqual([])
@@ -124,7 +137,7 @@ describe('pure presentation planning', () => {
 
   it('creates a track when unchanged values are explicitly retargeted', () => {
     const current = resolution([['opacity', '1']])
-    const observations = snapshot(current, current)
+    const observations = layerSnapshot(current, current)
 
     const plan = planObservedChange({
       ...observations,
@@ -137,7 +150,7 @@ describe('pure presentation planning', () => {
   it('expands changed declarations using every receiver writing context', () => {
     const previous = resolution([['margin-inline-start', '0px']])
     const next = resolution([['margin-inline-start', '20px']])
-    const observations = snapshot(previous, next)
+    const observations = layerSnapshot(previous, next)
 
     const plan = planObservedChange({
       ...observations,
@@ -185,7 +198,7 @@ describe('pure presentation planning', () => {
       },
     }
 
-    const plan = planObservedChange(snapshot(previous, next))
+    const plan = planObservedChange(layerSnapshot(previous, next))
 
     expect(plan.tracks).toHaveLength(1)
     expect(plan.tracks[0].keyframes.map((frame) => frame.value)).toEqual(['1', '1'])
@@ -261,6 +274,632 @@ describe('canonical declaration ownership', () => {
     expect(ordered.presentation.targets[0].properties.map((property) => property.name)).toEqual([
       'margin',
       'margin-left',
+    ])
+  })
+  it('suppresses a target-wide controller if any receiver has an overlapping winning declaration', () => {
+    const current = resolution([
+      ['margin-inline', '0px'],
+      ['margin-left', '10px'],
+    ])
+    const bound: LayerResolution = {
+      ...current,
+      presentation: {
+        ...current.presentation,
+        targets: [
+          {
+            ...current.presentation.targets[0],
+            properties: current.presentation.targets[0].properties.map((property) =>
+              property.name === 'margin-inline'
+                ? { ...property, binding: { kind: 'reference', path: ['controller'] } }
+                : property,
+            ),
+          },
+        ],
+      },
+    }
+    const receiver = {
+      id: 1,
+      target: 'box',
+      protected: [],
+      addresses: [
+        { name: 'margin-inline', addresses: ['margin-right'] },
+        { name: 'margin-left', addresses: ['margin-left'] },
+      ],
+    }
+    const conflicting = {
+      ...receiver,
+      id: 2,
+      addresses: [
+        { name: 'margin-inline', addresses: ['margin-left'] },
+        { name: 'margin-left', addresses: ['margin-left'] },
+      ],
+    }
+
+    expect(planControllerBindings(bound, [receiver])).toHaveLength(1)
+    expect(planControllerBindings(bound, [receiver, conflicting])).toEqual([])
+  })
+
+  it.each([
+    {
+      label: 'unreadable controller',
+      outputs: new Map<string, string | undefined>([['box\0opacity', undefined]]),
+      expected: ['0.2'],
+    },
+    { label: 'obscured controller', outputs: new Map<string, string | undefined>(), expected: [] },
+    {
+      label: 'readable controller',
+      outputs: new Map<string, string | undefined>([['box\0opacity', '0.6']]),
+      expected: ['0.6'],
+    },
+  ])('uses normal fallback only for a selected $label', ({ outputs, expected }) => {
+    const definition: Definition = {
+      name: 'bound',
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'box',
+              properties: [{ name: 'opacity', value: { kind: 'literal', value: '0.2' } }],
+            },
+          ],
+        },
+      ],
+    }
+    const normal = resolveLayers(definition, {})
+    const bound: LayerResolution = {
+      ...normal,
+      presentation: {
+        ...normal.presentation,
+        targets: [
+          {
+            ...normal.presentation.targets[0],
+            properties: [
+              {
+                ...normal.presentation.targets[0].properties[0],
+                binding: { kind: 'reference', path: ['controller'] },
+              },
+            ],
+          },
+        ],
+      },
+    }
+
+    const plan = planControllerPresentation(bound, normal, outputs, definition)
+
+    expect(plan.presentation.targets[0].properties.map((property) => property.value)).toEqual(
+      expected,
+    )
+  })
+})
+
+function receiverSnapshot(overrides: Partial<TrackSnapshot> = {}): TrackSnapshot {
+  const track = {
+    target: 'box',
+    property: 'opacity',
+    timing,
+    implicitStart: true,
+    destinationValue: '1',
+    keyframes: [
+      { offset: 0, value: '0.2' },
+      { offset: 0.5, value: '0.6' },
+      { offset: 1, value: '1' },
+    ],
+  }
+
+  return {
+    id: 17,
+    receiver: 3,
+    source: track,
+    track,
+    declarations: [{ name: 'opacity', addresses: ['opacity'] }],
+    displayed: '0.4',
+    interrupted: false,
+    ...overrides,
+  }
+}
+
+function finalPlan(snapshot: TrackSnapshot) {
+  return planTrack(snapshot, trackTiming(snapshot.track), 'both')
+}
+
+describe('final pure track planning', () => {
+  it.each([
+    { implicit: true, interrupted: false, start: '0.4' },
+    { implicit: false, interrupted: true, start: '0.4' },
+    { implicit: false, interrupted: false, start: '0.2' },
+  ])(
+    'uses the appropriate start for implicit=$implicit and interrupted=$interrupted',
+    ({ implicit, interrupted, start }) => {
+      const snapshot = receiverSnapshot()
+      const track = { ...snapshot.track, implicitStart: implicit }
+
+      const plan = finalPlan({ ...snapshot, track, interrupted })
+
+      expect(plan?.frames.map((frame) => frame.value)).toEqual([start, '0.6', '1'])
+      expect(snapshot.track.keyframes[0].value).toBe('0.2')
+    },
+  )
+
+  it('rejects missing displayed observations needed for interruption', () => {
+    const snapshot = receiverSnapshot({ displayed: undefined })
+
+    expect(() => finalPlan(snapshot)).toThrow('Missing displayed track snapshot: box.opacity')
+  })
+
+  it('omits an obscured canonical track before requiring its observations', () => {
+    const snapshot = receiverSnapshot({
+      displayed: undefined,
+      declarations: [
+        { name: 'opacity', addresses: ['opacity'] },
+        { name: 'later', addresses: ['opacity'] },
+      ],
+    })
+
+    expect(finalPlan(snapshot)).toBeUndefined()
+  })
+
+  it('keeps source declaration identity when a canonical property is expanded', () => {
+    const snapshot = receiverSnapshot()
+    const source = {
+      ...snapshot.source,
+      property: 'margin-inline',
+      destinationValue: '10px 20px',
+      keyframes: [
+        { offset: 0, value: '0px 0px' },
+        { offset: 1, value: '10px 20px' },
+      ],
+    }
+    const track = {
+      ...snapshot.track,
+      property: 'margin-left',
+      destinationValue: '10px',
+      keyframes: [
+        { offset: 0, value: '0px' },
+        { offset: 1, value: '10px' },
+      ],
+    }
+
+    const plan = finalPlan({
+      ...snapshot,
+      source,
+      track,
+      displayed: '0px',
+      declarations: [{ name: 'margin-inline', addresses: ['margin-left', 'margin-right'] }],
+    })
+
+    expect(plan).toMatchObject({
+      id: 17,
+      receiver: 3,
+      sourceProperty: 'margin-inline',
+      sourceDestination: '10px 20px',
+      track: { property: 'margin-left' },
+    })
+  })
+
+  it('uses supplied canonical position and units-per-millisecond velocity for supported springs', () => {
+    const snapshot = receiverSnapshot()
+    const track = {
+      ...snapshot.track,
+      timing: { kind: 'spring-duration', durationMs: 500, bounce: 0.1 } as const,
+      keyframes: [snapshot.track.keyframes[0], snapshot.track.keyframes[2]],
+    }
+
+    const plan = finalPlan({
+      ...snapshot,
+      track,
+      motion: { start: { value: [0.4], velocity: [0.001] }, end: [1], relative: false },
+    })
+    const start = plan?.trajectory?.(0)
+
+    // Analytic sampling at t=0 preserves initial conditions within floating-point roundoff.
+    expect(start?.value[0]).toBeCloseTo(0.4, 12)
+    expect(start?.velocity[0]).toBeCloseTo(0.001, 12)
+    expect(plan?.frames.at(-1)?.value).toBe('1')
+    expect(plan?.frames.length).toBeGreaterThan(2)
+    expect(plan?.easing).toBe('linear')
+  })
+
+  it.each([
+    { label: 'unreadable start', start: undefined, end: [20], relative: false, numeric: false },
+    {
+      label: 'unreadable destination',
+      start: { value: [0], velocity: [0.01] },
+      end: undefined,
+      relative: false,
+      numeric: false,
+    },
+    {
+      label: 'incompatible components',
+      start: { value: [0], velocity: [0.01] },
+      end: [1, 2],
+      relative: false,
+      numeric: false,
+    },
+    {
+      label: 'stationary absolute length',
+      start: { value: [0], velocity: [0] },
+      end: [20],
+      relative: false,
+      numeric: false,
+    },
+    {
+      label: 'stationary relative length',
+      start: { value: [0], velocity: [0] },
+      end: [20],
+      relative: true,
+      numeric: true,
+    },
+  ])('preserves numeric handoff support limits for $label', ({ start, end, relative, numeric }) => {
+    const snapshot = receiverSnapshot()
+    const track = {
+      ...snapshot.track,
+      property: 'width',
+      timing: { kind: 'spring-duration', durationMs: 500, bounce: 0.1 } as const,
+      destinationValue: relative ? '50%' : '20px',
+      keyframes: [
+        { offset: 0, value: '0px' },
+        { offset: 1, value: relative ? '50%' : '20px' },
+      ],
+    }
+
+    const plan = finalPlan({
+      ...snapshot,
+      source: track,
+      track,
+      displayed: '0px',
+      declarations: [{ name: 'width', addresses: ['width'] }],
+      motion: { start, end, relative },
+    })
+
+    expect(plan?.trajectory !== undefined).toBe(numeric)
+    expect(plan?.frames.at(-1)?.value).toBe('20px')
+  })
+
+  it('passes arbitrary CSS through scalar spring easing when numeric codecs do not support it', () => {
+    const snapshot = receiverSnapshot()
+    const track = {
+      ...snapshot.track,
+      property: 'color',
+      timing: { kind: 'spring-duration', durationMs: 500, bounce: 0.1 } as const,
+      destinationValue: 'red',
+      keyframes: [
+        { offset: 0, value: 'blue' },
+        { offset: 1, value: 'red' },
+      ],
+    }
+
+    const plan = finalPlan({
+      ...snapshot,
+      source: track,
+      track,
+      displayed: 'blue',
+      declarations: [{ name: 'color', addresses: ['color'] }],
+      motion: { start: { value: [0], velocity: [0.01] }, end: [1], relative: false },
+    })
+
+    expect(plan?.trajectory).toBeUndefined()
+    expect(plan?.frames.at(-1)?.value).toBe('red')
+  })
+
+  it('preserves intermediate frames instead of using endpoint-only velocity handoff', () => {
+    const observations = receiverSnapshot()
+    const track = {
+      ...observations.track,
+      timing: { kind: 'spring-duration', durationMs: 500, bounce: 0.1 } as const,
+    }
+
+    const plan = finalPlan({
+      ...observations,
+      track,
+      motion: { start: { value: [0.4], velocity: [0.001] }, end: [1], relative: false },
+    })
+
+    expect(plan?.trajectory).toBeUndefined()
+    expect(plan?.frames.map((frame) => frame.value)).toEqual(['0.4', '0.6', '1'])
+  })
+
+  it('does not request motion samples for manual endpoint-spring previews', () => {
+    const observations = receiverSnapshot()
+    const track = {
+      ...observations.track,
+      timing: { kind: 'spring-duration', durationMs: 500, bounce: 0.1 } as const,
+      keyframes: [observations.track.keyframes[0], observations.track.keyframes[2]],
+    }
+
+    expect(trackObservationNeeds(track, false, false).motion).toBe(false)
+  })
+
+  it('keeps explicit equal endpoints and preview fill without numeric observations', () => {
+    const snapshot = receiverSnapshot()
+    const track = {
+      ...snapshot.track,
+      implicitStart: false,
+      keyframes: [
+        { offset: 0, value: '1' },
+        { offset: 1, value: '1' },
+      ],
+    }
+
+    const plan = planTrack(
+      { ...snapshot, track, displayed: undefined },
+      trackTiming(track),
+      'backwards',
+    )
+
+    expect(plan?.frames.map((frame) => frame.value)).toEqual(['1', '1'])
+    expect(plan?.fill).toBe('backwards')
+  })
+  it('requests interruption observations only for the receiving element with an active effect', () => {
+    const snapshot = receiverSnapshot()
+    const track = { ...snapshot.track, implicitStart: false }
+    const candidates = [1, 2].map((receiver) => ({
+      receiver,
+      source: track,
+      track,
+      declarations: snapshot.declarations,
+      protected: false,
+    }))
+
+    const plan = planTrackObservations(candidates, executionFacts().active, true)
+
+    expect(plan.requests.map((request) => request.needs.displayed)).toEqual([true, false])
+    expect(plan.requests.map((request) => request.interrupted)).toEqual([true, false])
+  })
+
+  it('omits lifecycle-protected live tracks while retaining their replacement addresses', () => {
+    const snapshot = receiverSnapshot()
+    const candidate = {
+      receiver: 1,
+      source: snapshot.source,
+      track: snapshot.track,
+      declarations: snapshot.declarations,
+      protected: true,
+    }
+
+    const live = planTrackObservations([candidate], [], true)
+    const preview = planTrackObservations([candidate], executionFacts().active, false)
+
+    expect(live.requests).toEqual([])
+    expect([...live.changed]).toEqual(['box\0opacity'])
+    expect(preview.requests).toHaveLength(1)
+    expect(preview.requests[0].interrupted).toBe(false)
+    expect(preview.requests[0].reference).toBe(false)
+  })
+})
+
+function executionFacts(): PresentationFacts {
+  const track = receiverSnapshot().track
+
+  return {
+    mode: 'live',
+    lifecycle: [],
+    suspended: false,
+    reduced: false,
+    preserveLifecycle: true,
+    receivers: [
+      { id: 1, target: 'box', protected: ['opacity'] },
+      { id: 2, target: 'box', protected: [] },
+    ],
+    active: [
+      {
+        id: 9,
+        receiver: 1,
+        target: 'box',
+        property: 'opacity',
+        sourceProperty: 'opacity',
+        sourceDestination: '1',
+        track,
+      },
+      {
+        id: 10,
+        receiver: 2,
+        target: 'box',
+        property: 'color',
+        sourceProperty: 'color',
+        sourceDestination: 'blue',
+        track: { ...track, property: 'color' },
+      },
+    ],
+  }
+}
+
+describe('complete presentation planning', () => {
+  it.each([
+    { reduced: false, mode: 'live' as const },
+    { reduced: true, mode: 'preview' as const },
+  ])('preserves effects for reduced=$reduced and mode=$mode', ({ reduced, mode }) => {
+    const next = resolution([['opacity', '1']])
+
+    expect(planMotionChange(next, { ...executionFacts(), reduced, mode })).toBeUndefined()
+  })
+
+  it('settles ordinary effects and enter while writing around the remaining leave ownership', () => {
+    const next = resolution([
+      ['opacity', '1'],
+      ['color', 'red'],
+    ])
+    const facts: PresentationFacts = {
+      ...executionFacts(),
+      reduced: true,
+      receivers: [
+        { id: 1, target: 'box', protected: ['opacity'] },
+        { id: 2, target: 'box', protected: ['color'] },
+      ],
+      lifecycle: [
+        {
+          id: 1,
+          phase: 'enter',
+          finished: false,
+          protected: [{ receiver: 1, property: 'opacity' }],
+        },
+        { id: 2, phase: 'leave', finished: false, protected: [{ receiver: 2, property: 'color' }] },
+        { id: 3, phase: 'leave', finished: true, protected: [] },
+      ],
+    }
+
+    const plan = planMotionChange(next, facts)
+
+    expect(plan?.cancel).toEqual([9, 10])
+    expect(plan?.lifecycle).toEqual({ release: [3], cancel: [1] })
+    expect(plan?.restore).toBe(true)
+    expect(plan?.preserveLifecycle).toBe(true)
+    expect(plan?.resetMotion).toBe(true)
+    expect(plan?.writes).toEqual([
+      { receiver: 1, property: 'opacity', value: '1' },
+      { receiver: 2, property: 'opacity', value: '1' },
+      { receiver: 1, property: 'color', value: 'red' },
+    ])
+  })
+
+  it('releases all settled registrations and restores a finished enter around other live sessions', () => {
+    const next = resolution([
+      ['opacity', '1'],
+      ['color', 'red'],
+    ])
+    const facts: PresentationFacts = {
+      ...executionFacts(),
+      lifecycle: [
+        { id: 1, phase: 'enter', finished: true, protected: [] },
+        { id: 2, phase: 'enter', finished: true, protected: [] },
+        {
+          id: 3,
+          phase: 'leave',
+          finished: false,
+          protected: [{ receiver: 1, property: 'opacity' }],
+        },
+      ],
+    }
+
+    const plan = planLifecycleSettlement(next, facts)
+
+    expect(plan?.lifecycle).toEqual({ release: [1, 2], cancel: [] })
+    expect(plan?.restore).toBe(true)
+    expect(plan?.preserveLifecycle).toBe(true)
+    expect(plan?.writes).toEqual([
+      { receiver: 2, property: 'opacity', value: '1' },
+      { receiver: 1, property: 'color', value: 'red' },
+      { receiver: 2, property: 'color', value: 'red' },
+    ])
+  })
+
+  it.each([
+    { mode: 'preview' as const, phase: 'enter' as const },
+    { mode: 'preparing-preview' as const, phase: 'enter' as const },
+    { mode: 'live' as const, phase: 'leave' as const },
+  ])(
+    'releases a finished $phase during $mode without changing its presentation',
+    ({ mode, phase }) => {
+      const next = resolution([['opacity', '1']])
+      const facts: PresentationFacts = {
+        ...executionFacts(),
+        mode,
+        lifecycle: [{ id: 1, phase, finished: true, protected: [] }],
+      }
+
+      const plan = planLifecycleSettlement(next, facts)
+
+      expect(plan?.mode).toBe('maintenance')
+      expect(plan?.lifecycle).toEqual({ release: [1], cancel: [] })
+      expect(plan?.restore).toBe(false)
+      expect(plan?.writes).toEqual([])
+      expect(plan?.cancel).toEqual([])
+    },
+  )
+
+  it.each([planMotionChange, planLifecycleSettlement])(
+    'restores suspended playback without writing unavailable targets',
+    (planner) => {
+      const next = resolution([['opacity', '1']])
+      const facts: PresentationFacts = {
+        ...executionFacts(),
+        reduced: true,
+        suspended: true,
+        lifecycle: [{ id: 1, phase: 'enter', finished: true, protected: [] }],
+      }
+
+      const plan = planner(next, facts)
+
+      expect(plan?.restore).toBe(true)
+      expect(plan?.preserveLifecycle).toBe(false)
+      expect(plan?.writes).toEqual([])
+    },
+  )
+
+  it('ignores lifecycle notifications with no settled registration', () => {
+    const next = resolution([['opacity', '1']])
+
+    expect(planLifecycleSettlement(next, executionFacts())).toBeUndefined()
+  })
+
+  it('restores removed declarations and reapplies the cascade without writing lifecycle-owned properties', () => {
+    const next = resolution([
+      ['opacity', '1'],
+      ['color', 'red'],
+    ])
+
+    const plan = planPresentation(
+      next,
+      executionFacts(),
+      new Set(['box\0opacity']),
+      new Set(['box\0width']),
+      [],
+    )
+
+    expect(plan.cancel).toEqual([9])
+    expect(plan.restore).toBe(true)
+    expect(plan.preserveLifecycle).toBe(true)
+    expect(plan.writes).toEqual([
+      { receiver: 2, property: 'opacity', value: '1' },
+      { receiver: 1, property: 'color', value: 'red' },
+      { receiver: 2, property: 'color', value: 'red' },
+    ])
+  })
+
+  it('accepts suspended presentation changes without restoring or writing DOM styles', () => {
+    const next = resolution([['opacity', '1']])
+
+    const plan = planPresentation(
+      next,
+      { ...executionFacts(), suspended: true },
+      new Set(['box\0opacity']),
+      new Set(['box\0color']),
+      [],
+    )
+
+    expect(plan.resolution).toBe(next)
+    expect(plan.cancel).toEqual([9, 10])
+    expect(plan.restore).toBe(false)
+    expect(plan.writes).toEqual([])
+  })
+
+  it('reconciles completion only on the completed receiver and ignores stale effect IDs', () => {
+    const next = resolution([
+      ['opacity', '1'],
+      ['color', 'red'],
+    ])
+    const facts = executionFacts()
+
+    const plan = planEffectCompletion(next, facts, 10)
+
+    expect(plan?.cancel).toEqual([10])
+    expect(plan?.writes).toEqual([
+      { receiver: 2, property: 'color', value: 'blue' },
+      { receiver: 2, property: 'opacity', value: '1' },
+      { receiver: 2, property: 'color', value: 'red' },
+    ])
+    expect(planEffectCompletion(next, facts, 11)).toBeUndefined()
+  })
+
+  it('plans a preview baseline independently of live lifecycle protection', () => {
+    const next = resolution([['opacity', '1']])
+
+    const plan = planPreviewPresentation(next, executionFacts().receivers, [])
+
+    expect(plan.mode).toBe('preview')
+    expect(plan.writes).toEqual([
+      { receiver: 1, property: 'opacity', value: '1' },
+      { receiver: 2, property: 'opacity', value: '1' },
     ])
   })
 })
