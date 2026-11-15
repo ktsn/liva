@@ -79,6 +79,15 @@ type PresentationMode = 'live' | 'preparing-preview' | 'preview'
 /** Each registered name retains its receiving elements in accepted binding order. */
 type TargetElements = [HTMLElement, ...HTMLElement[]]
 
+/** Configured instances remain registered while another controller/declaration owns their address. */
+type ControllerState = {
+  /** Logical target/property identity used to compare selected owners. */
+  readonly key: string
+
+  /** Selected for live control, including controllers currently using an unreadable-value fallback. */
+  active: boolean
+}
+
 export class PresentationExecutor {
   private layerResolution!: LayerResolution
   private environment!: ExecutionEnvironment
@@ -112,8 +121,7 @@ export class PresentationExecutor {
   private readonly propertyMotion = new PropertyMotion()
   private readonly dirtyProperties = new Map<HTMLElement, Set<string>>()
   private referenceFrame?: number
-  private controllers = new Map<string, PropertyController>()
-  private controllerInstances = new Set<PropertyController>()
+  private readonly controllers = new Map<PropertyController, ControllerState>()
   private enterSessions = new Set<LifecycleSession>()
   private leaveSessions = new Set<LifecycleSession>()
   private owned: OwnedElement[] = []
@@ -167,7 +175,9 @@ export class PresentationExecutor {
   }
 
   terminalControls(time: number) {
-    const controlled = [...this.controllers.values()].map((controller) => controller.control())
+    const controlled = [...this.controllers]
+      .filter(([, state]) => state.active)
+      .map(([controller]) => controller.control())
 
     for (const value of controlled) {
       if (value) this.write(value.element, value.property, value.value)
@@ -267,13 +277,17 @@ export class PresentationExecutor {
   }
 
   configureControllers(definition: Definition, values: VariableValues) {
-    this.controllerInstances.clear()
+    this.controllers.clear()
+
     for (const target of layerTargets(definition)) {
       for (const property of target.properties) {
         if (property.value.kind !== 'binding') continue
 
         const controller = propertyController(evaluate(property.value.expression, values))
-        this.controllerInstances.add(controller)
+        this.controllers.set(controller, {
+          key: layerPropertyKey(target.name, property.name),
+          active: false,
+        })
         controller.configure({
           target: target.name,
           property: property.name,
@@ -293,8 +307,12 @@ export class PresentationExecutor {
   }
 
   releaseControllers(time = performance.now()) {
-    for (const controller of this.controllers.values()) controller.release(time)
-    this.controllers.clear()
+    for (const [controller, state] of this.controllers) {
+      if (!state.active) continue
+
+      controller.release(time)
+      state.active = false
+    }
   }
 
   /** Captures only canonical identities, without retaining the receiving element in plans. */
@@ -379,7 +397,7 @@ export class PresentationExecutor {
       resolution.composition,
     )
 
-    const controllers = new Map<string, PropertyController>()
+    const nextOwners = new Map<string, PropertyController>()
     const targets = resolution.presentation.targets.map((target) => ({
       ...target,
       properties: target.properties.flatMap((property) => {
@@ -406,7 +424,7 @@ export class PresentationExecutor {
         const snapshot = evaluate(property.binding, values)
         const controller = propertyController(snapshot)
         const key = layerPropertyKey(target.name, property.name)
-        controllers.set(key, controller)
+        nextOwners.set(key, controller)
 
         if (live) controller.acquire(time)
 
@@ -429,11 +447,15 @@ export class PresentationExecutor {
     // Release replaced or obscured owners before the caller prepares transitions,
     // allowing their input velocity to be handed to the next spring.
     if (live) {
-      for (const [key, controller] of this.controllers) {
-        if (controllers.get(key) !== controller) controller.release(time)
-      }
+      // Live controllers were registered before binding; candidate inspections
+      // never publish their ownership into this registry.
+      for (const [controller, state] of this.controllers) {
+        const selected = nextOwners.get(state.key) === controller
 
-      this.controllers = controllers
+        if (state.active && !selected) controller.release(time)
+
+        state.active = selected
+      }
     }
 
     // A fallback can belong to an earlier declaration, so restore cascade order
@@ -609,7 +631,7 @@ export class PresentationExecutor {
     this.presentationMode = 'live'
     this.clearReferenceFrame()
     if (!preserveControllerSnapshot) {
-      for (const controller of this.controllerInstances) controller.setPreview(false)
+      for (const controller of this.controllers.keys()) controller.setPreview(false)
     }
     this.propertyMotion.reset()
     this.dirtyProperties.clear()
@@ -885,7 +907,7 @@ export class PresentationExecutor {
       )
       const lifecycle = phase ? captureLifecycleDefinition(definition, phase, values) : undefined
 
-      for (const controller of this.controllerInstances) controller.setPreview(true)
+      for (const controller of this.controllers.keys()) controller.setPreview(true)
       this.cancel(true, true)
       this.restore()
       this.propertyMotion.reset()

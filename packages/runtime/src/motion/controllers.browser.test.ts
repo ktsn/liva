@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from 'vite-plus/test'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { Definition, Expression } from '../model/definition.ts'
 import { LivaInstance, type RuntimeDiagnostic } from '../execution/instance.ts'
 import { decodeProperty } from './property-codec.ts'
+import { springMotion } from './property-motion.ts'
 
 const reference = (...path: string[]): Expression => ({ kind: 'reference', path })
 const instances: LivaInstance[] = []
@@ -88,13 +89,14 @@ function definition(component: 'x' | 'y' = 'x'): Definition {
 function setup(
   component: 'x' | 'y' = 'x',
   transform: (value: Definition) => Definition = (value) => value,
+  extraInputs: Readonly<Record<string, number | boolean>> = {},
 ) {
   const element = document.createElement('div')
   element.style.cssText = 'position:relative;width:200px;height:80px;translate:100px 20px 3px;'
   document.body.append(element)
   elements.push(element)
   const errors: RuntimeDiagnostic[] = []
-  const inputs = { input: 0, enabled: false, sensitivity: 1, destination: 100 }
+  const inputs = { input: 0, enabled: false, sensitivity: 1, destination: 100, ...extraInputs }
   const instance = new LivaInstance(transform(definition(component)), inputs, (error) =>
     errors.push(error),
   )
@@ -102,6 +104,77 @@ function setup(
   instance.bind([['self', element]])
 
   return { element, instance, inputs, errors }
+}
+
+function setupSwitchingControllers() {
+  const fixture = setup(
+    'x',
+    (value) => ({
+      ...value,
+      parameters: [
+        ...(value.parameters ?? []),
+        { name: 'secondInput', type: 'number' },
+        { name: 'useSecond', type: 'boolean' },
+      ],
+      letBindings: [
+        ...(value.letBindings ?? []),
+        {
+          name: 'second',
+          initializer: {
+            kind: 'call',
+            function: 'link',
+            arguments: [
+              { name: 'input', value: reference('secondInput') },
+              { name: 'component', value: { kind: 'string', value: 'x' } },
+            ],
+          },
+        },
+      ],
+      layers: [
+        ...value.layers.map((layer) => ({
+          ...layer,
+          targets: layer.targets.map((target) => ({
+            ...target,
+            properties:
+              layer.name === 'base'
+                ? [
+                    ...target.properties,
+                    {
+                      name: '--second-observed',
+                      value: {
+                        kind: 'template' as const,
+                        parts: [reference('second', 'value', 'x')],
+                      },
+                    },
+                  ]
+                : target.properties,
+          })),
+        })),
+        {
+          name: 'second',
+          when: reference('useSecond'),
+          targets: [
+            {
+              name: 'self',
+              properties: [
+                { name: 'translate', value: { kind: 'binding', expression: reference('second') } },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+    { secondInput: 0, useSecond: false },
+  )
+  let inputs = { ...fixture.inputs, secondInput: 0, useSecond: false }
+
+  return {
+    ...fixture,
+    update: (changes: Partial<typeof inputs>) => {
+      inputs = { ...inputs, ...changes }
+      fixture.instance.updateParameters(inputs)
+    },
+  }
 }
 
 async function frame() {
@@ -347,6 +420,70 @@ describe('relative property controllers', () => {
     expect(errors).toEqual([])
   })
 
+  it('reacquires the displayed origin when a previously replaced controller becomes the owner again', () => {
+    const { element, update, errors } = setupSwitchingControllers()
+
+    update({ enabled: true, input: 0 })
+    update({ input: 20 })
+    update({ useSecond: true, secondInput: 0 })
+    update({ secondInput: 30 })
+
+    expect(decodeProperty(element, 'translate')?.values).toEqual([150, 20, 3])
+
+    update({ useSecond: false })
+
+    expect(decodeProperty(element, 'translate')?.values).toEqual([150, 20, 3])
+
+    update({ input: 30 })
+
+    expect(decodeProperty(element, 'translate')?.values).toEqual([160, 20, 3])
+    expect(errors).toEqual([])
+  })
+
+  it('hands the replacement owner velocity to the spring when all controller bindings end', () => {
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(100)
+
+    try {
+      const { instance, element, update, errors } = setupSwitchingControllers()
+
+      update({ enabled: true, input: 0 })
+      clock.mockReturnValue(110)
+      update({ input: 20 })
+      clock.mockReturnValue(120)
+      update({ useSecond: true, secondInput: 0 })
+      clock.mockReturnValue(130)
+      update({ secondInput: 30 })
+
+      expect(decodeProperty(element, 'translate')?.values).toEqual([150, 20, 3])
+
+      clock.mockReturnValue(140)
+      update({ enabled: false, useSecond: false, destination: 200 })
+      const animation = instance.animations[0]
+
+      if (!(animation?.effect instanceof KeyframeEffect)) throw new Error('Expected return spring')
+
+      // The second owner moved 30px over 10ms; its derivative must replace the first owner's 2px/ms.
+      const expected = springMotion(
+        { kind: 'spring-physics', stiffness: 300, damping: 25, mass: 1 },
+        [150, 20, 3],
+        [200, 20, 3],
+        [3, 0, 0],
+      )
+      // Compare at an authored sample boundary, avoiding WAAPI interpolation between samples.
+      const sampleTime = animation.effect.getKeyframes()[1].computedOffset * expected.durationMs
+      animation.pause()
+      animation.currentTime = sampleTime
+
+      expect(decodeProperty(element, 'translate')?.values[0]).toBeCloseTo(
+        expected.sample(sampleTime).value[0],
+        3,
+      )
+      expect(errors).toEqual([])
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
   it('retains common styles when a state controller is unavailable', async () => {
     const { instance, element, inputs, errors } = setup('x', (value) => ({
       ...value,
@@ -451,6 +588,59 @@ describe('relative property controllers', () => {
 
     instance.updateParameters({ ...inputs, enabled: true, input: 40 })
 
+    expect(errors).toEqual([])
+  })
+
+  it('freezes inactive controller observations during preview and resumes them when preview ends', async () => {
+    const { instance, element, update, errors } = setupSwitchingControllers()
+    update({ enabled: true, input: 10 })
+    update({ input: 30 })
+    const active = { layers: { base: true, active: true, second: false }, states: {} }
+    const inactive = { layers: { base: true, active: false, second: false }, states: {} }
+    const observeSecond = () =>
+      instance
+        .inspectComposition(inactive)
+        .presentation.targets.find((target) => target.name === 'self')
+        ?.properties.find((property) => property.name === '--second-observed')?.value
+
+    instance.previewComposition(active, inactive)
+
+    expect(instance.animations).toHaveLength(1)
+
+    instance.animations[0].currentTime = 50
+
+    await frame()
+
+    expect(decodeProperty(element, 'translate')?.values[0]).not.toBe(120)
+    expect(observeSecond()).toBe('120')
+
+    instance.endCompositionPreview()
+    element.style.translate = '200px 20px 3px'
+
+    expect(observeSecond()).toBe('200')
+    expect(errors).toEqual([])
+  })
+
+  it('keeps the live owner selected when a preview displays a different controller', () => {
+    const { instance, element, update, errors } = setupSwitchingControllers()
+    update({ enabled: true, input: 10 })
+    update({ input: 30 })
+
+    instance.previewComposition(
+      { layers: { base: true, active: true, second: false }, states: {} },
+      { layers: { base: true, active: false, second: true }, states: {} },
+    )
+    instance.endCompositionPreview()
+
+    // The live owner must apply its final 10px input delta before releasing to the spring.
+    update({ enabled: false, input: 40 })
+
+    expect(instance.animations).toHaveLength(1)
+
+    instance.animations[0].pause()
+    instance.animations[0].currentTime = 0
+
+    expect(decodeProperty(element, 'translate')?.values).toEqual([130, 20, 3])
     expect(errors).toEqual([])
   })
 
