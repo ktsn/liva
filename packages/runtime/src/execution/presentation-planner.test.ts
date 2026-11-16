@@ -11,7 +11,6 @@ import {
   planEffectCompletion,
   planPreviewPresentation,
   planMotionChange,
-  planLifecycleSettlement,
   type PresentationFacts,
   trackTiming,
   trackObservationNeeds,
@@ -756,7 +755,6 @@ function executionFacts(): PresentationFacts {
 
   return {
     mode: 'live',
-    lifecycle: [],
     suspended: false,
     reduced: false,
     preserveLifecycle: true,
@@ -818,22 +816,11 @@ describe('complete presentation planning', () => {
         { id: 1, target: 'box', protected: ['opacity'] },
         { id: 2, target: 'box', protected: ['color'] },
       ],
-      lifecycle: [
-        {
-          id: 1,
-          phase: 'enter',
-          finished: false,
-          protected: [{ receiver: 1, property: 'opacity' }],
-        },
-        { id: 2, phase: 'leave', finished: false, protected: [{ receiver: 2, property: 'color' }] },
-        { id: 3, phase: 'leave', finished: true, protected: [] },
-      ],
     }
 
     const plan = planMotionChange(next, facts)
 
     expect(plan?.cancel).toEqual([9, 10])
-    expect(plan?.lifecycle).toEqual({ release: [3] })
     expect(plan?.restore).toBe(true)
     expect(plan?.preserveLifecycle).toBe(false)
     expect(plan?.resetMotion).toBe(true)
@@ -871,84 +858,19 @@ describe('complete presentation planning', () => {
     },
   )
 
-  it('releases all settled registrations and restores a finished enter around other live sessions', () => {
-    const next = resolution([
-      ['opacity', '1'],
-      ['color', 'red'],
-    ])
+  it('restores suspended playback without writing unavailable targets', () => {
+    const next = resolution([['opacity', '1']])
     const facts: PresentationFacts = {
       ...executionFacts(),
-      lifecycle: [
-        { id: 1, phase: 'enter', finished: true, protected: [] },
-        { id: 2, phase: 'enter', finished: true, protected: [] },
-        {
-          id: 3,
-          phase: 'leave',
-          finished: false,
-          protected: [{ receiver: 1, property: 'opacity' }],
-        },
-      ],
+      reduced: true,
+      suspended: true,
     }
 
-    const plan = planLifecycleSettlement(next, facts)
+    const plan = planMotionChange(next, facts)
 
-    expect(plan?.lifecycle).toEqual({ release: [1, 2] })
     expect(plan?.restore).toBe(true)
-    expect(plan?.preserveLifecycle).toBe(true)
-    expect(plan?.writes).toEqual([
-      { receiver: 2, property: 'opacity', value: '1' },
-      { receiver: 1, property: 'color', value: 'red' },
-      { receiver: 2, property: 'color', value: 'red' },
-    ])
-  })
-
-  it.each([
-    { mode: 'preview' as const, phase: 'enter' as const },
-    { mode: 'preparing-preview' as const, phase: 'enter' as const },
-    { mode: 'live' as const, phase: 'leave' as const },
-  ])(
-    'releases a finished $phase during $mode without changing its presentation',
-    ({ mode, phase }) => {
-      const next = resolution([['opacity', '1']])
-      const facts: PresentationFacts = {
-        ...executionFacts(),
-        mode,
-        lifecycle: [{ id: 1, phase, finished: true, protected: [] }],
-      }
-
-      const plan = planLifecycleSettlement(next, facts)
-
-      expect(plan?.mode).toBe('maintenance')
-      expect(plan?.lifecycle).toEqual({ release: [1] })
-      expect(plan?.restore).toBe(false)
-      expect(plan?.writes).toEqual([])
-      expect(plan?.cancel).toEqual([])
-    },
-  )
-
-  it.each([planMotionChange, planLifecycleSettlement])(
-    'restores suspended playback without writing unavailable targets',
-    (planner) => {
-      const next = resolution([['opacity', '1']])
-      const facts: PresentationFacts = {
-        ...executionFacts(),
-        reduced: true,
-        suspended: true,
-        lifecycle: [{ id: 1, phase: 'enter', finished: true, protected: [] }],
-      }
-
-      const plan = planner(next, facts)
-
-      expect(plan?.restore).toBe(true)
-      expect(plan?.preserveLifecycle).toBe(false)
-      expect(plan?.writes).toEqual([])
-    },
-  )
-
-  it('ignores lifecycle notifications with no settled registration', () => {
-    const next = resolution([['opacity', '1']])
-
-    expect(planLifecycleSettlement(next, executionFacts())).toBeUndefined()
+    expect(plan?.preserveLifecycle).toBe(false)
+    expect(plan?.writes).toEqual([])
   })
 
   it('restores removed declarations and reapplies the cascade without writing lifecycle-owned properties', () => {

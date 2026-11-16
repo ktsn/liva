@@ -29,7 +29,6 @@ import {
   planPreviewPresentation,
   planReconciliation,
   planMotionChange,
-  planLifecycleSettlement,
   presentationWrites,
   layerPropertyKey,
   type PresentationFacts,
@@ -77,16 +76,31 @@ export class Runtime {
     const variables = parameterValues(definition.parameters ?? [], targetValues(definition), inputs)
     this.graph = new LetBindingGraph(definition.letBindings ?? [], layerTargets(definition))
     this.calls = new ReactiveCallStore()
-    this.values = this.evaluateValues(variables, (values) => {
-      resolveLayers(definition, values)
 
-      for (const event of definition.events ?? []) evaluate(event.when, values)
-    })
-    this.definition = definition
-    execution.configureControllers(definition, this.values)
-    this.evaluateEvents(false)
-    this.resolution = resolveLayers(definition, this.values)
-    execution.initialize(this.resolution)
+    try {
+      this.values = this.evaluateValues(variables, (values) => {
+        resolveLayers(definition, values)
+
+        for (const event of definition.events ?? []) evaluate(event.when, values)
+      })
+      this.definition = definition
+      execution.configureControllers(definition, this.values)
+      this.evaluateEvents(false)
+      this.resolution = resolveLayers(definition, this.values)
+      execution.initialize(this.resolution)
+    } catch (error) {
+      try {
+        this.calls.dispose()
+      } catch (cleanupError) {
+        this.report({
+          code: 'runtime.initialization-cleanup',
+          message: String(cleanupError),
+          error: cleanupError,
+        })
+      }
+
+      throw error
+    }
   }
 
   get composition() {
@@ -104,7 +118,6 @@ export class Runtime {
     },
     reconcile: () => this.reconcilePresentation(),
     motionChanged: () => this.applyObservedPlan(planMotionChange),
-    lifecycleSettled: () => this.applyObservedPlan(planLifecycleSettlement),
     refreshOwnership: () => this.refreshOwnership(),
   }
 

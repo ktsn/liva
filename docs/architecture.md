@@ -34,7 +34,7 @@ groups implementation files and their tests by responsibility:
 | `composition/`    | Layer selection, state transitions, cascade precedence, and resolved tracks                     |
 | `motion/`         | Numeric property rules/codecs, controllers, motion histories, springs, and WAAPI property names |
 | `layout/`         | Layout bounds and shared per-document measurement scheduling                                    |
-| `execution/`      | Instance ownership, DOM binding, playback, previews, and lifecycle sessions                     |
+| `execution/`      | Instance ownership, DOM binding, playback, previews, and presence operations                    |
 | `builtins/`       | Language-callable functions and their registration                                              |
 
 Tests spanning evaluation, composition, and spring resolution remain in `src/__test__/`.
@@ -42,8 +42,12 @@ These directories group responsibilities; they do not impose a one-way dependenc
 hierarchy. For example, expression rendering uses cascade timing helpers, while
 composition resolution evaluates expressions.
 
-The public `execution/instance.ts` facade routes logical requests to `Runtime` and
-DOM-bearing requests directly to `PresentationExecutor`. Runtime owns accepted
+Vue explicitly assembles `Runtime` and `PresentationExecutor`: it constructs the
+executor and runtime, attaches the logical environment, installs integration hooks,
+then registers receivers. Initialization failure releases call/browser resources
+and reports the original cause. `execution/instance.ts` remains a compatibility
+facade for direct ordinary/editor callers; lifecycle callers use executor captures
+and operation handles. Runtime owns accepted
 parameters and let environments, reactive-call lifetime, ordinary layer/state
 history, conditional events, binding revisions, and the update queue. It does not
 receive elements or native effects. `execution-contracts.ts` defines the logical
@@ -109,8 +113,9 @@ has joined the group. Cancellation, teardown, failure, and completion remain dis
 and idempotent. Reduced motion settles all live effects; manually seekable previews
 remain frozen.
 
-The executor keeps one operation registry for initialized presence layers and public
-compatibility registrations. It retains physical receivers through rebinding while
+The executor keeps one operation registry for initialized presence layers. Captures
+retain tracks, elements and source snapshots in its private WeakMap; their public
+handles carry no DOM or animation data. It retains physical receivers through rebinding while
 an operation still uses them. Target aliases share receiver identities, and
 controller effectiveness is decided across every receiver of a logical target.
 Controller formatting retains the ordered logical declaration presentation by
@@ -133,11 +138,17 @@ continuing leave effects, so editor seeking cannot scrub live presence. Live gro
 completion during preview releases its effects without changing frozen preview
 styles. Ending or failing a preview restores application presentation.
 
-`LifecycleSession` is a compatibility barrier over executor participants, allowing
-one Vue boundary to aggregate repeated targets and multiple Motion instances.
-Captured work retains source identity and an executor-owned input environment;
-replacement/disposal preserves that definition's final accepted values before
-subscriptions disconnect. Disposal severs Runtime callbacks and keeps only the
+`PresenceOperation` is a DOM-free boundary barrier over opaque `PresenceCapture`
+handles, allowing one Vue boundary to aggregate repeated targets and multiple Motion
+instances. Executor capabilities release captured effects before superseding a
+previous operation, then initialize every participant before painting. Completion
+tracks only current numeric effect identifiers and results. Repeated handles and
+repeated initialization/cancellation are idempotent.
+
+Captures retain source identity and an executor-owned environment; replacement or
+disposal freezes that definition's final accepted values and ordinary presentation
+before subscriptions disconnect. Delayed leave therefore uses its own definition's
+baseline even after a new definition has been accepted. Disposal severs Runtime callbacks and keeps only the
 browser resources needed by detached leave. The same composition, observation,
 planning, replacement, and reference tracking serve attached and detached playback.
 
@@ -548,17 +559,27 @@ Ordinary target registration retains nearest-root behavior for existing directiv
 
 `packages/vue/src/presence.ts` uses public JavaScript hooks on Vue Transition and
 TransitionGroup; persisted Transition handles v-show. Before target or Motion
-disposal, the adapter captures resolved work into all applicable boundary entries.
+disposal, the adapter collects opaque captures into all applicable boundary entries.
 Snapshots unused by that render patch are released in a microtask. Vue component
 unmount hooks and reactive-effect disposal retain their normal ordering; retained
 DOM does not keep the original Motion alive.
 
-`packages/runtime/src/execution/lifecycle.ts` resolves lifecycle declarations and
-preserves `LifecycleWork[]`, `LifecycleSession`, and public resolution helpers.
-Sessions retain compatibility work and completion results; the executor owns every
-native effect, inline style, motion sample, and observer. A boundary joins all
-participants' current effect IDs, including replacements. Only its current session
-may release Vue's removal/hide callback.
+`packages/runtime/src/execution/lifecycle.ts` contains only pure lifecycle helpers:
+Vite uses `hasLifecycle`/`lifecycleTransitions`, and the editor timeline uses
+`resolveLifecycleTracks`. `presence-calculation.ts` evaluates applicable expressions,
+calculates exclusion decisions from canonical address facts, and normalizes supplied
+tracks into evaluated layers. These calculations receive only receiver IDs, plain
+values, tracks and address observations; the executor supplies DOM observations and
+canonical expansion.
+
+Vue collects `PresentationExecutor.capturePresence` handles and initializes a
+`PresenceOperation` with the previous operation, then coordinates play, cancellation
+and completion. It never reads CSS endpoints or rewrites keyframes. Capture-time
+interruption observation also applies to snapshots made before structural teardown.
+The executor owns every native effect, inline style, motion sample and observer.
+Externally constructed element-bearing work and standalone playback are unsupported;
+leave captured from a real Runtime remains usable after its disposal. Only the
+entry's current operation may release Vue's removal/hide callback.
 
 ### Lifecycle normalization and layer capture
 
@@ -571,7 +592,7 @@ ordinary completion values. Existing property codecs expand supported logical an
 shorthand declarations without losing relative units or declaration identity.
 
 Enter initializes its current declared starting values before paint, preserving
-explicit displayed-start rebases from Vue reversal. Its initial timing follows
+displayed-start observations made by the executor before reversal cancellation. Its initial timing follows
 property, target, then lifecycle-wide precedence, independently of ordinary timing.
 A new ordinary transition takes over affected canonical components, uses displayed
 starts and its own timing, and leaves unrelated components running. Leave supplies
@@ -605,7 +626,7 @@ custom block text and decorator nodes.
 
 ## Composition inspection and manual resolution
 
-`LivaInstance.composition` returns an isolated snapshot of ordinary layer activation
+`Runtime.composition` returns an isolated snapshot of ordinary layer activation
 (`layers`, including disabled layers) and current stateful layer states (`states`).
 It reads retained state-machine history without reevaluating guards. Every definition
 has layers, so the getter always returns a composition.
@@ -625,7 +646,7 @@ transitions with the same endpoints remain distinct. Only the final value owner'
 transition contributes animation instructions, including intermediate motion when
 the endpoints are equal.
 
-`LivaInstance.previewComposition(from, to, transitions?, definition?)` prepares
+`Runtime.previewComposition(from, to, transitions?, definition?)` prepares
 paused effects for explicit compositions using the instance's current input and let
 values. An optional candidate definition affects only that preview; the application
 definition and state-machine history remain intact. The `animations` interface

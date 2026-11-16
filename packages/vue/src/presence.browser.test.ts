@@ -9,9 +9,10 @@ import {
   withDirectives,
   vShow,
   type App,
+  type DirectiveArguments,
 } from 'vue'
-import { LifecycleSession, type Definition } from '@liva/runtime'
-import { createLivaPlugin } from './runtime.ts'
+import { PresenceOperation, type Definition } from '@liva/runtime'
+import { createLivaPlugin, type InstanceBinding } from './runtime.ts'
 import { LivaPresenceBoundary, type PresenceEntry } from './presence.ts'
 
 const definition: Definition = {
@@ -88,10 +89,11 @@ afterEach(() => {
   host?.remove()
 })
 
-async function mount(persisted: boolean, group = false, motion = definition) {
+async function mount(persisted: boolean, group = false, motion = definition, rootOnTarget = false) {
   const visible = ref(true)
   const revision = ref(0)
   const entries: PresenceEntry[] = []
+  const records: { event: string; binding: InstanceBinding }[] = []
   const component = defineComponent({
     livaDefinitions: [motion],
     setup() {
@@ -114,12 +116,22 @@ async function mount(persisted: boolean, group = false, motion = definition) {
 
                     if (!persisted && !visible.value) return []
 
+                    const directives: DirectiveArguments = [
+                      [target, { owner: ['root'], entries: [entry] }, 'box', { compiled: true }],
+                      [entryDirective, entry],
+                    ]
+
+                    if (rootOnTarget)
+                      directives.push([
+                        root,
+                        { value: {}, owner: ['root'], entries: [entry] },
+                        'fade',
+                        { compiled: true },
+                      ])
+
                     const node = withDirectives(
                       h('div', { key, 'data-revision': revision.value }, 'content'),
-                      [
-                        [target, { owner: ['root'], entries: [entry] }, 'box', { compiled: true }],
-                        [entryDirective, entry],
-                      ],
+                      directives,
                     )
 
                     return [persisted ? withDirectives(node, [[vShow, visible.value]]) : node]
@@ -127,7 +139,7 @@ async function mount(persisted: boolean, group = false, motion = definition) {
               },
             ),
           ]),
-          [[root, { value: {}, owner: ['root'] }, 'fade', { compiled: true }]],
+          rootOnTarget ? [] : [[root, { value: {}, owner: ['root'] }, 'fade', { compiled: true }]],
         )
     },
   })
@@ -135,13 +147,13 @@ async function mount(persisted: boolean, group = false, motion = definition) {
   host = document.createElement('div')
   document.body.append(host)
   app = createApp(defineComponent({ setup: () => () => [h(component), h(component)] })).use(
-    createLivaPlugin(),
+    createLivaPlugin({ observe: (event, binding) => records.push({ event, binding }) }),
   )
   app.mount(host)
 
   await nextTick()
 
-  return { visible, revision, entries }
+  return { visible, revision, entries, records }
 }
 
 it.each([false, true])(
@@ -197,6 +209,64 @@ it('cancels an in-progress leave when a persisted element re-enters', async () =
   expect(host!.querySelector<HTMLElement>('div')!.style.display).not.toBe('none')
 })
 
+it('rebases interrupted enter from a Vue teardown snapshot before detached leave starts', async () => {
+  const motion: Definition = {
+    ...definition,
+    enter: { ...definition.enter!, timing: { kind: 'tween', durationMs: 1000, easing: 'linear' } },
+    leave: {
+      timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
+      targets: [
+        {
+          name: 'box',
+          properties: [
+            {
+              name: 'opacity',
+              keyframes: [
+                { offset: 0, value: { kind: 'literal', value: '0.9' } },
+                { offset: 1, value: { kind: 'literal', value: '0' } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  }
+  const { visible, records } = await mount(false, false, motion, true)
+  const element = host!.querySelector<HTMLElement>('div')!
+
+  await expect.poll(() => element.getAnimations().length).toBe(1)
+
+  const enter = element.getAnimations()[0]
+  enter.pause()
+  enter.currentTime = 400
+  const displayed = Number(getComputedStyle(element).opacity)
+
+  visible.value = false
+
+  await nextTick()
+
+  expect(records.filter((record) => record.event === 'unmount')).toHaveLength(2)
+  expect(visible.value).toBe(false)
+  expect(element.isConnected).toBe(true)
+
+  const leave = element.getAnimations()[0]
+  const effect = leave.effect
+
+  if (!(effect instanceof KeyframeEffect)) throw new Error('Expected detached leave effect')
+
+  // Browser opacity serialization retains at least five decimal places for this exact paused sample.
+  expect(Number(effect.getKeyframes()[0].opacity)).toBeCloseTo(displayed, 5)
+  expect(leave).not.toBe(enter)
+
+  for (const target of host!.querySelectorAll('div')) {
+    for (const animation of target.getAnimations()) animation.finish()
+  }
+
+  await expect.poll(() => host!.querySelector('div')).toBeNull()
+
+  expect(records.every((record) => record.binding.runtime.onUpdate === undefined)).toBe(true)
+})
+
 it('runs grouped lifecycle effects and disposes pending work with the owner', async () => {
   const { visible, entries } = await mount(false, true)
 
@@ -243,25 +313,7 @@ it('rebases a retained session from its displayed value before leaving', async (
   await expect.poll(() => host!.querySelector('div')!.getAnimations().length).toBe(0)
 
   const entry = entries.find((candidate) => candidate.element === host!.querySelector('div'))!
-  const element = entry.element!
-  const prior = new LifecycleSession(
-    [
-      {
-        element,
-        track: {
-          target: 'box',
-          property: 'opacity',
-          timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
-          keyframes: [
-            { offset: 0, value: '0.5' },
-            { offset: 1, value: '1' },
-          ],
-          destinationValue: '1',
-        },
-      },
-    ],
-    'enter',
-  )
+  const prior = new PresenceOperation(entry.capture('enter'), 'enter')
 
   entry.session = prior
   prior.initialize()
@@ -385,7 +437,7 @@ it('does not erase a newer session when a superseded completion settles', async 
 
   previous.cancel('superseded')
 
-  const replacement = new LifecycleSession([], 'enter')
+  const replacement = new PresenceOperation([], 'enter')
 
   entry.session = replacement
 

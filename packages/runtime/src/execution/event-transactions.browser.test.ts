@@ -1,8 +1,9 @@
+import { capturePresence } from '../__test__/helpers/presence.ts'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { Definition, Expression } from '../model/definition.ts'
 import type { ReactiveSubscription, RuntimeValue } from '../evaluation/reactive-value.ts'
 import { createEventValue, type ReactiveNotification } from '../evaluation/events.ts'
-import { LifecycleSession } from './lifecycle.ts'
+import { PresenceOperation } from './presence-operation.ts'
 import { LivaInstance, type RuntimeDiagnostic } from './instance.ts'
 import { springMotion } from '../motion/property-motion.ts'
 const sourceState = vi.hoisted<{ source?: ReactiveSubscription }>(() => ({}))
@@ -348,7 +349,7 @@ describe('event snapshot transactions', () => {
 
     update(true, 0)
 
-    const session = new LifecycleSession(instance.captureLifecycle('enter', ['self']), 'enter')
+    const session = new PresenceOperation(capturePresence(instance, 'enter', ['self']), 'enter')
 
     session.initialize()
     session.play()

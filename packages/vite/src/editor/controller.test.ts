@@ -26,12 +26,10 @@ const edits = [
 function binding(label: string) {
   const runtime = {
     definition,
-    animations: [],
     composition: from,
     inspectComposition: vi.fn<InstanceBinding['runtime']['inspectComposition']>(),
     inspectLifecycle: vi.fn<InstanceBinding['runtime']['inspectLifecycle']>(),
     previewComposition: vi.fn<InstanceBinding['runtime']['previewComposition']>(),
-    endCompositionPreview: vi.fn<InstanceBinding['runtime']['endCompositionPreview']>(),
     replaceDefinition: vi.fn<InstanceBinding['runtime']['replaceDefinition']>(function (
       this: { definition: Definition },
       next: Definition,
@@ -48,6 +46,10 @@ function binding(label: string) {
     },
     component: { livaSource: 'source' },
     runtime,
+    executor: {
+      animations: [],
+      endCompositionPreview: vi.fn<InstanceBinding['executor']['endCompositionPreview']>(),
+    },
     definition,
   } satisfies EditorBinding
   return result
@@ -533,7 +535,7 @@ describe('lifecycle preview coordination', () => {
 
       controller.endPreview()
 
-      expect(first.runtime.endCompositionPreview).toHaveBeenCalled()
+      expect(first.executor.endCompositionPreview).toHaveBeenCalled()
       expect(first.runtime.definition).toBe(definition)
     },
   )

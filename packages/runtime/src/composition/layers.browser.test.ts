@@ -1,4 +1,5 @@
-import { LifecycleSession } from '../execution/lifecycle.ts'
+import { capturePresence } from '../__test__/helpers/presence.ts'
+import { PresenceOperation } from '../execution/presence-operation.ts'
 import { afterEach, describe, expect, it, vi, type MockInstance } from 'vite-plus/test'
 import { cdp, userEvent } from 'vite-plus/test/browser'
 import { LivaInstance, type RuntimeDiagnostic } from '../execution/instance.ts'
@@ -1214,16 +1215,10 @@ function registeredReceiverElements(instance: LivaInstance): HTMLElement[] {
 }
 
 function start(phase: 'enter' | 'leave', instance: LivaInstance, element: HTMLElement) {
-  const work = instance.captureLifecycle(phase, ['body'])
-  instance.releaseLifecycle(
-    ['body'],
-    element,
-    work.map(({ track }) => track.property),
-  )
-
-  const session = new LifecycleSession(work, phase)
+  const work = capturePresence(instance, phase, ['body'])
+  const session = new PresenceOperation(work, phase)
   session.initialize()
-  instance.retainLifecycle(phase, session)
+  session.initialize()
   session.play()
 
   for (const animation of element.getAnimations()) {
@@ -1371,10 +1366,10 @@ describe('layer lifecycle composition', () => {
 
   it('does not register an already finished lifecycle session for later restoration', async () => {
     const { instance, element } = setup(timedDefinition())
-    const session = new LifecycleSession([], 'enter')
+    const session = new PresenceOperation(capturePresence(instance, 'enter', []), 'enter')
     session.cancel('superseded')
 
-    instance.retainLifecycle('enter', session)
+    session.initialize()
     element.style.scale = '1.7'
 
     await session.finished
@@ -1483,12 +1478,19 @@ describe('layer lifecycle composition', () => {
     expect(getComputedStyle(element).opacity).toBe('0.2')
   })
 
-  async function completeWithRegistrations(count: number) {
+  async function completionWritesForRepeatedCapture(count: number) {
     const { instance, element } = setup({ ...timedDefinition(), enter: lifecycle })
-    const session = start('enter', instance, element)
-    const writes = vi.spyOn(element.style, 'setProperty')
+    const captures = capturePresence(instance, 'enter', ['body'])
+    const session = new PresenceOperation(
+      Array.from({ length: count }, () => captures).flat(),
+      'enter',
+    )
 
-    for (let index = 1; index < count; index++) instance.retainLifecycle('enter', session)
+    cleanup.push(() => session.cancel('owner-teardown'))
+    session.initialize()
+    session.play()
+
+    const writes = vi.spyOn(element.style, 'setProperty')
 
     for (const animation of element.getAnimations()) animation.finish()
 
@@ -1503,9 +1505,9 @@ describe('layer lifecycle composition', () => {
     return countWrites
   }
 
-  it('does not repeat completion writes when multiple targets retain the same session', async () => {
-    const single = await completeWithRegistrations(1)
-    const repeated = await completeWithRegistrations(5)
+  it('does not repeat completion writes when a capture joins the same boundary repeatedly', async () => {
+    const single = await completionWritesForRepeatedCapture(1)
+    const repeated = await completionWritesForRepeatedCapture(5)
 
     expect(repeated).toBe(single)
   })
@@ -1522,18 +1524,18 @@ describe('layer lifecycle composition', () => {
         ['body', other],
       ])
 
-      const first = new LifecycleSession(
-        instance.captureLifecycle('enter', ['body'], element),
+      const first = new PresenceOperation(
+        capturePresence(instance, 'enter', ['body'], { element: element }),
         'enter',
       )
-      const second = new LifecycleSession(
-        instance.captureLifecycle('enter', ['body'], other),
+      const second = new PresenceOperation(
+        capturePresence(instance, 'enter', ['body'], { element: other }),
         'enter',
       )
 
       for (const session of [first, second]) {
         session.initialize()
-        instance.retainLifecycle('enter', session)
+        session.initialize()
         session.play()
 
         cleanup.push(() => session.cancel('owner-teardown'))
@@ -1645,7 +1647,7 @@ describe('layer lifecycle composition', () => {
         },
       }
       const { instance, element, errors } = setup(source)
-      const work = instance.captureLifecycle('leave', ['body'])
+      const work = capturePresence(instance, 'leave', ['body'])
 
       instance.updateParameters({ hover: false, press: false, size: 1.7 })
 
@@ -1656,7 +1658,7 @@ describe('layer lifecycle composition', () => {
         instance.replaceDefinition({ ...source, leave: undefined })
       }
 
-      const session = new LifecycleSession(work, 'leave')
+      const session = new PresenceOperation(work, 'leave')
 
       cleanup.push(() => session.cancel('owner-teardown'))
       session.initialize()
@@ -1755,8 +1757,8 @@ describe('layer lifecycle composition', () => {
 
       element.style.width = '100px'
 
-      const work = instance.captureLifecycle('leave', ['body'])
-      const session = new LifecycleSession(work, 'leave')
+      const work = capturePresence(instance, 'leave', ['body'])
+      const session = new PresenceOperation(work, 'leave')
 
       cleanup.push(() => session.cancel('owner-teardown'))
       session.initialize()
@@ -1928,9 +1930,9 @@ describe('layer lifecycle composition', () => {
       ['body', second],
     ])
 
-    const session = new LifecycleSession(
+    const session = new PresenceOperation(
       [element, second].flatMap((receiver) =>
-        instance.captureLifecycle('enter', ['body'], receiver),
+        capturePresence(instance, 'enter', ['body'], { element: receiver }),
       ),
       'enter',
     )
@@ -2012,22 +2014,13 @@ describe('layer lifecycle composition', () => {
         },
       }
       const { instance, element } = setup(source)
-      let work = instance.captureLifecycle('enter', ['body'])
+      if (rebased) element.style.scale = '0.7'
 
-      if (rebased)
-        work = work.map((item) => ({
-          ...item,
-          track: {
-            ...item.track,
-            keyframes: item.track.keyframes.map((frame, index) =>
-              index === 0 ? { ...frame, value: '0.7' } : frame,
-            ),
-          },
-        }))
+      const work = capturePresence(instance, 'enter', ['body'], { interrupted: rebased })
 
       instance.updateParameters({ hover: false, press: false, size: 0.3 })
 
-      const session = new LifecycleSession(work, 'enter')
+      const session = new PresenceOperation(work, 'enter')
 
       cleanup.push(() => session.cancel('owner-teardown'))
       session.initialize()
@@ -2182,8 +2175,8 @@ describe('layer lifecycle composition', () => {
     async (ending) => {
       const { instance, element } = setup({ ...timedDefinition(), leave: lifecycle })
       const report = vi.fn<(error: unknown) => void>()
-      const session = new LifecycleSession(
-        instance.captureLifecycle('leave', ['body']),
+      const session = new PresenceOperation(
+        capturePresence(instance, 'leave', ['body']),
         'leave',
         report,
       )
@@ -2294,10 +2287,9 @@ describe('layer lifecycle composition', () => {
       },
     }
     const { instance, element } = setup(source)
-    const work = instance.captureLifecycle('leave', ['body'])
     const sessions = ['scale', 'opacity'].map((property) => {
-      const session = new LifecycleSession(
-        work.filter((item) => item.track.property === property),
+      const session = new PresenceOperation(
+        capturePresence(instance, 'leave', ['body'], { properties: [property] }),
         'leave',
       )
 
@@ -2335,8 +2327,8 @@ describe('layer lifecycle composition', () => {
     document.body.append(captured)
     cleanup.push(() => captured.remove())
 
-    const session = new LifecycleSession(
-      instance.captureLifecycle('leave', ['body'], captured),
+    const session = new PresenceOperation(
+      capturePresence(instance, 'leave', ['body'], { element: captured }),
       'leave',
     )
 
@@ -2465,8 +2457,8 @@ describe('layer lifecycle composition', () => {
     element.style.width = '100px'
 
     const failures: unknown[] = []
-    const session = new LifecycleSession(
-      instance.captureLifecycle('leave', ['body']),
+    const session = new PresenceOperation(
+      capturePresence(instance, 'leave', ['body']),
       'leave',
       (error) => failures.push(error),
     )
@@ -2626,14 +2618,13 @@ describe('layer lifecycle composition', () => {
 
       instance.bind([['body', element]])
 
-      const work = instance.captureLifecycle('leave', ['body'])
-      const inset = work.filter((item) => item.track.property === 'inset')
-      const scale = new LifecycleSession(
-        work.filter((item) => item.track.property === 'scale'),
+      const inset = capturePresence(instance, 'leave', ['body'], { properties: ['inset'] })
+      const scale = new PresenceOperation(
+        capturePresence(instance, 'leave', ['body'], { properties: ['scale'] }),
         'leave',
       )
-      const first = new LifecycleSession(inset, 'leave')
-      let next: LifecycleSession | undefined
+      const first = new PresenceOperation(inset, 'leave')
+      let next: PresenceOperation | undefined
 
       try {
         for (const session of [first, scale]) {
@@ -2655,7 +2646,7 @@ describe('layer lifecycle composition', () => {
         if (change === 'edit') element.style.setProperty('inset', 'var(--external)', 'important')
         else element.style.removeProperty('inset')
 
-        next = new LifecycleSession(inset, 'leave')
+        next = new PresenceOperation(inset, 'leave')
         next.initialize()
         next.play()
 
@@ -2752,31 +2743,31 @@ describe('layer lifecycle composition', () => {
     expect(errors).toEqual([])
   })
 
-  it('retains externally constructed compatibility work across a binding replacement', async () => {
-    const { instance, element, errors } = setup(timedDefinition())
-    const session = new LifecycleSession(
-      [
-        {
-          element,
-          track: {
-            target: 'body',
-            property: 'scale',
-            timing: lifecycle.timing,
-            destinationValue: '1',
-            keyframes: [
-              { offset: 0, value: '0.5' },
-              { offset: 1, value: '1' },
+  it('retains a real captured operation across a binding replacement', async () => {
+    const source = {
+      ...timedDefinition(),
+      enter: {
+        timing: lifecycle.timing,
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'scale',
+                keyframes: [{ offset: 0, value: { kind: 'literal' as const, value: '0.5' } }],
+              },
             ],
           },
-        },
-      ],
-      'enter',
-    )
+        ],
+      },
+    }
+    const { instance, element, errors } = setup(source)
+    const session = new PresenceOperation(capturePresence(instance, 'enter', ['body']), 'enter')
 
     cleanup.push(() => session.cancel('owner-teardown'))
     session.initialize()
     session.play()
-    instance.retainLifecycle('enter', session)
+    session.initialize()
 
     const animation = element.getAnimations()[0]
 
@@ -2848,8 +2839,10 @@ describe('layer lifecycle composition', () => {
 
       instance.bind(receivers.map((receiver) => ['body', receiver] as const))
 
-      const session = new LifecycleSession(
-        receivers.flatMap((receiver) => instance.captureLifecycle('enter', ['body'], receiver)),
+      const session = new PresenceOperation(
+        receivers.flatMap((receiver) =>
+          capturePresence(instance, 'enter', ['body'], { element: receiver }),
+        ),
         'enter',
       )
 
@@ -2924,7 +2917,7 @@ describe('layer lifecycle composition', () => {
     cleanup.push(() => container.remove())
     element.style.cssText += ';position:absolute;width:100px;height:100px'
 
-    const session = new LifecycleSession(instance.captureLifecycle('leave', ['body']), 'leave')
+    const session = new PresenceOperation(capturePresence(instance, 'leave', ['body']), 'leave')
 
     cleanup.push(() => session.cancel('owner-teardown'))
     session.initialize()

@@ -3,7 +3,12 @@ import type { Transition } from '../model/definition.ts'
 import fixture from '../../../../fixtures/lifecycle.json'
 import { resolveLayers } from '../composition/layers.ts'
 import { decodeBundle } from '../model/definition.ts'
-import { captureLifecycleDefinition, hasLifecycle, resolveLifecycleTracks } from './lifecycle.ts'
+import {
+  captureLifecycleDefinition,
+  hasLifecycle,
+  resolveLifecycleTracks,
+  evaluateLifecycleTrack,
+} from './lifecycle.ts'
 
 const state: import('../model/presentation.ts').RenderedState = {
   name: 'idle',
@@ -284,3 +289,20 @@ it.each(['enter', 'leave'] as const)(
     ])
   },
 )
+
+it.each([undefined, { targets: [] }, { targets: [{ name: 'body', properties: [] }] }] satisfies (
+  | Transition
+  | undefined
+)[])('retains captured data when no matching authored declaration is supplied: %j', (source) => {
+  const captured = resolveLifecycleTracks(
+    'leave',
+    {
+      timing: { kind: 'tween', durationMs: 100, easing: 'linear' },
+      targets: [{ name: 'body', properties: [{ name: 'opacity' }] }],
+    },
+    state,
+    () => '0.4',
+  )[0]
+
+  expect(evaluateLifecycleTrack('leave', source, state, {}, captured)).toBe(captured)
+})

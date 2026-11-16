@@ -94,9 +94,6 @@ export interface ExecutionEnvironment {
 
   /** Recomputes controller ownership from accepted inputs, without sampling calls or advancing events/states. */
   readonly refreshOwnership: () => void
-
-  /** Reports a registered session settling; Runtime/planner decide releases and presentation recovery. */
-  readonly lifecycleSettled: () => void
 }
 
 /**

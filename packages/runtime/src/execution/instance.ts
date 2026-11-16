@@ -1,6 +1,5 @@
 import type { Composition, CompositionTransition } from '../composition/layers.ts'
 import type { Definition } from '../model/definition.ts'
-import type { LifecycleSession } from './lifecycle.ts'
 import type { RuntimeDiagnostic } from './execution-contracts.ts'
 import { PresentationExecutor } from './presentation-executor.ts'
 import { Runtime } from './runtime.ts'
@@ -46,18 +45,6 @@ export class LivaInstance {
 
   bind(entries: readonly (readonly [string, HTMLElement])[]) {
     this.executor.bind(entries)
-  }
-
-  retainLifecycle(phase: 'enter' | 'leave', session: LifecycleSession) {
-    this.executor.retainLifecycle(phase, session)
-  }
-
-  captureLifecycle(phase: 'enter' | 'leave', names: readonly string[], element?: HTMLElement) {
-    return this.executor.captureLifecycle(phase, names, element)
-  }
-
-  releaseLifecycle(names: readonly string[], element: HTMLElement, properties?: readonly string[]) {
-    this.executor.releaseLifecycle(names, element, properties)
   }
 
   inspectLifecycle(

@@ -1,3 +1,4 @@
+import { executorOf } from '../../../../runtime/src/__test__/helpers/presence.ts'
 import { afterEach, expect, it } from 'vite-plus/test'
 import { cdp, userEvent } from 'vite-plus/test/browser'
 import type { CDPSession } from '@vitest/browser-playwright'
@@ -98,6 +99,7 @@ async function setupEditor(
   controller.observe('mount', {
     root: host,
     runtime,
+    executor: executorOf(runtime),
     definition,
     component: { livaSource: 'source' },
   })
