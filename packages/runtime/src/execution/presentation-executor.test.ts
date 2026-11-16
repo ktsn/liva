@@ -22,3 +22,24 @@ it('rejects sources without a browser connection adapter', () => {
     'Source has no browser adapter',
   )
 })
+
+it('retains connections registered while an older binding is disconnecting', () => {
+  const executor = new PresentationExecutor(() => {})
+  const cleanup = vi.fn<() => void>()
+  const next: ReactiveSubscription = { value: 2, bind: () => cleanup }
+  const previous: ReactiveSubscription = {
+    value: 1,
+    bind: () => () => {
+      executor.connectSource(next, () => {})
+    },
+  }
+  executor.connectSource(previous, () => {})
+
+  executor.disconnectBindings()
+
+  expect(cleanup).not.toHaveBeenCalled()
+
+  executor.disconnectBindings()
+
+  expect(cleanup).toHaveBeenCalledTimes(1)
+})

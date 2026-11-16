@@ -207,7 +207,7 @@ export class PresentationExecutor {
   private frozen?: { readonly definition: Definition; readonly values: VariableValues }
   private standalone = false
   private environment?: ExecutionEnvironment
-  private letBindingCleanups: (() => void)[] = []
+  private readonly sourceCleanups = new Set<() => void>()
 
   get definition() {
     if (this.frozen) return this.frozen.definition
@@ -357,8 +357,8 @@ export class PresentationExecutor {
   }
 
   disconnectBindings() {
-    const cleanups = this.letBindingCleanups
-    this.letBindingCleanups = []
+    const cleanups = [...this.sourceCleanups]
+    this.sourceCleanups.clear()
 
     for (const cleanup of cleanups) cleanup()
   }
@@ -372,11 +372,11 @@ export class PresentationExecutor {
       if (!connected) return
 
       connected = false
-      this.letBindingCleanups = this.letBindingCleanups.filter((entry) => entry !== disconnect)
+      this.sourceCleanups.delete(disconnect)
       cleanup()
     }
 
-    this.letBindingCleanups.push(disconnect)
+    this.sourceCleanups.add(disconnect)
 
     return disconnect
   };
