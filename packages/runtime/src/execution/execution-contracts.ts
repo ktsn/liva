@@ -1,4 +1,4 @@
-import type { Composition, LayerResolution, LayerTrackTemplate } from '../composition/layers.ts'
+import type { Composition, LayerResolution } from '../composition/layers.ts'
 import type { ResolvedTrack } from '../composition/resolve.ts'
 import type { LetBindingGraph } from '../evaluation/let-bindings.ts'
 import type { ReactiveNotification } from '../evaluation/events.ts'
@@ -15,8 +15,7 @@ import type {
   TrackSnapshot,
 } from './presentation-planner.ts'
 
-/** Logical declaration identity, distinct from receiver-specific canonical addresses. */
-export const layerPropertyKey = (target: string, property: string) => `${target}\0${property}`
+export { layerPropertyKey } from '../model/presentation.ts'
 
 /** Explicit displayed-value requests; all receivers must belong to the current binding. */
 export interface DisplayedRequest {
@@ -88,17 +87,14 @@ export interface ExecutionEnvironment {
    */
   readonly acceptPresentation: (resolution: LayerResolution) => void
 
-  /** Requests reference-only planning without advancing guards or emitting input events. */
-  readonly retarget: (properties: ReadonlySet<string>) => void
-
-  /** Reconciles a still-current completed effect against the accepted cascade. */
-  readonly completeEffect: (id: number) => void
-
   /** Requests planned application of the accepted cascade after browser-owned restoration. */
   readonly reconcile: () => void
 
   /** Reports media-query changes; Runtime/planner decide preservation, cancellation, and restoration. */
   readonly motionChanged: () => void
+
+  /** Recomputes controller ownership from accepted inputs, without sampling calls or advancing events/states. */
+  readonly refreshOwnership: () => void
 
   /** Reports a registered session settling; Runtime/planner decide releases and presentation recovery. */
   readonly lifecycleSettled: () => void
@@ -111,6 +107,20 @@ export interface ExecutionEnvironment {
  * terminal writes, independently of notification-time evaluation snapshots.
  */
 export interface ExecutionPort {
+  /** Observe, plan and publish a common evaluated-layer change for current receivers. */
+  present(
+    previous: LayerResolution,
+    next: LayerResolution,
+    values: VariableValues,
+    retargets?: ReadonlySet<string>,
+  ): void
+
+  /** Validate still-applicable presence expressions before reactive calls/events are accepted. */
+  validatePresence(previous: LayerResolution, next: LayerResolution, values: VariableValues): void
+
+  /** Retain accepted inputs before subscription cleanup can change detached observations. */
+  freezeEnvironment(detaching?: boolean): void
+
   /** Current binding validity; Runtime connects reactive calls only when not suspended. */
   readonly bindingFacts: BindingFacts
 
@@ -162,10 +172,15 @@ export interface ExecutionPort {
   /** Current receiver/effect metadata and playback policy; performs no CSSOM reads. */
   presentationFacts(resolution: LayerResolution): PresentationFacts
 
-  /** Captures canonical addresses only for selected targets, in declaration order. */
+  /**
+   * Captures canonical addresses for selected targets, in declaration order.
+   * Live observations include scoped presence ownership; isolated inspection and
+   * preview use only the supplied ordinary resolution (live=false).
+   */
   observeReceivers(
     resolution: LayerResolution,
     targets: ReadonlySet<string>,
+    live: boolean,
   ): readonly ReceiverAddresses[]
 
   /**
@@ -180,9 +195,6 @@ export interface ExecutionPort {
     time: number,
     live: boolean,
   ): ReadonlyMap<string, string | undefined>
-
-  /** Reads implicit starts from the last receiver of each logical target. Missing targets yield empty CSS. */
-  observeLayerStarts(templates: readonly LayerTrackTemplate[]): ReadonlyMap<string, string>
 
   /**
    * Browser CSS normalization only; ownership and interruption are decided by the planner.

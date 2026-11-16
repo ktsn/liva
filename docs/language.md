@@ -413,7 +413,8 @@ A motion may declare one `enter` and one `leave` directly in its body. Named tar
 must be declared in its layers (including local states). The built-in `self` target
 is always bound to the Motion root, including lifecycle-only declarations. Lifecycle timing is
 independent of ordinary layer timing. Lifecycle property timing overrides target
-timing, which overrides the lifecycle shared decorator. All are captured at start.
+timing, which overrides the lifecycle shared decorator. Enter uses this timing for
+its initial animation; a later ordinary layer change uses that change's timing.
 
 ```liva
 motion panel(open: boolean) {
@@ -437,23 +438,28 @@ state-change animation. Layers cannot declare their own enter/leave blocks.
 
 A direct declaration in enter is the 0% frame; in leave it is the 100% frame.
 Explicit keyframe blocks and `${expression}` values are also supported. Duplicate
-properties are errors. Enter snapshots the fully cascaded destination and its
-animation expressions at insertion/showing. Missing 100% endpoints use that
-snapshot. Leave snapshots the currently displayed presentation and its expressions
-before disposal/hiding; missing 0% endpoints use that display, including interrupted
-animations.
+properties are errors. Enter starts from its declared 0% presentation and animates
+toward the ordinary cascade. Missing 100% endpoints use that cascade. Leave starts
+from the displayed presentation, including interrupted animations, and applies an
+internal exit layer containing only its declared properties. Explicit 100% frames
+remain animation endpoints even when enter completion restores a different ordinary
+value.
 
-Only properties explicitly animated by a lifecycle receive lifecycle precedence.
-Other properties continue to follow layer changes. Enter never retargets while
-running: completion applies the latest layer presentation, which can visibly jump
-if inputs changed. Leave ignores later layer changes and signals Vue to finish
-removal/hiding when its tracks complete. This snapshot limitation is intentional;
-smooth lifecycle retargeting and layer-local lifecycle composition are unsupported.
+Ordinary changes retarget an in-flight enter from its displayed value, using the new
+ordinary transition's timing. Supported endpoint-only springs carry displayed
+velocity into leave and back into re-entry. Numeric support and fallback behavior
+match ordinary transitions; arbitrary CSS, tweens, and intermediate-keyframe tracks
+do not promise velocity continuity. Relative-reference changes use the same
+retargeting rules without requiring input notifications.
 
-State and expression changes do not retarget an existing lifecycle session.
-Existing cancellation and replacement behavior still applies, for example when
-showing an element again during leave. During leave, ordinary transitions do not
-take over the properties owned by that session.
+While Motion remains connected, applicable lifecycle expressions follow accepted
+input updates. Leave keeps precedence only for its own declarations, so unrelated
+properties continue following ordinary layers. On Motion disposal, subscriptions
+are released and ongoing or captured leave work retains the final accepted input
+environment. Necessary DOM-relative observations continue until its effects end.
+Vue waits for the currently applicable effects, including replacements, before
+removing or hiding the boundary. Reduced motion settles live playback immediately;
+editor previews remain frozen and manually seekable.
 
 A conditional event is independent of state selection and animation completion:
 

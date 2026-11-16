@@ -55,7 +55,7 @@ export type MotionSample = {
 }
 
 /** Direct observation on the millisecond clock, optionally carrying released input velocity in units/ms. */
-type Sample = { time: number; value: number; velocity?: number }
+type Sample = { time: number; value: number; velocity?: { value: number; time: number } }
 
 /**
  * Observations for one target/component address. A registered animation takes
@@ -280,16 +280,31 @@ export class PropertyMotion {
   /**
    * Ends direct control with a committed input derivative in canonical units/ms,
    * ordered like the property's decoded components. Captures the displayed start
-   * position at time; unreadable targets are ignored. The supplied velocity takes
+   * position at time; unreadable targets are ignored. Optional velocityTimes retain
+   * each input component's original sampling time, so delayed playback does not
+   * restart its freshness window at release. The supplied velocity takes
    * precedence over DOM finite differences until stale or superseded by a write/effect.
    */
-  endControl(element: HTMLElement, property: string, velocity: readonly number[], time: number) {
+  endControl(
+    element: HTMLElement,
+    property: string,
+    velocity: readonly number[],
+    time: number,
+    velocityTimes?: readonly number[],
+  ) {
     const decoded = decodeProperty(element, property)
     if (!decoded) return
 
     for (const [index, address] of decoded.addresses.entries()) {
       const history = this.history(element, address)
-      history.samples = [{ time, value: decoded.values[index], velocity: velocity[index] }]
+
+      history.samples = [
+        {
+          time,
+          value: decoded.values[index],
+          velocity: { value: velocity[index] ?? 0, time: velocityTimes?.[index] ?? time },
+        },
+      ]
       history.animation = undefined
       history.trajectory = undefined
     }
@@ -373,8 +388,13 @@ export class PropertyMotion {
 
       const last = history.samples.at(-1)
       const before = history.samples.at(-2)
-      if (last?.velocity !== undefined)
-        return time >= last.time && time - last.time < DIRECT_SAMPLE_WINDOW_MS ? last.velocity : 0
+
+      if (last?.velocity) {
+        const sampled = last.velocity.time
+
+        return time >= sampled && time - sampled < DIRECT_SAMPLE_WINDOW_MS ? last.velocity.value : 0
+      }
+
       if (
         !last ||
         !before ||

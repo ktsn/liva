@@ -104,7 +104,9 @@ time. Changing speed preserves the current position.
 **Loop** defaults to off and repeats the full timeline at the selected speed,
 carrying frame overshoot into the next pass. Each boundary snaps directly to the
 starting pose without a return animation or pause. Lifecycle previews seek the
-same effects without changing element presence or invoking completion callbacks.
+same effects without changing element presence or invoking completion callbacks. Live enter/leave playback follows ordinary retargeting, while these
+manual previews retain frozen observations. Preview handles and seeking exclude
+continuing live leave effects; their completion cannot overwrite the preview.
 Turning Loop off lets the current pass finish; toggling it while paused does not
 start playback. Scrubbing and **To start** pause playback. Speed and Loop are
 session preferences retained across replay and selection changes, reset on page

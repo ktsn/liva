@@ -1,10 +1,11 @@
-import { trackLayoutAnimation } from '../layout/layout-scheduler.ts'
 import type { Definition, Transition } from '../model/definition.ts'
 import type { RenderedState } from '../model/presentation.ts'
 import { renderFrame, renderTransition, type VariableValues } from '../evaluation/expression.ts'
 import type { ResolvedTrack } from '../composition/resolve.ts'
-import { planTrack, trackTiming } from './presentation-planner.ts'
-import { materializeEffect } from './native-effect.ts'
+import { CompletionGroup } from './completion-group.ts'
+import { PresentationExecutor } from './presentation-executor.ts'
+import { transitionPropertySources } from '../composition/layer-cascade.ts'
+import { normalizeFrames } from '../composition/resolve.ts'
 
 export function lifecycleTransitions(
   definition: Definition,
@@ -35,10 +36,32 @@ export function captureLifecycleDefinition(
   return renderTransition(transition, values)
 }
 
+/** Browser-owned participant; compatibility work keeps this association through object spreads. */
+export interface LifecyclePlayback {
+  initializeLifecycle(
+    session: LifecycleSession,
+    phase: 'enter' | 'leave',
+    work: readonly LifecycleWork[],
+  ): void
+  playLifecycle(session: LifecycleSession): void
+  endLifecycle(session: LifecycleSession, result: LifecycleResult): void
+}
+
 export interface LifecycleWork {
+  /** Internal playback owner; omitted by callers constructing standalone work. */
+  readonly playback?: LifecyclePlayback
+  /** Source identity and accepted inputs retained for delayed work across definition replacement. */
+  readonly capture?: {
+    readonly definition: Definition
+    readonly environment: { values: VariableValues }
+    readonly track: ResolvedTrack
+  }
   readonly element: HTMLElement
   readonly track: ResolvedTrack
-  /** Layer owners apply the latest cascade after completion, including removing absent properties. */
+  /**
+   * Restores the pre-session inline style instead of publishing an enter destination.
+   * Layer-backed work uses this while its owner reapplies the latest cascade.
+   */
   readonly restoreOnCompletion?: boolean
 }
 
@@ -78,29 +101,30 @@ export function resolveLifecycleTracks(
     for (const property of target.properties) {
       const displayed = presentation(target.name, property.name)
       if (displayed === undefined) continue
-      const timing = property.timing ?? transition?.timing
+
+      const timing = transitionPropertySources(transition, target.name, property.name).timing
+        ?.timing
+
       if (!timing) throw new Error(`Missing lifecycle timing: ${target.name}.${property.name}`)
 
       const stateValue = state.targets
         .find((item) => item.name === target.name)
         ?.properties.find((item) => item.name === property.name)?.value
-      const frames = (property.keyframes ?? []).map((frame) => renderFrame(frame, {}))
       const baseline = stateValue ?? displayed
-
-      if (frames[0]?.offset !== 0) {
-        frames.unshift({ offset: 0, value: phase === 'leave' ? displayed || baseline : baseline })
-      }
-
-      if (frames.at(-1)?.offset !== 1) frames.push({ offset: 1, value: baseline })
+      const explicit = property.keyframes?.map((frame) => renderFrame(frame, {}))
+      const frames = normalizeFrames(
+        phase === 'leave' ? displayed || baseline : baseline,
+        baseline,
+        explicit,
+        timing,
+      )
 
       tracks.push({
         target: target.name,
         property: property.name,
         timing,
-        keyframes: frames.map((frame) => ({
-          ...frame,
-          easing: frame.easing ?? (timing.kind === 'tween' ? timing.easing : 'linear'),
-        })),
+        keyframes: frames,
+        implicitStart: phase === 'leave' && !explicit?.some((frame) => frame.offset === 0),
         destinationValue: phase === 'enter' ? baseline : frames.at(-1)!.value,
       })
     }
@@ -109,12 +133,49 @@ export function resolveLifecycleTracks(
   return tracks
 }
 
-/** Owns effects and completion independently of component effects and Motion disposal. */
+/** Evaluates only one applicable declaration, retaining an explicitly rebased start from the adapter. */
+export function evaluateLifecycleTrack(
+  phase: 'enter' | 'leave',
+  source: Transition | undefined,
+  state: RenderedState,
+  values: VariableValues,
+  captured: ResolvedTrack,
+  rebased = false,
+): ResolvedTrack {
+  const target = source?.targets.find((candidate) => candidate.name === captured.target)
+  const property = target?.properties.find((candidate) => candidate.name === captured.property)
+
+  if (!source || !target || !property) return captured
+
+  const transition = renderTransition(
+    { ...source, targets: [{ ...target, properties: [property] }] },
+    values,
+  )
+  const rendered = resolveLifecycleTracks(
+    phase,
+    transition,
+    state,
+    () => captured.keyframes[0].value,
+  )[0]
+
+  return rebased
+    ? {
+        ...rendered,
+        keyframes: rendered.keyframes.map((frame, index) =>
+          index === 0 ? { ...frame, value: captured.keyframes[0].value } : frame,
+        ),
+      }
+    : rendered
+}
+
+/**
+ * Compatibility boundary barrier. Participants own styles, native effects, and
+ * observations; the group follows only their current effect IDs across retargets.
+ * Standalone work uses the same executor as instance-backed playback.
+ */
 export class LifecycleSession {
   private work: LifecycleWork[]
-  private effects: Animation[] = []
-  private originals: { element: HTMLElement; property: string; value: string; priority: string }[] =
-    []
+  private readonly participants = new Map<LifecyclePlayback, LifecycleWork[]>()
   private ended = false
   private initialized = false
   private started = false
@@ -122,6 +183,9 @@ export class LifecycleSession {
   readonly finished = new Promise<LifecycleResult>((resolve) => {
     this.resolve = resolve
   })
+  readonly completion = new CompletionGroup<LifecycleResult>('completed', (result) =>
+    this.end(result),
+  )
 
   private readonly phase: 'enter' | 'leave'
   private readonly report: (error: unknown) => void
@@ -131,13 +195,16 @@ export class LifecycleSession {
     phase: 'enter' | 'leave',
     report: (error: unknown) => void = console.error,
   ) {
+    this.work = [...work]
     this.phase = phase
     this.report = report
-    this.work = [...work]
   }
 
   owns(element: HTMLElement, property: string): boolean {
-    return this.work.some((item) => item.element === element && item.track.property === property)
+    return (
+      !this.ended &&
+      this.work.some((item) => item.element === element && item.track.property === property)
+    )
   }
 
   get isFinished(): boolean {
@@ -146,92 +213,75 @@ export class LifecycleSession {
 
   initialize() {
     if (this.ended || this.initialized) return
+
     this.initialized = true
 
-    for (const { element, track } of this.work) {
-      this.originals.push({
-        element,
-        property: track.property,
-        value: element.style.getPropertyValue(track.property),
-        priority: element.style.getPropertyPriority(track.property),
-      })
-      element.style.setProperty(track.property, track.keyframes[0].value)
+    let standalone: PresentationExecutor | undefined
+
+    for (const item of this.work) {
+      const participant =
+        item.playback ??
+        (standalone ??= new PresentationExecutor((diagnostic) => {
+          if (diagnostic.error !== undefined) this.fail(diagnostic.error)
+        }))
+      const work = this.participants.get(participant) ?? []
+
+      work.push(item)
+      this.participants.set(participant, work)
+    }
+
+    try {
+      for (const [participant, work] of this.participants)
+        participant.initializeLifecycle(this, this.phase, work)
+    } catch (error) {
+      this.fail(error)
+
+      throw error
     }
   }
 
   play() {
     if (this.ended || this.started) return
+
     this.started = true
 
     try {
-      const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
+      this.initialize()
 
-      for (const { element, track } of this.work) {
-        const timing = trackTiming(track)
+      if (this.ended) return
 
-        if (reduced || timing.durationMs === 0) continue
+      for (const participant of this.participants.keys()) participant.playLifecycle(this)
 
-        // This compatibility coordinator outlives Runtime. Its captured track already
-        // contains resolved endpoints; it neither acquires controllers nor inherits live velocity.
-        const plan = planTrack(
-          {
-            id: this.effects.length,
-            receiver: this.effects.length,
-            source: track,
-            track,
-            declarations: [{ name: track.property, addresses: [track.property] }],
-            displayed: track.keyframes[0]?.value,
-            interrupted: false,
-          },
-          timing,
-          'both',
-        )
-        // The sole declaration owns its own property, so the planner cannot omit this track.
-        const animation = materializeEffect(plan!, element)
-        this.effects.push(animation)
-        animation.play()
-        trackLayoutAnimation(element, track.property, animation)
-      }
-
-      void Promise.all(this.effects.map((effect) => effect.finished)).then(
-        () => this.end('completed'),
-        (error) => this.fail(error),
-      )
+      this.completion.seal()
     } catch (error) {
       this.fail(error)
     }
   }
 
-  private fail(error: unknown) {
+  /** Reports unexpected browser failures while resolving the public failed result. */
+  fail(error: unknown) {
     if (this.ended) return
 
-    this.end('failed')
+    this.completion.end('failed')
     this.report(error)
   }
 
   cancel(reason: 'superseded' | 'owner-teardown') {
-    this.end(reason)
+    this.completion.end(reason)
   }
 
   private end(result: LifecycleResult) {
-    if (this.ended) return
     this.ended = true
 
-    for (const original of this.originals) {
-      original.element.style.setProperty(original.property, original.value, original.priority)
-    }
-
-    if (result === 'completed' && this.phase === 'enter') {
-      for (const { element, track, restoreOnCompletion } of this.work) {
-        if (restoreOnCompletion) continue
-
-        element.style.setProperty(track.property, track.destinationValue)
+    for (const participant of this.participants.keys()) {
+      try {
+        participant.endLifecycle(this, result)
+      } catch (error) {
+        this.report(error)
       }
     }
 
-    for (const effect of this.effects) effect.cancel()
-    this.effects = []
-    this.originals = []
+    this.participants.clear()
     this.work = []
     this.resolve(result)
   }

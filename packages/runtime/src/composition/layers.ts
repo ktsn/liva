@@ -1,5 +1,6 @@
 import type { RuntimeValue } from '../evaluation/reactive-value.ts'
 import {
+  cascadeProperty,
   compositionLayerSelection,
   resolveLayerCascade,
   targetTiming,
@@ -17,10 +18,49 @@ import {
   type VariableValues,
 } from '../evaluation/expression.ts'
 
-import type { RenderedProperty, RenderedState, RenderedFrame } from '../model/presentation.ts'
+import {
+  layerPropertyKey,
+  type RenderedProperty,
+  type RenderedState,
+  type RenderedFrame,
+} from '../model/presentation.ts'
 
-interface LayerProperty extends RenderedProperty {
+export interface LayerProperty extends RenderedProperty {
   readonly owner: string
+  readonly sourceProperty?: string
+  readonly sourceDestination?: string
+}
+
+/** Evaluated cascade input. Receiver scopes use executor-issued identities, never elements. */
+export interface EvaluatedLayer {
+  readonly id: string
+  readonly scope?: readonly number[]
+  readonly targets: readonly Target<LayerProperty>[]
+}
+
+/** Composes values and timing independently, in source order, for one receiver. */
+export function composeEvaluatedLayers(
+  layers: readonly EvaluatedLayer[],
+  receiver?: number,
+  declarationOrder = true,
+): readonly Target<LayerProperty>[] {
+  const targets = new Map<string, Map<string, LayerProperty>>()
+
+  for (const layer of layers) {
+    if (layer.scope && (receiver === undefined || !layer.scope.includes(receiver))) continue
+
+    for (const target of layer.targets) {
+      const properties = targets.get(target.name) ?? new Map<string, LayerProperty>()
+
+      targets.set(target.name, properties)
+
+      for (const property of target.properties) {
+        cascadeProperty(properties, property.name, property, property.timing, declarationOrder)
+      }
+    }
+  }
+
+  return [...targets].map(([name, properties]) => ({ name, properties: [...properties.values()] }))
 }
 
 export interface Composition {
@@ -34,6 +74,8 @@ export interface CompositionTransition {
 }
 
 export interface LayerResolution {
+  /** Ordinary declarations before controller CSS/fallback formatting; retained by reference. */
+  readonly declarations?: LayerResolution['presentation']
   readonly composition: Composition
   readonly states: ReadonlyMap<string, string>
   readonly transitions: ReadonlyMap<string, GuardedTransition>
@@ -120,18 +162,24 @@ function resolveLayerSelection(
     }
   }
 
-  const targets = resolveLayerCascade(
-    selectLayers(),
-    ({ layer, property }) => ({
-      ...renderProperty(property, values),
-      owner: layer.name,
-    }),
-    // The cascade invokes mapTiming only for a declaration with a timing expression or value.
-    ({ declaration }) =>
-      declaration.timingExpression
-        ? timingValue(evaluate(declaration.timingExpression, values))
-        : declaration.timing!,
-  )
+  const evaluated = [...selectLayers()].map((selected): EvaluatedLayer => ({
+    id: selected.layer.name,
+    targets: resolveLayerCascade(
+      [selected],
+      ({ layer, property }) => ({ ...renderProperty(property, values), owner: layer.name }),
+      // Timing is mapped only when the declaration supplies a timing value or expression.
+      ({ declaration }) =>
+        declaration.timingExpression
+          ? timingValue(evaluate(declaration.timingExpression, values))
+          : declaration.timing!,
+    ).map((target) => ({
+      name: target.name,
+      properties: target.properties.map((property) => ({
+        ...property.value,
+        timing: property.timing,
+      })),
+    })),
+  }))
 
   return {
     composition: { layers: activeLayers, states: Object.fromEntries(states) },
@@ -139,13 +187,7 @@ function resolveLayerSelection(
     transitions,
     presentation: {
       name: '@layers',
-      targets: targets.map((target) => ({
-        name: target.name,
-        properties: target.properties.map((property) => ({
-          ...property.value,
-          timing: property.timing,
-        })),
-      })),
+      targets: composeEvaluatedLayers(evaluated, undefined, false),
     },
   }
 }
@@ -242,6 +284,53 @@ export function layerPropertyChanged(
   )
 }
 
+/** Authored target/property declarations absent from the next resolved presentation. */
+export function removedLayerProperties(
+  previous: LayerResolution,
+  next: LayerResolution,
+): Set<string> {
+  const removed = new Set<string>()
+
+  for (const target of previous.presentation.targets) {
+    for (const property of target.properties) {
+      if (
+        !next.presentation.targets
+          .find((item) => item.name === target.name)
+          ?.properties.some((item) => item.name === property.name)
+      )
+        removed.add(layerPropertyKey(target.name, property.name))
+    }
+  }
+
+  return removed
+}
+
+/** Logical declarations changed by values, ownership, timing, removal, or an explicit transition. */
+export function changedLayerProperties(
+  previous: LayerResolution,
+  next: LayerResolution,
+): Set<string> {
+  const changed = new Set<string>()
+
+  for (const target of next.presentation.targets) {
+    for (const property of target.properties) {
+      const transition = next.transitions.get(property.owner)?.transition
+      const sources = transitionPropertySources(transition, target.name, property.name)
+
+      if (
+        layerPropertyChanged(previous, target.name, property) ||
+        sources.property ||
+        sources.timing
+      )
+        changed.add(layerPropertyKey(target.name, property.name))
+    }
+  }
+
+  for (const key of removedLayerProperties(previous, next)) changed.add(key)
+
+  return changed
+}
+
 /** A selected track whose omitted starting endpoint still requires a displayed observation. */
 export interface LayerTrackTemplate extends Omit<ResolvedTrack, 'keyframes'> {
   readonly keyframes?: readonly RenderedFrame[]
@@ -276,7 +365,8 @@ export function* layerTrackTemplates(
         !transition?.timing &&
         !sharedTiming?.timingExpression &&
         !sharedTiming?.timing &&
-        !retarget(target.name, property.name)
+        !retarget(target.name, property.name) &&
+        !(property.sourceProperty && retarget(target.name, property.sourceProperty))
       )
         continue
 
@@ -315,6 +405,9 @@ export function* layerTrackTemplates(
       yield {
         target: target.name,
         property: property.name,
+        owner: property.owner,
+        sourceProperty: property.sourceProperty,
+        sourceDestination: property.sourceDestination,
         timing,
         destinationValue: property.value,
         implicitStart: !explicit?.some((frame) => frame.offset === 0),

@@ -1027,7 +1027,7 @@ it('skips zero-duration layer effects', () => {
   expect(targets.get('box')!.style.opacity).toBe('1')
 })
 
-it('plans enter cancellation on reduced motion while preserving an independent leave', async () => {
+it('settles enter and leave together when reduced motion becomes active', async () => {
   const { instance, targets, errors } = setup(lifecyclePolicyDefinition, { enabled: true })
   const enter = startRegisteredLifecycle(instance, 'enter', 'box')
   const leave = startRegisteredLifecycle(instance, 'leave', 'exit')
@@ -1038,10 +1038,10 @@ it('plans enter cancellation on reduced motion while preserving an independent l
       features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
     })
 
-    expect(await enter.finished).toBe('superseded')
-    expect(leave.isFinished).toBe(false)
-    expect(leave.owns(targets.get('exit')!, 'opacity')).toBe(true)
-    expect(targets.get('exit')!.getAnimations()).toHaveLength(1)
+    expect(await enter.finished).toBe('completed')
+    expect(await leave.finished).toBe('completed')
+    expect(leave.owns(targets.get('exit')!, 'opacity')).toBe(false)
+    expect(targets.get('exit')!.getAnimations()).toHaveLength(0)
     expect(targets.get('box')!.style.opacity).toBe('1')
     expect(targets.get('box')!.style.width).toBe('50px')
     expect(errors).toEqual([])

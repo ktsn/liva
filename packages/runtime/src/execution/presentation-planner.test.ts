@@ -1,3 +1,4 @@
+import type { ResolvedTrack } from '../composition/resolve.ts'
 import { describe, expect, it } from 'vite-plus/test'
 import { resolveLayers, type LayerResolution } from '../composition/layers.ts'
 import type { Definition } from '../model/definition.ts'
@@ -205,6 +206,87 @@ describe('pure presentation planning', () => {
     expect(plan.diagnostics).toEqual([])
   })
 
+  it('invalidates canonical directional effects even when their logical declaration is unchanged', () => {
+    const previous = {
+      ...resolution([
+        ['inset-inline', '0px'],
+        ['right', '0px'],
+      ]),
+      states: new Map([['base', 'old']]),
+    }
+    const next = { ...previous, states: new Map([['base', 'new']]) }
+    const directional: ResolvedTrack = {
+      target: 'box',
+      property: 'left',
+      owner: 'base',
+      directionalOwner: 'base',
+      ownerState: 'old',
+      timing,
+      destinationValue: '0px',
+      keyframes: [
+        { offset: 0, value: '20px' },
+        { offset: 1, value: '0px' },
+      ],
+    }
+    const preparation = prepareLayerChange({
+      previous,
+      next,
+      values: {},
+      active: [{ track: directional }],
+      retargets: new Set(),
+    })
+    const change = planLayerChange(preparation, new Map(), [
+      {
+        target: 'box',
+        addresses: [
+          { name: 'inset-inline', addresses: ['left', 'right'] },
+          { name: 'right', addresses: ['right'] },
+        ],
+      },
+    ])
+
+    const replaced = replacedEffects(
+      [
+        { id: 1, target: 'box', sourceProperty: 'inset-inline', property: 'left', owner: 'base' },
+        { id: 2, target: 'box', sourceProperty: 'right', property: 'right', owner: 'base' },
+      ],
+      change.changed,
+      change.removedProperties,
+      change.preserved,
+    )
+
+    expect(replaced).toEqual([1])
+  })
+
+  it('preserves only the unchanged canonical owner, independently of lower writes and other targets', () => {
+    const active = [
+      { id: 1, target: 'box', sourceProperty: 'inset-inline', property: 'left', owner: 'presence' },
+      { id: 2, target: 'box', sourceProperty: 'inset-inline', property: 'right', owner: 'base' },
+      {
+        id: 3,
+        target: 'other',
+        sourceProperty: 'inset-inline',
+        property: 'left',
+        owner: 'presence',
+      },
+      { id: 4, target: 'box', sourceProperty: 'color', property: 'color', owner: 'base' },
+      { id: 5, target: 'box', sourceProperty: 'left', property: 'left', owner: 'new' },
+      { id: 6, target: 'box', sourceProperty: 'left', property: 'left', owner: 'presence' },
+    ]
+
+    const replaced = replacedEffects(
+      active,
+      new Set(['box\0inset-inline', 'other\0inset-inline', 'box\0left']),
+      new Set(),
+      [
+        { target: 'box', property: 'left', sourceProperty: 'inset-inline', owner: 'presence' },
+        { target: 'box', property: 'right', sourceProperty: 'inset-inline', owner: 'other' },
+      ],
+    )
+
+    expect(replaced).toEqual([2, 3, 5, 6])
+  })
+
   it('selects replacement effects by authored/canonical properties and removed declarations', () => {
     const active = [
       { id: 1, target: 'box', sourceProperty: 'margin', property: 'margin-left' },
@@ -301,6 +383,7 @@ describe('canonical declaration ownership', () => {
       id: 1,
       target: 'box',
       protected: [],
+      fallbacks: [],
       addresses: [
         { name: 'margin-inline', addresses: ['margin-right'] },
         { name: 'margin-left', addresses: ['margin-left'] },
@@ -684,6 +767,7 @@ function executionFacts(): PresentationFacts {
     active: [
       {
         id: 9,
+        preview: false,
         receiver: 1,
         target: 'box',
         property: 'opacity',
@@ -693,6 +777,7 @@ function executionFacts(): PresentationFacts {
       },
       {
         id: 10,
+        preview: false,
         receiver: 2,
         target: 'box',
         property: 'color',
@@ -711,10 +796,17 @@ describe('complete presentation planning', () => {
   ])('preserves effects for reduced=$reduced and mode=$mode', ({ reduced, mode }) => {
     const next = resolution([['opacity', '1']])
 
-    expect(planMotionChange(next, { ...executionFacts(), reduced, mode })).toBeUndefined()
+    const facts: PresentationFacts = {
+      ...executionFacts(),
+      reduced,
+      mode,
+      active: executionFacts().active.map((effect) => ({ ...effect, preview: mode === 'preview' })),
+    }
+
+    expect(planMotionChange(next, facts)).toBeUndefined()
   })
 
-  it('settles ordinary effects and enter while writing around the remaining leave ownership', () => {
+  it('settles all live effects and restores ordinary ownership under reduced motion', () => {
     const next = resolution([
       ['opacity', '1'],
       ['color', 'red'],
@@ -741,16 +833,43 @@ describe('complete presentation planning', () => {
     const plan = planMotionChange(next, facts)
 
     expect(plan?.cancel).toEqual([9, 10])
-    expect(plan?.lifecycle).toEqual({ release: [3], cancel: [1] })
+    expect(plan?.lifecycle).toEqual({ release: [3] })
     expect(plan?.restore).toBe(true)
-    expect(plan?.preserveLifecycle).toBe(true)
+    expect(plan?.preserveLifecycle).toBe(false)
     expect(plan?.resetMotion).toBe(true)
     expect(plan?.writes).toEqual([
       { receiver: 1, property: 'opacity', value: '1' },
       { receiver: 2, property: 'opacity', value: '1' },
       { receiver: 1, property: 'color', value: 'red' },
+      { receiver: 2, property: 'color', value: 'red' },
     ])
   })
+
+  it.each(['preparing-preview', 'preview'] as const)(
+    'settles only live effects without changing frozen %s presentation',
+    (mode) => {
+      const next = resolution([['opacity', '1']])
+      const facts: PresentationFacts = {
+        ...executionFacts(),
+        reduced: true,
+        mode,
+        active: executionFacts().active.map((effect) => ({
+          ...effect,
+          preview: effect.id === 10,
+        })),
+      }
+
+      const plan = planMotionChange(next, facts)
+
+      expect(plan?.mode).toBe('maintenance')
+      expect(plan?.cancel).toEqual([9])
+      expect(plan?.restore).toBe(false)
+      expect(plan?.preserveLifecycle).toBe(true)
+      expect(plan?.resetMotion).toBe(false)
+      expect(plan?.writes).toEqual([])
+      expect(plan?.start).toEqual([])
+    },
+  )
 
   it('releases all settled registrations and restores a finished enter around other live sessions', () => {
     const next = resolution([
@@ -773,7 +892,7 @@ describe('complete presentation planning', () => {
 
     const plan = planLifecycleSettlement(next, facts)
 
-    expect(plan?.lifecycle).toEqual({ release: [1, 2], cancel: [] })
+    expect(plan?.lifecycle).toEqual({ release: [1, 2] })
     expect(plan?.restore).toBe(true)
     expect(plan?.preserveLifecycle).toBe(true)
     expect(plan?.writes).toEqual([
@@ -800,7 +919,7 @@ describe('complete presentation planning', () => {
       const plan = planLifecycleSettlement(next, facts)
 
       expect(plan?.mode).toBe('maintenance')
-      expect(plan?.lifecycle).toEqual({ release: [1], cancel: [] })
+      expect(plan?.lifecycle).toEqual({ release: [1] })
       expect(plan?.restore).toBe(false)
       expect(plan?.writes).toEqual([])
       expect(plan?.cancel).toEqual([])

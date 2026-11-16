@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { Definition, Expression } from '../model/definition.ts'
+import { LifecycleSession } from '../execution/lifecycle.ts'
 import { LivaInstance, type RuntimeDiagnostic } from '../execution/instance.ts'
 import { decodeProperty } from './property-codec.ts'
-import { springMotion } from './property-motion.ts'
+import { PropertyMotion, springMotion } from './property-motion.ts'
 
 const reference = (...path: string[]): Expression => ({ kind: 'reference', path })
 const instances: LivaInstance[] = []
@@ -104,6 +105,132 @@ function setup(
   instance.bind([['self', element]])
 
   return { element, instance, inputs, errors }
+}
+
+/** Uses one long phase so inspection and preview can observe it before completion. */
+function withTranslatePresence(value: Definition, phase: 'enter' | 'leave'): Definition {
+  return {
+    ...value,
+    [phase]: {
+      timing: { kind: 'tween', durationMs: 10000, easing: 'linear' },
+      targets: [
+        {
+          name: 'self',
+          properties: [
+            {
+              name: 'translate',
+              keyframes: [
+                {
+                  offset: phase === 'enter' ? 0 : 1,
+                  value: {
+                    kind: 'literal',
+                    value: phase === 'enter' ? '120px 20px 3px' : '300px 0px',
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  }
+}
+
+/** Adds a phase-only input; the alias variant retains an earlier physical fallback. */
+function withLiveEnter(value: Definition, alias: boolean): Definition {
+  const property = alias ? 'inline-size' : 'translate'
+  const layers: Definition['layers'] = alias
+    ? [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'self',
+              properties: [
+                { name: 'width', value: { kind: 'literal', value: '120px' } },
+                { name: 'inline-size', value: { kind: 'literal', value: '100px' } },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'active',
+          when: reference('enabled'),
+          targets: [
+            {
+              name: 'self',
+              properties: [
+                {
+                  name: 'inline-size',
+                  value: { kind: 'binding', expression: reference('movement') },
+                },
+              ],
+            },
+          ],
+        },
+      ]
+    : value.layers
+
+  return {
+    ...value,
+    parameters: [...(value.parameters ?? []), { name: 'phase', type: 'number' }],
+    letBindings: alias
+      ? value.letBindings?.map((binding) => ({
+          ...binding,
+          initializer:
+            binding.initializer.kind === 'call'
+              ? {
+                  ...binding.initializer,
+                  arguments: binding.initializer.arguments.filter(
+                    (argument) => argument.name !== 'component',
+                  ),
+                }
+              : binding.initializer,
+        }))
+      : value.letBindings,
+    layers,
+    events: [
+      {
+        name: 'invalid',
+        when: {
+          kind: 'binary',
+          operator: '==',
+          left: reference('phase'),
+          right: { kind: 'number', value: 0 },
+        },
+      },
+    ],
+    enter: {
+      timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
+      targets: [
+        {
+          name: 'self',
+          properties: [
+            {
+              name: property,
+              keyframes: [
+                {
+                  offset: 0,
+                  value: {
+                    kind: 'template',
+                    parts: [
+                      {
+                        kind: 'binary',
+                        operator: '/',
+                        left: { kind: 'number', value: 1 },
+                        right: reference('phase'),
+                      },
+                      alias ? 'px' : 'px 20px 3px',
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  }
 }
 
 function setupSwitchingControllers() {
@@ -277,6 +404,396 @@ describe('relative property controllers', () => {
     expect(getComputedStyle(element).getPropertyValue(physical)).toBe('210px')
     expect(errors).toEqual([])
   })
+
+  it.each([
+    {
+      property: 'translate',
+      exit: 'translate',
+      base: '100px 20px 3px',
+      endpoint: '200px 20px 3px',
+      component: 'x',
+    },
+    {
+      property: 'inset',
+      exit: 'left',
+      base: '10px 20px 30px 40px',
+      endpoint: '200px',
+      component: undefined,
+    },
+  ])(
+    'reacquires $property immediately after scoped $exit ownership ends',
+    ({ property, exit, base, endpoint, component }) => {
+      const element = document.createElement('div')
+
+      element.style.cssText = 'position:relative;width:100px;height:80px;'
+      document.body.append(element)
+      elements.push(element)
+
+      const errors: RuntimeDiagnostic[] = []
+      const instance = new LivaInstance(
+        {
+          name: 'presence-controller',
+          parameters: [{ name: 'input', type: 'number' }],
+          letBindings: [
+            {
+              name: 'movement',
+              initializer: {
+                kind: 'call',
+                function: 'link',
+                arguments: [
+                  { name: 'input', value: reference('input') },
+                  ...(component
+                    ? [{ name: 'component', value: { kind: 'string' as const, value: component } }]
+                    : []),
+                ],
+              },
+            },
+          ],
+          layers: [
+            {
+              name: 'base',
+              targets: [
+                {
+                  name: 'self',
+                  properties: [{ name: property, value: { kind: 'literal', value: base } }],
+                },
+              ],
+            },
+            {
+              name: 'control',
+              targets: [
+                {
+                  name: 'self',
+                  properties: [
+                    {
+                      name: property,
+                      value: { kind: 'binding', expression: reference('movement') },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+          leave: {
+            timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
+            targets: [
+              {
+                name: 'self',
+                properties: [
+                  {
+                    name: exit,
+                    keyframes: [{ offset: 1, value: { kind: 'literal', value: endpoint } }],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        { input: 0 },
+        (error) => errors.push(error),
+      )
+
+      instances.push(instance)
+      instance.bind([['self', element]])
+      instance.updateParameters({ input: 10 })
+
+      const session = new LifecycleSession(instance.captureLifecycle('leave', ['self']), 'leave')
+
+      try {
+        session.initialize()
+        session.play()
+
+        const animation = element.getAnimations()[0]
+
+        animation.pause()
+        animation.currentTime = 500
+        instance.updateParameters({ input: 50 })
+
+        const before = decodeProperty(element, property)?.values
+
+        session.cancel('superseded')
+
+        expect(decodeProperty(element, property)?.values).toEqual(before)
+
+        instance.updateParameters({ input: 60 })
+
+        const after = decodeProperty(element, property)?.values
+
+        if (!before || !after) throw new Error('Expected readable controlled property')
+
+        expect(after[0]).toBeCloseTo(before[0] + 10, 6)
+        expect(after.slice(1)).toEqual(before.slice(1))
+        expect(errors).toEqual([])
+      } finally {
+        session.cancel('owner-teardown')
+      }
+    },
+  )
+
+  it.each([
+    { label: 'bound', hidden: false, alias: false },
+    { label: 'unreadable fallback', hidden: true, alias: false },
+    { label: 'unreadable fallback with source-ordered aliases', hidden: true, alias: true },
+  ])(
+    'rejects invalid still-applicable enter expressions with an unchanged $label controller',
+    async ({ hidden, alias }) => {
+      const { instance, element, inputs, errors } = setup(
+        'x',
+        (value) => withLiveEnter(value, alias),
+        { enabled: true, phase: 1 },
+      )
+
+      if (hidden) {
+        element.style.display = 'none'
+        instance.updateParameters({ ...inputs, phase: 1 })
+      }
+
+      const work = instance.captureLifecycle('enter', ['self'])
+
+      instance.releaseLifecycle(['self'], element)
+
+      const session = new LifecycleSession(work, 'enter')
+      const events: string[] = []
+
+      instance.onEvent = (event) => events.push(event)
+
+      try {
+        session.initialize()
+        session.play()
+
+        const original = instance.animations[0]
+
+        original.pause()
+        original.currentTime = 0
+
+        const acquire = vi.spyOn(PropertyMotion.prototype, 'beginControl')
+        const release = vi.spyOn(PropertyMotion.prototype, 'endControl')
+
+        try {
+          instance.updateParameters({ ...inputs, phase: 0 })
+
+          await Promise.resolve()
+
+          expect(acquire).not.toHaveBeenCalled()
+          expect(release).not.toHaveBeenCalled()
+        } finally {
+          acquire.mockRestore()
+          release.mockRestore()
+        }
+
+        expect(errors).toEqual([
+          expect.objectContaining({
+            code: 'runtime.expression',
+            message: 'Error: Expression result must be finite',
+          }),
+        ])
+        expect(events).toEqual([])
+        expect(session.isFinished).toBe(false)
+        expect(instance.animations).toContain(original)
+
+        element.style.display = ''
+        instance.updateParameters({ ...inputs, phase: 2 })
+
+        const replacement = instance.animations[0]
+
+        expect(replacement).not.toBe(original)
+
+        replacement.finish()
+
+        expect(await session.finished).toBe('completed')
+        expect(errors).toHaveLength(1)
+        expect(getComputedStyle(element).getPropertyValue(alias ? 'width' : 'translate')).toBe(
+          alias ? '100px' : '100px 20px 3px',
+        )
+      } finally {
+        session.cancel('owner-teardown')
+      }
+    },
+  )
+
+  it('accepts an alias takeover without evaluating the now-inactive controller enter expression', async () => {
+    const { instance, element, inputs, errors } = setup(
+      'x',
+      (value) => {
+        const source = withLiveEnter(value, true)
+
+        return {
+          ...source,
+          parameters: [...(source.parameters ?? []), { name: 'covered', type: 'boolean' }],
+          layers: [
+            ...source.layers,
+            {
+              name: 'cover',
+              when: reference('covered'),
+              targets: [
+                {
+                  name: 'self',
+                  properties: [{ name: 'width', value: { kind: 'literal', value: '150px' } }],
+                },
+              ],
+            },
+          ],
+        }
+      },
+      { enabled: true, phase: 1, covered: false },
+    )
+
+    element.style.display = 'none'
+    instance.updateParameters({ ...inputs, phase: 1, covered: false })
+
+    const session = new LifecycleSession(instance.captureLifecycle('enter', ['self']), 'enter')
+    const events: string[] = []
+
+    instance.onEvent = (event) => events.push(event)
+
+    try {
+      session.initialize()
+      session.play()
+      instance.updateParameters({ ...inputs, phase: 0, covered: true })
+
+      expect(await session.finished).toBe('completed')
+      expect(events).toEqual(['invalid'])
+      expect(getComputedStyle(element).width).toBe('150px')
+      expect(errors).toEqual([])
+    } finally {
+      session.cancel('owner-teardown')
+    }
+  })
+
+  it('reacquires one logical controller for every receiver after scoped presence releases it', async () => {
+    const { instance, element, inputs, errors } = setup(
+      'x',
+      (value) => ({
+        ...value,
+        leave: {
+          timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
+          targets: [
+            {
+              name: 'self',
+              properties: [
+                {
+                  name: 'translate',
+                  keyframes: [{ offset: 1, value: { kind: 'literal', value: '200px 20px 3px' } }],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+      { enabled: true },
+    )
+    const other = document.createElement('div')
+
+    other.style.cssText = element.style.cssText
+    document.body.append(other)
+    elements.push(other)
+    instance.bind([
+      ['self', element],
+      ['self', other],
+    ])
+    instance.updateParameters({ ...inputs, input: 10 })
+
+    const session = new LifecycleSession(
+      instance.captureLifecycle('leave', ['self'], element),
+      'leave',
+    )
+
+    try {
+      session.initialize()
+      session.play()
+
+      for (const animation of other.getAnimations()) animation.finish()
+
+      await Promise.resolve()
+
+      instance.updateParameters({ ...inputs, input: 50 })
+
+      expect(decodeProperty(other, 'translate')?.values[0]).toBe(100)
+
+      session.cancel('superseded')
+
+      expect(decodeProperty(other, 'translate')?.values[0]).toBe(100)
+
+      instance.updateParameters({ ...inputs, input: 60 })
+
+      expect(decodeProperty(other, 'translate')?.values[0]).toBe(110)
+      expect(decodeProperty(element, 'translate')?.values[0]).toBe(110)
+      expect(errors).toEqual([])
+    } finally {
+      session.cancel('owner-teardown')
+    }
+  })
+
+  it.each([
+    { label: 'fresh input', start: 1060, numeric: true },
+    {
+      label: 'expired input after an unchanged update and delayed release',
+      start: 1110,
+      numeric: false,
+    },
+  ])(
+    'preserves original input freshness for detached leave: $label',
+    async ({ start, numeric }) => {
+      let now = 1000
+      const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+      const { instance, element, inputs, errors } = setup(
+        'x',
+        (value) => ({
+          ...value,
+          leave: {
+            timing: { kind: 'spring-duration', durationMs: 500, bounce: 0.1 },
+            targets: [
+              {
+                name: 'self',
+                properties: [
+                  {
+                    name: 'translate',
+                    keyframes: [{ offset: 1, value: { kind: 'literal', value: '300px 20px 3px' } }],
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        { enabled: true },
+      )
+
+      try {
+        now = 1020
+        instance.updateParameters({ ...inputs, input: 20 })
+
+        const work = instance.captureLifecycle('leave', ['self'])
+
+        now = numeric ? 1040 : 1080
+        instance.updateParameters({ ...inputs, input: 20 })
+        instance.dispose()
+        now = start
+
+        const session = new LifecycleSession(work, 'leave')
+
+        try {
+          session.initialize()
+          session.play()
+
+          const animation = element.getAnimations()[0]
+
+          if (!(animation.effect instanceof KeyframeEffect))
+            throw new Error('Expected leave effect')
+
+          expect(animation.effect.getKeyframes().length > 2).toBe(numeric)
+
+          animation.finish()
+
+          expect(await session.finished).toBe('completed')
+          expect(errors).toEqual([])
+        } finally {
+          session.cancel('owner-teardown')
+        }
+      } finally {
+        clock.mockRestore()
+      }
+    },
+  )
 
   it.each<Expression>([reference('movement', 'value'), { kind: 'number', value: 1 }])(
     'rejects a non-controller property binding: %j',
@@ -528,6 +1045,153 @@ describe('relative property controllers', () => {
     expect(decodeProperty(element, 'translate')?.values).toEqual([130, 20, 3])
     expect(errors).toEqual([])
   })
+
+  it.each(['enter', 'leave'] as const)(
+    'keeps ordinary controller inspection isolated during active %s',
+    async (phase) => {
+      const { instance, inputs, errors } = setup(
+        'x',
+        (value) => withTranslatePresence(value, phase),
+        {
+          enabled: true,
+        },
+      )
+      const inspect = () =>
+        instance
+          .inspectComposition(instance.composition)
+          .presentation.targets.find((target) => target.name === 'self')
+          ?.properties.find((property) => property.name === 'translate')?.value
+
+      instance.updateParameters({ ...inputs, input: 20 })
+
+      const before = inspect()
+      const session = new LifecycleSession(instance.captureLifecycle(phase, ['self']), phase)
+
+      expect(before).toBe('120px 20px 3px')
+
+      try {
+        session.play()
+
+        expect(inspect()).toBe(before)
+
+        session.cancel('owner-teardown')
+
+        expect(await session.finished).toBe('owner-teardown')
+        expect(inspect()).toBe(before)
+        expect(errors).toEqual([])
+      } finally {
+        session.cancel('owner-teardown')
+      }
+    },
+  )
+
+  it('previews the ordinary controller snapshot while leave playback continues', () => {
+    const { instance, element, inputs, errors } = setup(
+      'x',
+      (value) => withTranslatePresence(value, 'leave'),
+      {
+        enabled: true,
+      },
+    )
+
+    instance.updateParameters({ ...inputs, input: 20 })
+
+    const session = new LifecycleSession(instance.captureLifecycle('leave', ['self']), 'leave')
+
+    try {
+      session.play()
+
+      const leave = element.getAnimations()[0]
+
+      instance.previewComposition(instance.composition, instance.composition)
+
+      expect(decodeProperty(element, 'translate')?.values).toEqual([120, 20, 3])
+      expect(instance.animations).toEqual([])
+      expect(element.getAnimations()).toContain(leave)
+      expect(session.isFinished).toBe(false)
+
+      instance.endCompositionPreview()
+
+      expect(session.isFinished).toBe(false)
+      expect(errors).toEqual([])
+    } finally {
+      session.cancel('owner-teardown')
+    }
+  })
+
+  it.each(['completion', 'reduced motion'] as const)(
+    'reacquires control before the first input after leave %s during preview',
+    async (completion) => {
+      const media = matchMedia('(prefers-reduced-motion: reduce)')
+      const factory = vi.spyOn(window, 'matchMedia').mockReturnValue(media)
+      const reduced = vi.spyOn(media, 'matches', 'get').mockReturnValue(false)
+      const { instance, element, inputs, errors } = setup(
+        'x',
+        (value) => ({
+          ...withTranslatePresence(value, 'leave'),
+          layers: value.layers.map((layer) => ({
+            ...layer,
+            targets: layer.targets.map((target) => ({
+              ...target,
+              properties: [
+                ...target.properties,
+                {
+                  name: 'scale',
+                  timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
+                  value: { kind: 'literal', value: layer.name === 'base' ? '1' : '2' },
+                },
+              ],
+            })),
+          })),
+        }),
+        { enabled: true },
+      )
+
+      instance.updateParameters({ ...inputs, input: 20 })
+
+      const session = new LifecycleSession(instance.captureLifecycle('leave', ['self']), 'leave')
+
+      try {
+        session.play()
+
+        const leave = element.getAnimations()[0]
+
+        instance.updateParameters({ ...inputs, input: 30 })
+        instance.previewComposition(
+          { layers: { base: true, active: false }, states: {} },
+          instance.composition,
+        )
+
+        expect(instance.animations.length).toBeGreaterThan(0)
+
+        if (completion === 'completion') {
+          leave.finish()
+        } else {
+          reduced.mockReturnValue(true)
+          media.dispatchEvent(new Event('change'))
+        }
+
+        await expect.poll(() => session.isFinished, { timeout: 300 }).toBe(true)
+
+        expect(await session.finished).toBe('completed')
+
+        instance.endCompositionPreview()
+
+        const before = decodeProperty(element, 'translate')
+
+        if (!before) throw new Error('Expected readable control origin after preview')
+
+        instance.updateParameters({ ...inputs, input: 40 })
+
+        expect(decodeProperty(element, 'translate')?.values[0]).toBe(before.values[0] + 10)
+        expect(errors).toEqual([])
+      } finally {
+        session.cancel('owner-teardown')
+        reduced.mockRestore()
+        factory.mockRestore()
+      }
+    },
+  )
 
   it('freezes controller observations while scrubbing and resumes the live session afterwards', async () => {
     const { instance, element, inputs, errors } = setup()

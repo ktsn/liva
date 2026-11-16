@@ -1182,6 +1182,37 @@ describe('reactive layer instances', () => {
   })
 })
 
+function keyframeEffect(animation: Animation): KeyframeEffect {
+  if (!(animation.effect instanceof KeyframeEffect)) throw new Error('Expected keyframe effect')
+
+  return animation.effect
+}
+
+/** Inspect only registry ownership; playback and binding remain driven through public APIs. */
+function registeredReceiverElements(instance: LivaInstance): HTMLElement[] {
+  const executor: unknown = Reflect.get(instance, 'executor')
+
+  if (
+    typeof executor !== 'object' ||
+    executor === null ||
+    !('receivers' in executor) ||
+    !(executor.receivers instanceof Map)
+  )
+    throw new Error('Expected executor receiver registry')
+
+  return Array.from(executor.receivers.values(), (receiver: unknown) => {
+    if (
+      typeof receiver !== 'object' ||
+      receiver === null ||
+      !('element' in receiver) ||
+      !(receiver.element instanceof HTMLElement)
+    )
+      throw new Error('Expected registered receiving element')
+
+    return receiver.element
+  })
+}
+
 function start(phase: 'enter' | 'leave', instance: LivaInstance, element: HTMLElement) {
   const work = instance.captureLifecycle(phase, ['body'])
   instance.releaseLifecycle(
@@ -1205,33 +1236,8 @@ function start(phase: 'enter' | 'leave', instance: LivaInstance, element: HTMLEl
   return session
 }
 
-/** Dispatches a native media-query event in the test's call stack, before Promise callbacks can run. */
-function setupWithSynchronousMotionChange(
-  source: Definition,
-  inputs: ConstructorParameters<typeof LivaInstance>[1],
-) {
-  const media = matchMedia('(prefers-reduced-motion: reduce)')
-  const observe = vi.spyOn(window, 'matchMedia').mockReturnValue(media)
-
-  try {
-    const fixture = setup(source, inputs)
-
-    return {
-      ...fixture,
-      reduceMotion: () => {
-        const matches = vi.spyOn(media, 'matches', 'get').mockReturnValue(true)
-        cleanup.push(() => matches.mockRestore())
-
-        media.dispatchEvent(new Event('change'))
-      },
-    }
-  } finally {
-    observe.mockRestore()
-  }
-}
-
-describe('layer lifecycle snapshots', () => {
-  const lifecycle: import('../model/definition.ts').Transition = {
+describe('layer lifecycle composition', () => {
+  const lifecycle = {
     timing: { kind: 'tween', durationMs: 1000, easing: 'linear' } as const,
     targets: [
       {
@@ -1252,26 +1258,38 @@ describe('layer lifecycle snapshots', () => {
         ],
       },
     ],
-  }
+  } satisfies import('../model/definition.ts').Transition
 
-  it('holds an enter snapshot while another property changes and settles the latest values', async () => {
+  it('retargets enter with ordinary timing and waits for replacement effects', async () => {
     const { instance, element } = setup({ ...timedDefinition(), enter: lifecycle })
     const session = start('enter', instance, element)
     const effect = element.getAnimations()[0]
 
+    expect(keyframeEffect(effect).getTiming().duration).toBe(1000)
+
     instance.updateParameters({ hover: true, press: true, size: 1.4 })
 
-    expect(element.getAnimations()).toContain(effect)
+    const replacement = element.getAnimations()[0]
+
+    replacement.pause()
+    replacement.currentTime = 0
+
+    expect(replacement).not.toBe(effect)
     expect(getComputedStyle(element).scale).toBe('0.5')
     expect(element.style.opacity).toBe('0.5')
 
-    if (!(effect.effect instanceof KeyframeEffect)) throw new Error('Expected keyframe effect')
+    if (!(replacement.effect instanceof KeyframeEffect)) throw new Error('Expected keyframe effect')
 
-    expect(effect.effect.getKeyframes().at(-1)?.scale).toBe('1')
+    expect(replacement.effect.getKeyframes().at(-1)?.scale).toBe('0.9')
+    expect(replacement.effect.getTiming().duration).toBe(300)
 
-    effect.finish()
+    await Promise.resolve()
 
-    await session.finished
+    expect(session.isFinished).toBe(false)
+
+    replacement.finish()
+
+    expect(await session.finished).toBe('completed')
 
     expect(element.style.scale).toBe('0.9')
     expect(element.style.opacity).toBe('0.5')
@@ -1297,7 +1315,7 @@ describe('layer lifecycle snapshots', () => {
         ],
       },
     }
-    const { instance, element, errors, reduceMotion } = setupWithSynchronousMotionChange(source, {
+    const { instance, element, errors } = setup(source, {
       hover: false,
       press: true,
       size: 1,
@@ -1311,14 +1329,14 @@ describe('layer lifecycle snapshots', () => {
     effects[1].currentTime = 500
     instance.updateParameters({ hover: false, press: false, size: 1 })
 
-    expect(getComputedStyle(element).scale).toBe('0.5')
+    expect(element.style.scale).toBe('')
 
-    reduceMotion()
+    enter.cancel('superseded')
 
-    // These checks run before the cancelled session's resolved Promise is delivered.
+    // Explicit cancellation restores ownership synchronously before Promise callbacks.
     expect(enter.isFinished).toBe(true)
     expect(element.style.scale).toBe('')
-    expect(element.style.opacity).toBe('0.5')
+    expect(element.style.opacity).toBe('0')
     expect(leave.isFinished).toBe(false)
     expect(element.getAnimations()).toHaveLength(1)
     expect(getComputedStyle(element).opacity).toBe('0.25')
@@ -1377,7 +1395,7 @@ describe('layer lifecycle snapshots', () => {
 
       instance.updateParameters({ hover: false, press: false, size: 1 })
 
-      expect(getComputedStyle(element).scale).toBe('0.5')
+      expect(element.style.scale).toBe('')
 
       try {
         if (reason === 'reduced motion') {
@@ -1529,6 +1547,14 @@ describe('layer lifecycle snapshots', () => {
       }
 
       instance.updateParameters({ hover: true, press: false, size: 1.4 })
+
+      for (const target of [element, other]) {
+        for (const animation of target.getAnimations()) {
+          animation.pause()
+          animation.currentTime = 0
+        }
+      }
+
       const writes = vi.spyOn(element.style, 'setProperty')
 
       for (const animation of element.getAnimations()) animation.finish()
@@ -1552,6 +1578,1512 @@ describe('layer lifecycle snapshots', () => {
       expect(other.style.scale).toBe('1.4')
 
       writes.mockRestore()
+    },
+  )
+
+  it('reevaluates an active leave while unrelated declarations follow ordinary updates', async () => {
+    const source: Definition = {
+      ...definition,
+      leave: {
+        timing: lifecycle.timing,
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'scale',
+                keyframes: [{ offset: 1, value: { kind: 'template', parts: [ref('size')] } }],
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const { instance, element, errors } = setup(source)
+    const session = start('leave', instance, element)
+    const initial = element.getAnimations()[0]
+
+    instance.updateParameters({ hover: true, press: true, size: 1.7 })
+
+    const replacement = element.getAnimations()[0]
+
+    replacement.pause()
+    replacement.currentTime = 0
+
+    expect(replacement).not.toBe(initial)
+    expect(element.style.opacity).toBe('0.5')
+    expect(keyframeEffect(replacement).getKeyframes().at(-1)?.scale).toBe('1.7')
+
+    await Promise.resolve()
+
+    expect(session.isFinished).toBe(false)
+
+    replacement.finish()
+
+    expect(await session.finished).toBe('completed')
+    expect(errors).toEqual([])
+  })
+
+  it.each(['dispose', 'replace'] as const)(
+    'starts captured leave with the final original environment after %s',
+    async (operation) => {
+      const source: Definition = {
+        ...definition,
+        leave: {
+          timing: lifecycle.timing,
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'scale',
+                  keyframes: [{ offset: 1, value: { kind: 'template', parts: [ref('size')] } }],
+                },
+              ],
+            },
+          ],
+        },
+      }
+      const { instance, element, errors } = setup(source)
+      const work = instance.captureLifecycle('leave', ['body'])
+
+      instance.updateParameters({ hover: false, press: false, size: 1.7 })
+
+      if (operation === 'dispose') {
+        instance.dispose()
+        element.remove()
+      } else {
+        instance.replaceDefinition({ ...source, leave: undefined })
+      }
+
+      const session = new LifecycleSession(work, 'leave')
+
+      cleanup.push(() => session.cancel('owner-teardown'))
+      session.initialize()
+      session.play()
+
+      const animation = instance.animations[0]
+
+      expect(keyframeEffect(animation).getKeyframes().at(-1)?.scale).toBe('1.7')
+
+      animation.finish()
+
+      expect(await session.finished).toBe('completed')
+      expect(errors).toEqual([])
+    },
+  )
+
+  it('distinguishes authored spring endpoints from ordinary completion values', async () => {
+    const source: Definition = {
+      ...definition,
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'body',
+              properties: [{ name: 'opacity', value: { kind: 'literal', value: '1' } }],
+            },
+          ],
+        },
+      ],
+      enter: {
+        timing: { kind: 'spring-duration', durationMs: 500, bounce: 0.1 },
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'opacity',
+                keyframes: [
+                  { offset: 0, value: { kind: 'literal', value: '0' } },
+                  { offset: 1, value: { kind: 'literal', value: '0.6' } },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const { instance, element } = setup(source)
+    const session = start('enter', instance, element)
+    const animation = element.getAnimations()[0]
+    const frames = keyframeEffect(animation).getKeyframes()
+
+    expect(frames.length).toBeGreaterThan(2)
+    expect(frames[0].opacity).toBe('0')
+    expect(frames.at(-1)?.opacity).toBe('0.6')
+
+    animation.finish()
+
+    expect(await session.finished).toBe('completed')
+    expect(element.style.opacity).toBe('1')
+  })
+
+  it.each([false, true])(
+    'retargets relative leave endpoints without input notifications (disposed=%s)',
+    async (disposed) => {
+      const source: Definition = {
+        ...definition,
+        layers: [
+          {
+            name: 'base',
+            targets: [
+              {
+                name: 'body',
+                properties: [{ name: 'translate', value: { kind: 'literal', value: '0px' } }],
+              },
+            ],
+          },
+        ],
+        leave: {
+          timing: { kind: 'spring-duration', durationMs: 1000, bounce: 0.1 },
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'translate',
+                  keyframes: [{ offset: 1, value: { kind: 'literal', value: '100%' } }],
+                },
+              ],
+            },
+          ],
+        },
+      }
+      const { instance, element, errors } = setup(source)
+
+      element.style.width = '100px'
+
+      const work = instance.captureLifecycle('leave', ['body'])
+      const session = new LifecycleSession(work, 'leave')
+
+      cleanup.push(() => session.cancel('owner-teardown'))
+      session.initialize()
+      session.play()
+
+      const initial = element.getAnimations()[0]
+
+      await initial.ready
+
+      initial.currentTime = 50
+
+      if (disposed) instance.dispose()
+
+      element.style.width = '200px'
+
+      await expect.poll(() => element.getAnimations()[0]).not.toBe(initial)
+
+      const replacement = element.getAnimations()[0]
+
+      expect(keyframeEffect(replacement).getKeyframes().at(-1)?.translate).toBe('200px')
+      expect(session.isFinished).toBe(false)
+
+      replacement.finish()
+
+      expect(await session.finished).toBe('completed')
+      expect(errors).toEqual([])
+    },
+  )
+
+  it('relinquishes only the canonical enter component changed by an ordinary declaration', async () => {
+    const source: Definition = {
+      ...definition,
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'inset-inline',
+                  value: { kind: 'literal', value: '20px 40px' },
+                  timing: { kind: 'tween', durationMs: 300, easing: 'linear' },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'hover',
+          when: ref('hover'),
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'left',
+                  value: { kind: 'literal', value: '60px' },
+                  timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      enter: {
+        timing: lifecycle.timing,
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'inset-inline',
+                keyframes: [{ offset: 0, value: { kind: 'literal', value: '0px 0px' } }],
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const { instance, element, errors } = setup(source)
+    const session = start('enter', instance, element)
+    const right = element
+      .getAnimations()
+      .find((animation) => keyframeEffect(animation).getKeyframes()[0]['right'] !== undefined)
+
+    instance.updateParameters({ hover: true, press: false, size: 1.1 })
+
+    const left = element
+      .getAnimations()
+      .find((animation) => keyframeEffect(animation).getKeyframes()[0]['left'] !== undefined)!
+
+    if (!left || !right) throw new Error('Expected physical inset effects')
+
+    expect(element.getAnimations()).toContain(right)
+    expect(keyframeEffect(left).getKeyframes().at(-1)?.left).toBe('60px')
+    expect(left.effect?.getTiming().duration).toBe(200)
+
+    left.finish()
+
+    await Promise.resolve()
+
+    expect(session.isFinished).toBe(false)
+
+    right.finish()
+
+    expect(await session.finished).toBe('completed')
+    expect(getComputedStyle(element).left).toBe('60px')
+    expect(getComputedStyle(element).right).toBe('40px')
+    expect(errors).toEqual([])
+  })
+
+  it('keeps receiver-specific enter components when repeated targets use ltr/rtl directions', async () => {
+    const source: Definition = {
+      ...definition,
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                { name: 'inset-inline', value: { kind: 'literal', value: '20px 40px' } },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'hover',
+          when: ref('hover'),
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'inset-inline-start',
+                  value: { kind: 'literal', value: '60px' },
+                  timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      enter: {
+        timing: lifecycle.timing,
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'inset-inline',
+                keyframes: [{ offset: 0, value: { kind: 'literal', value: '0px 0px' } }],
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const { instance, element, errors } = setup(source)
+    const second = document.createElement('div')
+
+    element.style.cssText = 'position: relative; direction: ltr'
+    second.style.cssText = 'position: relative; direction: rtl'
+    document.body.append(second)
+    cleanup.push(() => second.remove())
+    instance.bind([
+      ['body', element],
+      ['body', second],
+    ])
+
+    const session = new LifecycleSession(
+      [element, second].flatMap((receiver) =>
+        instance.captureLifecycle('enter', ['body'], receiver),
+      ),
+      'enter',
+    )
+
+    cleanup.push(() => session.cancel('owner-teardown'))
+    session.play()
+
+    const receivers = [
+      { element, unchanged: 'right' },
+      { element: second, unchanged: 'left' },
+    ]
+    const retained = receivers.map(({ element: receiver, unchanged }) => {
+      for (const animation of receiver.getAnimations()) {
+        animation.pause()
+        animation.currentTime = 500
+      }
+
+      const animation = receiver
+        .getAnimations()
+        .find((candidate) => keyframeEffect(candidate).getKeyframes()[0][unchanged] !== undefined)
+
+      if (!animation) throw new Error(`Expected enter effect for ${unchanged}`)
+
+      return {
+        receiver,
+        unchanged,
+        animation,
+        value: getComputedStyle(receiver).getPropertyValue(unchanged),
+      }
+    })
+
+    instance.updateParameters({ hover: true, press: false, size: 1.1 })
+
+    for (const { receiver, unchanged, animation, value } of retained) {
+      expect(receiver.getAnimations()).toContain(animation)
+      expect(getComputedStyle(receiver).getPropertyValue(unchanged)).toBe(value)
+
+      for (const changed of receiver.getAnimations()) {
+        if (changed !== animation) changed.finish()
+      }
+    }
+
+    await Promise.resolve()
+
+    expect(session.isFinished).toBe(false)
+
+    retained[0].animation.finish()
+
+    await Promise.resolve()
+
+    expect(session.isFinished).toBe(false)
+
+    retained[1].animation.finish()
+
+    expect(await session.finished).toBe('completed')
+    expect(getComputedStyle(element).right).toBe('40px')
+    expect(getComputedStyle(second).getPropertyValue(receivers[1].unchanged)).toBe('40px')
+    expect(errors).toEqual([])
+  })
+
+  it.each([false, true])(
+    'initializes the latest enter expression before paint while retaining an explicit rebase (%s)',
+    async (rebased) => {
+      const source: Definition = {
+        ...definition,
+        enter: {
+          timing: lifecycle.timing,
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'scale',
+                  keyframes: [{ offset: 0, value: { kind: 'template', parts: [ref('size')] } }],
+                },
+              ],
+            },
+          ],
+        },
+      }
+      const { instance, element } = setup(source)
+      let work = instance.captureLifecycle('enter', ['body'])
+
+      if (rebased)
+        work = work.map((item) => ({
+          ...item,
+          track: {
+            ...item.track,
+            keyframes: item.track.keyframes.map((frame, index) =>
+              index === 0 ? { ...frame, value: '0.7' } : frame,
+            ),
+          },
+        }))
+
+      instance.updateParameters({ hover: false, press: false, size: 0.3 })
+
+      const session = new LifecycleSession(work, 'enter')
+
+      cleanup.push(() => session.cancel('owner-teardown'))
+      session.initialize()
+
+      expect(element.style.scale).toBe(rebased ? '0.7' : '0.3')
+
+      session.play()
+
+      const animation = element.getAnimations()[0]
+
+      expect(keyframeEffect(animation).getKeyframes()[0].scale).toBe(rebased ? '0.7' : '0.3')
+
+      animation.finish()
+
+      expect(await session.finished).toBe('completed')
+    },
+  )
+
+  it.each(['resize', 'native completion'] as const)(
+    'retargets a live relative leave during manual preview after %s',
+    async (trigger) => {
+      const base = timedDefinition(1000)
+      const source: Definition = {
+        ...base,
+        layers: base.layers.map((layer) =>
+          layer.name === 'base'
+            ? {
+                ...layer,
+                targets: layer.targets.map((target) => ({
+                  ...target,
+                  properties: [
+                    ...target.properties,
+                    {
+                      name: 'translate',
+                      value: { kind: 'literal', value: '0px' },
+                      timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
+                    },
+                  ],
+                })),
+              }
+            : {
+                ...layer,
+                targets: layer.targets.map((target) => ({
+                  ...target,
+                  properties: [
+                    ...target.properties,
+                    { name: 'translate', value: { kind: 'literal', value: '40px' } },
+                  ],
+                })),
+              },
+        ),
+        leave: {
+          timing: { kind: 'spring-duration', durationMs: 1000, bounce: 0.1 },
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'translate',
+                  keyframes: [{ offset: 1, value: { kind: 'literal', value: '100%' } }],
+                },
+              ],
+            },
+          ],
+        },
+      }
+      const { instance, element, errors } = setup(source)
+
+      element.style.width = '100px'
+
+      const session = start('leave', instance, element)
+      const leave = element.getAnimations()[0]
+
+      await leave.ready
+
+      leave.play()
+      instance.previewComposition(instance.composition, {
+        layers: { base: true, hover: true, press: false },
+        states: {},
+      })
+
+      const previews = instance.animations
+
+      await Promise.all(previews.map((animation) => animation.ready))
+
+      for (const animation of previews) animation.currentTime = 500
+
+      const displayed = getComputedStyle(element).scale
+      const translated = getComputedStyle(element).translate
+      const inline = element.style.cssText
+
+      element.style.width = '200px'
+
+      if (trigger === 'native completion') leave.finish()
+
+      await expect
+        .poll(
+          () =>
+            keyframeEffect(
+              element.getAnimations().filter((animation) => !previews.includes(animation))[0],
+            )
+              .getKeyframes()
+              .at(-1)?.translate,
+        )
+        .toBe('200px')
+
+      const replacement = element.getAnimations().find((animation) => !previews.includes(animation))
+
+      if (!replacement) throw new Error('Expected retargeted live leave')
+
+      expect(session.isFinished).toBe(false)
+      expect(element.style.cssText).toBe(inline.replace('width: 100px', 'width: 200px'))
+      expect(instance.animations).toEqual(previews)
+      expect(getComputedStyle(element).scale).toBe(displayed)
+      expect(getComputedStyle(element).translate).toBe(translated)
+
+      replacement.finish()
+
+      await expect.poll(() => session.isFinished, { timeout: 300 }).toBe(true)
+
+      expect(await session.finished).toBe('completed')
+      expect(instance.animations).toEqual(previews)
+
+      for (const animation of previews) {
+        expect(animation.playState).toBe('paused')
+        expect(animation.currentTime).toBe(500)
+
+        animation.currentTime = 800
+      }
+
+      expect(Number(getComputedStyle(element).scale)).toBeGreaterThan(Number(displayed))
+      expect(parseFloat(getComputedStyle(element).translate)).toBeGreaterThan(
+        parseFloat(translated),
+      )
+
+      for (const animation of previews) animation.currentTime = 200
+
+      expect(Number(getComputedStyle(element).scale)).toBeLessThan(Number(displayed))
+      expect(parseFloat(getComputedStyle(element).translate)).toBeLessThan(parseFloat(translated))
+      expect(errors).toEqual([])
+    },
+  )
+
+  it.each([
+    'completion',
+    'cancellation',
+    'preview completion',
+    'preview cancellation',
+    'restoration failure',
+  ] as const)(
+    'retires a detached receiver after %s while retaining its current replacement',
+    async (ending) => {
+      const { instance, element } = setup({ ...timedDefinition(), leave: lifecycle })
+      const report = vi.fn<(error: unknown) => void>()
+      const session = new LifecycleSession(
+        instance.captureLifecycle('leave', ['body']),
+        'leave',
+        report,
+      )
+
+      cleanup.push(() => session.cancel('owner-teardown'))
+      session.play()
+
+      const leave = element.getAnimations()[0]
+      const replacement = document.createElement('div')
+
+      leave.pause()
+
+      document.body.append(replacement)
+      cleanup.push(() => replacement.remove())
+      instance.bind([['body', replacement]])
+      element.remove()
+
+      // Public playback drives ownership; inspect the strong registry to prove retirement,
+      // independently of garbage-collector timing or native animation retention.
+      const registered = () => registeredReceiverElements(instance)
+
+      expect(registered()).toEqual([element, replacement])
+      expect(session.isFinished).toBe(false)
+
+      if (ending.startsWith('preview'))
+        instance.previewComposition(instance.composition, instance.composition)
+
+      const failure = new Error('restoration failed')
+      const restore =
+        ending === 'restoration failure'
+          ? vi.spyOn(element.style, 'cssText', 'set').mockImplementationOnce(() => {
+              throw failure
+            })
+          : undefined
+      // Session completion must still release executor resources when restoration throws.
+      try {
+        if (ending.endsWith('completion')) leave.finish()
+        else session.cancel('owner-teardown')
+
+        await session.finished
+
+        // Frozen effects still use the old receiver until preview itself ends.
+        expect(registered()).toEqual(
+          ending.startsWith('preview') ? [element, replacement] : [replacement],
+        )
+
+        if (ending.startsWith('preview')) instance.endCompositionPreview()
+
+        expect(registered()).toEqual([replacement])
+
+        instance.bind([['body', replacement]])
+
+        expect(registered()).toEqual([replacement])
+        expect(element.getAnimations()).toEqual([])
+        expect(Reflect.get(instance, 'executor')).toEqual(
+          expect.objectContaining({
+            owned: expect.not.arrayContaining([expect.objectContaining({ element })]),
+          }),
+        )
+
+        expect(report.mock.calls).toEqual(restore ? [[failure]] : [])
+      } finally {
+        restore?.mockRestore()
+      }
+    },
+  )
+
+  it('retains a settled receiver while a current physical alias still binds it', async () => {
+    const { instance, element } = setup({ ...timedDefinition(), leave: lifecycle })
+    const session = start('leave', instance, element)
+    const leave = element.getAnimations()[0]
+    const replacement = document.createElement('div')
+
+    document.body.append(replacement)
+    cleanup.push(() => replacement.remove())
+    instance.bind([
+      ['body', replacement],
+      ['alias', element],
+    ])
+    leave.finish()
+
+    await session.finished
+
+    expect(registeredReceiverElements(instance)).toEqual([element, replacement])
+
+    instance.bind([['body', replacement]])
+
+    expect(registeredReceiverElements(instance)).toEqual([replacement])
+  })
+
+  it('retains a detached receiver until its last independent leave settles', async () => {
+    const source: Definition = {
+      ...timedDefinition(),
+      leave: {
+        ...lifecycle,
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              ...lifecycle.targets[0].properties,
+              {
+                name: 'opacity',
+                keyframes: [{ offset: 1, value: { kind: 'literal', value: '0' } }],
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const { instance, element } = setup(source)
+    const work = instance.captureLifecycle('leave', ['body'])
+    const sessions = ['scale', 'opacity'].map((property) => {
+      const session = new LifecycleSession(
+        work.filter((item) => item.track.property === property),
+        'leave',
+      )
+
+      cleanup.push(() => session.cancel('owner-teardown'))
+      session.play()
+
+      return session
+    })
+    const [scale, opacity] = element.getAnimations()
+    const replacement = document.createElement('div')
+
+    document.body.append(replacement)
+    cleanup.push(() => replacement.remove())
+    instance.bind([['body', replacement]])
+    element.remove()
+    scale.finish()
+
+    await sessions[0].finished
+
+    expect(sessions[1].isFinished).toBe(false)
+    expect(registeredReceiverElements(instance)).toEqual([element, replacement])
+    expect(opacity.playState).not.toBe('idle')
+
+    opacity.finish()
+
+    await sessions[1].finished
+
+    expect(registeredReceiverElements(instance)).toEqual([replacement])
+  })
+
+  it('retires an element-specific capture without requiring a later binding change', async () => {
+    const { instance, element } = setup({ ...timedDefinition(), leave: lifecycle })
+    const captured = document.createElement('div')
+
+    document.body.append(captured)
+    cleanup.push(() => captured.remove())
+
+    const session = new LifecycleSession(
+      instance.captureLifecycle('leave', ['body'], captured),
+      'leave',
+    )
+
+    cleanup.push(() => session.cancel('owner-teardown'))
+    session.play()
+
+    const leave = captured.getAnimations()[0]
+
+    expect(registeredReceiverElements(instance)).toEqual([element, captured])
+
+    leave.finish()
+
+    await session.finished
+
+    expect(registeredReceiverElements(instance)).toEqual([element])
+  })
+
+  it('settles a live leave on reduced motion while preserving a seekable manual preview', async () => {
+    const media = matchMedia('(prefers-reduced-motion: reduce)')
+    const factory = vi.spyOn(window, 'matchMedia').mockReturnValue(media)
+    const reduced = vi.spyOn(media, 'matches', 'get').mockReturnValue(false)
+
+    try {
+      const source: Definition = {
+        ...timedDefinition(1000),
+        leave: {
+          timing: lifecycle.timing,
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'opacity',
+                  keyframes: [{ offset: 1, value: { kind: 'literal', value: '0' } }],
+                },
+              ],
+            },
+          ],
+        },
+      }
+      const { instance, element, errors } = setup(source)
+      const session = start('leave', instance, element)
+      const leave = element.getAnimations()[0]
+
+      instance.previewComposition(instance.composition, {
+        layers: { base: true, hover: true, press: false },
+        states: {},
+      })
+
+      const previews = instance.animations
+
+      expect(previews.length).toBeGreaterThan(0)
+      expect(previews).not.toContain(leave)
+
+      await Promise.all(previews.map((animation) => animation.ready))
+
+      for (const animation of previews) animation.currentTime = 500
+
+      const displayed = getComputedStyle(element).scale
+
+      reduced.mockReturnValue(true)
+      media.dispatchEvent(new Event('change'))
+
+      await expect.poll(() => session.isFinished, { timeout: 300 }).toBe(true)
+
+      expect(await session.finished).toBe('completed')
+      expect(element.getAnimations()).not.toContain(leave)
+      expect(instance.animations).toEqual(previews)
+      expect(getComputedStyle(element).scale).toBe(displayed)
+
+      for (const animation of previews) {
+        expect(animation.playState).toBe('paused')
+        expect(animation.currentTime).toBe(500)
+
+        animation.currentTime = 800
+      }
+
+      expect(Number(getComputedStyle(element).scale)).toBeGreaterThan(Number(displayed))
+
+      for (const animation of previews) animation.currentTime = 200
+
+      expect(Number(getComputedStyle(element).scale)).toBeLessThan(Number(displayed))
+
+      instance.endCompositionPreview()
+
+      expect(element.getAnimations()).toEqual([])
+      expect(element.style.scale).toBe('1')
+      expect(errors).toEqual([])
+    } finally {
+      reduced.mockRestore()
+      factory.mockRestore()
+    }
+  })
+
+  it('fails and releases a presence group when completion-time reference observation throws', async () => {
+    const source: Definition = {
+      ...definition,
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'body',
+              properties: [{ name: 'translate', value: { kind: 'literal', value: '0px' } }],
+            },
+          ],
+        },
+      ],
+      leave: {
+        timing: lifecycle.timing,
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'translate',
+                keyframes: [{ offset: 1, value: { kind: 'literal', value: '100%' } }],
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const { instance, element } = setup(source)
+
+    element.style.width = '100px'
+
+    const failures: unknown[] = []
+    const session = new LifecycleSession(
+      instance.captureLifecycle('leave', ['body']),
+      'leave',
+      (error) => failures.push(error),
+    )
+
+    cleanup.push(() => session.cancel('owner-teardown'))
+    session.initialize()
+    session.play()
+
+    const animation = element.getAnimations()[0]
+    const failure = new Error('reference observation failed')
+    const observe = vi.spyOn(window, 'getComputedStyle').mockImplementationOnce(() => {
+      throw failure
+    })
+
+    try {
+      animation.finish()
+
+      expect(await session.finished).toBe('failed')
+      expect(element.getAnimations()).toEqual([])
+      expect(failures).toEqual([failure])
+    } finally {
+      observe.mockRestore()
+    }
+  })
+
+  it('keeps enter property, target, and phase timing independent of an already accepted ordinary transition', async () => {
+    const source: Definition = {
+      ...definition,
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                { name: 'opacity', value: { kind: 'literal', value: '1' } },
+                { name: 'scale', value: { kind: 'literal', value: '1' } },
+                { name: 'width', value: { kind: 'literal', value: '20px' } },
+              ],
+            },
+          ],
+          initialState: 'off',
+          states: [
+            { name: 'off', targets: [] },
+            { name: 'on', targets: [] },
+          ],
+          transitions: [
+            {
+              from: 'off',
+              to: 'on',
+              when: ref('hover'),
+              transition: {
+                timing: { kind: 'tween', durationMs: 50, easing: 'linear' },
+                targets: [],
+              },
+            },
+          ],
+        },
+      ],
+      enter: {
+        timing: lifecycle.timing,
+        targets: [
+          {
+            name: 'body',
+            timing: { kind: 'tween', durationMs: 700, easing: 'linear' },
+            timingProperties: ['opacity', 'scale'],
+            properties: [
+              {
+                name: 'opacity',
+                timing: { kind: 'tween', durationMs: 300, easing: 'linear' },
+                keyframes: [{ offset: 0, value: { kind: 'literal', value: '0' } }],
+              },
+              {
+                name: 'scale',
+                keyframes: [{ offset: 0, value: { kind: 'literal', value: '0.5' } }],
+              },
+              {
+                name: 'width',
+                keyframes: [{ offset: 0, value: { kind: 'literal', value: '0px' } }],
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const { instance, element, errors } = setup(source)
+
+    instance.updateParameters({ hover: true, press: false, size: 1 })
+
+    for (const animation of element.getAnimations()) animation.finish()
+
+    await Promise.resolve()
+
+    const session = start('enter', instance, element)
+    const effects = element.getAnimations().map((animation) => keyframeEffect(animation))
+
+    expect(effects.map((effect) => effect.getTiming().duration)).toEqual([300, 700, 1000])
+    expect(
+      effects.map(
+        (effect) =>
+          effect.getKeyframes()[0].opacity ??
+          effect.getKeyframes()[0].scale ??
+          effect.getKeyframes()[0].width,
+      ),
+    ).toEqual(['0', '0.5', '0px'])
+
+    for (const animation of element.getAnimations()) animation.finish()
+
+    expect(await session.finished).toBe('completed')
+    expect(errors).toEqual([])
+  })
+
+  it.each(['edit', 'remove'] as const)(
+    'releases retired detached fields before reacquiring their external %s',
+    async (change) => {
+      const element = document.createElement('div')
+
+      element.style.cssText = 'position:relative;inset:11px !important;scale:.8;--external:7px 8px;'
+      document.body.append(element)
+
+      const source: Definition = {
+        name: 'detached-ownership',
+        layers: [
+          {
+            name: 'base',
+            targets: [
+              {
+                name: 'body',
+                properties: [
+                  { name: 'inset', value: { kind: 'literal', value: '10px' } },
+                  { name: 'scale', value: { kind: 'literal', value: '1' } },
+                ],
+              },
+            ],
+          },
+        ],
+        leave: {
+          timing: lifecycle.timing,
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'inset',
+                  keyframes: [{ offset: 1, value: { kind: 'literal', value: '0px' } }],
+                },
+                {
+                  name: 'scale',
+                  keyframes: [{ offset: 1, value: { kind: 'literal', value: '0.2' } }],
+                },
+              ],
+            },
+          ],
+        },
+      }
+      const instance = new LivaInstance(source)
+
+      instance.bind([['body', element]])
+
+      const work = instance.captureLifecycle('leave', ['body'])
+      const inset = work.filter((item) => item.track.property === 'inset')
+      const scale = new LifecycleSession(
+        work.filter((item) => item.track.property === 'scale'),
+        'leave',
+      )
+      const first = new LifecycleSession(inset, 'leave')
+      let next: LifecycleSession | undefined
+
+      try {
+        for (const session of [first, scale]) {
+          session.initialize()
+          session.play()
+        }
+
+        instance.dispose()
+
+        for (const animation of element.getAnimations()) {
+          animation.pause()
+
+          if (keyframeEffect(animation).getKeyframes()[0].scale === undefined) animation.finish()
+        }
+
+        expect(await first.finished).toBe('completed')
+        expect(scale.isFinished).toBe(false)
+
+        if (change === 'edit') element.style.setProperty('inset', 'var(--external)', 'important')
+        else element.style.removeProperty('inset')
+
+        next = new LifecycleSession(inset, 'leave')
+        next.initialize()
+        next.play()
+
+        for (const animation of element.getAnimations()) {
+          if (keyframeEffect(animation).getKeyframes()[0].scale === undefined) animation.finish()
+        }
+
+        expect(await next.finished).toBe('completed')
+        expect(element.style.getPropertyValue('inset')).toBe(
+          change === 'edit' ? 'var(--external)' : '',
+        )
+        expect(element.style.getPropertyPriority('inset')).toBe(
+          change === 'edit' ? 'important' : '',
+        )
+        expect(scale.isFinished).toBe(false)
+
+        scale.cancel('owner-teardown')
+
+        expect(element.style.getPropertyValue('inset')).toBe(
+          change === 'edit' ? 'var(--external)' : '',
+        )
+      } finally {
+        first.cancel('owner-teardown')
+        next?.cancel('owner-teardown')
+        scale.cancel('owner-teardown')
+        instance.dispose()
+        element.remove()
+      }
+    },
+  )
+
+  it('preserves enter while only another logical target changes and completes independently', async () => {
+    const source: Definition = {
+      ...timedDefinition(),
+      enter: lifecycle,
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'body',
+              properties: [{ name: 'scale', value: { kind: 'literal', value: '1' } }],
+            },
+            {
+              name: 'other',
+              properties: [
+                {
+                  name: 'opacity',
+                  value: { kind: 'literal', value: '1' },
+                  timing: lifecycle.timing,
+                },
+              ],
+            },
+          ],
+        },
+        {
+          name: 'hover',
+          when: ref('hover'),
+          targets: [
+            {
+              name: 'other',
+              properties: [{ name: 'opacity', value: { kind: 'literal', value: '0.2' } }],
+            },
+          ],
+        },
+      ],
+    }
+    const { instance, element, errors } = setup(source)
+    const other = document.createElement('div')
+
+    document.body.append(other)
+    cleanup.push(() => other.remove())
+    instance.bind([
+      ['body', element],
+      ['other', other],
+    ])
+
+    const session = start('enter', instance, element)
+    const enter = element.getAnimations()[0]
+
+    instance.updateParameters({ hover: true, press: false, size: 1 })
+
+    const ordinary = other.getAnimations()[0]
+
+    ordinary.pause()
+    ordinary.currentTime = 0
+
+    expect(element.getAnimations()).toContain(enter)
+
+    enter.finish()
+
+    expect(await session.finished).toBe('completed')
+    expect(other.getAnimations()).toContain(ordinary)
+    expect(errors).toEqual([])
+  })
+
+  it('retains externally constructed compatibility work across a binding replacement', async () => {
+    const { instance, element, errors } = setup(timedDefinition())
+    const session = new LifecycleSession(
+      [
+        {
+          element,
+          track: {
+            target: 'body',
+            property: 'scale',
+            timing: lifecycle.timing,
+            destinationValue: '1',
+            keyframes: [
+              { offset: 0, value: '0.5' },
+              { offset: 1, value: '1' },
+            ],
+          },
+        },
+      ],
+      'enter',
+    )
+
+    cleanup.push(() => session.cancel('owner-teardown'))
+    session.initialize()
+    session.play()
+    instance.retainLifecycle('enter', session)
+
+    const animation = element.getAnimations()[0]
+
+    animation.pause()
+    animation.currentTime = 0
+
+    const other = document.createElement('div')
+
+    document.body.append(other)
+    cleanup.push(() => other.remove())
+
+    instance.bind([
+      ['body', element],
+      ['extra', other],
+    ])
+
+    expect(getComputedStyle(element).scale).toBe('0.5')
+    expect(element.getAnimations()).toContain(animation)
+
+    animation.finish()
+
+    expect(await session.finished).toBe('completed')
+    expect(errors).toEqual([])
+  })
+
+  it('observes repeated scoped declarations once per phase as receiver count grows', () => {
+    const source: Definition = {
+      ...definition,
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                { name: 'inset-inline', value: { kind: 'literal', value: '20px 40px' } },
+              ],
+            },
+          ],
+        },
+      ],
+      enter: {
+        timing: lifecycle.timing,
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'inset-inline',
+                keyframes: [{ offset: 0, value: { kind: 'literal', value: '0px' } }],
+              },
+            ],
+          },
+        ],
+      },
+    }
+
+    const readsFor = (count: number) => {
+      const { instance, element } = setup(source)
+      const receivers = [
+        element,
+        ...Array.from({ length: count - 1 }, () => document.createElement('div')),
+      ]
+
+      for (const receiver of receivers.slice(1)) {
+        document.body.append(receiver)
+        cleanup.push(() => receiver.remove())
+      }
+
+      instance.bind(receivers.map((receiver) => ['body', receiver] as const))
+
+      const session = new LifecycleSession(
+        receivers.flatMap((receiver) => instance.captureLifecycle('enter', ['body'], receiver)),
+        'enter',
+      )
+
+      cleanup.push(() => session.cancel('owner-teardown'))
+      session.initialize()
+      session.play()
+
+      const original = window.getComputedStyle
+      const observed = new Set<Element>(receivers)
+      let reads = 0
+      const observe = vi
+        .spyOn(window, 'getComputedStyle')
+        .mockImplementation((receiver, pseudo) => {
+          if (observed.has(receiver)) reads++
+
+          return original.call(window, receiver, pseudo)
+        })
+
+      try {
+        instance.updateParameters({ hover: false, press: false, size: 2 })
+
+        expect(session.isFinished).toBe(false)
+
+        return reads
+      } finally {
+        observe.mockRestore()
+      }
+    }
+
+    const small = readsFor(2)
+    const large = readsFor(4)
+
+    expect(small).toBeGreaterThan(0)
+    expect(large).toBe(small * 2)
+  })
+
+  it('replaces obsolete canonical components when relative dimensions and writing context change', async () => {
+    const source: Definition = {
+      ...definition,
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'body',
+              properties: [{ name: 'inset-inline', value: { kind: 'literal', value: '0px' } }],
+            },
+          ],
+        },
+      ],
+      leave: {
+        timing: { kind: 'spring-duration', durationMs: 1000, bounce: 0.1 },
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'inset-inline',
+                keyframes: [{ offset: 1, value: { kind: 'literal', value: '50% 70%' } }],
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const { instance, element, errors } = setup(source)
+    const container = document.createElement('div')
+
+    container.style.cssText = 'position:relative;width:400px;height:300px'
+    document.body.append(container)
+    container.append(element)
+    cleanup.push(() => container.remove())
+    element.style.cssText += ';position:absolute;width:100px;height:100px'
+
+    const session = new LifecycleSession(instance.captureLifecycle('leave', ['body']), 'leave')
+
+    cleanup.push(() => session.cancel('owner-teardown'))
+    session.initialize()
+    session.play()
+
+    const original = [...instance.animations]
+    const properties = () =>
+      instance.animations
+        .flatMap((animation) =>
+          Object.keys(keyframeEffect(animation).getKeyframes()[0]).filter((property) =>
+            ['left', 'right', 'top', 'bottom'].includes(property),
+          ),
+        )
+        .toSorted()
+
+    expect(properties()).toEqual(['left', 'right'])
+
+    container.style.width = '500px'
+
+    await expect
+      .poll(() => ({
+        properties: properties(),
+        replaced: !instance.animations.some((animation) => original.includes(animation)),
+      }))
+      .toEqual({ properties: ['left', 'right'], replaced: true })
+
+    expect(session.isFinished).toBe(false)
+
+    const beforeContext = [...instance.animations]
+
+    element.style.writingMode = 'vertical-rl'
+    container.style.width = '600px'
+
+    await expect.poll(properties).toEqual(['bottom', 'top'])
+
+    expect(
+      [...original, ...beforeContext].every((animation) => animation.playState === 'idle'),
+    ).toBe(true)
+    expect(session.isFinished).toBe(false)
+
+    for (const animation of instance.animations) animation.finish()
+
+    expect(await session.finished).toBe('completed')
+    expect(errors).toEqual([])
+  })
+
+  it.each([
+    {
+      change: 'hidden lower declaration',
+      hover: true,
+      size: 30,
+      leftDuring: '0px',
+      leftAfter: '60px',
+      right: '50px',
+      retained: true,
+    },
+    {
+      change: 'winning declaration removal',
+      hover: false,
+      size: 20,
+      leftDuring: '20px',
+      leftAfter: '20px',
+      right: '40px',
+      retained: false,
+    },
+  ])(
+    'uses effective ordinary ownership for $change during enter',
+    async ({ hover, size, leftDuring, leftAfter, right, retained }) => {
+      const source: Definition = {
+        ...definition,
+        layers: [
+          {
+            name: 'base',
+            targets: [
+              {
+                name: 'body',
+                properties: [
+                  {
+                    name: 'inset-inline',
+                    value: {
+                      kind: 'template',
+                      parts: [
+                        ref('size'),
+                        'px ',
+                        {
+                          kind: 'binary',
+                          operator: '+',
+                          left: ref('size'),
+                          right: { kind: 'number', value: 20 },
+                        },
+                        'px',
+                      ],
+                    },
+                  },
+                  { name: 'opacity', value: { kind: 'literal', value: '1' } },
+                ],
+              },
+            ],
+          },
+          {
+            name: 'hover',
+            when: ref('hover'),
+            targets: [
+              {
+                name: 'body',
+                properties: [{ name: 'left', value: { kind: 'literal', value: '60px' } }],
+              },
+            ],
+          },
+        ],
+        enter: {
+          timing: lifecycle.timing,
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'left',
+                  keyframes: [{ offset: 0, value: { kind: 'literal', value: '0px' } }],
+                },
+                {
+                  name: 'opacity',
+                  keyframes: [{ offset: 0, value: { kind: 'literal', value: '0' } }],
+                },
+              ],
+            },
+          ],
+        },
+      }
+      const { instance, element, errors } = setup(source, { hover: true, press: false, size: 20 })
+
+      element.style.position = 'relative'
+
+      const session = start('enter', instance, element)
+      const left = element
+        .getAnimations()
+        .find((animation) => keyframeEffect(animation).getKeyframes()[0].left !== undefined)
+      const opacity = element
+        .getAnimations()
+        .find((animation) => keyframeEffect(animation).getKeyframes()[0].opacity !== undefined)
+
+      if (!left || !opacity) throw new Error('Expected independent enter tracks')
+
+      instance.updateParameters({ hover, press: false, size })
+
+      await Promise.resolve()
+
+      expect(element.getAnimations().includes(left)).toBe(retained)
+      expect(element.getAnimations()).toContain(opacity)
+      expect(getComputedStyle(element).left).toBe(leftDuring)
+      expect(getComputedStyle(element).right).toBe(right)
+      expect(session.isFinished).toBe(false)
+
+      for (const animation of element.getAnimations()) animation.finish()
+
+      expect(await session.finished).toBe('completed')
+      expect(getComputedStyle(element).left).toBe(leftAfter)
+      expect(getComputedStyle(element).right).toBe(right)
+      expect(errors).toEqual([])
     },
   )
 

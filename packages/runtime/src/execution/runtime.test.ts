@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vite-plus/test'
 import type { Definition } from '../model/definition.ts'
 import type { ExecutionPort, RuntimeDiagnostic } from './execution-contracts.ts'
 import type { PresentationPlan } from './presentation-planner.ts'
-import { layerPropertyKey } from './presentation-planner.ts'
+import { planReconciliation } from './presentation-planner.ts'
 import { Runtime } from './runtime.ts'
 
 const definition: Definition = {
@@ -36,9 +36,20 @@ function setup() {
   let velocity = 0
   let runtime: Runtime
   const plans: PresentationPlan[] = []
+  const observations: { displayed: number; velocity: number }[] = []
   const errors: RuntimeDiagnostic[] = []
   const execution: ExecutionPort = {
     bindingFacts: { suspended: false },
+
+    freezeEnvironment() {},
+
+    validatePresence() {},
+
+    present(_previous, next) {
+      observations.push({ displayed, velocity })
+      execution.applyPlan(planReconciliation(next, execution.presentationFacts(next).receivers))
+    },
+
     initialize() {},
     configureControllers() {},
     disconnectBindings() {},
@@ -70,61 +81,33 @@ function setup() {
         id: 3,
         target: 'box',
         protected: [],
+        fallbacks: [],
         addresses: [{ name: 'opacity', addresses: ['opacity'] }],
       },
     ],
-    observeLayerStarts: (templates) =>
-      new Map(
-        templates
-          .filter((track) => track.implicitStart)
-          .map((track) => [layerPropertyKey(track.target, track.property), String(displayed)]),
-      ),
-    expandTracks: (sources) =>
-      sources.map((source) => ({
-        ...source,
-        track: source.source,
-        declarations: [{ name: 'opacity', addresses: ['opacity'] }],
-        protected: false,
-      })),
+    expandTracks: () => [],
     observeDisplayed: () => [],
-    observeTracks: (requests) =>
-      requests.map((request, id) => ({
-        id,
-        receiver: request.receiver,
-        source: request.source,
-        track: request.track,
-        declarations: request.declarations,
-        interrupted: request.interrupted,
-        displayed: request.needs.displayed ? String(displayed) : undefined,
-        motion: request.needs.motion
-          ? {
-              start: { value: [displayed], velocity: [velocity] },
-              end: [Number(request.track.destinationValue)],
-              relative: false,
-            }
-          : undefined,
-      })),
+    observeTracks: () => [],
     applyPlan: (plan) => {
       plans.push(plan)
       runtime.environment.acceptPresentation(plan.resolution)
     },
   }
+
   runtime = new Runtime(execution, definition, { enabled: false }, (error) => errors.push(error))
 
-  return { runtime, execution, plans, errors }
+  return { runtime, execution, plans, observations, errors }
 }
 
 describe('Runtime presentation coordination', () => {
-  it('plans from post-terminal position and post-release velocity without a browser', () => {
-    const { runtime, plans, errors } = setup()
+  it('requests presentation after terminal writes and controller release', () => {
+    const { runtime, plans, observations, errors } = setup()
 
     runtime.updateParameters({ enabled: true })
 
     expect(plans).toHaveLength(1)
     expect(plans[0].writes).toEqual([{ receiver: 3, property: 'opacity', value: '1' }])
-    expect(plans[0].start).toHaveLength(1)
-    expect(plans[0].start[0].trajectory?.(0).value[0]).toBeCloseTo(0.4, 12)
-    expect(plans[0].start[0].trajectory?.(0).velocity[0]).toBeCloseTo(0.002, 12)
+    expect(observations).toEqual([{ displayed: 0.4, velocity: 0.002 }])
     expect(runtime.composition.layers.active).toBe(true)
     expect(errors).toEqual([])
 

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { LivaInstance, type RuntimeDiagnostic } from '../execution/instance.ts'
 import type { Definition, Timing } from '../model/definition.ts'
-import { PropertyMotion } from './property-motion.ts'
+import { LifecycleSession } from '../execution/lifecycle.ts'
+import { PropertyMotion, springMotion } from './property-motion.ts'
 import { decodeProperty } from './property-codec.ts'
 
 const physics: Timing = { kind: 'spring-physics', stiffness: 300, damping: 25, mass: 1 }
@@ -86,6 +87,109 @@ afterEach(() => {
 })
 
 describe('displayed momentum integration', () => {
+  it('hands ordinary velocity into leave and its spring trajectory back into re-entry', async () => {
+    const timing = { kind: 'spring-physics', stiffness: 100, damping: 20, mass: 1 } as const
+    const { instance, element, errors } = setup('translate', '100px', {
+      kind: 'tween',
+      durationMs: 1000,
+      easing: 'linear',
+    })
+
+    instance.replaceDefinition({
+      ...instance.definition,
+      enter: {
+        timing,
+        targets: [
+          {
+            name: 'self',
+            properties: [
+              {
+                name: 'translate',
+                keyframes: [{ offset: 0, value: { kind: 'literal', value: '0px' } }],
+              },
+            ],
+          },
+        ],
+      },
+      leave: {
+        timing,
+        targets: [
+          {
+            name: 'self',
+            properties: [
+              {
+                name: 'translate',
+                keyframes: [{ offset: 1, value: { kind: 'literal', value: '200px' } }],
+              },
+            ],
+          },
+        ],
+      },
+    })
+    instance.updateParameters({ enabled: true })
+
+    const ordinary = element.getAnimations()[0]
+
+    ordinary.pause()
+    ordinary.currentTime = 250
+
+    const observations = vi.spyOn(PropertyMotion.prototype, 'observeSpring')
+    const leave = new LifecycleSession(instance.captureLifecycle('leave', ['self']), 'leave')
+    let enter: LifecycleSession | undefined
+
+    try {
+      instance.releaseLifecycle(['self'], element)
+      leave.initialize()
+      leave.play()
+
+      const outgoing = element.getAnimations()[0]
+
+      outgoing.pause()
+      outgoing.currentTime = 250
+
+      const observation = observations.mock.results[0].value
+      const displayed = getComputedStyle(element).translate
+      const displayedValue = decodeProperty(element, 'translate')?.values[0]
+      const expected = springMotion(timing, [25, 0, 0], [200, 0, 0], [0.1, 0, 0]).sample(250)
+
+      expect(observation.start?.value[0]).toBeCloseTo(25, 5)
+      expect(observation.start?.velocity[0]).toBeCloseTo(0.1, 5)
+
+      const work = instance.captureLifecycle('enter', ['self']).map((item) => ({
+        ...item,
+        track: {
+          ...item.track,
+          keyframes: item.track.keyframes.map((frame, index) =>
+            index === 0 ? { ...frame, value: displayed } : frame,
+          ),
+        },
+      }))
+
+      instance.releaseLifecycle(['self'], element)
+      leave.cancel('superseded')
+      observations.mockClear()
+      enter = new LifecycleSession(work, 'enter')
+      enter.initialize()
+      enter.play()
+
+      const incoming = element.getAnimations()[0]
+      const reentry = observations.mock.results[0].value
+
+      expect(reentry.start?.value[0]).toBe(displayedValue)
+      expect(reentry.start?.velocity[0]).toBeCloseTo(expected.velocity[0], 5)
+
+      incoming.finish()
+
+      expect(await enter.finished).toBe('completed')
+      expect(element.style.translate).toBe('100px')
+      expect(errors).toEqual([])
+    } finally {
+      observations.mockRestore()
+      leave.cancel('owner-teardown')
+      enter?.cancel('owner-teardown')
+    }
+  })
+
   it('reports reconciliation failures even after the completed effect has been removed', async () => {
     const { instance, element, errors } = setup('width', '200px', {
       kind: 'tween',
