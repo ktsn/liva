@@ -234,11 +234,14 @@ checked by the compiler.
 `drag`, its per-instance value, and Pointer Events handling. `interaction.ts` reads browser
 pseudo-class snapshots and coalesces event-triggered rechecks. A built-in subscription
 returns a value and a binding function whose cleanup releases browser resources.
-`LivaInstance` delegates handle binding and cleanup to the let graph without
-built-in-specific branches. The let binding graph reevaluates expressions in dependency order before
-layer resolution and template rendering. `FunctionResult` is a `RuntimeValue`,
-`ReactiveSubscription`, or stateful `ReactiveCall`, defined in `reactive-value.ts`. The runtime recognizes subscriptions by their `value` and
-callable `bind` members. Ordinary records remain ordinary values. Each call site
+Runtime connects the call store through the executor without built-in-specific
+branches. The executor binds adapters to receiving elements and owns their browser
+cleanup. The let graph evaluates expressions in dependency order before layer
+resolution and template rendering. Builtins return `BuiltinResult`: a `RuntimeValue`,
+`ReactiveSubscription`, or stateful `ReactiveCall`. The store retains the same
+adapter objects through the DOM-free `FunctionResult` source/call views defined in
+`reactive-value.ts`. Source recognition uses the adapters' `value` and callable
+`bind` members. Ordinary records remain ordinary values. Each call site
 caches its evaluated arguments and result; unchanged arguments reuse that result.
 Subscription results expose their latest value. Changed arguments invoke ordinary
 functions again or prepare an update on a retained `ReactiveCall`. Nested calls use the same evaluation rules. Active subscriptions
@@ -687,8 +690,9 @@ addresses without evaluating calls. Each graph evaluation receives invocation
 operations and an optional synchronous `afterEvaluate` validation/transformation.
 Runtime runs both inside `ReactiveCallStore.evaluate`, before subscription
 acceptance and prepared-call commit. Compatible graph metadata selects caches
-borrowed by a replacement or isolated candidate; accepting or rejecting a candidate
-disposes its store while preserving calls still held by the other store.
+borrowed by a replacement or isolated candidate. Acceptance disposes the retiring
+live store while preserving calls held by the replacement. Rejection or inspection
+completion disposes the candidate store while preserving calls held by the live store.
 
 `ReactiveCallStore` owns caches, coherent source snapshots, prepared updates,
 transactional acceptance/discard, and notification ordering. It connects evaluation
@@ -706,10 +710,11 @@ idempotent resource cleanup and immutable snapshots. A transaction reads each ca
 once; commit-time notifications are deferred to a microtask after all calls commit.
 
 Subscriptions activate only when DOM targets bind. Source replacement transfers
-calls only for the same binding name, structurally identical initializer, and
-unchanged arguments. Changed or removed calls dispose; editor inspection uses an
-inactive graph and cannot update retained live calls. Binding cleanup cancels
-active resources; final graph disposal also releases the call instance.
+calls only for the same binding name, structurally identical initializer, matching
+receiving addresses (including inactive states and aliases), and unchanged arguments.
+Changed or removed calls dispose; editor inspection uses an unbound candidate store
+and cannot update retained live calls. Executor-owned binding cleanup cancels browser
+resources; final store disposal also releases owned call instances.
 
 ### Property motion and event transactions
 
