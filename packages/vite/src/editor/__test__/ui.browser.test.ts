@@ -1191,17 +1191,20 @@ it.each(['composition', 'enter'] as const)(
     const lifecycle = vi.spyOn(participant.inspection, 'inspectLifecycle')
 
     await click('Motion editor')
+
     if (scope === 'enter') {
       await input('Existing transition', 'enter-default')
     }
 
     expect(host!.querySelector('[aria-label="Playback time"]')!.textContent).toContain('100 ms')
+
     const selected = controller.selected!.binding
     participant.runtime.onUpdate = () => controller.observe('update', selected)
     composition.mockClear()
     lifecycle.mockClear()
 
     participant.runtime.updateParameters({ amount: 0.75, duration: 400 })
+
     await tick()
 
     expect(controller.selected!.binding).toBe(selected)
@@ -1218,6 +1221,7 @@ it.each(['composition', 'enter'] as const)(
     expect(snapshots).toContainEqual(
       scope === 'enter' ? { kind: 'literal', value: '0.75' } : '0.75',
     )
+
     composition.mockRestore()
     lifecycle.mockRestore()
   },

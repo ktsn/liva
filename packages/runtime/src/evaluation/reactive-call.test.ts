@@ -335,12 +335,16 @@ describe('stable reactive calls', () => {
           (entry) => entry.index >= (phase === 'rollback' ? 1 : 2),
         ))
           listener.publish()
+
         await Promise.resolve()
         await Promise.resolve()
 
         expect(update).not.toHaveBeenCalled()
+
         expect(read(initial)).toEqual(initial)
+
         listeners.findLast((entry) => entry.index === 0)?.publish()
+
         expect(update).toHaveBeenCalledTimes(1)
       } finally {
         failing = false
