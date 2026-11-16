@@ -3,7 +3,12 @@ import type { ReactiveNotification } from './events.ts'
 export type Scalar = number | boolean | string
 export type RuntimeValue = Scalar | { readonly [name: string]: RuntimeValue }
 
-/** Evaluation-facing source identity. Browser connection capabilities are separate. */
+/**
+ * Evaluation-facing view of an existing builtin adapter, preserving its identity.
+ * Producers return bind-capable adapters; recognition still checks value/bind so
+ * ordinary records containing only value remain plain values. Browser connection
+ * capabilities are omitted from this view and are used only by the executor.
+ */
 export interface ReactiveSource {
   readonly value: RuntimeValue
 }
@@ -35,6 +40,7 @@ export interface PreparedUpdate {
   discard(): void
 }
 
+/** Stateful evaluation view of the same adapter-backed source identity. */
 export interface EvaluatedCall extends ReactiveSource {
   /**
    * Optionally reads a coherent observation at a performance.now()-compatible
