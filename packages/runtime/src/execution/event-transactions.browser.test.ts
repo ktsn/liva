@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { Definition, Expression } from '../model/definition.ts'
 import type { ReactiveSubscription, RuntimeValue } from '../evaluation/reactive-value.ts'
 import { createEventValue, type ReactiveNotification } from '../evaluation/events.ts'
+import { LifecycleSession } from './lifecycle.ts'
 import { LivaInstance, type RuntimeDiagnostic } from './instance.ts'
 import { springMotion } from '../motion/property-motion.ts'
 const sourceState = vi.hoisted<{ source?: ReactiveSubscription }>(() => ({}))
@@ -206,6 +207,188 @@ afterEach(() => {
 })
 
 describe('event snapshot transactions', () => {
+  it('keeps the accepted composition visible to source events when preview ends', () => {
+    const { instance, errors, update } = setup()
+    const before = instance.composition
+    const seen: boolean[] = []
+
+    instance.previewComposition(before, before)
+    instance.onEvent = () => seen.push(instance.composition.layers.dragging)
+    update(true, 90)
+
+    expect(seen).toEqual([false])
+    expect(instance.composition.layers.dragging).toBe(true)
+    expect(errors).toEqual([])
+  })
+
+  it('rejects invalid source presentation inside the transaction when preview ends', () => {
+    const { instance, errors, update } = setup((definition) => ({
+      ...definition,
+      layers: definition.layers.map((layer, index) =>
+        index === 0
+          ? {
+              ...layer,
+              targets: layer.targets.map((target) => ({
+                ...target,
+                properties: [
+                  ...target.properties,
+                  {
+                    name: '--checked',
+                    value: {
+                      kind: 'template',
+                      parts: [
+                        {
+                          kind: 'binary',
+                          operator: '/',
+                          left: { kind: 'number', value: 1 },
+                          right: {
+                            kind: 'binary',
+                            operator: '-',
+                            left: { kind: 'number', value: 100 },
+                            right: reference('pointer', 'offset'),
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              })),
+            }
+          : layer,
+      ),
+    }))
+    const before = instance.composition
+    const events: string[] = []
+
+    instance.previewComposition(before, before)
+    instance.onEvent = (event) => events.push(event)
+
+    expect(() => update(true, 100)).not.toThrow()
+    expect(instance.composition).toEqual(before)
+    expect(events).toEqual([])
+    expect(errors).toEqual([
+      expect.objectContaining({
+        code: 'runtime.expression',
+        message: 'Error: Expression result must be finite',
+      }),
+    ])
+
+    update(true, 90)
+
+    expect(events).toEqual(['crossed'])
+    expect(instance.composition.layers.dragging).toBe(true)
+  })
+
+  it('preserves the first controller input delta when a source notification ends preview', () => {
+    const { instance, element, errors, update } = setup()
+
+    update(true, 0)
+    update(true, 20)
+    instance.previewComposition(instance.composition, instance.composition)
+    update(true, 30)
+
+    expect(getComputedStyle(element).translate).toBe('30px')
+    expect(errors).toEqual([])
+  })
+
+  it('rejects invalid active presence before accepting source calls, events, or state history', async () => {
+    const { instance, element, errors, update } = setup((definition) => ({
+      ...definition,
+      layers: definition.layers.map((layer, index) =>
+        index === 0
+          ? {
+              ...layer,
+              targets: layer.targets.map((target) => ({
+                ...target,
+                properties: [
+                  ...target.properties,
+                  { name: 'color', value: { kind: 'literal', value: 'red' } },
+                ],
+              })),
+            }
+          : layer,
+      ),
+      enter: {
+        timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
+        targets: [
+          {
+            name: 'self',
+            properties: [
+              {
+                name: 'color',
+                keyframes: [
+                  {
+                    offset: 0,
+                    value: {
+                      kind: 'template',
+                      parts: [
+                        'rgb(',
+                        {
+                          kind: 'binary',
+                          operator: '/',
+                          left: { kind: 'number', value: 1 },
+                          right: {
+                            kind: 'binary',
+                            operator: '-',
+                            left: { kind: 'number', value: 100 },
+                            right: reference('pointer', 'offset'),
+                          },
+                        },
+                        ', 0, 0)',
+                      ],
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    }))
+
+    update(true, 0)
+
+    const session = new LifecycleSession(instance.captureLifecycle('enter', ['self']), 'enter')
+
+    session.initialize()
+    session.play()
+
+    const original = element.getAnimations()[0]
+
+    original.pause()
+    original.currentTime = 0
+
+    const events: string[] = []
+
+    instance.onEvent = (event) => events.push(`${event}:${instance.composition.states.position}`)
+
+    try {
+      update(false, 100, true)
+
+      expect(instance.composition.states.position).toBe('closed')
+      expect(events).toEqual([])
+      expect(element.getAnimations()).toContain(original)
+      expect(errors).toEqual([
+        expect.objectContaining({
+          code: 'runtime.expression',
+          message: 'Error: Expression result must be finite',
+        }),
+      ])
+
+      update(false, 90, true)
+
+      expect(instance.composition.states.position).toBe('open')
+      expect(events).toEqual(['crossed:closed'])
+      expect(session.isFinished).toBe(false)
+
+      for (const animation of element.getAnimations()) animation.finish()
+
+      expect(await session.finished).toBe('completed')
+    } finally {
+      session.cancel('owner-teardown')
+    }
+  })
+
   it('keeps newer synchronous occurrences behind already deferred occurrences', async () => {
     const { instance, update, errors } = setup((definition) => {
       const position = definition.layers[0]

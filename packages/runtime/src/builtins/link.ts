@@ -317,6 +317,7 @@ class Link implements ReactiveCall, PropertyController {
         this.address.property,
         this.inputVelocity(mapped(this.current), time, false),
         time,
+        this.history.map((history) => history.last.time),
       )
     }
 

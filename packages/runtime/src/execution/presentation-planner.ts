@@ -7,6 +7,8 @@ import {
 import type { RenderedFrame } from '../model/presentation.ts'
 import {
   layerPropertyChanged,
+  changedLayerProperties,
+  removedLayerProperties,
   layerTrackTemplates,
   completeLayerTrack,
   type LayerTrackTemplate,
@@ -76,20 +78,70 @@ export type DeclarationAddresses = readonly {
   readonly addresses: readonly string[]
 }[]
 
-/** Tests the target-wide cascade using receiver-specific writing-context facts. */
+/** Final authored declaration addressing a canonical component, in source order. */
+function canonicalPropertyOwner(declarations: DeclarationAddresses, property: string) {
+  return declarations.findLast((declaration) => declaration.addresses.includes(property))?.name
+}
+
+/** Tests target-wide cascade ownership from receiver-specific writing-context facts. */
 export function ownsCanonicalProperty(
   declarations: DeclarationAddresses,
   sourceProperty: string,
   canonicalProperty: string,
 ): boolean {
-  const candidates = declarations.filter((declaration) =>
-    declaration.addresses.includes(canonicalProperty),
+  const contributes = declarations.some(
+    (declaration) =>
+      declaration.name === sourceProperty && declaration.addresses.includes(canonicalProperty),
   )
 
-  if (!candidates.some((declaration) => declaration.name === sourceProperty)) return true
+  return !contributes || canonicalPropertyOwner(declarations, canonicalProperty) === sourceProperty
+}
 
-  // The source declaration is a candidate, so the filtered list is nonempty.
-  return candidates[candidates.length - 1].name === sourceProperty
+/**
+ * Ordinary takeovers compare winning canonical declarations, independently of
+ * controller output/fallback CSS. A changed obscured shorthand cannot take over
+ * its unchanged higher longhand; removing that longhand reveals its predecessor.
+ * Address facts must cover every declaration in both ordered presentations.
+ */
+export function planDeclarationTakeovers(
+  previous: LayerResolution,
+  next: LayerResolution,
+  target: string,
+  addresses: DeclarationAddresses,
+): readonly string[] {
+  const before = { ...previous, presentation: previous.declarations ?? previous.presentation }
+  const after = { ...next, presentation: next.declarations ?? next.presentation }
+  const changed = changedLayerProperties(before, after)
+  const properties = (resolution: LayerResolution) =>
+    resolution.presentation.targets.find((item) => item.name === target)?.properties ?? []
+  const sources = (resolution: LayerResolution) =>
+    properties(resolution).map((property) => ({
+      name: property.name,
+      addresses: addresses.find((declaration) => declaration.name === property.name)!.addresses,
+    }))
+  const oldSources = sources(before)
+  const newSources = sources(after)
+
+  return [
+    ...new Set([...oldSources, ...newSources].flatMap((declaration) => declaration.addresses)),
+  ].filter((address) => {
+    const oldName = canonicalPropertyOwner(oldSources, address)
+    const newName = canonicalPropertyOwner(newSources, address)
+
+    if (oldName !== newName) return true
+
+    // The address came from at least one side's declarations; equal names are
+    // therefore both defined, including when ownership remains unchanged.
+    return changed.has(layerPropertyKey(target, newName!))
+  })
+}
+
+/** One unchanged effective owner; source identity is distinct from its canonical address. */
+export interface CanonicalOwner {
+  readonly sourceProperty: string
+  readonly target: string
+  readonly property: string
+  readonly owner: string
 }
 
 export interface LayerPlanningSnapshot {
@@ -119,18 +171,8 @@ export function prepareLayerChange(snapshot: LayerPlanningSnapshot) {
     }
   }
 
-  const removedProperties = new Set(
-    previous.presentation.targets.flatMap((target) =>
-      target.properties
-        .filter(
-          (property) =>
-            !next.presentation.targets
-              .find((item) => item.name === target.name)
-              ?.properties.some((item) => item.name === property.name),
-        )
-        .map((property) => layerPropertyKey(target.name, property.name)),
-    ),
-  )
+  const forced = new Set(changed)
+  const removedProperties = removedLayerProperties(previous, next)
   const diagnostics: string[] = []
   const templates = [
     ...layerTrackTemplates(
@@ -150,7 +192,25 @@ export function prepareLayerChange(snapshot: LayerPlanningSnapshot) {
     }
   }
 
-  return { changed, removedProperties, templates, diagnostics }
+  const selected = new Set(
+    templates.map((template) => layerPropertyKey(template.target, template.property)),
+  )
+  const unchanged = next.presentation.targets.flatMap((target) =>
+    target.properties
+      .filter(
+        (property) =>
+          !changed.has(layerPropertyKey(target.name, property.name)) &&
+          !selected.has(layerPropertyKey(target.name, property.name)),
+      )
+      .map((property) => ({
+        target: target.name,
+        property: property.name,
+        sourceProperty: property.sourceProperty ?? property.name,
+        owner: property.owner,
+      })),
+  )
+
+  return { changed, removedProperties, templates, diagnostics, unchanged, forced }
 }
 
 export interface LayerChangePreparation {
@@ -158,6 +218,9 @@ export interface LayerChangePreparation {
   readonly removedProperties: ReadonlySet<string>
   readonly templates: readonly LayerTrackTemplate[]
   readonly diagnostics: readonly string[]
+  readonly unchanged: readonly CanonicalOwner[]
+  /** Explicit reference/directional invalidations must not be preserved as unchanged owners. */
+  readonly forced: ReadonlySet<string>
 }
 
 /**
@@ -171,6 +234,7 @@ export function planLayerChange(
   receivers: readonly { readonly target: string; readonly addresses: DeclarationAddresses }[],
 ) {
   const changed = new Set(preparation.changed)
+  const preserved: CanonicalOwner[] = []
   const tracks = preparation.templates.map((template) => {
     const source = template.implicitStart
       ? displayed.get(layerPropertyKey(template.target, template.property))
@@ -184,10 +248,26 @@ export function planLayerChange(
 
   for (const receiver of receivers) {
     for (const declaration of receiver.addresses) {
-      if (!preparation.changed.has(layerPropertyKey(receiver.target, declaration.name))) continue
+      const unchanged = preparation.unchanged.find(
+        (entry) => entry.target === receiver.target && entry.property === declaration.name,
+      )
 
-      for (const address of declaration.addresses)
-        changed.add(layerPropertyKey(receiver.target, address))
+      for (const address of declaration.addresses) {
+        if (preparation.changed.has(layerPropertyKey(receiver.target, declaration.name)))
+          changed.add(layerPropertyKey(receiver.target, address))
+
+        if (
+          unchanged &&
+          !preparation.forced.has(layerPropertyKey(receiver.target, address)) &&
+          ownsCanonicalProperty(receiver.addresses, declaration.name, address)
+        )
+          preserved.push({
+            target: receiver.target,
+            property: address,
+            sourceProperty: unchanged.sourceProperty,
+            owner: unchanged.owner,
+          })
+      }
     }
   }
 
@@ -196,10 +276,12 @@ export function planLayerChange(
     removedProperties: preparation.removedProperties,
     tracks,
     diagnostics: preparation.diagnostics,
+    preserved,
   }
 }
 
 export interface ActiveEffectMetadata {
+  readonly owner?: string
   readonly id: number
   readonly target: string
   readonly sourceProperty: string
@@ -216,6 +298,10 @@ export interface ReceiverFacts {
 
 export interface ReceiverAddresses extends ReceiverFacts {
   readonly addresses: DeclarationAddresses
+  /** Effective controller declarations after receiver-scoped evaluated layers compose. */
+  readonly bindings?: readonly string[]
+  /** Controller property names needing lower ordinary values during scoped ownership; empty when none. */
+  readonly fallbacks: readonly string[]
 }
 
 /** Lifecycle resource identities and observed ownership; native sessions stay in the executor. */
@@ -234,6 +320,8 @@ export interface PresentationFacts {
   readonly preserveLifecycle: boolean
   readonly receivers: readonly ReceiverFacts[]
   readonly active: readonly (ActiveEffectMetadata & {
+    /** Frozen manual effects remain seekable even when live playback settles. */
+    readonly preview: boolean
     readonly receiver: number
     readonly sourceDestination: string
     readonly track: ResolvedTrack
@@ -258,13 +346,14 @@ export function planControllerBindings(
       const obscured = receivers.some(
         (receiver) =>
           receiver.target === target.name &&
-          receiver.addresses.some(
-            (declaration) =>
-              declaration.name === property.name &&
-              declaration.addresses.some(
-                (address) => !ownsCanonicalProperty(receiver.addresses, property.name, address),
-              ),
-          ),
+          ((receiver.bindings !== undefined && !receiver.bindings.includes(property.name)) ||
+            receiver.addresses.some(
+              (declaration) =>
+                declaration.name === property.name &&
+                declaration.addresses.some(
+                  (address) => !ownsCanonicalProperty(receiver.addresses, property.name, address),
+                ),
+            )),
       )
 
       return obscured
@@ -303,26 +392,13 @@ export function planControllerPresentation(
   }))
 
   return orderedResolution(
-    { ...resolution, presentation: { ...resolution.presentation, targets } },
+    {
+      ...resolution,
+      declarations: resolution.presentation,
+      presentation: { ...resolution.presentation, targets },
+    },
     definition,
   )
-}
-
-/** Selects affected targets before requesting receiver-specific CSSOM addresses. */
-export function layerObservationTargets(
-  preparation: LayerChangePreparation,
-  next: LayerResolution,
-) {
-  return new Set([
-    ...preparation.templates.map((track) => track.target),
-    ...next.presentation.targets
-      .filter((target) =>
-        target.properties.some((property) =>
-          preparation.changed.has(layerPropertyKey(target.name, property.name)),
-        ),
-      )
-      .map((target) => target.name),
-  ])
 }
 
 export interface TrackCandidate {
@@ -415,8 +491,8 @@ export interface PresentationPlan {
   readonly preserveLifecycle: boolean
   readonly writes: readonly StyleWrite[]
   readonly start: readonly TrackPlan[]
-  /** Release settled registrations and cancel explicitly selected live sessions as superseded. */
-  readonly lifecycle?: { readonly release: readonly number[]; readonly cancel: readonly number[] }
+  /** Release settled compatibility registrations; effect membership owns live completion. */
+  readonly lifecycle?: { readonly release: readonly number[] }
   /** Clear motion/reference history and frozen controller state before applying planned writes. */
   readonly resetMotion?: boolean
 }
@@ -433,11 +509,12 @@ export function planPresentation(
   changed: ReadonlySet<string>,
   removed: ReadonlySet<string>,
   start: readonly TrackPlan[],
+  preserved: readonly CanonicalOwner[] = [],
 ): PresentationPlan {
   return {
     resolution,
     mode: 'live',
-    cancel: replacedEffects(facts.active, changed, removed),
+    cancel: replacedEffects(facts.active, changed, removed, preserved),
     restore: !facts.suspended && removed.size > 0,
     preserveLifecycle: facts.preserveLifecycle,
     writes: facts.suspended
@@ -530,35 +607,34 @@ function remainingLifecycleReceivers(
 
 /**
  * Settles live playback when reduced motion becomes active. Manual previews remain
- * seekable, ordinary effects and enter sessions stop, and active leaves retain ownership.
+ * seekable; live ordinary and grouped effects settle through their current membership.
  * No expression evaluation or guard advancement is part of this plan.
  */
 export function planMotionChange(
   resolution: LayerResolution,
   facts: PresentationFacts,
 ): PresentationPlan | undefined {
-  if (!facts.reduced || facts.mode === 'preview') return undefined
+  if (!facts.reduced) return undefined
 
-  const remaining = facts.lifecycle.filter(
-    (session) => session.phase === 'leave' && !session.finished,
-  )
+  const preview = facts.mode !== 'live'
+  const cancel = facts.active.filter((effect) => !effect.preview).map((effect) => effect.id)
+
+  if (preview && cancel.length === 0) return undefined
 
   return {
     resolution,
-    mode: 'live',
-    cancel: facts.active.map((effect) => effect.id),
-    restore: true,
-    preserveLifecycle: remaining.length > 0,
-    writes: facts.suspended
-      ? []
-      : presentationWrites(resolution, remainingLifecycleReceivers(facts, remaining)),
+    mode: preview ? 'maintenance' : 'live',
+    cancel,
+    restore: !preview,
+    preserveLifecycle: preview,
+    writes:
+      preview || facts.suspended
+        ? []
+        : presentationWrites(resolution, facts.receivers, undefined, false),
     start: [],
-    resetMotion: true,
+    resetMotion: !preview,
     lifecycle: {
       release: facts.lifecycle.filter((session) => session.finished).map((session) => session.id),
-      cancel: facts.lifecycle
-        .filter((session) => session.phase === 'enter' && !session.finished)
-        .map((session) => session.id),
     },
   }
 }
@@ -590,7 +666,7 @@ export function planLifecycleSettlement(
         ? presentationWrites(resolution, remainingLifecycleReceivers(facts, remaining))
         : [],
     start: [],
-    lifecycle: { release: finished.map((session) => session.id), cancel: [] },
+    lifecycle: { release: finished.map((session) => session.id) },
   }
 }
 
@@ -599,13 +675,22 @@ export function replacedEffects(
   active: readonly ActiveEffectMetadata[],
   changed: ReadonlySet<string>,
   removed: ReadonlySet<string>,
+  preserved: readonly CanonicalOwner[] = [],
 ): readonly number[] {
   return active
     .filter(
       (effect) =>
-        removed.has(layerPropertyKey(effect.target, effect.sourceProperty)) ||
-        changed.has(layerPropertyKey(effect.target, effect.sourceProperty)) ||
-        changed.has(layerPropertyKey(effect.target, effect.property)),
+        !preserved.some(
+          (owner) =>
+            owner.target === effect.target &&
+            owner.property === effect.property &&
+            owner.owner === effect.owner &&
+            owner.sourceProperty === effect.sourceProperty,
+        ) &&
+        (removed.has(layerPropertyKey(effect.target, effect.sourceProperty)) ||
+          removed.has(layerPropertyKey(effect.target, effect.property)) ||
+          changed.has(layerPropertyKey(effect.target, effect.sourceProperty)) ||
+          changed.has(layerPropertyKey(effect.target, effect.property))),
     )
     .map((effect) => effect.id)
 }
@@ -698,8 +783,8 @@ export function planTrack(
     id: snapshot.id,
     receiver: snapshot.receiver,
     track,
-    sourceProperty: source.property,
-    sourceDestination: source.destinationValue,
+    sourceProperty: source.sourceProperty ?? source.property,
+    sourceDestination: source.sourceDestination ?? source.destinationValue,
     frames: handoff?.frames ?? frames,
     durationMs: handoff?.durationMs ?? timing.durationMs,
     easing: handoff ? 'linear' : timing.easing,

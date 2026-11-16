@@ -2,6 +2,11 @@ import type { Timing } from '../model/definition.ts'
 import type { RenderedFrame } from '../model/presentation.ts'
 
 export interface ResolvedTrack {
+  /** Effective evaluated declaration identity, retained across canonical expansion. */
+  readonly owner?: string
+  /** Authored declaration identity retained when a scoped layer is normalized to components. */
+  readonly sourceProperty?: string
+  readonly sourceDestination?: string
   readonly directionalOwner?: string
   readonly ownerState?: string
   readonly implicitStart?: boolean

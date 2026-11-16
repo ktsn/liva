@@ -22,15 +22,10 @@ import {
   orderedResolution,
   planControllerBindings,
   planControllerPresentation,
-  prepareLayerChange,
-  layerObservationTargets,
-  planLayerChange,
   planTrackObservations,
   planTrack,
   trackTiming,
-  planPresentation,
   planPreviewPresentation,
-  planEffectCompletion,
   planReconciliation,
   planMotionChange,
   planLifecycleSettlement,
@@ -104,13 +99,10 @@ export class Runtime {
     acceptPresentation: (resolution: LayerResolution) => {
       this.resolution = resolution
     },
-    // The executor requests retargeting only for current live effects.
-    retarget: (properties: ReadonlySet<string>) =>
-      this.applyPresentation(this.resolution, this.resolution, properties),
-    completeEffect: (id: number) => this.completeEffect(id),
     reconcile: () => this.reconcilePresentation(),
     motionChanged: () => this.applyObservedPlan(planMotionChange),
     lifecycleSettled: () => this.applyObservedPlan(planLifecycleSettlement),
+    refreshOwnership: () => this.refreshOwnership(),
   }
 
   private invalidateBinding() {
@@ -166,6 +158,7 @@ export class Runtime {
 
     this.execution.endCompositionPreview()
     this.invalidateBinding()
+    this.execution.freezeEnvironment()
 
     const inputs = Object.fromEntries(
       (definition.parameters ?? [])
@@ -264,11 +257,12 @@ export class Runtime {
   }
 
   private applyTransaction(values: VariableValues, notification?: ReactiveNotification) {
-    this.execution.endCompositionPreview()
     const previous = this.values
     const revision = this.revision
 
     try {
+      this.execution.endCompositionPreview()
+
       let resolution: LayerResolution | undefined
       values = this.graph.evaluate(
         values,
@@ -279,6 +273,12 @@ export class Runtime {
             this.resolution.states,
             true,
             notification?.event,
+          )
+
+          this.execution.validatePresence(
+            this.resolution,
+            orderedResolution(resolution, this.definition),
+            snapshot,
           )
 
           for (const event of this.definition.events ?? []) evaluate(event.when, snapshot)
@@ -344,61 +344,20 @@ export class Runtime {
       values,
       resolution.composition,
     )
-    const receivers = this.execution.observeReceivers(resolution, targets)
+    const receivers = this.execution.observeReceivers(resolution, targets, live)
     const bindings = planControllerBindings(resolution, receivers)
-    const outputs = this.execution.applyControllers(bindings, values, time, live)
+    const outputs = new Map(this.execution.applyControllers(bindings, values, time, live))
+
+    for (const receiver of receivers) {
+      for (const property of receiver.fallbacks)
+        outputs.set(layerPropertyKey(receiver.target, property), undefined)
+    }
 
     return planControllerPresentation(resolution, normal, outputs, definition)
   }
 
-  private applyPresentation(
-    previous: LayerResolution,
-    next: LayerResolution,
-    retargets: ReadonlySet<string> = new Set(),
-  ) {
-    const facts = this.execution.presentationFacts(next)
-    const preparation = prepareLayerChange({
-      previous,
-      next,
-      values: this.values,
-      active: facts.active,
-      retargets,
-    })
-    const displayed = this.execution.observeLayerStarts(preparation.templates)
-    const receivers = this.execution.observeReceivers(
-      next,
-      layerObservationTargets(preparation, next),
-    )
-    const change = planLayerChange(preparation, displayed, receivers)
-
-    for (const message of change.diagnostics) this.report({ code: 'runtime.endpoint', message })
-
-    const enabled = !facts.suspended && !facts.reduced
-    const sources = enabled
-      ? change.tracks.flatMap((source) => {
-          change.changed.add(layerPropertyKey(source.target, source.property))
-
-          return receivers
-            .filter((receiver) => receiver.target === source.target)
-            .map((receiver) => ({
-              receiver: receiver.id,
-              source,
-              declarations: receiver.addresses,
-            }))
-        })
-      : []
-    const tracks = this.planTracks(sources, facts, true, 'both')
-
-    for (const property of tracks.changed) change.changed.add(property)
-
-    const plan = planPresentation(
-      next,
-      facts,
-      change.changed,
-      change.removedProperties,
-      tracks.start,
-    )
-    this.execution.applyPlan(plan)
+  private applyPresentation(previous: LayerResolution, next: LayerResolution) {
+    this.execution.present(previous, next, this.values)
   }
 
   /** Numeric/displayed observations are requested only after canonical ownership is known. */
@@ -409,20 +368,11 @@ export class Runtime {
       readonly declarations?: ReceiverAddresses['addresses']
     }[],
     facts: PresentationFacts,
-    live: boolean,
     fill: TrackPlan['fill'],
   ) {
-    const timings = new Map<ResolvedTrack, ReturnType<typeof trackTiming>>()
-
-    for (const { source } of sources) {
-      if (!timings.has(source)) timings.set(source, trackTiming(source))
-    }
-
-    // Every source has a cached timing above. Manual previews also retain zero-duration effects.
-    const candidates = this.execution.expandTracks(
-      sources.filter(({ source }) => !live || timings.get(source)!.durationMs !== 0),
-    )
-    const observations = planTrackObservations(candidates, facts.active, live)
+    const timings = new Map(sources.map(({ source }) => [source, trackTiming(source)]))
+    const candidates = this.execution.expandTracks(sources)
+    const observations = planTrackObservations(candidates, facts.active, false)
     const snapshots = this.execution.observeTracks(observations.requests)
     const start: TrackPlan[] = []
 
@@ -433,6 +383,22 @@ export class Runtime {
     }
 
     return { changed: observations.changed, start }
+  }
+
+  /** Presence ownership changes can reacquire a controller without waiting for another input. */
+  private refreshOwnership() {
+    const time = performance.now()
+
+    this.execution.terminalControls(time)
+    this.resolution = this.controllerResolution(
+      resolveLayers(this.definition, this.values, this.resolution.states, false),
+      this.values,
+      time,
+    )
+    // Reacquisition uses accepted call capabilities and their committed input baseline.
+    // Sampling the graph here could consume a pending source notification before its
+    // candidate validation and event callbacks in applyTransaction.
+    this.execution.initialize(this.resolution)
   }
 
   private reconcilePresentation() {
@@ -453,13 +419,6 @@ export class Runtime {
     const plan = planner(this.resolution, facts)
 
     if (plan) this.execution.applyPlan(plan)
-  }
-
-  private completeEffect(id: number) {
-    const facts = this.execution.presentationFacts(this.resolution)
-    // The executor sends completion only for a current effect. Metadata capture and
-    // planning are synchronous, with no callbacks that can invalidate that effect.
-    this.execution.applyPlan(planEffectCompletion(this.resolution, facts, id)!)
   }
 
   inspectLifecycle(
@@ -654,12 +613,19 @@ export class Runtime {
                 ),
               )
 
-        return tracks.map((source) => ({ receiver: receiver.id, source }))
+        return tracks.map((source) => ({
+          receiver: receiver.id,
+          source: phase ? { ...source, implicitStart: false } : source,
+        }))
       })
       // Lifecycle declarations have their own ownership. Ordinary previews share the application cascade.
       const addresses = phase
         ? []
-        : this.execution.observeReceivers(next, new Set(sources.map(({ source }) => source.target)))
+        : this.execution.observeReceivers(
+            next,
+            new Set(sources.map(({ source }) => source.target)),
+            false,
+          )
       const tracks = this.planTracks(
         sources.map((source) => ({
           ...source,
@@ -669,7 +635,6 @@ export class Runtime {
           )?.addresses,
         })),
         facts,
-        false,
         phase === 'leave' ? 'both' : 'backwards',
       )
       this.execution.applyPlan(planPreviewPresentation(next, facts.receivers, tracks.start))
@@ -694,6 +659,7 @@ export class Runtime {
     if (this.disposed) return
 
     this.queue.length = 0
+    this.execution.freezeEnvironment(true)
     this.execution.releaseControllers()
     this.clearBindings()
     this.graph.dispose()

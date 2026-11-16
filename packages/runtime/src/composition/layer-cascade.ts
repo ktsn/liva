@@ -84,6 +84,25 @@ export function* compositionLayerSelection(
 }
 
 /**
+ * Publishes a winning value in declaration order while inheriting timing separately.
+ * Moving an overwritten name to the end also preserves ownership across authored
+ * shorthand, longhand, and logical/physical declarations.
+ */
+export function cascadeProperty<Value, ResolvedTiming>(
+  properties: Map<string, Value & { readonly timing?: ResolvedTiming }>,
+  name: string,
+  value: Value,
+  timing: ResolvedTiming | undefined,
+  declarationOrder = false,
+) {
+  const inherited = timing ?? properties.get(name)?.timing
+
+  if (declarationOrder) properties.delete(name)
+
+  properties.set(name, { ...value, timing: inherited })
+}
+
+/**
  * Resolves property ownership and independent timing inheritance across selected layers.
  * State properties override common properties within a layer; later layers override
  * earlier layers for each target/property pair.
@@ -168,15 +187,19 @@ export function resolveLayerCascade<Value, ResolvedTiming>(
 
         const provider = candidates.find((candidate) => timingProvider(candidate.declaration))
         const previous = properties.get(name)
-        const timing = provider ? mapTiming(provider) : previous?.timing
+        const timing = provider ? mapTiming(provider) : undefined
 
-        properties.set(name, {
+        cascadeProperty<Omit<CascadedProperty<Value, ResolvedTiming>, 'timing'>, ResolvedTiming>(
+          properties,
           name,
-          source,
-          value: mapValue(source),
-          declarations: [...(previous?.declarations ?? []), ...declarations],
+          {
+            name,
+            source,
+            value: mapValue(source),
+            declarations: [...(previous?.declarations ?? []), ...declarations],
+          },
           timing,
-        })
+        )
       }
     }
   }

@@ -334,6 +334,21 @@ describe('per-property motion histories', () => {
     expect(motion.read(element, 'translate', 180)?.velocity).toEqual([0, 0, 0])
   })
 
+  it('expires released velocity at each original input timestamp and accepts newer releases', () => {
+    const element = target()
+    const motion = new PropertyMotion()
+
+    motion.endControl(element, 'translate', [1, -2, 0], 160, [100, 120, 160])
+
+    expect(motion.read(element, 'translate', 179)?.velocity).toEqual([1, -2, 0])
+    expect(motion.read(element, 'translate', 180)?.velocity).toEqual([0, -2, 0])
+
+    motion.endControl(element, 'translate', [3, -4, 0], 190, [185, 185, 190])
+
+    expect(motion.read(element, 'translate', 200)?.velocity).toEqual([3, -4, 0])
+    expect(motion.read(element, 'translate', 265)?.velocity).toEqual([0, 0, 0])
+  })
+
   it('lets later direct writes replace explicit control velocity', () => {
     const element = target()
     const motion = new PropertyMotion()

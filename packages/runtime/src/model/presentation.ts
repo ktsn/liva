@@ -24,3 +24,10 @@ export interface RenderedState {
   readonly name: string
   readonly targets: readonly Target<RenderedProperty>[]
 }
+
+/** Logical declaration identity, distinct from receiver-specific canonical addresses. */
+export const layerPropertyKey = (target: string, property: string) => `${target}\0${property}`
+
+/** Tests target membership without exposing the logical key's separator to callers. */
+export const layerPropertyMatchesTarget = (key: string, target: string) =>
+  key.startsWith(layerPropertyKey(target, ''))

@@ -53,15 +53,23 @@ does not import Runtime.
 `presentation-planner.ts` calculates declaration order, target-wide controller
 ownership, changed/removed properties, observation needs, final tracks, ordered
 writes, and affected effect identities from supplied values and snapshots. It
-reuses `composition/layers.ts` for timing and frame resolution. Runtime invokes
-these pure calculations and passes a completed `PresentationPlan` to the executor;
-the executor does not select tracks or invoke the planner. Plans contain receiver
-and effect identifiers, never elements or native effects.
+reuses `composition/layers.ts` for timing and frame resolution. Ordinary layer
+selection and presence adapters produce evaluated layers with identifier-based
+receiver scopes. Their common cascade keeps value and timing precedence independent
+and retains authored declaration identity after canonical expansion. Public
+composition contains only ordinary selections; Definition IR is never modified.
+Plans contain receiver and effect identifiers, never elements or native effects.
 
-Runtime coordinates synchronous planning phases through `ExecutionPort`:
+Runtime coordinates evaluation and controller ownership through `ExecutionPort`.
+Its presentation request enters one synchronous observation/planning/commit path in
+the executor, also usable after Runtime disposal. The executor supplies observations
+to the existing pure planner stages; ownership, track selection, frame construction,
+and cancellation decisions remain in those stages:
 
-1. After expression evaluation, event delivery, and revision checks, request the
-   terminal controller writes and motion-history recording.
+1. Validate ordinary selection, applicable presence expressions, and events before
+   accepting reactive calls. Publish values and deliver events while public
+   composition is still old. After revision checks, request terminal controller
+   writes and motion-history recording.
 2. Request receiver-specific canonical addresses. Calculate target-wide controller
    ownership, ask the executor to acquire selected controllers and release old
    owners, then resolve supplied controller CSS values or normal fallbacks.
@@ -91,35 +99,47 @@ and applies planned writes/playback; unrelated effects remain active. Earlier
 accepted reactive calls, events, and terminal writes are not rolled back. Style
 restoration still protects external edits inside the executor.
 
-Reference changes request Runtime planning without advancing guards or events.
-Completed effects likewise request an identifier-based completion plan, which
-reconciles only their receiving element. Media-query changes and lifecycle settlement
-also notify Runtime before any presentation policy is applied. The planner chooses
-ordinary effect cancellation, enter-session cancellation, settled-registration
-release, motion-history reset, and restoration around the remaining session owners.
-The executor retains one native-session registry, supplies identifier-based ownership
-facts, and executes the selected cleanup. Reduced motion preserves manually seekable
-previews and independent leaves. A finished enter restores the latest application
-cascade, including declarations removed during entry; settlement during a preview
-only releases registrations and leaves preview effects untouched.
+Reference changes reuse that presentation path without advancing guards or events.
+Ordinary completion reconciles the current receiving element. Grouped effects
+remain executor-owned until their operation settles, while the DOM-free
+`CompletionGroup` tracks only current effect IDs and results. Replacement publishes
+membership together before cancelling old native effects; stale completion cannot
+finish a replacement. Empty-work completion is deferred until participant startup
+has joined the group. Cancellation, teardown, failure, and completion remain distinct
+and idempotent. Reduced motion settles all live effects; manually seekable previews
+remain frozen.
 
-Runtime also coordinates inspection and preview planning. Element IDs identify
-physical receivers, while logical target names identify declaration scopes. The
-executor stores each current physical receiver as one `{ id, element }` record;
-target aliases and active tracks share that record. Only a current ID-to-receiver
-index persists. Element deduplication uses a temporary map during binding, and
-rebinding/disposal releases the old binding indexes. Receiver IDs are valid for the
-current binding; plans never retain DOM-bearing Receiver records. Preview
-templates are keyed by target name, and observed declaration addresses are matched
-by both target name and receiver ID, so a root and its alias cannot overwrite each
-other's tracks. Preview controllers remain frozen, live velocity is not inherited,
-and preview plans do not publish ordinary composition. The executor applies the
-planned starting presentation before observations, then materializes paused effects;
-ending or failing a preview restores application presentation. Ordinary playback,
-previews, and the detached lifecycle compatibility coordinator share final track
-planning and `native-effect.ts` materialization. The compatibility coordinator
-retains its captured environment and native-effect ownership independently of a
-live Runtime; this separation does not change presence animation semantics.
+The executor keeps one operation registry for initialized presence layers and public
+compatibility registrations. It retains physical receivers through rebinding while
+an operation still uses them. Target aliases share receiver identities, and
+controller effectiveness is decided across every receiver of a logical target.
+Controller formatting retains the ordered logical declaration presentation by
+reference. Candidate validation and accepted application compare this same baseline,
+so an unchanged binding, an unreadable fallback, or an alias cannot falsely suppress
+an active enter expression. Canonical takeovers compare the winning declaration
+for each physical component. Lower obscured changes preserve higher effects; removing
+a winner reveals its predecessor. Source-ordered writes can reapply an unchanged
+higher declaration without cancelling that declaration's effect. Validation performs
+no live controller operations.
+Presence start/end refreshes ownership without waiting for another input:
+released controllers transfer fresh input velocity, and reacquired controllers
+capture the displayed origin before outgoing effects are cancelled. Evaluation
+snapshots are refreshed after ownership changes.
+
+Runtime also coordinates isolated inspection and preview planning. Preview effects
+use the same final planner and native materialization, begin paused at zero, and
+never join live completion groups. Exported preview Animation handles exclude
+continuing leave effects, so editor seeking cannot scrub live presence. Live group
+completion during preview releases its effects without changing frozen preview
+styles. Ending or failing a preview restores application presentation.
+
+`LifecycleSession` is a compatibility barrier over executor participants, allowing
+one Vue boundary to aggregate repeated targets and multiple Motion instances.
+Captured work retains source identity and an executor-owned input environment;
+replacement/disposal preserves that definition's final accepted values before
+subscriptions disconnect. Disposal severs Runtime callbacks and keeps only the
+browser resources needed by detached leave. The same composition, observation,
+planning, replacement, and reference tracking serve attached and detached playback.
 
 ## Rust syntax infrastructure
 
@@ -529,35 +549,42 @@ Snapshots unused by that render patch are released in a microtask. Vue component
 unmount hooks and reactive-effect disposal retain their normal ordering; retained
 DOM does not keep the original Motion alive.
 
-`packages/runtime/src/execution/lifecycle.ts` resolves lifecycle tracks from resolved layer
-values and a presentation snapshot. A session owns only resolved tracks, element
-references, temporary inline presentations, and WAAPI handles. Completion joins
-all tracks. Supersession, owner teardown, cancellation/failure, and normal
-completion have distinct results with idempotent cleanup. Only a current session
-may release Vue's removal/hide callback. Enter sessions are registered with live
-Motion instances so explicitly animated properties are protected during layer updates. Enter completion restores the latest cascade, including properties removed during entry; leave sessions remain independent of the disposed instance.
-
-The core runtime contains no Vue structural semantics. It shares transition IR,
-spring sampling, CSS-property conversion, and browser interpolation with normal
-state transitions. Conditional events are evaluated after let updates and before
-visual selection, and the adapter translates event names into DOM CustomEvents.
+`packages/runtime/src/execution/lifecycle.ts` resolves lifecycle declarations and
+preserves `LifecycleWork[]`, `LifecycleSession`, and public resolution helpers.
+Sessions retain compatibility work and completion results; the executor owns every
+native effect, inline style, motion sample, and observer. A boundary joins all
+participants' current effect IDs, including replacements. Only its current session
+may release Vue's removal/hide callback.
 
 ### Lifecycle normalization and layer capture
 
 Lifecycle CSS shorthand lowers to Frame IR at offset 0 for enter and offset 1 for
-leave. Frames retain scalar templates and typed timing/easing expressions. The
-compiler accepts lifecycle declarations only at motion scope. Each motion has
-at most one enter transition and one leave transition.
+leave. The compiler accepts one lifecycle declaration per phase at motion scope;
+source syntax and Definition schema are unchanged. Presence adapters evaluate only
+applicable declarations, complete omitted endpoints with ordinary/displayed values,
+and produce scoped evaluated layers. Authored frame endpoints remain distinct from
+ordinary completion values. Existing property codecs expand supported logical and
+shorthand declarations without losing relative units or declaration identity.
 
-Boundary planning uses the motion-level lifecycle target set. At capture, the
-runtime renders the selected lifecycle and uses the instance's resolved layer
-presentation, including all active local states, for missing enter endpoints.
-Leave samples current displayed values before ordinary effects are released.
-Only explicit lifecycle properties release ordinary effects; unrelated animation
-continues. Sessions protect these properties from layer writes until completion.
-Enter completion restores original ownership and applies the latest cascade;
-leave completion releases Vue's pending removal/hide callback. No new Vue boundary
-or directive is needed, and component/application data remains Vue-owned.
+Enter initializes its current declared starting values before paint, preserving
+explicit displayed-start rebases from Vue reversal. Its initial timing follows
+property, target, then lifecycle-wide precedence, independently of ordinary timing.
+A new ordinary transition takes over affected canonical components, uses displayed
+starts and its own timing, and leaves unrelated components running. Leave supplies
+an exit layer only for its declarations; unrelated ordinary updates continue.
+Applicable expressions remain live while connected, and the final accepted input
+environment survives disposal/replacement without subscriptions. DOM-relative
+reference observation can continue during detached leave.
+
+Source-controller input derivatives keep their original per-component timestamps
+through release. Displayed animation velocity is sampled separately from registered
+native/analytic trajectories. Endpoint-only supported springs share ordinary
+handoff and fallback rules across ordinary playback, leave, and re-entry. No
+controller observation polling is added. Completion/failure releases styles while
+preserving external edits; reacquiring a retired declaration captures its current
+baseline even if another operation still owns a different field on the element.
+The runtime contains no Vue structural semantics; component/application data and
+boundary removal/hiding remain Vue-owned.
 
 ### Product examples and editor safety
 
@@ -692,7 +719,8 @@ Acquisition resets input history; release seeds property motion with the fresh i
 derivative before the next spring is prepared. Registered animation trajectories still
 supply spring-to-spring velocity at interruption time, without polling. Property codecs
 read/serialize canonical values separately from input mapping and effective ownership. Per-element physical/component histories
-survive ordinary retargeting and reset at lifecycle boundaries.
+survive ordinary and lifecycle retargeting. Released input derivatives expire from
+the original input sample time, rather than gaining a new freshness window at release.
 
 Reactive notifications can carry an occurrence and timestamped source snapshot map.
 The binding graph stages dependent expressions against that map. An instance first
