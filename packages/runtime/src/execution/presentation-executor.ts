@@ -691,7 +691,7 @@ export class PresentationExecutor {
   ) {
     const exclusions = this.enterExclusions(previous, next)
     const presence = this.presenceLayers(next, values, exclusions)
-    const facts = this.presentationFacts(next)
+    const facts = this.presentationFacts()
     const plans: PresentationPlan[] = []
     const accepted = new Map<string, LayerResolution>()
 
@@ -928,7 +928,7 @@ export class PresentationExecutor {
 
       this.restore(this.operations.size > 0, elements)
 
-      const facts = this.presentationFacts(this.layerResolution)
+      const facts = this.presentationFacts()
       const changed = changedLayerProperties(previous, this.layerResolution)
       const presence = this.presenceLayers(
         this.layerResolution,
@@ -1072,7 +1072,7 @@ export class PresentationExecutor {
   }
 
   /** Metadata has no live style values; Runtime chooses which CSS observations follow. */
-  presentationFacts(_resolution: LayerResolution): PresentationFacts {
+  presentationFacts(): PresentationFacts {
     const receivers = [...this.targetReceivers].flatMap(([target, bindings]) =>
       bindings.map((receiver) => ({ id: receiver.id, target })),
     )
@@ -1089,10 +1089,7 @@ export class PresentationExecutor {
       suspended: this.suspended,
       reduced: this.motion.matches,
       preserveLifecycle: this.operations.size > 0,
-      receivers: receivers.map((receiver) => ({
-        ...receiver,
-        protected: [],
-      })),
+      receivers,
       active: this.active.map((entry) => ({
         preview: entry.preview,
         id: entry.id,
@@ -1112,7 +1109,7 @@ export class PresentationExecutor {
     targets: ReadonlySet<string>,
     live: boolean,
   ): readonly ReceiverAddresses[] {
-    const receivers = this.presentationFacts(resolution).receivers
+    const receivers = this.presentationFacts().receivers
     const presence = live
       ? this.presenceLayers(
           resolution,
@@ -1226,7 +1223,6 @@ export class PresentationExecutor {
         declarations: declarations ?? [
           { name: source.property, addresses: propertyAddresses(element, source.property) },
         ],
-        protected: false,
       }))
     })
   }
@@ -1320,11 +1316,10 @@ export class PresentationExecutor {
             },
             track: entry.track,
             declarations: [],
-            protected: false,
           }))
           const observations = planTrackObservations(
             candidates,
-            this.presentationFacts(this.layerResolution).active.filter((entry) => !entry.preview),
+            this.presentationFacts().active.filter((entry) => !entry.preview),
             true,
           )
           // These retained tracks already own their canonical address; empty
@@ -1797,7 +1792,7 @@ export class PresentationExecutor {
               this.enterExclusions(this.layerResolution, this.layerResolution),
             )
             const resolution = this.project(this.layerResolution, entry.receiver.id, presence)
-            const facts = this.presentationFacts(resolution)
+            const facts = this.presentationFacts()
             const completion = planEffectCompletion(resolution, facts, entry.id)
 
             // This current effect was checked above; no callbacks intervene before planning.

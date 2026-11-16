@@ -288,12 +288,10 @@ export interface ActiveEffectMetadata {
   readonly property: string
 }
 
-/** Receiver identities and lifecycle protection; no browser objects cross this boundary. */
+/** Receiver identities; no browser objects cross this boundary. */
 export interface ReceiverFacts {
   readonly id: number
   readonly target: string
-  /** Authored declarations protected by live lifecycle sessions on this receiver. */
-  readonly protected: readonly string[]
 }
 
 export interface ReceiverAddresses extends ReceiverFacts {
@@ -397,8 +395,6 @@ export interface TrackCandidate {
   readonly source: ResolvedTrack
   readonly track: ResolvedTrack
   readonly declarations: DeclarationAddresses
-  /** Whether a live lifecycle session owns this canonical property. */
-  readonly protected: boolean
 }
 
 export interface TrackObservationRequest extends TrackCandidate {
@@ -422,8 +418,6 @@ export function planTrackObservations(
     if (!ownsCanonicalProperty(declarations, source.property, track.property)) continue
 
     changed.add(layerPropertyKey(track.target, track.property))
-
-    if (live && candidate.protected) continue
 
     const interrupted =
       live &&
@@ -451,18 +445,13 @@ export function presentationWrites(
   resolution: LayerResolution,
   receivers: readonly ReceiverFacts[],
   changed?: ReadonlySet<string>,
-  protectLifecycle = true,
 ): StyleWrite[] {
   return resolution.presentation.targets.flatMap((target) =>
     target.properties.flatMap((property) => {
       if (changed && !changed.has(layerPropertyKey(target.name, property.name))) return []
 
       return receivers
-        .filter(
-          (receiver) =>
-            receiver.target === target.name &&
-            (!protectLifecycle || !receiver.protected.includes(property.name)),
-        )
+        .filter((receiver) => receiver.target === target.name)
         .map((receiver) => ({
           receiver: receiver.id,
           property: property.name,
@@ -525,7 +514,7 @@ export function planPreviewPresentation(
     cancel: [],
     restore: true,
     preserveLifecycle: false,
-    writes: presentationWrites(resolution, receivers, undefined, false),
+    writes: presentationWrites(resolution, receivers),
     start,
   }
 }
@@ -599,10 +588,7 @@ export function planMotionChange(
     cancel,
     restore: !preview,
     preserveLifecycle: preview,
-    writes:
-      preview || facts.suspended
-        ? []
-        : presentationWrites(resolution, facts.receivers, undefined, false),
+    writes: preview || facts.suspended ? [] : presentationWrites(resolution, facts.receivers),
     start: [],
     resetMotion: !preview,
   }

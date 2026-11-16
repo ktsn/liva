@@ -454,7 +454,7 @@ export class Runtime {
   private reconcilePresentation() {
     if (this.execution.bindingFacts.suspended) return
 
-    const facts = this.execution.presentationFacts(this.resolution)
+    const facts = this.execution.presentationFacts()
     this.execution.applyPlan(planReconciliation(this.resolution, facts.receivers))
   }
 
@@ -465,7 +465,7 @@ export class Runtime {
       facts: PresentationFacts,
     ) => PresentationPlan | undefined,
   ) {
-    const facts = this.execution.presentationFacts(this.resolution)
+    const facts = this.execution.presentationFacts()
     const plan = planner(this.resolution, facts)
 
     if (plan) this.execution.applyPlan(plan)
@@ -599,8 +599,8 @@ export class Runtime {
         false,
       )
       const lifecycle = phase ? captureLifecycleDefinition(definition, phase, values) : undefined
-      const facts = this.execution.presentationFacts(next)
-      this.execution.beginPreview(presentationWrites(previous, facts.receivers, undefined, false))
+      const facts = this.execution.presentationFacts()
+      this.execution.beginPreview(presentationWrites(previous, facts.receivers))
 
       const templates = new Map(
         facts.receivers.map((receiver) => {

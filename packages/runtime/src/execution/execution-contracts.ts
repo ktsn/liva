@@ -156,7 +156,7 @@ export interface ExecutionPort {
   refreshSuspension(definition: Definition): void
 
   /** Current receiver/effect metadata and playback policy; performs no CSSOM reads. */
-  presentationFacts(resolution: LayerResolution): PresentationFacts
+  presentationFacts(): PresentationFacts
 
   /**
    * Captures canonical addresses for selected targets, in declaration order.

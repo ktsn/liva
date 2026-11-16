@@ -51,7 +51,7 @@ function setup(
 
     present(_previous, next) {
       observations.push({ displayed, velocity })
-      execution.applyPlan(planReconciliation(next, execution.presentationFacts(next).receivers))
+      execution.applyPlan(planReconciliation(next, execution.presentationFacts().receivers))
     },
 
     initialize() {},
@@ -77,14 +77,14 @@ function setup(
       suspended: false,
       reduced: false,
       preserveLifecycle: false,
-      receivers: [{ id: 3, target: 'box', protected: [] }],
+      receivers: [{ id: 3, target: 'box' }],
       active: [],
     }),
     observeReceivers: () => [
       {
         id: 3,
         target: 'box',
-        protected: [],
+
         fallbacks: [],
         addresses: [{ name: 'opacity', addresses: ['opacity'] }],
       },
