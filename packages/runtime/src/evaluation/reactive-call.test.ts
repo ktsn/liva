@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
-import { LetBindingGraph } from './let-bindings.ts'
+import { EvaluationFixture } from '../__test__/helpers/evaluation.ts'
 import * as functions from '../builtins/index.ts'
 import type { LetBinding } from '../model/definition.ts'
 import type { ReactiveCall, RuntimeValue } from './reactive-value.ts'
@@ -71,7 +71,7 @@ afterEach(() => vi.restoreAllMocks())
 describe('stable reactive calls', () => {
   it('updates one instance while aliases share the transaction snapshot', () => {
     const counter = installCounter()
-    const graph = new LetBindingGraph(bindings, { input: 1 })
+    const graph = new EvaluationFixture(bindings, { input: 1 })
 
     const values = graph.evaluate({ input: 2 })
 
@@ -83,7 +83,7 @@ describe('stable reactive calls', () => {
 
   it('captures an on-demand call once at the notifying source timestamp', () => {
     const counter = installCounter()
-    const graph = new LetBindingGraph([...bindings, { ...bindings[0], name: 'observer' }], {
+    const graph = new EvaluationFixture([...bindings, { ...bindings[0], name: 'observer' }], {
       input: 1,
     })
     const observer = counter.instances[1]
@@ -108,7 +108,7 @@ describe('stable reactive calls', () => {
 
   it('discards prepared updates when a later expression fails', () => {
     const counter = installCounter()
-    const graph = new LetBindingGraph(
+    const graph = new EvaluationFixture(
       [
         ...bindings,
         {
@@ -134,7 +134,7 @@ describe('stable reactive calls', () => {
 
   it('discards updates when presentation validation fails', () => {
     const counter = installCounter()
-    const graph = new LetBindingGraph(bindings, { input: 1 })
+    const graph = new EvaluationFixture(bindings, { input: 1 })
 
     expect(() =>
       graph.evaluate({ input: 2 }, () => {
@@ -150,7 +150,7 @@ describe('stable reactive calls', () => {
     const counter = installCounter()
     const disposedNewCall = vi.fn<() => void>()
     const bindingError = new Error('Binding failed')
-    const graph = new LetBindingGraph(
+    const graph = new EvaluationFixture(
       [
         ...bindings,
         {
@@ -200,7 +200,7 @@ describe('stable reactive calls', () => {
 
     expect(
       () =>
-        new LetBindingGraph(
+        new EvaluationFixture(
           [...bindings, { name: 'invalid', initializer: { kind: 'reference', path: ['missing'] } }],
           { input: 1 },
         ),
@@ -208,7 +208,7 @@ describe('stable reactive calls', () => {
 
     expect(counter.disposed).toEqual(counter.instances)
 
-    const graph = new LetBindingGraph([bindings[0], { ...bindings[0], name: 'second' }], {
+    const graph = new EvaluationFixture([bindings[0], { ...bindings[0], name: 'second' }], {
       input: 1,
     })
 
@@ -222,7 +222,7 @@ describe('stable reactive calls', () => {
 
   it('defers synchronous commit notifications until the entire graph commits', async () => {
     installCounter()
-    const graph = new LetBindingGraph(bindings, { input: 1 })
+    const graph = new EvaluationFixture(bindings, { input: 1 })
     const snapshots: RuntimeValue[] = []
     graph.bind(new Map(), () => {
       snapshots.push(graph.evaluate({ input: 2 }).counter)
@@ -241,8 +241,8 @@ describe('stable reactive calls', () => {
 
   it('transfers only structurally compatible call sites during source replacement', () => {
     const counter = installCounter()
-    const graph = new LetBindingGraph(bindings, { input: 1 })
-    const replacement = new LetBindingGraph(bindings, { input: 1 }, graph)
+    const graph = new EvaluationFixture(bindings, { input: 1 })
+    const replacement = new EvaluationFixture(bindings, { input: 1 }, graph)
 
     graph.dispose(replacement)
 
@@ -264,7 +264,7 @@ describe('stable reactive calls', () => {
       dispose,
     }
     vi.spyOn(functions, 'callBuiltin').mockReturnValue(instance)
-    const graph = new LetBindingGraph(
+    const graph = new EvaluationFixture(
       [
         {
           name: 'active',
@@ -290,7 +290,7 @@ describe('stable reactive calls', () => {
 
   it('ignores scheduled notifications after teardown and rejects later evaluation', async () => {
     installCounter()
-    const graph = new LetBindingGraph(bindings, { input: 1 })
+    const graph = new EvaluationFixture(bindings, { input: 1 })
     const notified = vi.fn<() => void>()
     graph.bind(new Map(), notified)
 
@@ -305,7 +305,7 @@ describe('stable reactive calls', () => {
 
   it('coalesces notifications from several committed updates without reentry', async () => {
     installCounter()
-    const graph = new LetBindingGraph(bindings, { input: 1 })
+    const graph = new EvaluationFixture(bindings, { input: 1 })
     const notified = vi.fn<() => void>(() => {
       graph.evaluate({ input: 3 })
     })
@@ -324,7 +324,7 @@ describe('stable reactive calls', () => {
 
   it('rejects recursive evaluation from validation and retains committed state', () => {
     const counter = installCounter()
-    const graph = new LetBindingGraph(bindings, { input: 1 })
+    const graph = new EvaluationFixture(bindings, { input: 1 })
 
     expect(() =>
       graph.evaluate({ input: 2 }, () => {
@@ -347,7 +347,7 @@ describe('stable reactive calls', () => {
         return () => {}
       },
     }))
-    const graph = new LetBindingGraph(bindings, { input: 1 })
+    const graph = new EvaluationFixture(bindings, { input: 1 })
     const notified = vi.fn<() => void>()
     const [unbind] = graph.bind(new Map(), notified)
 
@@ -370,7 +370,7 @@ describe('stable reactive calls', () => {
         return () => {}
       },
     }))
-    const graph = new LetBindingGraph(bindings, { input: 1 })
+    const graph = new EvaluationFixture(bindings, { input: 1 })
     const notified = vi.fn<() => void>()
     const first = graph.bind(new Map(), notified)
     const second = graph.bind(new Map(), notified)
@@ -401,8 +401,8 @@ describe('stable reactive calls', () => {
         },
       },
     ]
-    const live = new LetBindingGraph(definitions, {})
-    const candidate = new LetBindingGraph(
+    const live = new EvaluationFixture(definitions, {})
+    const candidate = new EvaluationFixture(
       [{ name: 'selected', initializer: { kind: 'number', value: 2 } }, definitions[1]],
       {},
       live,
@@ -431,11 +431,11 @@ describe('stable reactive calls', () => {
         },
       },
     ]
-    const live = new LetBindingGraph(definitions, {})
+    const live = new EvaluationFixture(definitions, {})
 
     expect(
       () =>
-        new LetBindingGraph(
+        new EvaluationFixture(
           [
             { name: 'selected', initializer: { kind: 'number', value: 2 } },
             definitions[1],
@@ -478,8 +478,8 @@ describe('stable reactive calls', () => {
         },
       },
     ]
-    const live = new LetBindingGraph(definitions, {})
-    const candidate = new LetBindingGraph(
+    const live = new EvaluationFixture(definitions, {})
+    const candidate = new EvaluationFixture(
       [{ name: 'enabled', initializer: { kind: 'boolean', value: false } }, definitions[1]],
       {},
       live,

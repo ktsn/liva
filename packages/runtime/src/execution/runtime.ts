@@ -10,6 +10,7 @@ import {
 } from '../composition/layers.ts'
 import { parameterValues, LetBindingGraph, targetValues } from '../evaluation/let-bindings.ts'
 import { evaluate, renderTransition, type VariableValues } from '../evaluation/expression.ts'
+import { ReactiveCallStore } from '../evaluation/reactive-call-store.ts'
 import type { ReactiveNotification } from '../evaluation/events.ts'
 import type { Definition } from '../model/definition.ts'
 import {
@@ -51,6 +52,8 @@ export class Runtime {
   onEvent?: (name: string) => void
   private values: VariableValues
   private graph: LetBindingGraph
+  private calls: ReactiveCallStore
+  private bindingCleanups: (() => void)[] = []
   private resolution: LayerResolution
   private readonly events = new Map<string, boolean>()
   private revision = 0
@@ -72,13 +75,13 @@ export class Runtime {
     this.report = report
 
     const variables = parameterValues(definition.parameters ?? [], targetValues(definition), inputs)
-    this.graph = new LetBindingGraph(
-      definition.letBindings ?? [],
-      variables,
-      undefined,
-      layerTargets(definition),
-    )
-    this.values = this.graph.evaluate(variables)
+    this.graph = new LetBindingGraph(definition.letBindings ?? [], layerTargets(definition))
+    this.calls = new ReactiveCallStore()
+    this.values = this.evaluateValues(variables, (values) => {
+      resolveLayers(definition, values)
+
+      for (const event of definition.events ?? []) evaluate(event.when, values)
+    })
     this.definition = definition
     execution.configureControllers(definition, this.values)
     this.evaluateEvents(false)
@@ -110,26 +113,40 @@ export class Runtime {
     this.queue.length = 0
   }
 
-  private snapshotValues(definition: Definition): VariableValues {
-    const graph = new LetBindingGraph(
-      definition.letBindings ?? [],
-      this.values,
-      this.graph,
-      layerTargets(definition),
+  private evaluateValues(
+    variables: VariableValues,
+    afterEvaluate: (values: VariableValues) => void = () => {},
+    notification?: ReactiveNotification,
+  ): VariableValues {
+    return this.calls.evaluate(
+      (operations) =>
+        this.graph.evaluate(variables, operations, (values) => {
+          afterEvaluate(values)
+
+          return values
+        }),
+      notification,
     )
+  }
+
+  private snapshotValues(definition: Definition): VariableValues {
+    const graph = new LetBindingGraph(definition.letBindings ?? [], layerTargets(definition))
+    const calls = new ReactiveCallStore(this.calls, graph.compatibleBindings(this.graph))
 
     try {
-      return graph.evaluate(this.values)
+      return calls.evaluate((operations) => graph.evaluate(this.values, operations))
     } finally {
-      graph.dispose(this.graph)
+      calls.dispose(this.calls)
     }
   }
 
   private clearBindings() {
-    this.execution.disconnectBindings()
+    for (const cleanup of this.bindingCleanups) cleanup()
+
+    this.bindingCleanups = []
 
     try {
-      this.values = this.graph.evaluate(this.values)
+      this.values = this.evaluateValues(this.values)
     } catch (error) {
       this.report({ code: 'runtime.expression', message: String(error), error })
     }
@@ -143,10 +160,10 @@ export class Runtime {
   }
 
   private connectBindings() {
-    this.execution.connectBindings(this.graph, (notification) =>
+    this.bindingCleanups = this.calls.bind(this.execution.connectSource, (notification) =>
       this.applyValues(this.values, notification),
     )
-    this.values = this.graph.evaluate(this.values)
+    this.values = this.evaluateValues(this.values)
     this.evaluateEvents(false)
     this.resolution = resolveLayers(this.definition, this.values, this.resolution.states, false)
     this.resolution = this.controllerResolution(this.resolution, this.values, performance.now())
@@ -172,19 +189,33 @@ export class Runtime {
       targetValues(definition, this.values),
       inputs,
     )
-    const graph = new LetBindingGraph(
-      definition.letBindings ?? [],
-      variables,
-      this.graph,
-      layerTargets(definition),
-    )
+    const graph = new LetBindingGraph(definition.letBindings ?? [], layerTargets(definition))
+
+    const calls = new ReactiveCallStore(this.calls, graph.compatibleBindings(this.graph))
+
+    try {
+      calls.evaluate((operations) =>
+        graph.evaluate(variables, operations, (values) => {
+          resolveLayers(definition, values)
+
+          for (const event of definition.events ?? []) evaluate(event.when, values)
+
+          return values
+        }),
+      )
+    } catch (error) {
+      calls.dispose(this.calls)
+
+      throw error
+    }
 
     this.execution.releaseControllers()
     this.clearBindings()
     this.execution.resetPresentation()
-    this.graph.dispose(graph)
+    this.calls.dispose(calls)
     this.graph = graph
-    this.values = graph.evaluate(variables)
+    this.calls = calls
+    this.values = this.evaluateValues(variables)
     this.definition = definition
     this.execution.configureControllers(definition, this.values)
     this.events.clear()
@@ -264,7 +295,7 @@ export class Runtime {
       this.execution.endCompositionPreview()
 
       let resolution: LayerResolution | undefined
-      values = this.graph.evaluate(
+      values = this.evaluateValues(
         values,
         (snapshot) => {
           resolution = resolveLayers(
@@ -662,7 +693,7 @@ export class Runtime {
     this.execution.freezeEnvironment(true)
     this.execution.releaseControllers()
     this.clearBindings()
-    this.graph.dispose()
+    this.calls.dispose()
     this.execution.dispose()
     this.events.clear()
     this.onEvent = undefined

@@ -1,4 +1,3 @@
-import type { ReactiveNotification } from './events.ts'
 import { ROOT_TARGET } from '../model/targets.ts'
 import type {
   Definition,
@@ -9,7 +8,7 @@ import type {
   Property,
   Target,
 } from '../model/definition.ts'
-import { ReactiveCallStore } from './reactive-call-store.ts'
+import type { ReactiveCallEvaluation } from './reactive-call-store.ts'
 import type { RuntimeValue } from './reactive-value.ts'
 import { evaluate, type VariableValues } from './expression.ts'
 
@@ -45,29 +44,21 @@ type LetBindingNode = {
  * Owns expression dependencies and call-site identities; ReactiveCallStore owns
  * cached call results, subscriptions, and their resource lifetime.
  *
- * Construction evaluates the bindings and throws on dependency cycles or invalid
- * expressions. A replacement may reuse calls from a previous graph only for the
- * same binding name, structurally identical initializer, unchanged arguments, and
- * unchanged receiving addresses derived from the supplied layer/state targets.
+ * Construction only analyzes dependencies and throws on cycles. Evaluation uses
+ * operations supplied for that synchronous evaluation; the graph owns no call
+ * resources. Runtime uses compatibleBindings to select safe store borrowing.
  */
 export class LetBindingGraph {
   private readonly nodes: LetBindingNode[] = []
-  private readonly calls: ReactiveCallStore
-  private readonly addresses: ReadonlyMap<string, string>
+  readonly addresses: ReadonlyMap<string, string>
 
   /**
    * targets must include common styles and every state, including inactive states.
    * Omit targets only for graphs with no property attachments.
    */
-  constructor(
-    letBindings: readonly LetBinding[],
-    values: VariableValues,
-    previous?: LetBindingGraph,
-    targets: readonly Target<Property>[] = [],
-  ) {
+  constructor(letBindings: readonly LetBinding[], targets: readonly Target<Property>[] = []) {
     const pending = new Map(letBindings.map((binding) => [binding.name, binding]))
     const visiting = new Set<string>()
-    const retainedBindings: string[] = []
 
     // Resolve forward references before their consumers. The visiting set detects
     // cycles before any call instances are created or borrowed.
@@ -93,90 +84,74 @@ export class LetBindingGraph {
     // Resolve property references only after dependency sorting has rejected cycles.
     // Address changes must replace the call even when its authored arguments match.
     this.addresses = controllerAddresses(this.nodes, targets)
+  }
 
-    for (const node of this.nodes) {
-      const retained = previous?.nodes.find(
-        (candidate) =>
-          candidate.definition.name === node.definition.name &&
-          JSON.stringify(candidate.definition.initializer) ===
-            JSON.stringify(node.definition.initializer) &&
-          previous.addresses.get(node.definition.name) === this.addresses.get(node.definition.name),
+  /** Names whose initializer and complete receiving-address set match a previous graph. */
+  compatibleBindings(previous: LetBindingGraph): readonly string[] {
+    return this.nodes
+      .filter((node) =>
+        previous.nodes.some(
+          (candidate) =>
+            candidate.definition.name === node.definition.name &&
+            JSON.stringify(candidate.definition.initializer) ===
+              JSON.stringify(node.definition.initializer) &&
+            previous.addresses.get(node.definition.name) ===
+              this.addresses.get(node.definition.name),
+        ),
       )
-
-      if (retained) retainedBindings.push(node.definition.name)
-    }
-
-    // The candidate store borrows compatible caches for its first evaluation without
-    // updating live calls. Acceptance or rejection later decides which graph keeps them.
-    this.calls = new ReactiveCallStore(previous?.calls, retainedBindings)
-    this.evaluate(values)
+      .map((node) => node.definition.name)
   }
 
   /**
    * Returns a new environment containing the inputs and evaluated let values.
-   * validate must run synchronously and must not publish candidate state; it may
+   * afterEvaluate runs synchronously and must not publish candidate state; it may
    * reject values needed by presentation or other consumers by throwing.
-   * Evaluation, validation, and subscription-binding errors propagate without
-   * accepting candidate call state. Disposed or recursive evaluation throws.
+   * The caller must run this method inside Store.evaluate, including afterEvaluate,
+   * before subscriptions and prepared calls are accepted. Errors propagate.
    */
-  evaluate(
+  evaluate(variables: VariableValues, operations: ReactiveCallEvaluation): VariableValues
+  evaluate<T>(
     variables: VariableValues,
-    validate: (values: VariableValues) => void = () => {},
-    notification?: ReactiveNotification,
-  ): VariableValues {
-    return this.calls.evaluate((transaction) => {
-      // Keep candidate variables local so a later failure cannot publish a partial
-      // environment. Dependency order makes each completed value available below.
-      const values = { ...variables }
+    operations: ReactiveCallEvaluation,
+    afterEvaluate: (values: VariableValues) => T,
+  ): T
+  evaluate<T>(
+    variables: VariableValues,
+    operations: ReactiveCallEvaluation,
+    afterEvaluate?: (values: VariableValues) => T,
+  ): T | VariableValues {
+    // Keep candidate variables local so a later failure cannot publish a partial
+    // environment. Dependency order makes each completed value available below.
+    const values = { ...variables }
 
-      for (const node of this.nodes) {
-        // The graph resolves argument expressions, including nested calls; the store
-        // decides whether to reuse a result, prepare an update, or create an instance.
-        const invoke = (call: CallExpression, scope: VariableValues): RuntimeValue => {
-          const args = Object.fromEntries(
-            call.arguments.map((argument) => [
-              argument.name,
-              evaluate(argument.value, scope, invoke),
-            ]),
-          )
-          // Every initializer call is indexed by collectCalls, including inactive branches.
-          const id = node.callIds.get(call)!
+    for (const node of this.nodes) {
+      // The graph resolves argument expressions, including nested calls; the store
+      // decides whether to reuse a result, prepare an update, or create an instance.
+      const invoke = (call: CallExpression, scope: VariableValues): RuntimeValue => {
+        const args = Object.fromEntries(
+          call.arguments.map((argument) => [
+            argument.name,
+            evaluate(argument.value, scope, invoke),
+          ]),
+        )
+        // Every initializer call is indexed by collectCalls, including inactive branches.
+        const id = node.callIds.get(call)!
 
-          return transaction.invoke(node.definition.name, id, call.function, args)
-        }
-
-        const value = evaluate(node.definition.initializer, values, invoke)
-        Object.defineProperty(values, node.definition.name, {
-          value,
-          enumerable: true,
-          writable: true,
-          configurable: true,
-        })
+        return operations.invoke(node.definition.name, id, call.function, args)
       }
 
-      // Presentation and other consumers must accept the complete environment before
-      // returning control to the store, which then activates and commits call state.
-      validate(values)
+      const value = evaluate(node.definition.initializer, values, invoke)
+      Object.defineProperty(values, node.definition.name, {
+        value,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      })
+    }
 
-      return values
-    }, notification)
-  }
-
-  /**
-   * Releases subscriptions and owned calls; repeated disposal is harmless.
-   * Pass the accepted replacement when retiring this graph, or the live graph when
-   * rejecting a candidate, to preserve any shared calls still in use.
-   */
-  dispose(retained?: LetBindingGraph) {
-    this.calls.dispose(retained?.calls)
-  }
-
-  /** Activates call subscriptions for these targets and returns their cleanup callbacks. */
-  bind(
-    targets: ReadonlyMap<string, HTMLElement>,
-    update: (notification?: ReactiveNotification) => void,
-  ): (() => void)[] {
-    return this.calls.bind(targets, update)
+    // Presentation and other consumers must accept the complete environment before
+    // returning control to the store, which then activates and commits call state.
+    return afterEvaluate ? afterEvaluate(values) : values
   }
 }
 

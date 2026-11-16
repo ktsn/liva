@@ -1,13 +1,14 @@
 import type { ReactiveNotification } from './events.ts'
 import { callBuiltin } from '../builtins/index.ts'
 import {
-  isReactiveSubscription,
+  isReactiveSource,
   isReactiveCall,
   type PreparedUpdate,
-  type ReactiveCall,
+  type EvaluatedCall,
+  type SourceConnection,
   type FunctionArguments,
   type FunctionResult,
-  type ReactiveSubscription,
+  type ReactiveSource,
   type RuntimeValue,
 } from './reactive-value.ts'
 
@@ -21,9 +22,9 @@ type CallSites = Map<string, Map<number, CallSite>>
 
 /** One subscription session; identity separates queued occurrences from later bindings. */
 type SubscriptionBinding = {
-  targets: ReadonlyMap<string, HTMLElement>
+  connect: SourceConnection
   update: (notification?: ReactiveNotification) => void
-  cleanups: Map<ReactiveSubscription, () => void>
+  cleanups: Map<ReactiveSource, () => void>
 }
 
 /**
@@ -31,7 +32,7 @@ type SubscriptionBinding = {
  * indices must identify the same expression across evaluations. Do not retain this
  * reader beyond the evaluation callback.
  */
-interface ReactiveCallEvaluation {
+export interface ReactiveCallEvaluation {
   invoke(binding: string, id: number, name: string, args: FunctionArguments): RuntimeValue
 }
 
@@ -199,8 +200,8 @@ export class ReactiveCallStore {
     const binding = this.binding
     if (!binding) return
 
-    const active = new Set([...results].filter(isReactiveSubscription))
-    const added = new Map<ReactiveSubscription, () => void>()
+    const active = new Set([...results].filter(isReactiveSource))
+    const added = new Map<ReactiveSource, () => void>()
 
     // Stage additions without removing committed subscriptions: if a later bind
     // throws, only additions from this attempt need cleanup.
@@ -208,17 +209,17 @@ export class ReactiveCallStore {
       for (const subscription of active) {
         if (!binding.cleanups.has(subscription)) {
           let subscribed = true
-          const cleanup = subscription.bind(binding.targets, (value, notification) => {
+          const cleanup = binding.connect(subscription, (value, notification) => {
             // Ignore callbacks retained by a removed subscription or an older binding.
             if (!subscribed || this.binding !== binding) return
 
-            const snapshots = new Map<ReactiveSubscription, RuntimeValue>(notification?.snapshots)
+            const snapshots = new Map<ReactiveSource, RuntimeValue>(notification?.snapshots)
             const time = notification?.time ?? performance.now()
 
             // Capture all committed calls at one time before notifying the graph, so
             // event handling and dependent controllers consume the same input sample.
             for (const result of callResults(this.calls)) {
-              if (isReactiveSubscription(result) && !snapshots.has(result))
+              if (isReactiveSource(result) && !snapshots.has(result))
                 snapshots.set(
                   result,
                   isReactiveCall(result) && result.readSnapshot
@@ -257,21 +258,21 @@ export class ReactiveCallStore {
   }
 
   /**
-   * Activates cached subscriptions against targets and delivers later changes to update.
+   * Activates cached sources through connect and delivers later changes to update.
    * Returns cleanup callbacks that stop this binding while retaining cached call values.
    * Synchronous bind-time notifications are deferred; subscription errors propagate.
    */
   bind(
-    targets: ReadonlyMap<string, HTMLElement>,
+    connect: SourceConnection,
     update: (notification?: ReactiveNotification) => void,
   ): (() => void)[] {
     const previous = this.binding
     const pendingEvents = this.eventNotifications.length
     const pendingNotification = this.notificationPending
-    const binding = { targets, update, cleanups: new Map<ReactiveSubscription, () => void>() }
+    const binding = { connect, update, cleanups: new Map<ReactiveSource, () => void>() }
     this.binding = binding
 
-    // Initial DOM reads may notify immediately. Use the evaluation guard until every
+    // Initial source connection may notify immediately. Use the evaluation guard until every
     // subscription has bound so the consumer cannot observe a partially bound store.
     this.evaluating = true
     let bound = false
@@ -310,7 +311,7 @@ export class ReactiveCallStore {
 class PreparedCalls implements ReactiveCallEvaluation {
   readonly calls: CallSites = new Map()
   private readonly prepared: PreparedUpdate[] = []
-  private readonly created = new Set<ReactiveCall>()
+  private readonly created = new Set<EvaluatedCall>()
   private readonly snapshots: Map<FunctionResult, RuntimeValue>
   private readonly context: { readonly time: number }
   private readonly previous: CallSites
@@ -366,7 +367,7 @@ class PreparedCalls implements ReactiveCallEvaluation {
 
     // Repeated reads of a shared result use one snapshot, even if its live getter
     // changes. A prepared snapshot above takes precedence over the committed value.
-    if (!isReactiveSubscription(site.result)) return site.result
+    if (!isReactiveSource(site.result)) return site.result
     if (!this.snapshots.has(site.result))
       this.snapshots.set(
         site.result,

@@ -32,7 +32,6 @@ import type {
 import { propertyReference, propertyAddresses, canonicalTracks } from '../motion/property-codec.ts'
 import { propertyRule } from '../motion/property-rules.ts'
 import { propertyController, type PropertyController } from '../motion/controllers.ts'
-import type { ReactiveNotification } from '../evaluation/events.ts'
 import {
   layerTargets,
   composeEvaluatedLayers,
@@ -41,7 +40,7 @@ import {
   type LayerResolution,
 } from '../composition/layers.ts'
 export { waapiProperty } from '../motion/animation.ts'
-import { LetBindingGraph } from '../evaluation/let-bindings.ts'
+import { isReactiveSubscription, type SourceConnection } from '../evaluation/reactive-value.ts'
 import { evaluate, type VariableValues } from '../evaluation/expression.ts'
 import type { Definition } from '../model/definition.ts'
 import { type ResolvedTrack } from '../composition/resolve.ts'
@@ -364,9 +363,23 @@ export class PresentationExecutor {
     for (const cleanup of cleanups) cleanup()
   }
 
-  connectBindings(graph: LetBindingGraph, notify: (notification?: ReactiveNotification) => void) {
-    this.letBindingCleanups.push(...graph.bind(new Map(this.representativeTargets()), notify))
-  }
+  readonly connectSource: SourceConnection = (source, publish) => {
+    if (!isReactiveSubscription(source)) throw new Error('Source has no browser adapter')
+
+    const cleanup = source.bind(new Map(this.representativeTargets()), publish)
+    let connected = true
+    const disconnect = () => {
+      if (!connected) return
+
+      connected = false
+      this.letBindingCleanups = this.letBindingCleanups.filter((entry) => entry !== disconnect)
+      cleanup()
+    }
+
+    this.letBindingCleanups.push(disconnect)
+
+    return disconnect
+  };
 
   /**
    * Single-receiver consumers use the last entry, matching Map construction from bind entries.

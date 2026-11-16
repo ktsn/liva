@@ -52,8 +52,7 @@ function setup() {
 
     initialize() {},
     configureControllers() {},
-    disconnectBindings() {},
-    connectBindings() {},
+    connectSource: () => () => {},
     resetPresentation() {},
     refreshSuspension() {},
     endCompositionPreview() {},
@@ -135,4 +134,31 @@ describe('Runtime presentation coordination', () => {
 
     runtime.dispose()
   })
+})
+
+it('rejects invalid replacement layers before retiring the accepted environment', () => {
+  const { runtime, errors } = setup()
+  const previous = runtime.composition
+  const invalid: Definition = {
+    ...definition,
+    layers: [
+      ...definition.layers,
+      {
+        name: 'invalid',
+        when: { kind: 'reference', path: ['missing'] },
+        targets: [],
+      },
+    ],
+  }
+
+  expect(() => runtime.replaceDefinition(invalid)).toThrow('Unknown variable')
+  expect(runtime.definition).toBe(definition)
+  expect(runtime.composition).toEqual(previous)
+
+  runtime.updateParameters({ enabled: true })
+
+  expect(runtime.composition.layers.active).toBe(true)
+  expect(errors).toEqual([])
+
+  runtime.dispose()
 })

@@ -99,7 +99,13 @@ const config = defineViteConfig({
       enabled: true,
       provider: 'v8',
       include: ['packages/**/*.{ts,vue}'],
-      exclude: ['packages/**/*.test.ts', 'packages/**/*.d.ts', 'packages/**/wasm/**'],
+      exclude: [
+        'packages/**/*.test.ts',
+        // Test assembly has no product behavior; its graph/store operations are exercised by callers.
+        'packages/**/__test__/helpers/**',
+        'packages/**/*.d.ts',
+        'packages/**/wasm/**',
+      ],
       thresholds: { 100: true, perFile: true },
     },
   },

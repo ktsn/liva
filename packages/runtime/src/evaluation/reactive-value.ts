@@ -3,8 +3,18 @@ import type { ReactiveNotification } from './events.ts'
 export type Scalar = number | boolean | string
 export type RuntimeValue = Scalar | { readonly [name: string]: RuntimeValue }
 
-export interface ReactiveSubscription {
+/** Evaluation-facing source identity. Browser connection capabilities are separate. */
+export interface ReactiveSource {
   readonly value: RuntimeValue
+}
+
+/** DOM-free connection supplied by the browser execution owner. */
+export type SourceConnection = (
+  source: ReactiveSource,
+  publish: (value: RuntimeValue, notification?: ReactiveNotification) => void,
+) => () => void
+
+export interface ReactiveSubscription extends ReactiveSource {
   bind(
     targets: ReadonlyMap<string, HTMLElement>,
     update: (value: RuntimeValue, notification?: ReactiveNotification) => void,
@@ -20,7 +30,7 @@ export interface PreparedUpdate {
   discard(): void
 }
 
-export interface ReactiveCall extends ReactiveSubscription {
+export interface EvaluatedCall extends ReactiveSource {
   /**
    * Optionally reads a coherent observation at a performance.now()-compatible
    * millisecond timestamp without committing argument changes. Implementations may
@@ -39,11 +49,17 @@ export interface ReactiveCall extends ReactiveSubscription {
   dispose(): void
 }
 
-export type FunctionResult = RuntimeValue | ReactiveSubscription | ReactiveCall
+/** Existing DOM-aware adapter, viewed as EvaluatedCall during evaluation. */
+export interface ReactiveCall extends EvaluatedCall, ReactiveSubscription {}
 
-export function isReactiveCall(value: FunctionResult): value is ReactiveCall {
+export type FunctionResult = RuntimeValue | ReactiveSource | EvaluatedCall
+
+/** Builtin implementations return the DOM-capable adapter, retained by identity as a source. */
+export type BuiltinResult = RuntimeValue | ReactiveSubscription | ReactiveCall
+
+export function isReactiveCall(value: FunctionResult): value is EvaluatedCall {
   return (
-    isReactiveSubscription(value) &&
+    isReactiveSource(value) &&
     'prepareUpdate' in value &&
     typeof value.prepareUpdate === 'function' &&
     'dispose' in value &&
@@ -51,6 +67,16 @@ export function isReactiveCall(value: FunctionResult): value is ReactiveCall {
   )
 }
 
+export function isReactiveSource(value: FunctionResult): value is ReactiveSource {
+  return (
+    typeof value === 'object' &&
+    'value' in value &&
+    'bind' in value &&
+    typeof value.bind === 'function'
+  )
+}
+
+/** Existing adapters share source identity; only browser execution uses this capability view. */
 export function isReactiveSubscription(value: FunctionResult): value is ReactiveSubscription {
-  return typeof value === 'object' && 'value' in value && typeof value.bind === 'function'
+  return isReactiveSource(value)
 }

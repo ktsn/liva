@@ -681,14 +681,21 @@ an immutable readable `value`, a subscription binding, `prepareUpdate(args)`, an
 aliases share its snapshot, while distinct calls own independent instances.
 Ordinary functions keep argument-based result caching.
 
-`LetBindingGraph` owns dependency ordering, expression evaluation, and validation.
-`ReactiveCallStore` owns call-site caches, candidate snapshots, subscriptions,
-update commit/discard, disposal, and notification deferral. Each store evaluation
-runs a synchronous callback that reads calls by binding name and call-site index.
-The graph validates the complete candidate environment inside that callback; only
-its successful return allows the store to activate subscriptions and commit updates.
-Compatible initializer detection stays in the graph, which supplies the binding
-names whose cached calls a replacement store may borrow.
+`Runtime` independently owns `LetBindingGraph` and `ReactiveCallStore`. Graph
+construction analyzes dependencies, stable call-site identities, and receiving
+addresses without evaluating calls. Each graph evaluation receives invocation
+operations and an optional synchronous `afterEvaluate` validation/transformation.
+Runtime runs both inside `ReactiveCallStore.evaluate`, before subscription
+acceptance and prepared-call commit. Compatible graph metadata selects caches
+borrowed by a replacement or isolated candidate; accepting or rejecting a candidate
+disposes its store while preserving calls still held by the other store.
+
+`ReactiveCallStore` owns caches, coherent source snapshots, prepared updates,
+transactional acceptance/discard, and notification ordering. It connects evaluation
+sources through a DOM-free `SourceConnection` supplied by the executor. The executor
+invokes the existing adapter's `bind(elementMap, publish)` and owns native cleanup;
+no target map is passed through Runtime, graph, or store. Source identity is retained
+across interface views for snapshot maps and controller capability lookup.
 
 Preparation must be pure: it returns a candidate snapshot plus `commit()` and
 `discard()` without mutating committed state, allocating active browser resources,

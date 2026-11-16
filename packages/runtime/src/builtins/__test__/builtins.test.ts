@@ -2,7 +2,8 @@ import { expect, it } from 'vite-plus/test'
 import cardFixture from '../../../../../fixtures/card.json'
 import { decodeBundle } from '../../model/definition.ts'
 import { evaluate, evaluateScalar } from '../../evaluation/expression.ts'
-import { LetBindingGraph, targetValues } from '../../evaluation/let-bindings.ts'
+import { targetValues } from '../../evaluation/let-bindings.ts'
+import { EvaluationFixture } from '../../__test__/helpers/evaluation.ts'
 import { isReactiveSubscription } from '../../evaluation/reactive-value.ts'
 import { callBuiltin } from '../index.ts'
 
@@ -10,8 +11,8 @@ it('dispatches call IR to independently initialized built-in subscriptions', () 
   const definition = decodeBundle(JSON.stringify(cardFixture)).definitions[0]
   const firstVariables = targetValues(definition)
   const secondVariables = targetValues(definition)
-  const first = new LetBindingGraph(definition.letBindings!, firstVariables)
-  const second = new LetBindingGraph(definition.letBindings!, secondVariables)
+  const first = new EvaluationFixture(definition.letBindings!, firstVariables)
+  const second = new EvaluationFixture(definition.letBindings!, secondVariables)
 
   expect(first.evaluate(firstVariables).movement).not.toBe(
     second.evaluate(secondVariables).movement,
@@ -54,7 +55,7 @@ it('evaluates target variables using the same environment as other argument valu
   expect(evaluate(reference, variables)).toBe(variables.body)
   expect(targetValues(definition).body).not.toBe(variables.body)
   expect(targetValues(definition, variables).body).toBe(variables.body)
-  expect(() => new LetBindingGraph(definition.letBindings!, {})).toThrow(
+  expect(() => new EvaluationFixture(definition.letBindings!, {})).toThrow(
     'Unknown variable reference: body',
   )
 
