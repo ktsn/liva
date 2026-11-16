@@ -50,6 +50,7 @@ type LetBindingNode = {
  */
 export class LetBindingGraph {
   private readonly nodes: LetBindingNode[] = []
+  /** Sorted authored [target, property] receiving addresses by binding, including aliases and inactive states. */
   readonly addresses: ReadonlyMap<string, string>
 
   /**

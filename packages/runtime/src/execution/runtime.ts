@@ -140,10 +140,14 @@ export class Runtime {
     }
   }
 
-  private clearBindings() {
+  private disconnectBindings() {
     for (const cleanup of this.bindingCleanups) cleanup()
 
     this.bindingCleanups = []
+  }
+
+  private clearBindings() {
+    this.disconnectBindings()
 
     try {
       this.values = this.evaluateValues(this.values)
@@ -210,7 +214,9 @@ export class Runtime {
     }
 
     this.execution.releaseControllers()
-    this.clearBindings()
+    // The candidate can borrow live calls. Resampling the retiring store after
+    // disconnection could retire a call that the candidate still holds.
+    this.disconnectBindings()
     this.execution.resetPresentation()
     this.calls.dispose(calls)
     this.graph = graph

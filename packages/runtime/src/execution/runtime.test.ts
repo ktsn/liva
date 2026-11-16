@@ -3,6 +3,8 @@ import type { Definition } from '../model/definition.ts'
 import type { ExecutionPort, RuntimeDiagnostic } from './execution-contracts.ts'
 import type { PresentationPlan } from './presentation-planner.ts'
 import { planReconciliation } from './presentation-planner.ts'
+import * as functions from '../builtins/index.ts'
+import { isReactiveSubscription } from '../evaluation/reactive-value.ts'
 import { Runtime } from './runtime.ts'
 
 const definition: Definition = {
@@ -31,7 +33,10 @@ const definition: Definition = {
 }
 
 /** A browser-free execution port whose terminal write and release change later observations. */
-function setup() {
+function setup(
+  initialDefinition = definition,
+  inputs: Record<string, unknown> = { enabled: false },
+) {
   let displayed = 0.2
   let velocity = 0
   let runtime: Runtime
@@ -52,7 +57,11 @@ function setup() {
 
     initialize() {},
     configureControllers() {},
-    connectSource: () => () => {},
+    connectSource(source, publish) {
+      if (!isReactiveSubscription(source)) throw new Error('Expected source adapter')
+
+      return source.bind(new Map(), publish)
+    },
     resetPresentation() {},
     refreshSuspension() {},
     endCompositionPreview() {},
@@ -93,7 +102,7 @@ function setup() {
     },
   }
 
-  runtime = new Runtime(execution, definition, { enabled: false }, (error) => errors.push(error))
+  runtime = new Runtime(execution, initialDefinition, inputs, (error) => errors.push(error))
 
   return { runtime, execution, plans, observations, errors }
 }
@@ -134,31 +143,83 @@ describe('Runtime presentation coordination', () => {
 
     runtime.dispose()
   })
-})
 
-it('rejects invalid replacement layers before retiring the accepted environment', () => {
-  const { runtime, errors } = setup()
-  const previous = runtime.composition
-  const invalid: Definition = {
-    ...definition,
-    layers: [
-      ...definition.layers,
-      {
-        name: 'invalid',
-        when: { kind: 'reference', path: ['missing'] },
-        targets: [],
-      },
-    ],
-  }
+  it('rejects invalid replacement layers before retiring the accepted environment', () => {
+    const { runtime, errors } = setup()
+    const previous = runtime.composition
+    const invalid: Definition = {
+      ...definition,
+      layers: [
+        ...definition.layers,
+        {
+          name: 'invalid',
+          when: { kind: 'reference', path: ['missing'] },
+          targets: [],
+        },
+      ],
+    }
 
-  expect(() => runtime.replaceDefinition(invalid)).toThrow('Unknown variable')
-  expect(runtime.definition).toBe(definition)
-  expect(runtime.composition).toEqual(previous)
+    expect(() => runtime.replaceDefinition(invalid)).toThrow('Unknown variable')
+    expect(runtime.definition).toBe(definition)
+    expect(runtime.composition).toEqual(previous)
 
-  runtime.updateParameters({ enabled: true })
+    runtime.updateParameters({ enabled: true })
 
-  expect(runtime.composition.layers.active).toBe(true)
-  expect(errors).toEqual([])
+    expect(runtime.composition.layers.active).toBe(true)
+    expect(errors).toEqual([])
 
-  runtime.dispose()
+    runtime.dispose()
+  })
+
+  it('does not retire a borrowed call twice when disconnecting a replacement changes a source branch', () => {
+    let active = true
+    const dispose = vi.fn<() => void>()
+    const factory = vi.spyOn(functions, 'callBuiltin').mockImplementation((name) =>
+      name === 'source'
+        ? {
+            get value() {
+              return active
+            },
+            bind() {
+              return () => {
+                active = false
+              }
+            },
+          }
+        : {
+            value: true,
+            bind: () => () => {},
+            prepareUpdate: () => {
+              throw new Error('No argument updates in this scenario')
+            },
+            dispose,
+          },
+    )
+    const sourceDefinition: Definition = {
+      name: 'borrowed',
+      layers: [],
+      letBindings: [
+        { name: 'active', initializer: { kind: 'call', function: 'source', arguments: [] } },
+        {
+          name: 'resource',
+          initializer: {
+            kind: 'binary',
+            operator: '&&',
+            left: { kind: 'reference', path: ['active'] },
+            right: { kind: 'call', function: 'acquireResource', arguments: [] },
+          },
+        },
+      ],
+    }
+    const { runtime } = setup(sourceDefinition, {})
+
+    runtime.environment.rebound(false)
+
+    runtime.replaceDefinition(sourceDefinition)
+
+    expect(dispose).toHaveBeenCalledTimes(1)
+
+    runtime.dispose()
+    factory.mockRestore()
+  })
 })

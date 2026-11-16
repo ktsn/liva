@@ -8,7 +8,12 @@ export interface ReactiveSource {
   readonly value: RuntimeValue
 }
 
-/** DOM-free connection supplied by the browser execution owner. */
+/**
+ * Connects a source identity through the browser owner, preserving the same object
+ * used by snapshot maps and controller capabilities. Returns an idempotent cleanup;
+ * connection failures throw. Store guards synchronous publications during acceptance,
+ * while the browser owner retains the native adapter resources and their cleanup.
+ */
 export type SourceConnection = (
   source: ReactiveSource,
   publish: (value: RuntimeValue, notification?: ReactiveNotification) => void,
