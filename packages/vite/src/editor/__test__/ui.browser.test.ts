@@ -1129,6 +1129,100 @@ it('ignores invalid transition instructions hidden by the effective owner', asyn
   expect(button('Play').disabled).toBe(true)
 })
 
+it.each(['composition', 'enter'] as const)(
+  'refreshes the same selected form inspection after accepted input changes: %s',
+  async (scope) => {
+    const definition: Definition = {
+      name: 'fresh-inspection',
+      parameters: [
+        { name: 'amount', type: 'number' },
+        { name: 'duration', type: 'number' },
+      ],
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'body',
+              properties: [
+                {
+                  name: 'opacity',
+                  value: { kind: 'template', parts: [{ kind: 'reference', path: ['amount'] }] },
+                  timingExpression: {
+                    kind: 'call',
+                    function: 'tween',
+                    arguments: [
+                      { name: 'duration', value: { kind: 'reference', path: ['duration'] } },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      enter: {
+        timingExpression: {
+          kind: 'call',
+          function: 'tween',
+          arguments: [{ name: 'duration', value: { kind: 'reference', path: ['duration'] } }],
+        },
+        targets: [
+          {
+            name: 'body',
+            properties: [
+              {
+                name: 'opacity',
+                keyframes: [
+                  {
+                    offset: 0,
+                    value: { kind: 'template', parts: [{ kind: 'reference', path: ['amount'] }] },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const { controller } = await setupEditor(undefined, definition, { amount: 0.25, duration: 100 })
+    const participant = runtime!
+    const composition = vi.spyOn(participant.inspection, 'inspectComposition')
+    const lifecycle = vi.spyOn(participant.inspection, 'inspectLifecycle')
+
+    await click('Motion editor')
+    if (scope === 'enter') {
+      await input('Existing transition', 'enter-default')
+    }
+
+    expect(host!.querySelector('[aria-label="Playback time"]')!.textContent).toContain('100 ms')
+    const selected = controller.selected!.binding
+    participant.runtime.onUpdate = () => controller.observe('update', selected)
+    composition.mockClear()
+    lifecycle.mockClear()
+
+    participant.runtime.updateParameters({ amount: 0.75, duration: 400 })
+    await tick()
+
+    expect(controller.selected!.binding).toBe(selected)
+    expect(host!.querySelector('[aria-label="Playback time"]')!.textContent).toContain('400 ms')
+    const snapshots =
+      scope === 'enter'
+        ? lifecycle.mock.results
+            .filter((result) => result.type === 'return')
+            .map(({ value }) => value.transition?.targets[0].properties[0].keyframes?.[0].value)
+        : composition.mock.results
+            .filter((result) => result.type === 'return')
+            .map(({ value }) => value.presentation.targets[0].properties[0].value)
+
+    expect(snapshots).toContainEqual(
+      scope === 'enter' ? { kind: 'literal', value: '0.75' } : '0.75',
+    )
+    composition.mockRestore()
+    lifecycle.mockRestore()
+  },
+)
+
 it('inspects the replacement instance and reinitializes its current composition after remount', async () => {
   const definition: Definition = {
     ...compositionDefinition,

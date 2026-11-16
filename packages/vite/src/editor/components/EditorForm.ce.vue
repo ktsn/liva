@@ -35,8 +35,9 @@ const candidateInspection = shallowRef(props.inspection)
 const model = shallowRef<Definition>(editableDefinition(props.inspection.definition))
 const layers = model.value.layers
 // An inspected form belongs to the selected instance; changing selection replaces the form.
-const selectedRuntime = shallowRef(props.controller.selected!.binding.runtime)
-const initialComposition = selectedRuntime.value.composition
+const selectedBinding = props.controller.selected!.binding
+const selectedInspection = shallowRef(selectedBinding.inspection)
+const initialComposition = selectedBinding.runtime.composition
 const compositionFrom = shallowRef(copyComposition(initialComposition))
 const compositionTo = shallowRef(copyComposition(initialComposition))
 const selectedTransition = shallowRef<CompositionTransition>()
@@ -57,15 +58,12 @@ const phase = computed<LifecyclePhase | undefined>(() =>
 )
 const timelineResult = computed(() => {
   try {
+    const inspection = selectedInspection.value
     const before = compositionFrom.value
     const after = compositionTo.value
 
     if (phase.value) {
-      const captured = props.controller.selected!.binding.inspection.inspectLifecycle(
-        phase.value,
-        after,
-        model.value,
-      )
+      const captured = inspection.inspectLifecycle(phase.value, after, model.value)
       return {
         tracks: compositionLifecycleTracks(
           model.value.name,
@@ -78,13 +76,8 @@ const timelineResult = computed(() => {
 
     return {
       tracks: compositionTimelineTracks(
-        props.controller.selected!.binding.inspection.inspectComposition(
-          before,
-          undefined,
-          [],
-          model.value,
-        ),
-        props.controller.selected!.binding.inspection.inspectComposition(
+        inspection.inspectComposition(before, undefined, [], model.value),
+        inspection.inspectComposition(
           after,
           before,
           selectedTransition.value ? [selectedTransition.value] : [],
@@ -468,7 +461,7 @@ async function discard() {
 }
 
 const unsubscribe = props.controller.subscribe(() => {
-  triggerRef(selectedRuntime)
+  triggerRef(selectedInspection)
   if (!props.controller.previewActive) {
     stop()
     generation++
