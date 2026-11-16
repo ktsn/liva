@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { EvaluationFixture } from '../__test__/helpers/evaluation.ts'
 import * as functions from '../builtins/index.ts'
 import type { LetBinding } from '../model/definition.ts'
-import type { ReactiveCall, RuntimeValue } from './reactive-value.ts'
+import type { ReactiveCall, ReactiveSubscription, RuntimeValue } from './reactive-value.ts'
 
 const bindings: LetBinding[] = [
   {
@@ -264,6 +264,90 @@ describe('stable reactive calls', () => {
     live.dispose()
     expect(disposed).toEqual([2, 3, 1])
   })
+
+  it.each(['rollback', 'retirement'] as const)(
+    'invalidates and releases every unaccepted subscription while retaining original failure during %s',
+    async (phase) => {
+      const primary = new Error(
+        phase === 'rollback' ? 'New connection failed' : 'Old cleanup failed',
+      )
+      const secondary = new Error('Rollback cleanup failed')
+      const closed: number[] = []
+      const readsDuringCleanup: number[] = []
+      const listeners: { index: number; publish(): void }[] = []
+      let valueReads = 0
+      let failing = true
+      vi.spyOn(functions, 'callBuiltin').mockImplementation((_name, args) => {
+        const index = Number(args.index)
+        const source: ReactiveSubscription = {
+          get value() {
+            valueReads++
+            return index
+          },
+          bind: () => () => {},
+        }
+
+        return source
+      })
+      const calls = new ReactiveCallStore()
+      const read = (indices: readonly number[]) =>
+        calls.evaluate((evaluation) =>
+          indices.map((index) => evaluation.invoke(String(index), 0, 'source', { index })),
+        )
+      const initial = phase === 'rollback' ? [0] : [0, 1]
+      const update = vi.fn<() => void>()
+      read(initial)
+      calls.bind((source, publish) => {
+        const index = Number(source.value)
+        // Even a connector that throws can retain its unaccepted publication capability.
+        listeners.push({ index, publish: () => publish(index) })
+        if (failing && phase === 'rollback' && index === 3) throw primary
+
+        return () => {
+          closed.push(index)
+          const firstCleanup = phase === 'rollback' ? 1 : 0
+
+          if (failing && index === firstCleanup) {
+            // Another member is already retiring. Its callback must be invalid
+            // before this backend can publish, so no source snapshot may be read.
+            const before = valueReads
+            listeners
+              .find((listener) => listener.index === (phase === 'rollback' ? 2 : 1))
+              ?.publish()
+            readsDuringCleanup.push(valueReads - before)
+          }
+
+          if (failing && phase === 'retirement' && index === 0) throw primary
+          if (failing && index === (phase === 'rollback' ? 1 : 2)) throw secondary
+        }
+      }, update)
+
+      try {
+        expect(() => read(phase === 'rollback' ? [0, 1, 2, 3] : [2, 3])).toThrow(
+          new AggregateError([primary, secondary], 'Could not roll back source connections', {
+            cause: primary,
+          }),
+        )
+        expect(closed).toEqual(phase === 'rollback' ? [1, 2] : [0, 1, 2, 3])
+        expect(readsDuringCleanup).toEqual([0])
+
+        for (const listener of listeners.filter(
+          (entry) => entry.index >= (phase === 'rollback' ? 1 : 2),
+        ))
+          listener.publish()
+        await Promise.resolve()
+        await Promise.resolve()
+
+        expect(update).not.toHaveBeenCalled()
+        expect(read(initial)).toEqual(initial)
+        listeners.findLast((entry) => entry.index === 0)?.publish()
+        expect(update).toHaveBeenCalledTimes(1)
+      } finally {
+        failing = false
+        calls.dispose()
+      }
+    },
+  )
 
   it('updates one instance while aliases share the transaction snapshot', () => {
     const counter = installCounter()

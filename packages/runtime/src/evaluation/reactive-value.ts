@@ -6,8 +6,10 @@ export type RuntimeValue = Scalar | { readonly [name: string]: RuntimeValue }
 /**
  * Connects a source identity through the browser owner, preserving the same object
  * used by snapshot maps and controller capabilities. Returns an idempotent cleanup;
- * connection failures throw. Store guards synchronous publications during acceptance,
- * while the browser owner retains the native adapter resources and their cleanup.
+ * connection failures throw. Until cleanup is returned, the connector owns any
+ * native resources and must unwind them on failure. Store invalidates callbacks
+ * from rejected connections and guards synchronous publications during acceptance;
+ * the browser owner retains the native adapter resources and their cleanup.
  */
 export type SourceConnection = (
   source: ReactiveSubscription,

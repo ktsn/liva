@@ -765,7 +765,12 @@ binding identity before releasing resources, so queued publications cannot reach
 retired binding. Rejected evaluation and final disposal attempt all independent
 cleanups. Multiple failures propagate together with their original cause; Runtime
 still releases browser resources and clears callbacks, and Vue unregisters observer
-metadata/bounds while reporting disposal failure.
+metadata/bounds while reporting disposal failure. Subscription changes invalidate
+all retiring delivery callbacks before backend cleanup and release all staged
+connections on failure, including disabling a callback retained by a throwing
+connector. Failed retirement cannot recreate already released backend resources;
+those registrations remain disconnected and can reconnect on a later evaluation.
+Accepted call caches are not silently rolled back or replaced by failed candidates.
 
 ### Property motion and event transactions
 
