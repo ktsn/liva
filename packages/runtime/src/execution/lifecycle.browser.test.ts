@@ -7,7 +7,7 @@ import { timingValue } from '../evaluation/timing-values.ts'
 import { LivaInstance } from './instance.ts'
 import { Runtime } from './runtime.ts'
 import { PresentationExecutor } from './presentation-executor.ts'
-import type { Definition, Timing } from '../model/definition.ts'
+import type { Definition, Timing, Frame } from '../model/definition.ts'
 
 const elements: HTMLElement[] = []
 const sessions: PresenceOperation[] = []
@@ -22,6 +22,7 @@ function setup(
     end?: string
     baseline?: string
     style?: string
+    frames?: readonly Frame[]
   } = {},
 ) {
   const element = document.createElement('div')
@@ -53,7 +54,7 @@ function setup(
           properties: [
             {
               name: property,
-              keyframes: [
+              keyframes: options.frames ?? [
                 { offset: 0, value: { kind: 'literal', value: options.start ?? '0' } },
                 { offset: 1, value: { kind: 'literal', value: options.end ?? '1' } },
               ],
@@ -724,7 +725,7 @@ describe('lifecycle effects', () => {
     expect(element.style.opacity).toBe('1')
   })
 
-  it('captures connected and detached presentation while skipping absent targets', async () => {
+  it('completes empty capture selection without touching receiver presentation', async () => {
     const { element, instance } = setup('leave')
     const absent = new PresenceOperation(capturePresence(instance, 'leave', ['absent']), 'leave')
 
@@ -732,25 +733,44 @@ describe('lifecycle effects', () => {
 
     expect(await absent.finished).toBe('completed')
     expect(instance.animations).toEqual([])
+    expect(element.style.opacity).toBe('0.7')
+  })
 
-    for (const connected of [true, false]) {
-      if (!connected) element.remove()
+  it.each([
+    { mode: 'connected', connected: true, captured: '0.4' },
+    { mode: 'detached', connected: false, captured: '0.7' },
+  ])('captures $mode presentation before later CSS changes', async ({ connected, captured }) => {
+    const { element, instance } = setup(
+      'leave',
+      { kind: 'tween', durationMs: 100, easing: 'linear' },
+      {
+        frames: [{ offset: 1, value: { kind: 'literal', value: '0' } }],
+      },
+    )
+    const stylesheet = document.createElement('style')
 
-      const operation = new PresenceOperation(capturePresence(instance, 'leave', ['box']), 'leave')
+    stylesheet.textContent = '.capture-observation { opacity: 0.4 !important }'
+    document.head.append(stylesheet)
+    elements.push(stylesheet)
+    element.className = 'capture-observation'
 
-      sessions.push(operation)
-      operation.play()
+    if (!connected) element.remove()
 
-      const effect = instance.animations[0].effect
+    const operation = new PresenceOperation(capturePresence(instance, 'leave', ['box']), 'leave')
+    sessions.push(operation)
 
-      if (!(effect instanceof KeyframeEffect)) throw new Error('Expected captured native effect')
+    // Connected CSS differs from inline CSS. Change both after capture to expose
+    // any accidental sampling during initialization instead of using the capture.
+    element.className = ''
+    element.style.opacity = '0.1'
+    operation.initialize()
 
-      expect(effect.getKeyframes()[0].opacity).toBe('0')
+    expect(element.style.opacity).toBe(captured)
+    expect(instance.animations).toEqual([])
 
-      operation.cancel('owner-teardown')
+    operation.cancel('owner-teardown')
 
-      expect(await operation.finished).toBe('owner-teardown')
-      expect(element.style.opacity).toBe('0.7')
-    }
+    expect(await operation.finished).toBe('owner-teardown')
+    expect(element.style.opacity).toBe('0.7')
   })
 })
