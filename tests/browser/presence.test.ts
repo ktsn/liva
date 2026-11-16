@@ -121,11 +121,18 @@ test('ancestor boundaries aggregate targets and nested motions after disposal', 
       Object.assign(window, { probeUnmounted: true }),
     )
   })
+  expect(
+    await page.evaluate(() =>
+      [...window.records].some((record) => record.label === 'nested Nested'),
+    ),
+  ).toBe(true)
   await page.locator('#toggle').click()
 
   expect(await page.evaluate(() => window.probeUnmounted)).toBe(true)
   expect(
-    await page.evaluate(() => [...window.records].some((record) => record.root.id === 'nested')),
+    await page.evaluate(() =>
+      [...window.records].some((record) => record.label === 'nested Nested'),
+    ),
   ).toBe(false)
   expect(await page.locator('#ancestor').count()).toBe(1)
   expect(

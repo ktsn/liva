@@ -1,3 +1,4 @@
+import { releaseResources } from './resource-cleanup.ts'
 import type { ReactiveNotification } from './events.ts'
 import { callBuiltin } from '../builtins/index.ts'
 import {
@@ -165,15 +166,27 @@ export class ReactiveCallStore {
       this.initializing = false
 
       return value
-    } finally {
+    } catch (error) {
       if (!committed) {
-        // Prepared updates have not changed live calls. Release only resources created
-        // by this attempt and suppress notifications from its unsuccessful binding work.
-        evaluation.discard()
-        this.notificationPending = pendingNotification
-        this.eventNotifications.length = pendingEvents
+        // A broken disposer must not hide the validation failure or leave the store
+        // evaluating forever. Failed-attempt publications are suppressed in either case.
+        try {
+          evaluation.discard()
+        } catch (cleanupError) {
+          // eslint-disable-next-line preserve-caught-error -- Both failures are retained; cause identifies the rejected evaluation.
+          throw new AggregateError(
+            [error, cleanupError],
+            'Could not discard failed call evaluation',
+            { cause: error },
+          )
+        } finally {
+          this.notificationPending = pendingNotification
+          this.eventNotifications.length = pendingEvents
+        }
       }
 
+      throw error
+    } finally {
       this.evaluating = false
       this.flushNotifications()
     }
@@ -189,11 +202,19 @@ export class ReactiveCallStore {
 
     this.disposed = true
 
-    // Unbind first so retiring a call cannot publish through this store's binding.
-    for (const cleanup of this.binding?.cleanups.values() ?? []) cleanup()
+    // Invalidate identity before cleanup: queued or disposer-time publications
+    // cannot reach a binding whose owner has already begun teardown.
+    const binding = this.binding
     this.binding = undefined
+    const cleanups = [...(binding?.cleanups.values() ?? [])]
+    binding?.cleanups.clear()
+    const owned = callResults(this.calls)
+    this.calls.clear()
 
-    disposeCalls(callResults(this.calls), retained ? callResults(retained.calls) : new Set())
+    releaseResources([
+      ...cleanups,
+      ...callDisposals(owned, retained ? callResults(retained.calls) : new Set()),
+    ])
   }
 
   private updateSubscriptions(results: ReadonlySet<FunctionResult>) {
@@ -295,9 +316,11 @@ export class ReactiveCallStore {
 
     return [
       () => {
-        for (const cleanup of binding.cleanups.values()) cleanup()
-        binding.cleanups.clear()
         if (this.binding === binding) this.binding = undefined
+        const cleanups = [...binding.cleanups.values()]
+        binding.cleanups.clear()
+
+        releaseResources(cleanups)
       },
     ]
   }
@@ -384,8 +407,10 @@ class PreparedCalls implements ReactiveCallEvaluation {
   }
 
   discard() {
-    for (const update of this.prepared) update.discard()
-    for (const result of this.created) result.dispose()
+    releaseResources([
+      ...[...this.prepared].map((update) => () => update.discard()),
+      ...[...this.created].map((result) => () => result.dispose()),
+    ])
   }
 }
 
@@ -395,8 +420,16 @@ function callResults(calls: CallSites): Set<FunctionResult> {
   )
 }
 
+function callDisposals(
+  results: ReadonlySet<FunctionResult>,
+  retained: ReadonlySet<FunctionResult>,
+): (() => void)[] {
+  return [...results]
+    .filter((result) => !retained.has(result))
+    .filter(isReactiveCall)
+    .map((result) => () => result.dispose())
+}
+
 function disposeCalls(results: ReadonlySet<FunctionResult>, retained: ReadonlySet<FunctionResult>) {
-  for (const result of results) {
-    if (!retained.has(result) && isReactiveCall(result)) result.dispose()
-  }
+  releaseResources(callDisposals(results, retained))
 }

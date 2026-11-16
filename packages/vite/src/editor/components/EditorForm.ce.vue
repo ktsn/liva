@@ -57,12 +57,15 @@ const phase = computed<LifecyclePhase | undefined>(() =>
 )
 const timelineResult = computed(() => {
   try {
-    const runtime = selectedRuntime.value
     const before = compositionFrom.value
     const after = compositionTo.value
 
     if (phase.value) {
-      const captured = runtime.inspectLifecycle(phase.value, after, model.value)
+      const captured = props.controller.selected!.binding.inspection.inspectLifecycle(
+        phase.value,
+        after,
+        model.value,
+      )
       return {
         tracks: compositionLifecycleTracks(
           model.value.name,
@@ -75,8 +78,13 @@ const timelineResult = computed(() => {
 
     return {
       tracks: compositionTimelineTracks(
-        runtime.inspectComposition(before, undefined, [], model.value),
-        runtime.inspectComposition(
+        props.controller.selected!.binding.inspection.inspectComposition(
+          before,
+          undefined,
+          [],
+          model.value,
+        ),
+        props.controller.selected!.binding.inspection.inspectComposition(
           after,
           before,
           selectedTransition.value ? [selectedTransition.value] : [],

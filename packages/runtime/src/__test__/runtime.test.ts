@@ -4,7 +4,7 @@ import { decodeBundle, type Definition, type Timing, type Transition } from '../
 import { normalizeFrames } from '../composition/resolve.ts'
 import { resolveComposition, resolveLayerTracks } from '../composition/layers.ts'
 import { sampleSpring, springResponse, springState, SPRING_ERROR } from '../motion/spring.ts'
-import { waapiProperty } from '../execution/instance.ts'
+import { waapiProperty } from '../motion/animation.ts'
 
 const definition = decodeBundle(JSON.stringify(fixture)).definitions[0]
 const tween = (durationMs: number): Timing => ({ kind: 'tween', durationMs, easing: 'linear' })

@@ -1,17 +1,21 @@
+import {
+  assembleRuntime,
+  nativeEffects,
+  type RuntimeAssembly,
+} from '../__test__/helpers/assembly.ts'
 import { capturePresence } from '../__test__/helpers/presence.ts'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { PresenceOperation, createPresenceCapture } from './presence-operation.ts'
 import { evaluate } from '../evaluation/expression.ts'
 import { PropertyMotion } from '../motion/property-motion.ts'
 import { timingValue } from '../evaluation/timing-values.ts'
-import { LivaInstance } from './instance.ts'
 import { Runtime } from './runtime.ts'
 import { PresentationExecutor } from './presentation-executor.ts'
 import type { Definition, Timing, Frame } from '../model/definition.ts'
 
 const elements: HTMLElement[] = []
 const sessions: PresenceOperation[] = []
-const instances: LivaInstance[] = []
+const instances: RuntimeAssembly[] = []
 
 function setup(
   phase: 'enter' | 'leave',
@@ -64,10 +68,10 @@ function setup(
       ],
     },
   }
-  const instance = new LivaInstance(definition)
+  const instance = assembleRuntime(definition)
 
   instances.push(instance)
-  instance.bind([['box', element]])
+  instance.executor.bind([['box', element]])
 
   const captures = capturePresence(instance, phase, ['box'])
   const errors: unknown[] = []
@@ -81,7 +85,7 @@ function setup(
 afterEach(() => {
   for (const session of sessions.splice(0)) session.cancel('owner-teardown')
 
-  for (const instance of instances.splice(0)) instance.dispose()
+  for (const instance of instances.splice(0)) instance.runtime.dispose()
 
   for (const element of elements.splice(0)) element.remove()
 })
@@ -94,7 +98,7 @@ describe('lifecycle effects', () => {
       const factory = vi.spyOn(window, 'matchMedia').mockReturnValue(media)
       const added = vi.spyOn(media, 'addEventListener')
       const removed = vi.spyOn(media, 'removeEventListener')
-      const instance = new LivaInstance({ name: 'empty', layers: [] })
+      const instance = assembleRuntime({ name: 'empty', layers: [] })
       const session = new PresenceOperation(capturePresence(instance, 'leave', []), 'leave')
 
       sessions.push(session)
@@ -103,7 +107,7 @@ describe('lifecycle effects', () => {
       try {
         if (ending === 'completed') session.play()
 
-        instance.dispose()
+        instance.runtime.dispose()
 
         expect(removed).not.toHaveBeenCalled()
 
@@ -115,7 +119,7 @@ describe('lifecycle effects', () => {
           expect(removed).toHaveBeenCalledWith(...registration)
       } finally {
         session.cancel('owner-teardown')
-        instance.dispose()
+        instance.runtime.dispose()
         added.mockRestore()
         removed.mockRestore()
         factory.mockRestore()
@@ -128,7 +132,7 @@ describe('lifecycle effects', () => {
     const factory = vi.spyOn(window, 'matchMedia').mockReturnValue(media)
     const added = vi.spyOn(media, 'addEventListener')
     const removed = vi.spyOn(media, 'removeEventListener')
-    const instance = new LivaInstance({ name: 'external', layers: [] })
+    const instance = assembleRuntime({ name: 'external', layers: [] })
     const owner = setup('leave', { kind: 'tween', durationMs: 1000, easing: 'linear' })
     const { element, errors } = owner
     const session = new PresenceOperation(
@@ -145,7 +149,7 @@ describe('lifecycle effects', () => {
 
     try {
       session.play()
-      instance.dispose()
+      instance.runtime.dispose()
 
       expect(removed).not.toHaveBeenCalled()
       expect(session.isFinished).toBe(false)
@@ -154,7 +158,7 @@ describe('lifecycle effects', () => {
 
       expect(await session.finished).toBe('completed')
 
-      owner.instance.dispose()
+      owner.instance.runtime.dispose()
 
       for (const registration of added.mock.calls)
         expect(removed).toHaveBeenCalledWith(...registration)
@@ -163,7 +167,7 @@ describe('lifecycle effects', () => {
       expect(errors).toEqual([])
     } finally {
       session.cancel('owner-teardown')
-      instance.dispose()
+      instance.runtime.dispose()
       added.mockRestore()
       removed.mockRestore()
       factory.mockRestore()
@@ -215,7 +219,7 @@ describe('lifecycle effects', () => {
     expect(element.style.opacity).toBe('1')
     expect(element.getAnimations()).toEqual([])
 
-    instance.dispose()
+    instance.runtime.dispose()
 
     expect(element.style.opacity).toBe('0.7')
   })
@@ -320,9 +324,9 @@ describe('lifecycle effects', () => {
         document.body.append(element)
         elements.push(element)
 
-        const instance = new LivaInstance(definition)
+        const instance = assembleRuntime(definition)
 
-        instance.bind([['box', element]])
+        instance.executor.bind([['box', element]])
 
         return { instance, element }
       })
@@ -379,12 +383,12 @@ describe('lifecycle effects', () => {
         for (const { element, instance } of owners) {
           expect(element.style.opacity).toBe('1')
           expect(element.getAnimations()).toEqual([])
-          expect(instance.animations).toEqual([])
+          expect(nativeEffects(instance.executor)).toEqual([])
         }
       } finally {
         restore()
 
-        for (const { instance } of owners) instance.dispose()
+        for (const { instance } of owners) instance.runtime.dispose()
       }
     },
   )
@@ -425,9 +429,9 @@ describe('lifecycle effects', () => {
       elements.push(element)
     }
 
-    const instance = new LivaInstance(source)
+    const instance = assembleRuntime(source)
     instances.push(instance)
-    instance.bind(cases.map(({ name }, index) => [name, receivers[index]] as const))
+    instance.executor.bind(cases.map(({ name }, index) => [name, receivers[index]] as const))
     const operation = new PresenceOperation(
       capturePresence(
         instance,
@@ -535,16 +539,16 @@ describe('lifecycle effects', () => {
         targets: [{ name: 'box', properties: [{ name: 'opacity' }] }],
       },
     }
-    const instance = new LivaInstance(source, { amount: 0.5 })
+    const instance = assembleRuntime(source, { amount: 0.5 })
     const element = document.createElement('div')
     document.body.append(element)
     elements.push(element)
     instances.push(instance)
-    instance.bind([['box', element]])
+    instance.executor.bind([['box', element]])
     const captures = capturePresence(instance, 'leave', ['box'])
 
-    instance.updateParameters({ amount: 0.8 })
-    instance.replaceDefinition({
+    instance.runtime.updateParameters({ amount: 0.8 })
+    instance.runtime.replaceDefinition({
       ...source,
       layers: [
         {
@@ -655,7 +659,7 @@ describe('lifecycle effects', () => {
       },
     )
 
-    instance.dispose()
+    instance.runtime.dispose()
     session.initialize()
     session.play()
 
@@ -684,7 +688,7 @@ describe('lifecycle effects', () => {
       easing: 'linear',
     })
 
-    instance.dispose()
+    instance.runtime.dispose()
 
     try {
       session.initialize()
@@ -732,7 +736,7 @@ describe('lifecycle effects', () => {
     absent.play()
 
     expect(await absent.finished).toBe('completed')
-    expect(instance.animations).toEqual([])
+    expect(nativeEffects(instance.executor)).toEqual([])
     expect(element.style.opacity).toBe('0.7')
   })
 
@@ -766,7 +770,7 @@ describe('lifecycle effects', () => {
     operation.initialize()
 
     expect(element.style.opacity).toBe(captured)
-    expect(instance.animations).toEqual([])
+    expect(nativeEffects(instance.executor)).toEqual([])
 
     operation.cancel('owner-teardown')
 

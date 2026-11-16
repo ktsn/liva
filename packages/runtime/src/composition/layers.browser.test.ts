@@ -1,8 +1,13 @@
+import {
+  assembleRuntime,
+  nativeEffects,
+  type RuntimeAssembly,
+} from '../__test__/helpers/assembly.ts'
 import { capturePresence } from '../__test__/helpers/presence.ts'
 import { PresenceOperation } from '../execution/presence-operation.ts'
 import { afterEach, describe, expect, it, vi, type MockInstance } from 'vite-plus/test'
 import { cdp, userEvent } from 'vite-plus/test/browser'
-import { LivaInstance, type RuntimeDiagnostic } from '../execution/instance.ts'
+import type { RuntimeDiagnostic } from '../execution/execution-contracts.ts'
 import { decodeBundle, type Definition, type Expression } from '../model/definition.ts'
 
 const ref = (name: string): Expression => ({ kind: 'reference', path: [name] })
@@ -197,7 +202,7 @@ const cleanup: (() => void)[] = []
 
 function setup(
   source = definition,
-  inputs: ConstructorParameters<typeof LivaInstance>[1] = { hover: false, press: false, size: 1.1 },
+  inputs: Parameters<typeof assembleRuntime>[1] = { hover: false, press: false, size: 1.1 },
 ) {
   const errors: RuntimeDiagnostic[] = []
   const element = document.createElement('div')
@@ -205,10 +210,10 @@ function setup(
   document.body.append(element)
   const decoded = decodeBundle(JSON.stringify({ schemaVersion: 2, definitions: [source] }))
     .definitions[0]
-  const instance = new LivaInstance(decoded, inputs, (error) => errors.push(error))
-  instance.bind([['body', element]])
+  const instance = assembleRuntime(decoded, inputs, (error) => errors.push(error))
+  instance.executor.bind([['body', element]])
   cleanup.push(() => {
-    instance.dispose()
+    instance.runtime.dispose()
     element.remove()
   })
 
@@ -300,26 +305,28 @@ describe('reactive layer instances', () => {
         ],
       }
       const { instance, element, errors } = setup(source)
-      instance.updateParameters({ hover: true, press: false, size: 1.4 })
-      const obsolete = [...instance.animations]
+      instance.runtime.updateParameters({ hover: true, press: false, size: 1.4 })
+      const obsolete = [...nativeEffects(instance.executor)]
 
       expect(obsolete).toHaveLength(2)
 
-      instance.updateParameters({ hover: true, press: true, size: 1.4 })
+      instance.runtime.updateParameters({ hover: true, press: true, size: 1.4 })
 
       expect(getComputedStyle(element).scale).toBe('1.4')
-      expect(instance.animations).toHaveLength(1)
-      expect(instance.animations[0]).toBe(obsolete[1])
+      expect(nativeEffects(instance.executor)).toHaveLength(1)
+      expect(nativeEffects(instance.executor)[0]).toBe(obsolete[1])
       expect(obsolete[0].playState).toBe('idle')
 
       await new Promise(requestAnimationFrame)
 
       expect(getComputedStyle(element).scale).toBe('1.4')
 
-      instance.updateParameters({ hover: true, press: false, size: 1.4 })
+      instance.runtime.updateParameters({ hover: true, press: false, size: 1.4 })
 
-      expect(instance.animations).toHaveLength(2)
-      const returning = instance.animations.find((animation) => animation !== obsolete[1])
+      expect(nativeEffects(instance.executor)).toHaveLength(2)
+      const returning = nativeEffects(instance.executor).find(
+        (animation) => animation !== obsolete[1],
+      )
 
       expect(returning).toBeDefined()
       returning!.finish()
@@ -334,9 +341,9 @@ describe('reactive layer instances', () => {
   it('Instant tracks settle at their destination without intermediate application frames', () => {
     const { instance, element } = setup(instantTrackDefinition())
 
-    instance.updateParameters({ hover: true, press: false, size: 1 })
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1 })
 
-    expect(instance.animations).toHaveLength(0)
+    expect(nativeEffects(instance.executor)).toHaveLength(0)
     expect(getComputedStyle(element).scale).toBe('2')
   })
 
@@ -344,10 +351,10 @@ describe('reactive layer instances', () => {
     const { instance, element } = setup(instantTrackDefinition())
     const from = { layers: { base: true, hover: false }, states: {} }
     const to = { layers: { base: true, hover: true }, states: {} }
-    instance.previewComposition(from, to)
+    instance.inspection.previewComposition(from, to)
 
     for (const time of [0, 100, 0]) {
-      for (const animation of instance.animations) animation.currentTime = time
+      for (const animation of nativeEffects(instance.executor)) animation.currentTime = time
 
       expect(getComputedStyle(element).scale).toBe('2')
     }
@@ -356,12 +363,12 @@ describe('reactive layer instances', () => {
   it('resolves overlap and interpolation updates while preserving unrelated styles', () => {
     const { instance, element, errors } = setup()
 
-    instance.updateParameters({ hover: true, press: true, size: 1.2 })
+    instance.runtime.updateParameters({ hover: true, press: true, size: 1.2 })
 
     expect(element.style.scale).toBe('0.9')
     expect(element.style.opacity).toBe('0.5')
 
-    instance.updateParameters({ hover: true, press: false, size: 1.3 })
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1.3 })
 
     expect(element.style.scale).toBe('1.3')
     expect(element.style.opacity).toBe('')
@@ -373,7 +380,7 @@ describe('reactive layer instances', () => {
     const first = setup()
     const second = setup()
 
-    first.instance.updateParameters({ hover: true, press: false, size: 1.4 })
+    first.instance.runtime.updateParameters({ hover: true, press: false, size: 1.4 })
 
     expect(first.element.style.scale).toBe('1.4')
     expect(second.element.style.scale).toBe('1')
@@ -382,7 +389,7 @@ describe('reactive layer instances', () => {
   it('exposes the current layer composition', () => {
     const { instance } = setup()
 
-    expect(instance.composition).toEqual({
+    expect(instance.runtime.composition).toEqual({
       layers: { base: true, hover: false, press: false },
       states: {},
     })
@@ -391,21 +398,21 @@ describe('reactive layer instances', () => {
   it('replaces layer definitions using current parameter values', () => {
     const { instance, element } = setup(definition, { hover: true, press: false, size: 1.4 })
 
-    instance.replaceDefinition({ ...definition, layers: definition.layers.slice(0, 1) })
+    instance.runtime.replaceDefinition({ ...definition, layers: definition.layers.slice(0, 1) })
 
     expect(element.style.scale).toBe('1')
   })
 
   it('accepts updates before targets are bound without writing to other elements', () => {
     const { instance, element, errors } = setup()
-    instance.bind([])
+    instance.executor.bind([])
 
-    instance.updateParameters({ hover: true, press: false, size: 1.5 })
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1.5 })
 
     expect(element.style.scale).toBe('')
 
-    instance.bind([['body', element]])
-    instance.updateParameters({ hover: true, press: false, size: 1.5 })
+    instance.executor.bind([['body', element]])
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1.5 })
 
     expect(element.style.scale).toBe('1.5')
     expect(errors[0].code).toBe('runtime.targets')
@@ -413,10 +420,10 @@ describe('reactive layer instances', () => {
 
   it('keeps reactive updates ready while a lifecycle target is absent', () => {
     const { instance, element, errors } = setup({ ...timedDefinition(), enter: { targets: [] } })
-    instance.bind([])
+    instance.executor.bind([])
 
-    instance.updateParameters({ hover: true, press: false, size: 1.6 })
-    instance.bind([['body', element]])
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1.6 })
+    instance.executor.bind([['body', element]])
 
     expect(element.style.scale).toBe('1.6')
     expect(errors).toEqual([])
@@ -481,10 +488,10 @@ describe('reactive layer instances', () => {
     document.body.append(replacement)
     cleanup.push(() => replacement.remove())
     let rebound = false
-    instance.onUpdate = () => {
+    instance.runtime.onUpdate = () => {
       if (!rebound && element.style.opacity === '0.5') {
         rebound = true
-        instance.bind([['body', replacement]])
+        instance.executor.bind([['body', replacement]])
       }
     }
 
@@ -529,14 +536,14 @@ describe('reactive layer instances', () => {
       ),
     }
     const { instance, element, errors } = setup(source)
-    instance.updateParameters({ hover: true, press: false, size: 1.4 })
-    const first = instance.animations[0]
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1.4 })
+    const first = nativeEffects(instance.executor)[0]
     first.pause()
     first.currentTime = 150
     const displayed = Number(getComputedStyle(element).scale)
 
-    instance.updateParameters({ hover: false, press: false, size: 1.4 })
-    const next = instance.animations[0]
+    instance.runtime.updateParameters({ hover: false, press: false, size: 1.4 })
+    const next = nativeEffects(instance.executor)[0]
     next.pause()
     next.currentTime = 0
 
@@ -593,8 +600,8 @@ describe('reactive layer instances', () => {
       ],
     })
 
-    instance.updateParameters({ hover: false, press: true, size: 1 })
-    const animation = instance.animations[0]
+    instance.runtime.updateParameters({ hover: false, press: true, size: 1 })
+    const animation = nativeEffects(instance.executor)[0]
     animation.pause()
     animation.currentTime = 0
 
@@ -632,8 +639,8 @@ describe('reactive layer instances', () => {
       ),
     })
 
-    instance.updateParameters({ hover: true, press: false, size: 1.4 })
-    const animation = instance.animations[0]
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1.4 })
+    const animation = nativeEffects(instance.executor)[0]
 
     expect(animation.effect?.getTiming().easing).toContain('linear(')
 
@@ -644,10 +651,10 @@ describe('reactive layer instances', () => {
   it('settles zero-duration updates without creating effects', () => {
     const { instance, element } = setup(timedDefinition(0))
 
-    instance.updateParameters({ hover: true, press: false, size: 1.4 })
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1.4 })
 
     expect(element.style.scale).toBe('1.4')
-    expect(instance.animations).toEqual([])
+    expect(nativeEffects(instance.executor)).toEqual([])
   })
 
   it('skips animation while reduced motion is enabled', async () => {
@@ -655,10 +662,10 @@ describe('reactive layer instances', () => {
 
     try {
       const { instance, element } = setup(timedDefinition())
-      instance.updateParameters({ hover: true, press: false, size: 1.4 })
+      instance.runtime.updateParameters({ hover: true, press: false, size: 1.4 })
 
       expect(element.style.scale).toBe('1.4')
-      expect(instance.animations).toEqual([])
+      expect(nativeEffects(instance.executor)).toEqual([])
     } finally {
       await setReducedMotion(false)
     }
@@ -666,28 +673,28 @@ describe('reactive layer instances', () => {
 
   it('keeps the resolved destination after external animation cancellation', async () => {
     const { instance, element, errors } = setup(timedDefinition())
-    instance.updateParameters({ hover: true, press: false, size: 1.4 })
-    const animation = instance.animations[0]
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1.4 })
+    const animation = nativeEffects(instance.executor)[0]
 
     animation.cancel()
     await Promise.resolve()
     await Promise.resolve()
 
     expect(element.style.scale).toBe('1.4')
-    expect(instance.animations).toEqual([])
+    expect(nativeEffects(instance.executor)).toEqual([])
     expect(errors[0].code).toBe('runtime.animation')
   })
 
   it('does not apply a stale completion after a newer reactive update', async () => {
     const { instance, element } = setup(timedDefinition())
-    instance.updateParameters({ hover: true, press: false, size: 1.4 })
-    instance.animations[0].finish()
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1.4 })
+    nativeEffects(instance.executor)[0].finish()
 
-    instance.updateParameters({ hover: false, press: false, size: 1.4 })
+    instance.runtime.updateParameters({ hover: false, press: false, size: 1.4 })
     await Promise.resolve()
 
     expect(element.style.scale).toBe('1')
-    expect(instance.animations).toHaveLength(1)
+    expect(nativeEffects(instance.executor)).toHaveLength(1)
   })
 
   it('rolls back prepared effects when a later track has invalid easing', () => {
@@ -749,9 +756,9 @@ describe('reactive layer instances', () => {
     }
     const { instance, element, errors } = setup(source)
 
-    instance.updateParameters({ hover: true, press: false, size: 1 })
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1 })
 
-    expect(instance.animations).toEqual([])
+    expect(nativeEffects(instance.executor)).toEqual([])
     expect(element.style.scale).toBe('1')
     expect(element.style.opacity).toBe('1')
     expect(errors[0].error).toBeInstanceOf(TypeError)
@@ -819,14 +826,14 @@ describe('reactive layer instances', () => {
       ],
     }
     const { instance } = setup(source, { hover: false, press: false, size: 1 })
-    instance.updateParameters({ hover: false, press: false, size: 0.5 })
-    const opacity = instance.animations[0]
+    instance.runtime.updateParameters({ hover: false, press: false, size: 0.5 })
+    const opacity = nativeEffects(instance.executor)[0]
     opacity.pause()
     opacity.currentTime = 100
 
-    instance.updateParameters({ hover: true, press: false, size: 0.5 })
+    instance.runtime.updateParameters({ hover: true, press: false, size: 0.5 })
 
-    expect(instance.animations).toContain(opacity)
+    expect(nativeEffects(instance.executor)).toContain(opacity)
     expect(opacity.currentTime).toBe(100)
     expect(opacity.playState).toBe('paused')
   })
@@ -896,13 +903,13 @@ describe('reactive layer instances', () => {
       ],
     }
     const { instance, element } = setup(source)
-    instance.updateParameters({ hover: true, press: false, size: 1 })
-    const opening = instance.animations[0]
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1 })
+    const opening = nativeEffects(instance.executor)[0]
     opening.pause()
     opening.currentTime = 0
 
-    instance.updateParameters({ hover: false, press: false, size: 1 })
-    const closing = instance.animations[0]
+    instance.runtime.updateParameters({ hover: false, press: false, size: 1 })
+    const closing = nativeEffects(instance.executor)[0]
     closing.pause()
     closing.currentTime = 0
 
@@ -985,8 +992,8 @@ describe('reactive layer instances', () => {
       ],
     }
     const { instance, element, errors } = setup(source)
-    instance.updateParameters({ hover: true, press: false, size: 1 })
-    const animation = instance.animations[0]
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1 })
+    const animation = nativeEffects(instance.executor)[0]
 
     animation.finish()
     await animation.finished
@@ -1081,8 +1088,8 @@ describe('reactive layer instances', () => {
       ],
     }
     const { instance, element, errors } = setup(source)
-    instance.updateParameters({ hover: true, press: false, size: 1 })
-    const opening = instance.animations[0]
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1 })
+    const opening = nativeEffects(instance.executor)[0]
     opening.pause()
     opening.currentTime = 100
 
@@ -1093,8 +1100,8 @@ describe('reactive layer instances', () => {
 
     expect(effect.getKeyframes().some((frame) => frame.scale === '1.2')).toBe(true)
 
-    instance.updateParameters({ hover: false, press: false, size: 1 })
-    const closing = instance.animations[0]
+    instance.runtime.updateParameters({ hover: false, press: false, size: 1 })
+    const closing = nativeEffects(instance.executor)[0]
 
     expect(closing.effect?.getTiming().duration).toBe(75)
 
@@ -1115,7 +1122,7 @@ describe('reactive layer instances', () => {
   it('restores original styles on disposal', () => {
     const { instance, element } = setup()
 
-    instance.dispose()
+    instance.runtime.dispose()
 
     expect(element.style.scale).toBe('')
     expect(element.style.color).toBe('red')
@@ -1176,7 +1183,7 @@ describe('reactive layer instances', () => {
 
     expect(element.style.opacity).toBe('0.5')
 
-    instance.updateParameters({ hover: true, press: false, size: 1 })
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1 })
 
     expect(element.style.opacity).toBe('1')
     expect(errors).toEqual([])
@@ -1190,7 +1197,7 @@ function keyframeEffect(animation: Animation): KeyframeEffect {
 }
 
 /** Inspect only registry ownership; playback and binding remain driven through public APIs. */
-function registeredReceiverElements(instance: LivaInstance): HTMLElement[] {
+function registeredReceiverElements(instance: RuntimeAssembly): HTMLElement[] {
   const executor: unknown = Reflect.get(instance, 'executor')
 
   if (
@@ -1214,7 +1221,7 @@ function registeredReceiverElements(instance: LivaInstance): HTMLElement[] {
   })
 }
 
-function start(phase: 'enter' | 'leave', instance: LivaInstance, element: HTMLElement) {
+function start(phase: 'enter' | 'leave', instance: RuntimeAssembly, element: HTMLElement) {
   const work = capturePresence(instance, phase, ['body'])
   const session = new PresenceOperation(work, phase)
   session.initialize()
@@ -1262,7 +1269,7 @@ describe('layer lifecycle composition', () => {
 
     expect(keyframeEffect(effect).getTiming().duration).toBe(1000)
 
-    instance.updateParameters({ hover: true, press: true, size: 1.4 })
+    instance.runtime.updateParameters({ hover: true, press: true, size: 1.4 })
 
     const replacement = element.getAnimations()[0]
 
@@ -1322,7 +1329,7 @@ describe('layer lifecycle composition', () => {
     expect(effects).toHaveLength(2)
 
     effects[1].currentTime = 500
-    instance.updateParameters({ hover: false, press: false, size: 1 })
+    instance.runtime.updateParameters({ hover: false, press: false, size: 1 })
 
     expect(element.style.scale).toBe('')
 
@@ -1348,10 +1355,13 @@ describe('layer lifecycle composition', () => {
       const session = start('enter', instance, element)
 
       if (operation === 'preview') {
-        instance.previewComposition(instance.composition, instance.composition)
-        instance.endCompositionPreview()
+        instance.inspection.previewComposition(
+          instance.runtime.composition,
+          instance.runtime.composition,
+        )
+        instance.executor.endCompositionPreview()
       } else {
-        instance.replaceDefinition(source)
+        instance.runtime.replaceDefinition(source)
       }
 
       expect(session.isFinished).toBe(true)
@@ -1388,7 +1398,7 @@ describe('layer lifecycle composition', () => {
       const { instance, element } = setup(source, { hover: false, press: true, size: 1 })
       const session = start('enter', instance, element)
 
-      instance.updateParameters({ hover: false, press: false, size: 1 })
+      instance.runtime.updateParameters({ hover: false, press: false, size: 1 })
 
       expect(element.style.scale).toBe('')
 
@@ -1414,13 +1424,13 @@ describe('layer lifecycle composition', () => {
 
   it('preserves enter presentation across target rebinding', async () => {
     const { instance, element } = setup({ ...timedDefinition(), enter: lifecycle })
-    instance.updateParameters({ hover: true, press: false, size: 1.4 })
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1.4 })
     const session = start('enter', instance, element)
     const other = document.createElement('div')
     document.body.append(other)
     cleanup.push(() => other.remove())
 
-    instance.bind([
+    instance.executor.bind([
       ['body', element],
       ['extra', other],
     ])
@@ -1519,7 +1529,7 @@ describe('layer lifecycle composition', () => {
       const other = document.createElement('div')
       document.body.append(other)
       cleanup.push(() => other.remove())
-      instance.bind([
+      instance.executor.bind([
         ['body', element],
         ['body', other],
       ])
@@ -1548,7 +1558,7 @@ describe('layer lifecycle composition', () => {
         }
       }
 
-      instance.updateParameters({ hover: true, press: false, size: 1.4 })
+      instance.runtime.updateParameters({ hover: true, press: false, size: 1.4 })
 
       for (const target of [element, other]) {
         for (const animation of target.getAnimations()) {
@@ -1605,7 +1615,7 @@ describe('layer lifecycle composition', () => {
     const session = start('leave', instance, element)
     const initial = element.getAnimations()[0]
 
-    instance.updateParameters({ hover: true, press: true, size: 1.7 })
+    instance.runtime.updateParameters({ hover: true, press: true, size: 1.7 })
 
     const replacement = element.getAnimations()[0]
 
@@ -1649,13 +1659,13 @@ describe('layer lifecycle composition', () => {
       const { instance, element, errors } = setup(source)
       const work = capturePresence(instance, 'leave', ['body'])
 
-      instance.updateParameters({ hover: false, press: false, size: 1.7 })
+      instance.runtime.updateParameters({ hover: false, press: false, size: 1.7 })
 
       if (operation === 'dispose') {
-        instance.dispose()
+        instance.runtime.dispose()
         element.remove()
       } else {
-        instance.replaceDefinition({ ...source, leave: undefined })
+        instance.runtime.replaceDefinition({ ...source, leave: undefined })
       }
 
       const session = new PresenceOperation(work, 'leave')
@@ -1664,7 +1674,7 @@ describe('layer lifecycle composition', () => {
       session.initialize()
       session.play()
 
-      const animation = instance.animations[0]
+      const animation = nativeEffects(instance.executor)[0]
 
       expect(keyframeEffect(animation).getKeyframes().at(-1)?.scale).toBe('1.7')
 
@@ -1770,7 +1780,7 @@ describe('layer lifecycle composition', () => {
 
       initial.currentTime = 50
 
-      if (disposed) instance.dispose()
+      if (disposed) instance.runtime.dispose()
 
       element.style.width = '200px'
 
@@ -1845,7 +1855,7 @@ describe('layer lifecycle composition', () => {
       .getAnimations()
       .find((animation) => keyframeEffect(animation).getKeyframes()[0]['right'] !== undefined)
 
-    instance.updateParameters({ hover: true, press: false, size: 1.1 })
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1.1 })
 
     const left = element
       .getAnimations()
@@ -1925,7 +1935,7 @@ describe('layer lifecycle composition', () => {
     second.style.cssText = 'position: relative; direction: rtl'
     document.body.append(second)
     cleanup.push(() => second.remove())
-    instance.bind([
+    instance.executor.bind([
       ['body', element],
       ['body', second],
     ])
@@ -1964,7 +1974,7 @@ describe('layer lifecycle composition', () => {
       }
     })
 
-    instance.updateParameters({ hover: true, press: false, size: 1.1 })
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1.1 })
 
     for (const { receiver, unchanged, animation, value } of retained) {
       expect(receiver.getAnimations()).toContain(animation)
@@ -2018,7 +2028,7 @@ describe('layer lifecycle composition', () => {
 
       const work = capturePresence(instance, 'enter', ['body'], { interrupted: rebased })
 
-      instance.updateParameters({ hover: false, press: false, size: 0.3 })
+      instance.runtime.updateParameters({ hover: false, press: false, size: 0.3 })
 
       const session = new PresenceOperation(work, 'enter')
 
@@ -2097,12 +2107,12 @@ describe('layer lifecycle composition', () => {
       await leave.ready
 
       leave.play()
-      instance.previewComposition(instance.composition, {
+      instance.inspection.previewComposition(instance.runtime.composition, {
         layers: { base: true, hover: true, press: false },
         states: {},
       })
 
-      const previews = instance.animations
+      const previews = nativeEffects(instance.executor)
 
       await Promise.all(previews.map((animation) => animation.ready))
 
@@ -2133,7 +2143,7 @@ describe('layer lifecycle composition', () => {
 
       expect(session.isFinished).toBe(false)
       expect(element.style.cssText).toBe(inline.replace('width: 100px', 'width: 200px'))
-      expect(instance.animations).toEqual(previews)
+      expect(nativeEffects(instance.executor)).toEqual(previews)
       expect(getComputedStyle(element).scale).toBe(displayed)
       expect(getComputedStyle(element).translate).toBe(translated)
 
@@ -2142,7 +2152,7 @@ describe('layer lifecycle composition', () => {
       await expect.poll(() => session.isFinished, { timeout: 300 }).toBe(true)
 
       expect(await session.finished).toBe('completed')
-      expect(instance.animations).toEqual(previews)
+      expect(nativeEffects(instance.executor)).toEqual(previews)
 
       for (const animation of previews) {
         expect(animation.playState).toBe('paused')
@@ -2191,7 +2201,7 @@ describe('layer lifecycle composition', () => {
 
       document.body.append(replacement)
       cleanup.push(() => replacement.remove())
-      instance.bind([['body', replacement]])
+      instance.executor.bind([['body', replacement]])
       element.remove()
 
       // Public playback drives ownership; inspect the strong registry to prove retirement,
@@ -2202,7 +2212,10 @@ describe('layer lifecycle composition', () => {
       expect(session.isFinished).toBe(false)
 
       if (ending.startsWith('preview'))
-        instance.previewComposition(instance.composition, instance.composition)
+        instance.inspection.previewComposition(
+          instance.runtime.composition,
+          instance.runtime.composition,
+        )
 
       const failure = new Error('restoration failed')
       const restore =
@@ -2223,11 +2236,11 @@ describe('layer lifecycle composition', () => {
           ending.startsWith('preview') ? [element, replacement] : [replacement],
         )
 
-        if (ending.startsWith('preview')) instance.endCompositionPreview()
+        if (ending.startsWith('preview')) instance.executor.endCompositionPreview()
 
         expect(registered()).toEqual([replacement])
 
-        instance.bind([['body', replacement]])
+        instance.executor.bind([['body', replacement]])
 
         expect(registered()).toEqual([replacement])
         expect(element.getAnimations()).toEqual([])
@@ -2252,7 +2265,7 @@ describe('layer lifecycle composition', () => {
 
     document.body.append(replacement)
     cleanup.push(() => replacement.remove())
-    instance.bind([
+    instance.executor.bind([
       ['body', replacement],
       ['alias', element],
     ])
@@ -2262,7 +2275,7 @@ describe('layer lifecycle composition', () => {
 
     expect(registeredReceiverElements(instance)).toEqual([element, replacement])
 
-    instance.bind([['body', replacement]])
+    instance.executor.bind([['body', replacement]])
 
     expect(registeredReceiverElements(instance)).toEqual([replacement])
   })
@@ -2303,7 +2316,7 @@ describe('layer lifecycle composition', () => {
 
     document.body.append(replacement)
     cleanup.push(() => replacement.remove())
-    instance.bind([['body', replacement]])
+    instance.executor.bind([['body', replacement]])
     element.remove()
     scale.finish()
 
@@ -2373,12 +2386,12 @@ describe('layer lifecycle composition', () => {
       const session = start('leave', instance, element)
       const leave = element.getAnimations()[0]
 
-      instance.previewComposition(instance.composition, {
+      instance.inspection.previewComposition(instance.runtime.composition, {
         layers: { base: true, hover: true, press: false },
         states: {},
       })
 
-      const previews = instance.animations
+      const previews = nativeEffects(instance.executor)
 
       expect(previews.length).toBeGreaterThan(0)
       expect(previews).not.toContain(leave)
@@ -2396,7 +2409,7 @@ describe('layer lifecycle composition', () => {
 
       expect(await session.finished).toBe('completed')
       expect(element.getAnimations()).not.toContain(leave)
-      expect(instance.animations).toEqual(previews)
+      expect(nativeEffects(instance.executor)).toEqual(previews)
       expect(getComputedStyle(element).scale).toBe(displayed)
 
       for (const animation of previews) {
@@ -2412,7 +2425,7 @@ describe('layer lifecycle composition', () => {
 
       expect(Number(getComputedStyle(element).scale)).toBeLessThan(Number(displayed))
 
-      instance.endCompositionPreview()
+      instance.executor.endCompositionPreview()
 
       expect(element.getAnimations()).toEqual([])
       expect(element.style.scale).toBe('1')
@@ -2546,7 +2559,7 @@ describe('layer lifecycle composition', () => {
     }
     const { instance, element, errors } = setup(source)
 
-    instance.updateParameters({ hover: true, press: false, size: 1 })
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1 })
 
     for (const animation of element.getAnimations()) animation.finish()
 
@@ -2614,9 +2627,9 @@ describe('layer lifecycle composition', () => {
           ],
         },
       }
-      const instance = new LivaInstance(source)
+      const instance = assembleRuntime(source)
 
-      instance.bind([['body', element]])
+      instance.executor.bind([['body', element]])
 
       const inset = capturePresence(instance, 'leave', ['body'], { properties: ['inset'] })
       const scale = new PresenceOperation(
@@ -2632,7 +2645,7 @@ describe('layer lifecycle composition', () => {
           session.play()
         }
 
-        instance.dispose()
+        instance.runtime.dispose()
 
         for (const animation of element.getAnimations()) {
           animation.pause()
@@ -2672,7 +2685,7 @@ describe('layer lifecycle composition', () => {
         first.cancel('owner-teardown')
         next?.cancel('owner-teardown')
         scale.cancel('owner-teardown')
-        instance.dispose()
+        instance.runtime.dispose()
         element.remove()
       }
     },
@@ -2719,7 +2732,7 @@ describe('layer lifecycle composition', () => {
 
     document.body.append(other)
     cleanup.push(() => other.remove())
-    instance.bind([
+    instance.executor.bind([
       ['body', element],
       ['other', other],
     ])
@@ -2727,7 +2740,7 @@ describe('layer lifecycle composition', () => {
     const session = start('enter', instance, element)
     const enter = element.getAnimations()[0]
 
-    instance.updateParameters({ hover: true, press: false, size: 1 })
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1 })
 
     const ordinary = other.getAnimations()[0]
 
@@ -2779,7 +2792,7 @@ describe('layer lifecycle composition', () => {
     document.body.append(other)
     cleanup.push(() => other.remove())
 
-    instance.bind([
+    instance.executor.bind([
       ['body', element],
       ['extra', other],
     ])
@@ -2837,7 +2850,7 @@ describe('layer lifecycle composition', () => {
         cleanup.push(() => receiver.remove())
       }
 
-      instance.bind(receivers.map((receiver) => ['body', receiver] as const))
+      instance.executor.bind(receivers.map((receiver) => ['body', receiver] as const))
 
       const session = new PresenceOperation(
         receivers.flatMap((receiver) =>
@@ -2862,7 +2875,7 @@ describe('layer lifecycle composition', () => {
         })
 
       try {
-        instance.updateParameters({ hover: false, press: false, size: 2 })
+        instance.runtime.updateParameters({ hover: false, press: false, size: 2 })
 
         expect(session.isFinished).toBe(false)
 
@@ -2923,9 +2936,9 @@ describe('layer lifecycle composition', () => {
     session.initialize()
     session.play()
 
-    const original = [...instance.animations]
+    const original = [...nativeEffects(instance.executor)]
     const properties = () =>
-      instance.animations
+      nativeEffects(instance.executor)
         .flatMap((animation) =>
           Object.keys(keyframeEffect(animation).getKeyframes()[0]).filter((property) =>
             ['left', 'right', 'top', 'bottom'].includes(property),
@@ -2940,13 +2953,15 @@ describe('layer lifecycle composition', () => {
     await expect
       .poll(() => ({
         properties: properties(),
-        replaced: !instance.animations.some((animation) => original.includes(animation)),
+        replaced: !nativeEffects(instance.executor).some((animation) =>
+          original.includes(animation),
+        ),
       }))
       .toEqual({ properties: ['left', 'right'], replaced: true })
 
     expect(session.isFinished).toBe(false)
 
-    const beforeContext = [...instance.animations]
+    const beforeContext = [...nativeEffects(instance.executor)]
 
     element.style.writingMode = 'vertical-rl'
     container.style.width = '600px'
@@ -2958,7 +2973,7 @@ describe('layer lifecycle composition', () => {
     ).toBe(true)
     expect(session.isFinished).toBe(false)
 
-    for (const animation of instance.animations) animation.finish()
+    for (const animation of nativeEffects(instance.executor)) animation.finish()
 
     expect(await session.finished).toBe('completed')
     expect(errors).toEqual([])
@@ -3061,7 +3076,7 @@ describe('layer lifecycle composition', () => {
 
       if (!left || !opacity) throw new Error('Expected independent enter tracks')
 
-      instance.updateParameters({ hover, press: false, size })
+      instance.runtime.updateParameters({ hover, press: false, size })
 
       await Promise.resolve()
 
@@ -3107,7 +3122,7 @@ describe('layer lifecycle composition', () => {
     const session = start('leave', instance, element)
     const effect = element.getAnimations()[0]
 
-    instance.updateParameters({ hover: true, press: true, size: 1.4 })
+    instance.runtime.updateParameters({ hover: true, press: true, size: 1.4 })
 
     expect(element.getAnimations()).toContain(effect)
 
@@ -3129,13 +3144,13 @@ describe('composition preview sessions', () => {
   it('scrubs both directions without changing application composition and restores on end', async () => {
     const { instance, element, errors } = setup(timedDefinition(200))
 
-    instance.previewComposition(from, to)
-    const animation = instance.animations[0]
+    instance.inspection.previewComposition(from, to)
+    const animation = nativeEffects(instance.executor)[0]
     await animation.ready
     animation.currentTime = 100
 
     expect(Number(getComputedStyle(element).scale)).toBeGreaterThan(1)
-    expect(instance.composition).toEqual(from)
+    expect(instance.runtime.composition).toEqual(from)
 
     animation.currentTime = 200
     expect(Number(getComputedStyle(element).scale)).toBeCloseTo(1.1)
@@ -3143,9 +3158,9 @@ describe('composition preview sessions', () => {
     animation.currentTime = 0
     expect(Number(getComputedStyle(element).scale)).toBeCloseTo(1)
 
-    instance.endCompositionPreview()
+    instance.executor.endCompositionPreview()
 
-    expect(instance.animations).toHaveLength(0)
+    expect(nativeEffects(instance.executor)).toHaveLength(0)
     expect(element.style.scale).toBe('1')
     expect(errors).toEqual([])
   })
@@ -3153,7 +3168,7 @@ describe('composition preview sessions', () => {
   it('isolates candidate definitions and restores the latest input update', () => {
     const first = setup(timedDefinition())
     const second = setup(timedDefinition())
-    const original = first.instance.definition
+    const original = first.instance.runtime.definition
     const candidate: Definition = {
       ...original,
       layers: original.layers?.map((layer) =>
@@ -3179,16 +3194,16 @@ describe('composition preview sessions', () => {
       ),
     }
 
-    first.instance.previewComposition(from, to, [], candidate)
+    first.instance.inspection.previewComposition(from, to, [], candidate)
 
-    expect(first.instance.definition).toBe(original)
-    expect(second.instance.animations).toHaveLength(0)
+    expect(first.instance.runtime.definition).toBe(original)
+    expect(nativeEffects(second.instance.executor)).toHaveLength(0)
     expect(second.element.style.scale).toBe('1')
 
-    first.instance.updateParameters({ hover: true, press: false, size: 1.4 })
-    first.instance.endCompositionPreview()
+    first.instance.runtime.updateParameters({ hover: true, press: false, size: 1.4 })
+    first.instance.executor.endCompositionPreview()
 
-    expect(first.instance.composition).toEqual(to)
+    expect(first.instance.runtime.composition).toEqual(to)
     expect(first.element.style.scale).toBe('1.4')
   })
 
@@ -3202,10 +3217,10 @@ describe('composition preview sessions', () => {
     const off = { layers: { hover: false, press: false }, states: {} }
     const on = { layers: { hover: true, press: false }, states: {} }
 
-    instance.previewComposition(off, on)
+    instance.inspection.previewComposition(off, on)
     expect(element.style.scale).toBe('1.1')
 
-    instance.endCompositionPreview()
+    instance.executor.endCompositionPreview()
     expect(element.style.scale).toBe('0.7')
   })
 
@@ -3265,22 +3280,22 @@ describe('composition preview sessions', () => {
     const idle = { layers: {}, states: { machine: 'idle' } }
     const done = { layers: {}, states: { machine: 'done' } }
 
-    instance.previewComposition(done, idle)
-    instance.endCompositionPreview()
-    instance.updateParameters({ hover: false, press: false, size: 1.1 })
+    instance.inspection.previewComposition(done, idle)
+    instance.executor.endCompositionPreview()
+    instance.runtime.updateParameters({ hover: false, press: false, size: 1.1 })
 
-    expect(instance.composition).toEqual(done)
+    expect(instance.runtime.composition).toEqual(done)
   })
 
   it('releases preview effects on unmount and rejects further previews', () => {
     const { instance, element } = setup(timedDefinition())
 
-    instance.previewComposition(from, to)
-    instance.dispose()
+    instance.inspection.previewComposition(from, to)
+    instance.runtime.dispose()
 
-    expect(instance.animations).toHaveLength(0)
+    expect(nativeEffects(instance.executor)).toHaveLength(0)
     expect(element.style.scale).toBe('')
-    expect(() => instance.previewComposition(from, to)).toThrow('mounted layer instance')
+    expect(() => instance.inspection.previewComposition(from, to)).toThrow('mounted layer instance')
   })
 
   it('keeps paused scrubbing available across reduced-motion changes', async () => {
@@ -3289,8 +3304,8 @@ describe('composition preview sessions', () => {
     await setReducedMotion(true)
 
     try {
-      instance.previewComposition(from, to)
-      const animation = instance.animations[0]
+      instance.inspection.previewComposition(from, to)
+      const animation = nativeEffects(instance.executor)[0]
       await animation.ready
       animation.currentTime = 100
 
@@ -3302,7 +3317,7 @@ describe('composition preview sessions', () => {
 
       expect(Number(getComputedStyle(element).scale)).toBeCloseTo(1)
     } finally {
-      instance.endCompositionPreview()
+      instance.executor.endCompositionPreview()
       await setReducedMotion(false)
     }
   })
@@ -3335,8 +3350,8 @@ describe('composition preview sessions', () => {
       ),
     })
 
-    instance.previewComposition(from, to)
-    const animation = instance.animations[0]
+    instance.inspection.previewComposition(from, to)
+    const animation = nativeEffects(instance.executor)[0]
     await animation.ready
     animation.currentTime = 400
 
@@ -3349,22 +3364,22 @@ describe('composition preview sessions', () => {
   it('ends previews when targets are removed', () => {
     const { instance, element } = setup(timedDefinition())
 
-    instance.previewComposition(from, to)
-    instance.bind([])
+    instance.inspection.previewComposition(from, to)
+    instance.executor.bind([])
 
     expect(element.style.scale).toBe('')
-    expect(instance.animations).toHaveLength(0)
-    expect(() => instance.previewComposition(from, to)).toThrow('mounted layer instance')
+    expect(nativeEffects(instance.executor)).toHaveLength(0)
+    expect(() => instance.inspection.previewComposition(from, to)).toThrow('mounted layer instance')
   })
 
   it('ends previews when the definition is replaced', () => {
     const { instance, element } = setup(timedDefinition())
 
-    instance.previewComposition(from, to)
-    instance.replaceDefinition(definition)
+    instance.inspection.previewComposition(from, to)
+    instance.runtime.replaceDefinition(definition)
 
     expect(element.style.scale).toBe('1')
-    expect(instance.animations).toHaveLength(0)
+    expect(nativeEffects(instance.executor)).toHaveLength(0)
   })
 
   it('animates equal compositions with intermediate style motion', async () => {
@@ -3408,8 +3423,8 @@ describe('composition preview sessions', () => {
     })
     const composition = { layers: { base: true }, states: {} }
 
-    instance.previewComposition(composition, composition)
-    const animation = instance.animations[0]
+    instance.inspection.previewComposition(composition, composition)
+    const animation = nativeEffects(instance.executor)[0]
     await animation.ready
     animation.currentTime = 100
 
@@ -3477,7 +3492,9 @@ describe('composition preview sessions', () => {
     })
     const composition = { layers: {}, states: { machine: 'idle' } }
 
-    instance.previewComposition(composition, composition, [{ layer: 'machine', index: 0 }])
+    instance.inspection.previewComposition(composition, composition, [
+      { layer: 'machine', index: 0 },
+    ])
 
     expect(errors.at(-1)?.code).toBe('runtime.endpoint')
   })
@@ -3511,11 +3528,11 @@ describe('composition preview sessions', () => {
     const before = { ...from, layers: { ...from.layers, optional: true } }
     const after = { ...to, layers: { ...to.layers, optional: true } }
 
-    instance.previewComposition(before, after)
+    instance.inspection.previewComposition(before, after)
 
-    expect(instance.animations).toHaveLength(1)
+    expect(nativeEffects(instance.executor)).toHaveLength(1)
 
-    instance.endCompositionPreview()
+    instance.executor.endCompositionPreview()
 
     expect(element.style.scale).toBe('1')
   })
@@ -3579,13 +3596,13 @@ describe('composition preview sessions', () => {
     )
 
     try {
-      expect(() => instance.previewComposition(from, to)).toThrow(
+      expect(() => instance.inspection.previewComposition(from, to)).toThrow(
         'Could not prepare composition preview',
       )
       expect(cancellations).toHaveLength(1)
       expect(cancellations[0]).toHaveBeenCalledExactlyOnceWith()
       expect(element.getAnimations()).toHaveLength(0)
-      expect(instance.animations).toHaveLength(0)
+      expect(nativeEffects(instance.executor)).toHaveLength(0)
       expect(errors.at(-1)?.error).toMatchObject({ cause: original })
       expect(element.style.scale).toBe('1')
     } finally {
@@ -3604,11 +3621,11 @@ describe('composition preview sessions', () => {
     )
 
     try {
-      expect(() => instance.previewComposition(from, to)).toThrow(
+      expect(() => instance.inspection.previewComposition(from, to)).toThrow(
         'Could not prepare composition preview',
       )
       expect(errors.at(-1)?.error).toMatchObject({ cause: original })
-      expect(instance.animations).toHaveLength(0)
+      expect(nativeEffects(instance.executor)).toHaveLength(0)
       expect(element.style.scale).toBe('1')
     } finally {
       vi.unstubAllGlobals()
@@ -3673,8 +3690,8 @@ describe('typed timing playback', () => {
       }
       const { instance, element } = setup(source, { amount: 0, count: 2 })
 
-      instance.updateParameters({ amount: 1, count: 2 })
-      const animation = instance.animations[0]
+      instance.runtime.updateParameters({ amount: 1, count: 2 })
+      const animation = nativeEffects(instance.executor)[0]
       await animation.ready
       animation.pause()
       animation.currentTime = 0
@@ -3739,7 +3756,7 @@ describe('typed timing playback', () => {
     }
     const { instance, element, errors } = setup(source, { amount: 0.25, count: 4, position: 'end' })
 
-    instance.updateParameters({ amount: 0.75, count: 4, position: 'start' })
+    instance.runtime.updateParameters({ amount: 0.75, count: 4, position: 'start' })
 
     expect(element.style.opacity).toBe('0.75')
     expect(element.style.getPropertyValue('--position')).toBe('start')
@@ -3749,7 +3766,7 @@ describe('typed timing playback', () => {
       { count: 1, position: 'jump-none' },
       { count: 2, position: 'middle' },
     ]) {
-      instance.updateParameters({ amount: 1, ...args })
+      instance.runtime.updateParameters({ amount: 1, ...args })
 
       expect(errors.at(-1)?.code).toBe('runtime.expression')
       expect(element.style.opacity).toBe('0.75')
@@ -3758,12 +3775,12 @@ describe('typed timing playback', () => {
 
     expect(errors).toHaveLength(3)
 
-    instance.replaceDefinition(structuredClone(source))
+    instance.runtime.replaceDefinition(structuredClone(source))
 
     expect(element.style.opacity).toBe('0.75')
     expect(element.style.getPropertyValue('--position')).toBe('start')
 
-    instance.updateParameters({ amount: 0.5, count: 2, position: 'end' })
+    instance.runtime.updateParameters({ amount: 0.5, count: 2, position: 'end' })
 
     expect(element.style.opacity).toBe('0.5')
     expect(element.style.getPropertyValue('--position')).toBe('end')
@@ -3840,12 +3857,12 @@ describe('typed timing playback', () => {
     }
     const { instance, element } = setup(source, { duration: 400, bounce: 0.25 })
 
-    instance.previewComposition(
+    instance.inspection.previewComposition(
       { layers: {}, states: { machine: 'idle' } },
       { layers: {}, states: { machine: 'active' } },
       [{ layer: 'machine', index: 0 }],
     )
-    const animation = instance.animations[0]
+    const animation = nativeEffects(instance.executor)[0]
     await animation.ready
 
     expect(animation.effect?.getTiming().duration).toBe(400)
@@ -3856,7 +3873,7 @@ describe('typed timing playback', () => {
     animation.currentTime = 400
     expect(Number(getComputedStyle(element).opacity)).toBeCloseTo(1)
 
-    instance.endCompositionPreview()
+    instance.executor.endCompositionPreview()
     expect(element.style.opacity).toBe('0')
   })
 })
@@ -3910,26 +3927,26 @@ describe('composition lifecycle previews', () => {
     badge.style.opacity = '0.6'
     document.body.append(badge)
     cleanup.push(() => badge.remove())
-    instance.bind([
+    instance.executor.bind([
       ['body', element],
       ['badge', badge],
     ])
 
-    instance.previewLifecycle('leave', {
+    instance.inspection.previewLifecycle('leave', {
       layers: { base: true, hover: false, press: false },
       states: {},
     })
 
-    await Promise.all(instance.animations.map((animation) => animation.ready))
+    await Promise.all(nativeEffects(instance.executor).map((animation) => animation.ready))
 
-    for (const animation of instance.animations) animation.currentTime = 100
+    for (const animation of nativeEffects(instance.executor)) animation.currentTime = 100
 
     expect(Number(getComputedStyle(badge).opacity)).toBeCloseTo(0.3)
     expect(Number(getComputedStyle(element).scale)).toBeCloseTo(0.5)
 
-    instance.updateParameters({ hover: true, press: false, size: 1.4 })
+    instance.runtime.updateParameters({ hover: true, press: false, size: 1.4 })
 
-    expect(instance.animations).toHaveLength(0)
+    expect(nativeEffects(instance.executor)).toHaveLength(0)
     expect(badge.style.opacity).toBe('0.6')
     expect(element.style.scale).toBe('1.4')
   })
@@ -3962,11 +3979,11 @@ describe('composition lifecycle previews', () => {
       }
       const { instance, element } = setup(source)
       const baseline = { layers: { base: true, hover: true, press: false }, states: {} }
-      const original = instance.composition
+      const original = instance.runtime.composition
 
-      instance.previewLifecycle(phase, baseline)
+      instance.inspection.previewLifecycle(phase, baseline)
 
-      const animation = instance.animations[0]
+      const animation = nativeEffects(instance.executor)[0]
 
       await animation.ready
 
@@ -3974,7 +3991,7 @@ describe('composition lifecycle previews', () => {
 
       expect(Number(getComputedStyle(element).scale)).toBeGreaterThan(0)
       expect(Number(getComputedStyle(element).scale)).toBeLessThan(1.1)
-      expect(instance.composition).toEqual(original)
+      expect(instance.runtime.composition).toEqual(original)
       expect(element.isConnected).toBe(true)
 
       animation.currentTime = 200
@@ -3985,10 +4002,10 @@ describe('composition lifecycle previews', () => {
 
       expect(Number(getComputedStyle(element).scale)).toBeCloseTo(phase === 'enter' ? 0 : 1.1)
 
-      instance.endCompositionPreview()
+      instance.executor.endCompositionPreview()
 
       expect(element.style.scale).toBe('1')
-      expect(instance.animations).toHaveLength(0)
+      expect(nativeEffects(instance.executor)).toHaveLength(0)
     },
   )
 })

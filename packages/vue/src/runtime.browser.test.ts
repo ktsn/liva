@@ -14,7 +14,7 @@ import fixture from '../../../fixtures/toggle.json'
 import reactiveFixture from '../../../fixtures/reactive-toggle.json'
 import { decodeBundle, type Definition, type RuntimeDiagnostic } from '@liva/runtime'
 import * as functions from '../../runtime/src/builtins/index.ts'
-import { createLivaPlugin, type InstanceBinding } from './runtime.ts'
+import { createLivaPlugin, type InstanceBinding, type LivaOptions } from './runtime.ts'
 
 vi.mock('../../runtime/src/builtins/index.ts', { spy: true })
 
@@ -32,6 +32,7 @@ async function mount(
   reactive = false,
   initial?: string | Record<string, unknown> | null,
   override?: Definition,
+  source?: LivaOptions['source'],
 ) {
   const value = ref<string | Record<string, unknown> | null | undefined>(
     reactive ? { checked: false } : initial === undefined ? { mode: 'off' } : initial,
@@ -76,6 +77,7 @@ async function mount(
 
   const app = createApp(component).use(
     createLivaPlugin({
+      source,
       observe: (event, binding) => records.push({ event, binding }),
       onDiagnostic: (error) => errors.push(error),
     }),
@@ -87,10 +89,67 @@ async function mount(
   await nextTick()
   await Promise.resolve()
 
-  return { value, name, shown, target, records, errors, host }
+  return { value, name, shown, target, records, errors, host, app }
 }
 
 describe('Vue motion directives', () => {
+  it.each([undefined, 'Accessible motion'])(
+    'publishes label metadata after created-hook DOM setup and reads fresh bounds on demand: %s',
+    async (label) => {
+      const records: InstanceBinding[] = []
+      const component = defineComponent({
+        livaDefinitions: [{ name: 'metadata', layers: [] }],
+        setup() {
+          const directive = resolveDirective('liva')!
+
+          return () =>
+            withDirectives(h('div', { 'aria-label': label, style: { width: '24px' } }, 'Ready'), [
+              [directive, undefined, 'metadata'],
+            ])
+        },
+      })
+      const host = document.createElement('div')
+      document.body.append(host)
+      hosts.push(host)
+      const app = createApp(component).use(
+        createLivaPlugin({
+          observe(event, binding) {
+            if (event === 'mount') records.push(binding)
+          },
+        }),
+      )
+      apps.push(app)
+
+      app.mount(host)
+
+      await nextTick()
+
+      const binding = records[0]
+      const element = host.firstElementChild
+      if (!(element instanceof HTMLElement)) throw new Error('Expected mounted motion root')
+      const read = vi.spyOn(element, 'getBoundingClientRect')
+
+      expect(binding.label).toBe(label ?? 'metadata Ready')
+      expect(Object.hasOwn(binding, 'root')).toBe(false)
+      expect(Object.hasOwn(binding, 'executor')).toBe(false)
+      expect(Object.values(binding).some((value) => value instanceof HTMLElement)).toBe(false)
+      expect(read).not.toHaveBeenCalled()
+
+      expect(binding.bounds()?.width).toBe(24)
+      element.style.width = '48px'
+      expect(binding.bounds()?.width).toBe(48)
+      expect(read).toHaveBeenCalledTimes(2)
+
+      app.unmount()
+
+      apps.splice(apps.indexOf(app), 1)
+
+      expect(binding.bounds()).toBeUndefined()
+      expect(read).toHaveBeenCalledTimes(2)
+      read.mockRestore()
+    },
+  )
+
   it('mounts targets, updates inputs, rejects invalid parameters and disposes removed roots', async () => {
     const { value, shown, records, errors, host } = await mount()
     const runtime = records[0].binding.runtime
@@ -116,8 +175,80 @@ describe('Vue motion directives', () => {
     await nextTick()
 
     expect(records.at(-1)?.event).toBe('unmount')
-    expect(records[0].binding.executor.animations).toEqual([])
+    expect(runtime.isDisposed).toBe(true)
     expect(host.querySelector('[data-target]')).toBeNull()
+  })
+
+  it('unregisters observer metadata and bounds and cleans native effects after a call disposer fails', async () => {
+    const failure = new Error('Call disposer failed')
+    const factory = vi.spyOn(functions, 'callBuiltin').mockReturnValue({
+      value: 1,
+      bind: () => () => {},
+      prepareUpdate: () => ({ value: 1, commit() {}, discard() {} }),
+      dispose() {
+        throw failure
+      },
+    })
+    const source = {
+      ...definition,
+      letBindings: [
+        {
+          name: 'value',
+          initializer: { kind: 'call' as const, function: 'resource', arguments: [] },
+        },
+      ],
+    }
+
+    try {
+      const { records, errors, host, value, app } = await mount(false, undefined, source)
+      const binding = records[0].binding
+      value.value = { mode: 'on' }
+
+      await nextTick()
+
+      const effects = host.getAnimations({ subtree: true })
+      for (const effect of effects) effect.pause()
+      expect(effects.length).toBeGreaterThan(0)
+
+      apps.splice(apps.indexOf(app), 1)
+      app.unmount()
+
+      expect(records.at(-1)?.event).toBe('unmount')
+      expect(records.at(-1)?.binding).toBe(binding)
+      expect(binding.bounds()).toBeUndefined()
+      expect(host.getAnimations({ subtree: true })).toEqual([])
+      expect(errors.map(({ code, error }) => ({ code, error }))).toEqual([
+        { code: 'vue.disposal', error: failure },
+      ])
+    } finally {
+      factory.mockRestore()
+    }
+  })
+
+  it('reports source metadata extraction failure before constructing application resources', async () => {
+    const failure = new Error('Source metadata failed')
+    const factory = vi.spyOn(functions, 'callBuiltin')
+    const source: Definition = {
+      name: 'metadata-failure',
+      layers: [],
+      letBindings: [
+        { name: 'value', initializer: { kind: 'call', function: 'resource', arguments: [] } },
+      ],
+    }
+
+    try {
+      const { records, errors } = await mount(false, {}, source, () => {
+        throw failure
+      })
+
+      expect(records).toEqual([])
+      expect(factory).not.toHaveBeenCalled()
+      expect(errors.map(({ code, error }) => ({ code, error }))).toEqual([
+        { code: 'vue.initialization', error: failure },
+      ])
+    } finally {
+      factory.mockRestore()
+    }
   })
 
   it.each([false, true])(
@@ -221,13 +352,13 @@ describe('Vue motion directives', () => {
     async (inputs) => {
       const { errors, records } = await mount(false, inputs)
 
+      expect(records).toEqual([])
       expect(errors).toContainEqual(
         expect.objectContaining({
           code: 'vue.initialization',
           error: expect.objectContaining({ message: 'Motion inputs must be a parameter object' }),
         }),
       )
-      expect(records).toEqual([])
     },
   )
 

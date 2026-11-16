@@ -1,3 +1,9 @@
+import * as functions from '../builtins/index.ts'
+import {
+  assembleRuntime,
+  nativeEffects,
+  type RuntimeAssembly,
+} from '../__test__/helpers/assembly.ts'
 import { capturePresence } from '../__test__/helpers/presence.ts'
 import type { Definition as PropertyIRDefinition } from '../model/definition.ts'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
@@ -10,11 +16,13 @@ import reactiveFixture from '../../../../fixtures/reactive-toggle.json'
 import cardFixture from '../../../../fixtures/card.json'
 import { layerTargets } from '../composition/layers.ts'
 import { decodeBundle } from '../model/definition.ts'
-import { LivaInstance, type RuntimeDiagnostic } from './instance.ts'
+import type { RuntimeDiagnostic } from './execution-contracts.ts'
 import { PresenceOperation } from './presence-operation.ts'
 
+vi.mock('../builtins/index.ts', { spy: true })
+
 const definition = decodeBundle(JSON.stringify(fixture)).definitions[0]
-const instances: LivaInstance[] = []
+const instances: RuntimeAssembly[] = []
 const elements: HTMLElement[] = []
 
 function setup(
@@ -24,7 +32,7 @@ function setup(
     : {},
 ) {
   const errors: RuntimeDiagnostic[] = []
-  const instance = new LivaInstance(def, inputs, (error) => errors.push(error))
+  const instance = assembleRuntime(def, inputs, (error) => errors.push(error))
   const targets = new Map(
     layerTargets(def).map(({ name }) => {
       const element = document.createElement('div')
@@ -36,16 +44,16 @@ function setup(
   )
 
   instances.push(instance)
-  instance.bind([...targets])
+  instance.executor.bind([...targets])
 
   return { instance, targets, errors }
 }
 
-function updateMode(instance: LivaInstance, mode: string, options: { paused?: boolean } = {}) {
-  instance.updateParameters({ mode })
+function updateMode(instance: RuntimeAssembly, mode: string, options: { paused?: boolean } = {}) {
+  instance.runtime.updateParameters({ mode })
 
   if (options.paused) {
-    for (const animation of instance.animations) animation.pause()
+    for (const animation of nativeEffects(instance.executor)) animation.pause()
   }
 }
 
@@ -120,7 +128,7 @@ const lifecyclePolicyDefinition: PropertyIRDefinition = {
 }
 
 function startRegisteredLifecycle(
-  instance: LivaInstance,
+  instance: RuntimeAssembly,
   phase: 'enter' | 'leave',
   target: string,
 ) {
@@ -132,14 +140,16 @@ function startRegisteredLifecycle(
   return session
 }
 
-function capturedLeaveEffect(instance: LivaInstance) {
-  const previous = new Set(instance.animations)
+function capturedLeaveEffect(instance: RuntimeAssembly) {
+  const previous = new Set(nativeEffects(instance.executor))
   const operation = new PresenceOperation(capturePresence(instance, 'leave', ['thumb']), 'leave')
 
   try {
     operation.play()
 
-    const effect = instance.animations.find((animation) => !previous.has(animation))?.effect
+    const effect = nativeEffects(instance.executor).find(
+      (animation) => !previous.has(animation),
+    )?.effect
 
     if (!(effect instanceof KeyframeEffect)) throw new Error('Expected captured native effect')
 
@@ -191,18 +201,115 @@ function setupRepeatedThumb() {
 
   document.body.append(second)
   elements.push(second)
-  instance.bind([...targets, ['thumb', second]])
+  instance.executor.bind([...targets, ['thumb', second]])
 
   return { instance, targets, first, second, errors }
 }
 
 afterEach(() => {
-  for (const instance of instances.splice(0)) instance.dispose()
+  for (const instance of instances.splice(0)) instance.runtime.dispose()
 
   for (const element of elements.splice(0)) element.remove()
 })
 
 describe('browser animation execution', () => {
+  it('releases ordinary native effects and logical callbacks when a call disposer fails', () => {
+    const failure = new Error('Call disposal failed')
+    const factory = vi.spyOn(functions, 'callBuiltin').mockReturnValue({
+      value: 1,
+      bind: () => () => {},
+      prepareUpdate: () => ({ value: 1, commit() {}, discard() {} }),
+      dispose() {
+        throw failure
+      },
+    })
+    const source = {
+      ...definition,
+      letBindings: [
+        {
+          name: 'value',
+          initializer: { kind: 'call' as const, function: 'resource', arguments: [] },
+        },
+      ],
+    }
+    const { instance, targets } = setup(source)
+
+    try {
+      updateMode(instance, 'on', { paused: true })
+      expect(nativeEffects(instance.executor).length).toBeGreaterThan(0)
+
+      expect(() => instance.runtime.dispose()).toThrow(failure)
+
+      expect(nativeEffects(instance.executor)).toEqual([])
+      expect([...targets.values()].every((element) => element.getAnimations().length === 0)).toBe(
+        true,
+      )
+      expect(instance.runtime.onEvent).toBeUndefined()
+      expect(instance.runtime.onUpdate).toBeUndefined()
+      expect(instance.runtime.isDisposed).toBe(true)
+    } finally {
+      factory.mockRestore()
+    }
+  })
+
+  it('keeps captured detached leave functional after logical call disposal fails', async () => {
+    const failure = new Error('Call disposal failed')
+    const factory = vi.spyOn(functions, 'callBuiltin').mockReturnValue({
+      value: 1,
+      bind: () => () => {},
+      prepareUpdate: () => ({ value: 1, commit() {}, discard() {} }),
+      dispose() {
+        throw failure
+      },
+    })
+    const source = {
+      ...definition,
+      letBindings: [
+        {
+          name: 'value',
+          initializer: { kind: 'call' as const, function: 'resource', arguments: [] },
+        },
+      ],
+      leave: {
+        timing: { kind: 'tween' as const, durationMs: 1000, easing: 'linear' },
+        targets: [
+          {
+            name: 'thumb',
+            properties: [
+              {
+                name: 'opacity',
+                keyframes: [
+                  { offset: 0, value: { kind: 'literal' as const, value: '1' } },
+                  { offset: 1, value: { kind: 'literal' as const, value: '0' } },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const { instance, targets } = setup(source)
+    const captures = capturePresence(instance, 'leave', ['thumb'])
+
+    try {
+      expect(() => instance.runtime.dispose()).toThrow(failure)
+      targets.get('thumb')!.remove()
+      const leave = new PresenceOperation(captures, 'leave')
+      leave.play()
+      const effects = nativeEffects(instance.executor)
+
+      expect(effects).toHaveLength(1)
+      effects[0].finish()
+
+      await expect(leave.finished).resolves.toBe('completed')
+
+      expect(nativeEffects(instance.executor)).toEqual([])
+      expect(targets.get('thumb')!.style.opacity).toBe('')
+    } finally {
+      factory.mockRestore()
+    }
+  })
+
   it('previews distinct properties through self and an alias of the same element', async () => {
     const tween = { kind: 'tween', durationMs: 1000, easing: 'linear' } as const
     const source: PropertyIRDefinition = {
@@ -241,26 +348,26 @@ describe('browser animation execution', () => {
     }
     const { instance, targets, errors } = setup(source)
     const root = targets.get('self')!
-    instance.bind([
+    instance.executor.bind([
       ['self', root],
       ['alias', root],
     ])
 
-    instance.previewComposition(
+    instance.inspection.previewComposition(
       { layers: { base: true, active: false }, states: {} },
       { layers: { base: true, active: true }, states: {} },
     )
 
-    await Promise.all(instance.animations.map((animation) => animation.ready))
+    await Promise.all(nativeEffects(instance.executor).map((animation) => animation.ready))
 
-    for (const animation of instance.animations) animation.currentTime = 500
+    for (const animation of nativeEffects(instance.executor)) animation.currentTime = 500
 
-    expect(instance.animations).toHaveLength(2)
+    expect(nativeEffects(instance.executor)).toHaveLength(2)
     expect(getComputedStyle(root).opacity).toBe('0.5')
     expect(getComputedStyle(root).width).toBe('20px')
     expect(errors).toEqual([])
 
-    instance.endCompositionPreview()
+    instance.executor.endCompositionPreview()
 
     expect(root.style.opacity).toBe('0')
     expect(root.style.width).toBe('10px')
@@ -304,43 +411,49 @@ describe('browser animation execution', () => {
     const { instance, targets, errors } = setup(source)
     const root = targets.get('self')!
     root.style.position = 'relative'
-    instance.bind([
+    instance.executor.bind([
       ['self', root],
       ['alias', root],
     ])
 
-    instance.previewComposition(
+    instance.inspection.previewComposition(
       { layers: { base: true, active: false }, states: {} },
       { layers: { base: true, active: true }, states: {} },
     )
 
-    await Promise.all(instance.animations.map((animation) => animation.ready))
+    await Promise.all(nativeEffects(instance.executor).map((animation) => animation.ready))
 
-    for (const animation of instance.animations) animation.currentTime = 500
+    for (const animation of nativeEffects(instance.executor)) animation.currentTime = 500
 
-    expect(instance.animations).toHaveLength(8)
+    expect(nativeEffects(instance.executor)).toHaveLength(8)
     expect(getComputedStyle(root).left).toBe('5px')
     expect(errors).toEqual([])
 
-    instance.endCompositionPreview()
+    instance.executor.endCompositionPreview()
   })
 
   it('preserves existing effects and composition when replacement preparation fails', () => {
     const { instance, errors } = setup()
 
     updateMode(instance, 'on', { paused: true })
-    const previous = instance.composition
-    const animations = [...instance.animations]
+    const previous = instance.runtime.composition
+    const animations = [...nativeEffects(instance.executor)]
 
     expect(animations.length).toBeGreaterThan(0)
 
-    instance.definition = invalidScaleEasing()
-    updateMode(instance, 'off')
+    const failure = new Error('native preparation failed')
+    const prepare = vi.spyOn(window, 'KeyframeEffect').mockImplementationOnce(function () {
+      throw failure
+    })
 
-    expect(instance.composition).toEqual(previous)
-    expect(instance.animations).toEqual(animations)
+    updateMode(instance, 'off')
+    prepare.mockRestore()
+
+    expect(instance.runtime.composition).toEqual(previous)
+    expect(nativeEffects(instance.executor)).toEqual(animations)
     expect(animations.every((animation) => animation.playState === 'paused')).toBe(true)
     expect(errors.at(-1)?.code).toBe('runtime.expression')
+    expect(errors.at(-1)?.error).toBe(failure)
   })
 
   it('captures a repeated target from its last accepted receiver', () => {
@@ -359,16 +472,16 @@ describe('browser animation execution', () => {
       const { instance, targets, first, second, errors } = setupRepeatedThumb()
 
       updateMode(instance, 'on', { paused: true })
-      const animations = instance.animations
+      const animations = nativeEffects(instance.executor)
 
       expect(animations.length).toBeGreaterThan(0)
 
       const entries: (readonly [string, HTMLElement])[] =
         order === 'reordered' ? [['thumb', second], ...targets] : [...targets, ['thumb', first]]
 
-      instance.bind(entries)
+      instance.executor.bind(entries)
 
-      expect(instance.animations).toEqual(animations)
+      expect(nativeEffects(instance.executor)).toEqual(animations)
       expect(capturedLeaveEffect(instance).target).toBe(second)
       expect(first.style.translate).toBe('24px')
       expect(second.style.translate).toBe('24px')
@@ -380,21 +493,21 @@ describe('browser animation execution', () => {
     const { instance, second, errors } = setupRepeatedThumb()
 
     updateMode(instance, 'on', { paused: true })
-    const previous = [...instance.animations]
+    const previous = [...nativeEffects(instance.executor)]
 
     expect(previous.length).toBeGreaterThan(0)
 
-    instance.bind([])
+    instance.executor.bind([])
 
-    expect(instance.animations).toEqual([])
+    expect(nativeEffects(instance.executor)).toEqual([])
     expect(previous.every((animation) => animation.playState === 'idle')).toBe(true)
 
-    instance.bind([
+    instance.executor.bind([
       ['thumb', second],
       ['track', second],
     ])
     updateMode(instance, 'off', { paused: true })
-    const replacements = [...instance.animations]
+    const replacements = [...nativeEffects(instance.executor)]
     const finished = replacements.map((animation) => animation.finished)
 
     expect(replacements.length).toBeGreaterThan(0)
@@ -409,7 +522,7 @@ describe('browser animation execution', () => {
 
     await Promise.all(finished)
 
-    expect(instance.animations).toEqual([])
+    expect(nativeEffects(instance.executor)).toEqual([])
     expect(Number.parseFloat(getComputedStyle(second).translate)).toBe(0)
     expect(errors).toEqual([])
   })
@@ -417,7 +530,7 @@ describe('browser animation execution', () => {
   it('connects reactive calls to the last receiver and reconnects when that receiver is removed', async () => {
     const { instance, targets, first, second, errors } = setupRepeatedThumb()
     const focused = vi.fn<(name: string) => void>()
-    instance.onEvent = focused
+    instance.runtime.onEvent = focused
 
     first.focus()
 
@@ -431,7 +544,7 @@ describe('browser animation execution', () => {
 
     expect(focused).toHaveBeenCalledExactlyOnceWith('focus')
 
-    instance.bind([...targets])
+    instance.executor.bind([...targets])
     focused.mockClear()
     first.focus()
 
@@ -498,16 +611,16 @@ describe('browser animation execution', () => {
       let unrelatedReads: number
 
       try {
-        instance.previewLifecycle(phase)
+        instance.inspection.previewLifecycle(phase)
         reads = observe.mock.calls.length
         unrelatedReads = observe.mock.calls.filter(([receiver]) => receiver === unrelated).length
       } finally {
         observe.mockRestore()
       }
 
-      await Promise.all(instance.animations.map((animation) => animation.ready))
+      await Promise.all(nativeEffects(instance.executor).map((animation) => animation.ready))
 
-      for (const animation of instance.animations) animation.currentTime = 100
+      for (const animation of nativeEffects(instance.executor)) animation.currentTime = 100
 
       // Only the phase's opacity can need a displayed snapshot; ordinary lengths
       // and the target without phase tracks require no writing-context observation.
@@ -516,7 +629,7 @@ describe('browser animation execution', () => {
       expect(getComputedStyle(element!).opacity).toBe('0.5')
       expect(errors).toEqual([])
 
-      instance.endCompositionPreview()
+      instance.executor.endCompositionPreview()
     },
   )
 
@@ -556,22 +669,22 @@ describe('browser animation execution', () => {
 
     expect(element).toBeDefined()
 
-    instance.previewComposition(
+    instance.inspection.previewComposition(
       { layers: { base: true, active: false }, states: {} },
       { layers: { base: true, active: true }, states: {} },
     )
-    await Promise.all(instance.animations.map((animation) => animation.ready))
+    await Promise.all(nativeEffects(instance.executor).map((animation) => animation.ready))
 
-    for (const animation of instance.animations) animation.currentTime = 500
+    for (const animation of nativeEffects(instance.executor)) animation.currentTime = 500
 
-    expect(instance.animations).toHaveLength(4)
+    expect(nativeEffects(instance.executor)).toHaveLength(4)
     expect(getComputedStyle(element!).left).toBe('15px')
     expect(getComputedStyle(element!).right).toBe('5px')
 
-    instance.endCompositionPreview()
+    instance.executor.endCompositionPreview()
 
     expect(element!.style.left).toBe('20px')
-    expect(instance.animations).toEqual([])
+    expect(nativeEffects(instance.executor)).toEqual([])
     expect(errors).toEqual([])
   })
 
@@ -598,10 +711,10 @@ describe('browser animation execution', () => {
     const observe = vi.spyOn(window, 'getComputedStyle')
 
     try {
-      for (let update = 0; update < 10; update++) instance.updateParameters({})
+      for (let update = 0; update < 10; update++) instance.runtime.updateParameters({})
 
       expect(observe).not.toHaveBeenCalled()
-      expect(instance.animations).toEqual([])
+      expect(nativeEffects(instance.executor)).toEqual([])
     } finally {
       observe.mockRestore()
     }
@@ -614,10 +727,10 @@ describe('browser animation execution', () => {
 
     expect(root).toBeDefined()
 
-    instance.updateParameters({ active: true })
-    const animation = instance.animations[0]
+    instance.runtime.updateParameters({ active: true })
+    const animation = nativeEffects(instance.executor)[0]
 
-    expect(instance.animations).toHaveLength(1)
+    expect(nativeEffects(instance.executor)).toHaveLength(1)
     expect(animation.effect?.getTiming().duration).toBe(150)
 
     animation.pause()
@@ -635,20 +748,23 @@ describe('browser animation execution', () => {
 
     expect(root).toBeDefined()
 
-    instance.previewLifecycle('enter', { layers: { base: true, interaction: false }, states: {} })
+    instance.inspection.previewLifecycle('enter', {
+      layers: { base: true, interaction: false },
+      states: {},
+    })
 
-    for (const animation of instance.animations) animation.currentTime = 100
+    for (const animation of nativeEffects(instance.executor)) animation.currentTime = 100
 
     // Default tween easing is ease, so use actual effect timings rather than assume linear interpolation.
     expect(
-      instance.animations
+      nativeEffects(instance.executor)
         .map((animation) => Number(animation.effect?.getTiming().duration))
         .toSorted((a, b) => a - b),
     ).toEqual([200, 400])
     expect(Number(getComputedStyle(root!).opacity)).toBeGreaterThan(0)
     expect(Number(getComputedStyle(root!).scale)).toBeGreaterThan(0.8)
 
-    instance.endCompositionPreview()
+    instance.executor.endCompositionPreview()
 
     expect(getComputedStyle(root!).opacity).toBe('1')
     expect(getComputedStyle(root!).scale).toBe('1')
@@ -679,14 +795,14 @@ describe('browser animation execution', () => {
     } satisfies PropertyIRDefinition
     const { instance, targets } = setup(source)
 
-    instance.bind([])
-    instance.replaceDefinition(source)
-    instance.updateParameters({})
+    instance.executor.bind([])
+    instance.runtime.replaceDefinition(source)
+    instance.runtime.updateParameters({})
 
-    expect(instance.animations).toHaveLength(0)
+    expect(nativeEffects(instance.executor)).toHaveLength(0)
     expect(targets.get('body')!.style.opacity).toBe('')
 
-    instance.bind([...targets])
+    instance.executor.bind([...targets])
 
     expect(targets.get('body')!.style.opacity).toBe('1')
   })
@@ -697,17 +813,17 @@ describe('browser animation execution', () => {
     const thumb = targets.get('thumb')!
     const duplicate = [...targets, ['thumb', thumb] as const]
 
-    instance.bind(duplicate)
-    instance.replaceDefinition({ ...definition, enter: { targets: [] } })
+    instance.executor.bind(duplicate)
+    instance.runtime.replaceDefinition({ ...definition, enter: { targets: [] } })
     updateMode(instance, 'on')
 
     expect(thumb.style.translate).toBe('')
-    expect(instance.animations).toHaveLength(0)
+    expect(nativeEffects(instance.executor)).toHaveLength(0)
     expect(errors).toEqual([
       expect.objectContaining({ code: 'runtime.targets', message: 'Duplicate target binding' }),
     ])
 
-    instance.bind(duplicate)
+    instance.executor.bind(duplicate)
 
     expect(thumb.style.translate).toBe('24px')
   })
@@ -717,22 +833,22 @@ describe('browser animation execution', () => {
     const thumb = targets.get('thumb')!
 
     updateMode(instance, 'on', { paused: true })
-    expect(instance.animations.length).toBeGreaterThan(0)
+    expect(nativeEffects(instance.executor).length).toBeGreaterThan(0)
 
-    for (const animation of instance.animations) animation.currentTime = 100
+    for (const animation of nativeEffects(instance.executor)) animation.currentTime = 100
 
     expect(parseFloat(getComputedStyle(thumb).scale)).toBeGreaterThan(1)
     expect(errors).toEqual([])
 
-    instance.dispose()
+    instance.runtime.dispose()
 
-    expect(instance.animations).toEqual([])
+    expect(nativeEffects(instance.executor)).toEqual([])
     expect(thumb.style.scale).toBe('')
     updateMode(instance, 'off')
 
-    instance.bind([...targets])
-    instance.replaceDefinition(definition)
-    instance.updateParameters({ mode: 'on' })
+    instance.executor.bind([...targets])
+    instance.runtime.replaceDefinition(definition)
+    instance.runtime.updateParameters({ mode: 'on' })
   })
 
   it('completes animations and settles destination styles', async () => {
@@ -740,7 +856,7 @@ describe('browser animation execution', () => {
 
     updateMode(instance, 'on')
 
-    const animations = [...instance.animations]
+    const animations = [...nativeEffects(instance.executor)]
 
     await Promise.all(animations.map((animation) => animation.ready))
 
@@ -749,7 +865,7 @@ describe('browser animation execution', () => {
     await Promise.all(animations.map((animation) => animation.finished))
     await Promise.resolve()
 
-    expect(instance.animations).toEqual([])
+    expect(nativeEffects(instance.executor)).toEqual([])
     expect(targets.get('thumb')!.style.scale).toBe('1')
     updateMode(instance, 'on')
   })
@@ -759,31 +875,31 @@ describe('browser animation execution', () => {
 
     updateMode(instance, 'on', { paused: true })
 
-    const first = instance.animations[0]
+    const first = nativeEffects(instance.executor)[0]
 
     first.currentTime = 100
     updateMode(instance, 'off', { paused: true })
 
     expect(first.playState).toBe('idle')
-    instance.updateParameters({ mode: false })
-    expect(instance.composition.states.toggle).toBe('off')
+    instance.runtime.updateParameters({ mode: false })
+    expect(instance.runtime.composition.states.toggle).toBe('off')
     expect(errors.at(-1)?.code).toBe('runtime.parameter')
 
-    instance.bind([...targets])
+    instance.executor.bind([...targets])
 
-    expect(instance.animations.length).toBeGreaterThan(0)
+    expect(nativeEffects(instance.executor).length).toBeGreaterThan(0)
 
-    instance.bind([])
+    instance.executor.bind([])
 
-    expect(instance.animations).toEqual([])
+    expect(nativeEffects(instance.executor)).toEqual([])
     expect(errors.at(-1)?.message).toBe('Missing target binding')
     updateMode(instance, 'on')
 
-    instance.bind([...targets, ['thumb', targets.get('thumb')!]])
+    instance.executor.bind([...targets, ['thumb', targets.get('thumb')!]])
 
     expect(errors.at(-1)?.message).toBe('Duplicate target binding')
 
-    instance.bind([...targets])
+    instance.executor.bind([...targets])
 
     expect(targets.get('thumb')!.style.scale).toBe('1')
   })
@@ -791,19 +907,19 @@ describe('browser animation execution', () => {
   it('preserves external style edits and original declarations', () => {
     const { instance, targets } = setup()
 
-    instance.dispose()
+    instance.runtime.dispose()
 
     const thumb = targets.get('thumb')!
 
     thumb.style.cssText = 'scale: 2 !important; color: red; margin: 4px'
 
-    const replacement = new LivaInstance(definition, { mode: 'off' })
+    const replacement = assembleRuntime(definition, { mode: 'off' })
 
     instances.push(replacement)
-    replacement.bind([...targets])
+    replacement.executor.bind([...targets])
     thumb.style.color = 'blue'
     thumb.style.removeProperty('margin')
-    replacement.dispose()
+    replacement.runtime.dispose()
 
     expect(thumb.style.scale).toBe('2')
     expect(thumb.style.getPropertyPriority('scale')).toBe('important')
@@ -815,7 +931,7 @@ describe('browser animation execution', () => {
     const source = decodeBundle(JSON.stringify(constrainedFixture)).definitions[0]
 
     for (const position of ['middle', false]) {
-      expect(() => new LivaInstance(source, { position, axis: 'x' })).toThrow(
+      expect(() => assembleRuntime(source, { position, axis: 'x' })).toThrow(
         'Motion parameter position requires "end" | "start"',
       )
     }
@@ -829,20 +945,20 @@ describe('browser animation execution', () => {
     expect(thumb?.style.opacity).toBe('0.25')
     expect(thumb?.style.getPropertyValue('--position')).toBe('end')
 
-    instance.updateParameters({ position: 'start', axis: 'x' })
+    instance.runtime.updateParameters({ position: 'start', axis: 'x' })
 
     expect(thumb?.style.opacity).toBe('1')
     expect(thumb?.style.getPropertyValue('--position')).toBe('start')
 
-    instance.updateParameters({ position: 'end', axis: 'y' })
-    instance.replaceDefinition(structuredClone(source))
+    instance.runtime.updateParameters({ position: 'end', axis: 'y' })
+    instance.runtime.replaceDefinition(structuredClone(source))
 
     expect(errors.at(-1)?.code).toBe('runtime.parameter')
     expect(thumb?.style.opacity).toBe('1')
     expect(thumb?.style.getPropertyValue('--position')).toBe('start')
     expect(thumb?.style.getPropertyValue('--axis')).toBe('x')
 
-    instance.updateParameters({ position: 'end', axis: 'x' })
+    instance.runtime.updateParameters({ position: 'end', axis: 'x' })
 
     expect(thumb?.style.opacity).toBe('0.25')
     expect(thumb?.style.getPropertyValue('--position')).toBe('end')
@@ -860,14 +976,14 @@ describe('browser animation execution', () => {
     }
     const thumb = targets.get('thumb')
 
-    expect(() => instance.replaceDefinition(replacement)).toThrow(
+    expect(() => instance.runtime.replaceDefinition(replacement)).toThrow(
       'Motion parameter position requires "end"',
     )
-    expect(instance.definition).toBe(source)
+    expect(instance.runtime.definition).toBe(source)
     expect(thumb?.style.getPropertyValue('--position')).toBe('start')
     expect(thumb?.style.opacity).toBe('1')
 
-    instance.updateParameters({ position: 'end', axis: 'x' })
+    instance.runtime.updateParameters({ position: 'end', axis: 'x' })
 
     expect(thumb?.style.getPropertyValue('--position')).toBe('end')
     expect(thumb?.style.opacity).toBe('0.25')
@@ -877,22 +993,22 @@ describe('browser animation execution', () => {
     const reactive = decodeBundle(JSON.stringify(reactiveFixture)).definitions[0]
     const { instance, errors } = setup(reactive, { checked: false })
 
-    instance.updateParameters({ checked: true })
+    instance.runtime.updateParameters({ checked: true })
 
-    expect(instance.composition.states.toggle).toBe('on')
+    expect(instance.runtime.composition.states.toggle).toBe('on')
 
-    instance.replaceDefinition(structuredClone(reactive))
+    instance.runtime.replaceDefinition(structuredClone(reactive))
 
-    expect(instance.composition.states.toggle).toBe('on')
+    expect(instance.runtime.composition.states.toggle).toBe('on')
 
-    instance.updateParameters({ checked: 'invalid' })
+    instance.runtime.updateParameters({ checked: 'invalid' })
 
     expect(errors.at(-1)?.code).toBe('runtime.parameter')
-    expect(instance.composition.states.toggle).toBe('on')
+    expect(instance.runtime.composition.states.toggle).toBe('on')
 
-    instance.updateParameters({ checked: false })
+    instance.runtime.updateParameters({ checked: false })
 
-    expect(instance.composition.states.toggle).toBe('off')
+    expect(instance.runtime.composition.states.toggle).toBe('off')
   })
 })
 
@@ -931,14 +1047,14 @@ it('updates template values in place and recovers from non-finite expressions', 
   } satisfies import('../model/definition.ts').Definition
   const { instance, targets, errors } = setup(templated, { x: 1 })
 
-  instance.updateParameters({ x: 0 })
+  instance.runtime.updateParameters({ x: 0 })
 
   expect(errors.at(-1)?.code).toBe('runtime.expression')
 
   const enter = new PresenceOperation(capturePresence(instance, 'enter', []), 'enter')
 
   enter.initialize()
-  instance.updateParameters({ x: 2 })
+  instance.runtime.updateParameters({ x: 2 })
 
   expect(enter.isFinished).toBe(false)
 
@@ -947,11 +1063,11 @@ it('updates template values in place and recovers from non-finite expressions', 
   expect(await enter.finished).toBe('completed')
   expect(targets.get('box')!.style.width).toBe('50px')
 
-  instance.updateParameters({ x: 2 })
+  instance.runtime.updateParameters({ x: 2 })
 
   expect(targets.get('box')!.style.width).toBe('50px')
 
-  instance.updateParameters({ x: 0 })
+  instance.runtime.updateParameters({ x: 0 })
 
   expect(errors.at(-1)?.code).toBe('runtime.expression')
   expect(targets.get('box')!.style.width).toBe('50px')
@@ -986,25 +1102,25 @@ it('restores variable shorthands and preserves external priority changes', () =>
   document.body.append(element)
   elements.push(element)
 
-  const instance = new LivaInstance(def)
+  const instance = assembleRuntime(def)
 
   instances.push(instance)
-  instance.bind([['box', element]])
+  instance.executor.bind([['box', element]])
   element.style.width = '20px'
   element.style.removeProperty('color')
-  instance.dispose()
+  instance.runtime.dispose()
 
   expect(element.style.margin).toBe('var(--a)')
   expect(element.style.width).toBe('20px')
   expect(element.style.getPropertyPriority('width')).toBe('')
   expect(element.style.color).toBe('')
 
-  const second = new LivaInstance(def)
+  const second = assembleRuntime(def)
 
   instances.push(second)
-  second.bind([['box', element]])
+  second.executor.bind([['box', element]])
   element.style.setProperty('margin', 'var(--external)', 'important')
-  second.dispose()
+  second.runtime.dispose()
 
   expect(element.style.margin).toBe('var(--external)')
   expect(element.style.getPropertyPriority('margin')).toBe('important')
@@ -1040,7 +1156,7 @@ it('skips zero-duration layer effects', () => {
 
   updateMode(instance, 'on')
 
-  expect(instance.animations).toEqual([])
+  expect(nativeEffects(instance.executor)).toEqual([])
   expect(targets.get('box')!.style.opacity).toBe('1')
 })
 
@@ -1105,7 +1221,7 @@ it('plans enter completion restoration of removed declarations without cancellin
   const box = targets.get('box')!
 
   try {
-    instance.updateParameters({ enabled: false })
+    instance.runtime.updateParameters({ enabled: false })
 
     for (const animation of box.getAnimations()) animation.finish()
 
@@ -1133,16 +1249,16 @@ it('settles active effects when reduced motion is enabled but preserves manual p
 
     await new Promise(requestAnimationFrame)
 
-    await expect.poll(() => instance.animations.length).toBe(0)
+    await expect.poll(() => nativeEffects(instance.executor).length).toBe(0)
     expect(targets.get('thumb')!.style.translate).toBe('24px')
 
-    instance.previewComposition(
+    instance.inspection.previewComposition(
       { layers: {}, states: { toggle: 'on' } },
       { layers: {}, states: { toggle: 'off' } },
       [{ layer: 'toggle', index: 1 }],
     )
 
-    expect(instance.animations.length).toBeGreaterThan(0)
+    expect(nativeEffects(instance.executor).length).toBeGreaterThan(0)
 
     await session.send('Emulation.setEmulatedMedia', {
       features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
@@ -1156,7 +1272,7 @@ it('settles active effects when reduced motion is enabled but preserves manual p
 
     await new Promise(requestAnimationFrame)
 
-    expect(instance.animations.length).toBeGreaterThan(0)
+    expect(nativeEffects(instance.executor).length).toBeGreaterThan(0)
   } finally {
     await session.send('Emulation.setEmulatedMedia', {
       features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
@@ -1188,7 +1304,7 @@ it('releases only captured effects and keeps leave ownership through ordinary up
 
   updateMode(instance, 'on', { paused: true })
 
-  const before = [...instance.animations]
+  const before = [...nativeEffects(instance.executor)]
   const unrelated = before.find(
     (animation) =>
       animation.effect instanceof KeyframeEffect &&
@@ -1199,16 +1315,16 @@ it('releases only captured effects and keeps leave ownership through ordinary up
   try {
     session.initialize()
 
-    expect(instance.animations).toContain(unrelated)
-    expect(instance.animations.length).toBeLessThan(before.length)
+    expect(nativeEffects(instance.executor)).toContain(unrelated)
+    expect(nativeEffects(instance.executor).length).toBeLessThan(before.length)
 
     session.play()
 
-    const leave = instance.animations.find((animation) => !before.includes(animation))
+    const leave = nativeEffects(instance.executor).find((animation) => !before.includes(animation))
 
     updateMode(instance, 'off', { paused: true })
 
-    expect(instance.animations).toContain(leave)
+    expect(nativeEffects(instance.executor)).toContain(leave)
     expect(session.isFinished).toBe(false)
   } finally {
     session.cancel('owner-teardown')
@@ -1234,10 +1350,10 @@ it('restores parameter snapshots when a reactive transition cannot be prepared',
   }
   const { instance, errors } = setup(broken, { checked: false })
 
-  instance.updateParameters({ checked: true })
+  instance.runtime.updateParameters({ checked: true })
 
   expect(errors.at(-1)?.code).toBe('runtime.expression')
-  expect(instance.composition.states.toggle).toBe('off')
+  expect(instance.runtime.composition.states.toggle).toBe('off')
 })
 
 it('stops a reactive update when an event listener disposes its owner', () => {
@@ -1248,10 +1364,10 @@ it('stops a reactive update when an event listener disposes its owner', () => {
   }
   const { instance } = setup(def, { checked: false })
 
-  instance.onEvent = () => instance.dispose()
-  instance.updateParameters({ checked: true })
+  instance.runtime.onEvent = () => instance.runtime.dispose()
+  instance.runtime.updateParameters({ checked: true })
 
-  expect(instance.animations).toEqual([])
+  expect(nativeEffects(instance.executor)).toEqual([])
   updateMode(instance, 'on')
 })
 
@@ -1279,15 +1395,15 @@ it.each(['dispose', 'replace', 'presence'] as const)(
 
     updateMode(instance, 'on')
 
-    const animation = instance.animations[0]
+    const animation = nativeEffects(instance.executor)[0]
 
     await animation.ready
     animation.finish()
 
     const finished = animation.finished
 
-    if (operation === 'dispose') instance.dispose()
-    else if (operation === 'replace') instance.replaceDefinition(definition)
+    if (operation === 'dispose') instance.runtime.dispose()
+    else if (operation === 'replace') instance.runtime.replaceDefinition(definition)
     else {
       presence = new PresenceOperation(capturePresence(instance, 'leave', ['track']), 'leave')
       presence.initialize()
@@ -1299,7 +1415,7 @@ it.each(['dispose', 'replace', 'presence'] as const)(
 
     await Promise.resolve()
 
-    expect(instance.animations).not.toContain(animation)
+    expect(nativeEffects(instance.executor)).not.toContain(animation)
     expect(targets.get('track')!.style.backgroundColor).toBe('blue')
 
     presence?.cancel('owner-teardown')
@@ -1345,10 +1461,10 @@ it('cleans drag subscriptions and reports a failed reevaluation during disposal'
 
   const count = errors.length
 
-  instance.dispose()
+  instance.runtime.dispose()
 
   expect(errors.length).toBeGreaterThan(count)
-  expect(instance.animations).toEqual([])
+  expect(nativeEffects(instance.executor)).toEqual([])
 })
 
 it('replaces only an animated template property when its value changes within a state', () => {
@@ -1442,18 +1558,20 @@ it('replaces only an animated template property when its value changes within a 
 
   empty.play()
 
-  expect(instance.animations).toEqual([])
+  expect(nativeEffects(instance.executor)).toEqual([])
 
-  instance.updateParameters({ checked: true, x: 10 })
+  instance.runtime.updateParameters({ checked: true, x: 10 })
 
-  expect(instance.animations).toHaveLength(3)
+  expect(nativeEffects(instance.executor)).toHaveLength(3)
 
-  const previous = [...instance.animations]
+  const previous = [...nativeEffects(instance.executor)]
 
-  instance.updateParameters({ checked: true, x: 20 })
+  instance.runtime.updateParameters({ checked: true, x: 20 })
 
-  expect(instance.animations).toHaveLength(3)
-  expect(previous.filter((animation) => instance.animations.includes(animation))).toHaveLength(2)
+  expect(nativeEffects(instance.executor)).toHaveLength(3)
+  expect(
+    previous.filter((animation) => nativeEffects(instance.executor).includes(animation)),
+  ).toHaveLength(2)
   expect(targets.get('box')!.style.width).toBe('20px')
 })
 
@@ -1493,15 +1611,15 @@ it('restores removed owned declarations but preserves external removals', () => 
       },
     ],
   } satisfies PropertyIRDefinition
-  const instance = new LivaInstance(def)
+  const instance = assembleRuntime(def)
 
   instances.push(instance)
-  instance.bind([['box', element]])
+  instance.executor.bind([['box', element]])
 
   expect(element.style.width).toBe('')
 
   element.style.removeProperty('height')
-  instance.dispose()
+  instance.runtime.dispose()
 
   expect(element.style.width).toBe('10px')
   expect(element.style.height).toBe('')
@@ -1512,9 +1630,9 @@ it('retains enter snapshots on input changes and cancels them on owner disposal'
   const interrupted = new PresenceOperation(capturePresence(instance, 'enter', []), 'enter')
 
   interrupted.initialize()
-  instance.updateParameters({ mode: 'on' })
+  instance.runtime.updateParameters({ mode: 'on' })
 
-  expect(instance.composition.states.toggle).toBe('on')
+  expect(instance.runtime.composition.states.toggle).toBe('on')
   expect(interrupted.isFinished).toBe(false)
 
   interrupted.play()
@@ -1524,7 +1642,7 @@ it('retains enter snapshots on input changes and cancels them on owner disposal'
   const disposed = new PresenceOperation(capturePresence(instance, 'enter', []), 'enter')
 
   disposed.initialize()
-  instance.dispose()
+  instance.runtime.dispose()
 
   expect(await disposed.finished).toBe('owner-teardown')
 })
@@ -1556,10 +1674,10 @@ it('updates template snapshots while lifecycle targets are absent', () => {
   } satisfies PropertyIRDefinition
   const { instance, errors } = setup(def, { x: 1 })
 
-  instance.bind([])
-  instance.updateParameters({ x: 2 })
+  instance.executor.bind([])
+  instance.runtime.updateParameters({ x: 2 })
 
-  expect(instance.composition.layers.off).toBe(true)
+  expect(instance.runtime.composition.layers.off).toBe(true)
   expect(errors).toEqual([])
 })
 
@@ -1569,8 +1687,8 @@ it('cancels effects prepared before a later track fails browser validation', () 
   const { instance, errors } = setup(broken)
 
   updateMode(instance, 'on')
-  expect(instance.composition.states.toggle).toBe('off')
-  expect(instance.animations).toEqual([])
+  expect(instance.runtime.composition.states.toggle).toBe('off')
+  expect(nativeEffects(instance.executor)).toEqual([])
   expect(errors.at(-1)?.code).toBe('runtime.expression')
 })
 
@@ -1626,29 +1744,29 @@ it.each(['enter', 'leave'] as const)(
     const second = document.createElement('div')
     document.body.append(second)
     elements.push(second)
-    instance.bind([
+    instance.executor.bind([
       ['body', targets.get('body')!],
       ['body', second],
     ])
 
-    instance.previewLifecycle(phase)
-    expect(instance.animations).toHaveLength(2)
+    instance.inspection.previewLifecycle(phase)
+    expect(nativeEffects(instance.executor)).toHaveLength(2)
 
-    for (const animation of instance.animations) animation.currentTime = 100
+    for (const animation of nativeEffects(instance.executor)) animation.currentTime = 100
 
     for (const element of [targets.get('body')!, second]) {
       expect(Number(getComputedStyle(element).opacity)).toBeCloseTo(0.6)
       expect(element.isConnected).toBe(true)
     }
 
-    instance.replaceDefinition(def)
+    instance.runtime.replaceDefinition(def)
 
-    expect(instance.animations).toHaveLength(0)
+    expect(nativeEffects(instance.executor)).toHaveLength(0)
     expect(getComputedStyle(second).opacity).toBe('1')
     expect(errors).toEqual([])
 
-    instance.dispose()
-    expect(() => instance.previewLifecycle(phase)).toThrow('mounted')
+    instance.runtime.dispose()
+    expect(() => instance.inspection.previewLifecycle(phase)).toThrow('mounted')
   },
 )
 
@@ -1720,7 +1838,9 @@ it('keeps lifecycle preview preparation atomic on invalid easing and supports sp
   } satisfies PropertyIRDefinition
   const { instance, targets, errors } = setup(def)
 
-  expect(() => instance.previewLifecycle('leave')).toThrow('Could not prepare composition preview')
+  expect(() => instance.inspection.previewLifecycle('leave')).toThrow(
+    'Could not prepare composition preview',
+  )
   expect(targets.get('body')!.getAnimations()).toHaveLength(0)
   expect(errors.at(-1)?.code).toBe('runtime.preview')
 
@@ -1731,8 +1851,8 @@ it('keeps lifecycle preview preparation atomic on invalid easing and supports sp
       targets: [{ name: 'body', properties: [def.leave.targets[0].properties[0]] }],
     },
   }
-  instance.replaceDefinition(valid)
+  instance.runtime.replaceDefinition(valid)
 
-  instance.previewLifecycle('leave')
-  expect(instance.animations).toHaveLength(1)
+  instance.inspection.previewLifecycle('leave')
+  expect(nativeEffects(instance.executor)).toHaveLength(1)
 })

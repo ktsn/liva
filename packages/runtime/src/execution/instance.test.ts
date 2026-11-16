@@ -1,5 +1,5 @@
+import { assembleRuntime, type RuntimeAssembly } from '../__test__/helpers/assembly.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
-import { LivaInstance } from './instance.ts'
 import type { Definition } from '../model/definition.ts'
 
 const definition: Definition = {
@@ -8,10 +8,10 @@ const definition: Definition = {
   layers: [{ name: 'idle', targets: [] }],
   events: [{ name: 'dismiss', when: { kind: 'reference', path: ['ready'] } }],
 }
-const instances: LivaInstance[] = []
+const instances: RuntimeAssembly[] = []
 
 function createInstance(ready: boolean, source = definition) {
-  const instance = new LivaInstance(source, { ready })
+  const instance = assembleRuntime(source, { ready })
   instances.push(instance)
   return instance
 }
@@ -21,7 +21,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  for (const instance of instances) instance.dispose()
+  for (const instance of instances) instance.runtime.dispose()
   instances.length = 0
   vi.unstubAllGlobals()
 })
@@ -35,16 +35,16 @@ describe('conditional event edges', () => {
     ({ initial, values, counts }) => {
       const instance = createInstance(initial)
       const emitted: string[] = []
-      instance.onEvent = (name) => emitted.push(name)
+      instance.runtime.onEvent = (name) => emitted.push(name)
 
       const observed = values.map((ready) => {
-        instance.updateParameters({ ready })
+        instance.runtime.updateParameters({ ready })
         return emitted.length
       })
 
       expect(observed).toEqual(counts)
       expect(emitted).toEqual(['dismiss', 'dismiss'])
-      expect(instance.composition).toEqual({ layers: { idle: true }, states: {} })
+      expect(instance.runtime.composition).toEqual({ layers: { idle: true }, states: {} })
     },
   )
 
@@ -52,13 +52,13 @@ describe('conditional event edges', () => {
     const first = createInstance(false)
     const second = createInstance(false)
     const emitted: string[] = []
-    first.onEvent = (name) => emitted.push('first:' + name)
-    second.onEvent = (name) => emitted.push('second:' + name)
+    first.runtime.onEvent = (name) => emitted.push('first:' + name)
+    second.runtime.onEvent = (name) => emitted.push('second:' + name)
 
-    first.updateParameters({ ready: true })
-    second.updateParameters({ ready: true })
-    first.updateParameters({ ready: true })
-    second.updateParameters({ ready: true })
+    first.runtime.updateParameters({ ready: true })
+    second.runtime.updateParameters({ ready: true })
+    first.runtime.updateParameters({ ready: true })
+    second.runtime.updateParameters({ ready: true })
 
     expect(emitted).toEqual(['first:dismiss', 'second:dismiss'])
   })
@@ -75,14 +75,14 @@ describe('conditional event edges', () => {
       ],
     })
     const emitted: string[] = []
-    instance.onEvent = (name) => emitted.push(name)
+    instance.runtime.onEvent = (name) => emitted.push(name)
 
-    instance.updateParameters({ ready: false })
-    instance.updateParameters({ ready: false })
-    instance.updateParameters({ ready: true })
+    instance.runtime.updateParameters({ ready: false })
+    instance.runtime.updateParameters({ ready: false })
+    instance.runtime.updateParameters({ ready: true })
 
     expect(emitted).toEqual(['reset', 'dismiss'])
-    expect(instance.composition).toEqual({ layers: { idle: true }, states: {} })
+    expect(instance.runtime.composition).toEqual({ layers: { idle: true }, states: {} })
   })
 })
 
@@ -90,30 +90,30 @@ describe('event lifecycle', () => {
   it('does not emit after disposal', () => {
     const instance = createInstance(false)
     const emitted: string[] = []
-    instance.onEvent = (name) => emitted.push(name)
+    instance.runtime.onEvent = (name) => emitted.push(name)
 
-    instance.dispose()
-    instance.updateParameters({ ready: true })
+    instance.runtime.dispose()
+    instance.runtime.updateParameters({ ready: true })
 
     expect(emitted).toEqual([])
-    expect(instance.onEvent).toBeUndefined()
+    expect(instance.runtime.onEvent).toBeUndefined()
   })
 
   it('initializes replacement definitions without emitting an already-true condition', () => {
     const instance = createInstance(true)
     const emitted: string[] = []
-    instance.onEvent = (name) => emitted.push(name)
+    instance.runtime.onEvent = (name) => emitted.push(name)
     const replacement: Definition = {
       ...definition,
       events: [{ name: 'replacement', when: { kind: 'reference', path: ['ready'] } }],
     }
 
-    instance.replaceDefinition(replacement)
-    instance.updateParameters({ ready: true })
+    instance.runtime.replaceDefinition(replacement)
+    instance.runtime.updateParameters({ ready: true })
     expect(emitted).toEqual([])
 
-    instance.updateParameters({ ready: false })
-    instance.updateParameters({ ready: true })
+    instance.runtime.updateParameters({ ready: false })
+    instance.runtime.updateParameters({ ready: true })
     expect(emitted).toEqual(['replacement'])
   })
 })
@@ -122,7 +122,7 @@ describe('composition snapshots', () => {
   it('exposes the active ordinary layer composition', () => {
     const instance = createInstance(false)
 
-    expect(instance.composition).toEqual({ layers: { idle: true }, states: {} })
+    expect(instance.runtime.composition).toEqual({ layers: { idle: true }, states: {} })
   })
 
   const layered: Definition = {
@@ -153,15 +153,15 @@ describe('composition snapshots', () => {
   it('reads retained machine history and current ordinary layer activation', () => {
     const instance = createInstance(false, layered)
 
-    expect(instance.composition).toEqual({
+    expect(instance.runtime.composition).toEqual({
       layers: { visible: false },
       states: { history: 'idle' },
     })
 
-    instance.updateParameters({ ready: true })
-    instance.updateParameters({ ready: false })
+    instance.runtime.updateParameters({ ready: true })
+    instance.runtime.updateParameters({ ready: false })
 
-    expect(instance.composition).toEqual({
+    expect(instance.runtime.composition).toEqual({
       layers: { visible: false },
       states: { history: 'done' },
     })
@@ -170,89 +170,20 @@ describe('composition snapshots', () => {
   it('isolates returned snapshots and instances', () => {
     const first = createInstance(true, layered)
     const second = createInstance(false, layered)
-    const snapshot = first.composition
+    const snapshot = first.runtime.composition
 
     expect(snapshot).toBeDefined()
 
     Object.assign(snapshot.layers, { visible: false })
     Object.assign(snapshot.states, { history: 'idle' })
 
-    expect(first.composition).toEqual({ layers: { visible: true }, states: { history: 'done' } })
-    expect(second.composition).toEqual({ layers: { visible: false }, states: { history: 'idle' } })
-  })
-})
-
-describe('public facade compatibility', () => {
-  it.each(['onEvent', 'onUpdate'] as const)(
-    'calls %s with the public instance as receiver',
-    (callback) => {
-      const instance = createInstance(false)
-      const observed: LivaInstance[] = []
-      instance[callback] = function (this: LivaInstance) {
-        observed.push(this)
-      }
-
-      instance.updateParameters({ ready: true })
-
-      expect(observed).toHaveLength(1)
-      expect(observed[0]).toBe(instance)
-    },
-  )
-
-  it.each(['onEvent', 'onUpdate'] as const)('stops calling a deleted %s property', (callback) => {
-    const instance = createInstance(false)
-    let calls = 0
-    instance[callback] = () => {
-      calls++
-    }
-
-    delete instance[callback]
-    instance.updateParameters({ ready: true })
-
-    expect(calls).toBe(0)
-    expect(Object.hasOwn(instance, callback)).toBe(false)
-  })
-
-  it('calls diagnostics with the public instance as receiver', () => {
-    const observed: LivaInstance[] = []
-    const instance = new LivaInstance(definition, { ready: false }, function (this: LivaInstance) {
-      observed.push(this)
+    expect(first.runtime.composition).toEqual({
+      layers: { visible: true },
+      states: { history: 'done' },
     })
-    instances.push(instance)
-
-    instance.updateParameters({ ready: 'invalid' })
-
-    expect(observed).toHaveLength(1)
-    expect(observed[0]).toBe(instance)
-  })
-
-  it('uses a directly assigned definition for subsequent event evaluation', () => {
-    const instance = createInstance(false)
-    const replacement: Definition = {
-      ...definition,
-      events: [{ name: 'replacement', when: { kind: 'reference', path: ['ready'] } }],
-    }
-    const emitted: string[] = []
-    instance.definition = replacement
-    instance.onEvent = (name) => emitted.push(name)
-
-    instance.updateParameters({ ready: true })
-    instance.updateParameters({ ready: false })
-    instance.updateParameters({ ready: true })
-
-    expect(instance.definition).toBe(replacement)
-    expect(emitted).toEqual(['replacement'])
-  })
-
-  it('returns the assigned update callback', () => {
-    const instance = createInstance(false)
-    const observed: boolean[] = []
-    const update = () => observed.push(instance.composition.layers.idle)
-    instance.onUpdate = update
-
-    instance.updateParameters({ ready: true })
-
-    expect(instance.onUpdate).toBe(update)
-    expect(observed).toEqual([true])
+    expect(second.runtime.composition).toEqual({
+      layers: { visible: false },
+      states: { history: 'idle' },
+    })
   })
 })

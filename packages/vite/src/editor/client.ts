@@ -14,6 +14,7 @@ export function createDevPlugin(token: string) {
   import.meta.hot?.dispose(unsubscribe)
   Object.assign(window, { __LIVA_EDITOR__: controller })
   return createLivaPlugin({
+    source: (component) => component.livaSource,
     observe: (event, binding) => controller.observe(event, binding),
     onDiagnostic: (diagnostic) => controller.report(diagnostic.message),
   })

@@ -32,7 +32,7 @@ async function expectCapturedStart(page: Page, value: string) {
 
           if (!composition) throw new Error('Missing lifecycle composition')
 
-          return binding.runtime
+          return binding.inspection
             .inspectLifecycle('enter', composition)
             .transition?.targets.find((target) => target.name === 'body')
             ?.properties.find((property) => property.name === 'opacity')

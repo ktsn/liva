@@ -18,8 +18,8 @@ previewing one mounted instance. Vue retains application state.
 | `editor.css`         | Shared base styles                                                      |
 
 Vue custom-element compilation injects `.ce.vue` scoped styles into the shadow
-root. Shallow controller snapshots avoid proxying DOM elements and animation
-instances. Scope disposal removes subscriptions and invalidates pending preview requests.
+root. Shallow controller snapshots preserve the identity of logical and inspection
+capabilities. Target DOM and native animations stay outside editor bindings. Scope disposal removes subscriptions and invalidates pending preview requests.
 
 Inspect returns source revision and editable fields. Preview sends semantic edits
 to the server for compilation and returns instance-local IR without writing files.
@@ -90,13 +90,29 @@ timing precedence. The editor converts these resolved sources into mapping paths
 and applies editing restrictions; it does not implement a separate cascade.
 Candidates recompile before preview; failed candidates leave the previous draft intact.
 
-`Runtime.previewLifecycle` accepts an explicit composition and candidate definition
+`RuntimeInspection.previewLifecycle` accepts an explicit composition and candidate definition
 for layer previews. It resolves the baseline and captures lifecycle expressions once,
 without replacing the application definition or state-machine history. It resolves
 every mounted target, including repeated targets and targets absent from the active
 baseline. The inspector uses the same expression snapshot and lifecycle-only rows.
-Vue supplies explicit Runtime and Executor participants. Paused effects remain
-Executor-owned; the controller currently seeks its preview animation view and asks
-it to restore presentation on cancellation. Enter settles to the baseline composition at its end; leave holds its last frame. The
-controller restores the committed definition on cancellation and never invokes Vue
-presence completion callbacks or removes DOM elements.
+Vue assembles Runtime, Executor and RuntimeInspection, then publishes a separate
+editor-facing binding. The development client supplies opaque source identity through Vue’s source extractor
+option before Runtime construction; compiler mappings stay out of production runtime.
+The binding provides that identity, definition metadata and a label obtained
+from the mounted directive after Vue has populated attributes and children. Its
+`bounds()` capability returns fresh plain viewport-relative CSS-pixel geometry on
+request, or undefined after unmount; the panel uses it only when revealing the
+selection. No target element or Executor is forwarded to the editor.
+
+Inspection returns plain resolved presentation/transition data. Preview returns a
+`PreviewOperation`, begins paused at zero and supports forward/backward seeking in
+milliseconds, including under reduced motion. The controller retains that handle
+and calls `seek`/`end`; Executor owns native effects and scopes both operations to
+the preview generation. An obsolete handle cannot scrub continuing live leave or
+restore over a newer preview. Application updates, selection/source changes and
+unmount invalidate pending replies and terminate the active preview. Preparation
+failure restores presentation, reports the original cause and throws to the UI
+caller; updating the displayed error never converts a failed operation to success.
+Enter settles to its baseline at the end; leave holds its last frame. Cancellation
+restores accepted application presentation without replacing its definition,
+joining Vue presence completion, or removing application DOM.

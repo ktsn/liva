@@ -63,8 +63,6 @@ function setup(
     refreshSuspension() {},
     endCompositionPreview() {},
     dispose() {},
-    beginPreview() {},
-    abortPreview() {},
     terminalControls() {
       displayed = 0.4
     },
@@ -217,6 +215,200 @@ describe('Runtime presentation coordination', () => {
 
     runtime.dispose()
     factory.mockRestore()
+  })
+
+  it.each([false, true])(
+    'keeps candidate resources alive through transformation, then releases them when rejected=%s',
+    (reject) => {
+      const { runtime } = setup()
+      const failure = new Error('Candidate validation failed')
+      const dispose = vi.fn<() => void>()
+      const factory = vi.spyOn(functions, 'callBuiltin').mockReturnValue({
+        value: 1,
+        bind: () => () => {},
+        prepareUpdate: () => ({ value: 1, commit() {}, discard() {} }),
+        dispose,
+      })
+      const candidate: Definition = {
+        name: 'candidate',
+        layers: [],
+        letBindings: [
+          {
+            name: 'resource',
+            initializer: { kind: 'call', function: 'createResource', arguments: [] },
+          },
+        ],
+      }
+      const before = runtime.composition
+
+      try {
+        const evaluate = () =>
+          runtime.evaluateCandidate(candidate, (values) => {
+            expect(dispose).not.toHaveBeenCalled()
+
+            if (reject) throw failure
+
+            return values.resource
+          })
+
+        let result: unknown
+        let caught: unknown
+
+        try {
+          result = evaluate()
+        } catch (error) {
+          caught = error
+        }
+
+        expect(caught).toBe(reject ? failure : undefined)
+        expect(result).toBe(reject ? undefined : 1)
+        expect(dispose).toHaveBeenCalledTimes(1)
+        expect(runtime.definition).toBe(definition)
+        expect(runtime.composition).toEqual(before)
+      } finally {
+        runtime.dispose()
+        factory.mockRestore()
+      }
+    },
+  )
+
+  it.each([false, true])(
+    'propagates cleanup failure and preserves validation cause when rejected=%s',
+    (reject) => {
+      const { runtime, errors } = setup()
+      const failure = new Error('Candidate validation failed')
+      const cleanup = new Error('Candidate disposal failed')
+      const factory = vi.spyOn(functions, 'callBuiltin').mockReturnValue({
+        value: 1,
+        bind: () => () => {},
+        prepareUpdate: () => ({ value: 1, commit() {}, discard() {} }),
+        dispose() {
+          throw cleanup
+        },
+      })
+      const candidate: Definition = {
+        name: 'cleanup-candidate',
+        layers: [],
+        letBindings: [
+          {
+            name: 'resource',
+            initializer: { kind: 'call', function: 'createResource', arguments: [] },
+          },
+        ],
+      }
+
+      try {
+        const evaluate = () =>
+          runtime.evaluateCandidate(candidate, () => {
+            if (reject) throw failure
+
+            return 1
+          })
+        let caught: unknown
+
+        try {
+          evaluate()
+        } catch (error) {
+          caught = error
+        }
+
+        expect(caught).toEqual(
+          reject
+            ? new AggregateError([failure, cleanup], 'Could not discard failed call evaluation', {
+                cause: failure,
+              })
+            : cleanup,
+        )
+        expect(errors).toEqual([])
+      } finally {
+        runtime.dispose()
+        factory.mockRestore()
+      }
+    },
+  )
+
+  it('keeps borrowed live calls owned when candidate transformation rejects', () => {
+    const dispose = vi.fn<() => void>()
+    const factory = vi.spyOn(functions, 'callBuiltin').mockReturnValue({
+      value: 1,
+      bind: () => () => {},
+      prepareUpdate: () => ({ value: 1, commit() {}, discard() {} }),
+      dispose,
+    })
+    const source: Definition = {
+      name: 'borrowed-candidate',
+      layers: [],
+      letBindings: [
+        {
+          name: 'resource',
+          initializer: { kind: 'call', function: 'createResource', arguments: [] },
+        },
+      ],
+    }
+    const { runtime } = setup(source, {})
+    const failure = new Error('Candidate rejected')
+
+    try {
+      expect(() =>
+        runtime.evaluateCandidate(source, () => {
+          throw failure
+        }),
+      ).toThrow(failure)
+      expect(factory).toHaveBeenCalledTimes(1)
+      expect(dispose).not.toHaveBeenCalled()
+
+      runtime.dispose()
+
+      expect(dispose).toHaveBeenCalledTimes(1)
+    } finally {
+      runtime.dispose()
+      factory.mockRestore()
+    }
+  })
+
+  it('finishes logical and executor teardown and preserves both call and executor failures', () => {
+    const failure = new Error('Call disposal failed')
+    const browserFailure = new Error('Executor disposal failed')
+    const factory = vi.spyOn(functions, 'callBuiltin').mockReturnValue({
+      value: 1,
+      bind: () => () => {},
+      prepareUpdate: () => ({ value: 1, commit() {}, discard() {} }),
+      dispose() {
+        throw failure
+      },
+    })
+    const source: Definition = {
+      name: 'teardown',
+      layers: [],
+      letBindings: [
+        { name: 'value', initializer: { kind: 'call', function: 'resource', arguments: [] } },
+      ],
+    }
+    const { runtime, execution } = setup(source, {})
+    const dispose = vi.fn<() => void>(() => {
+      throw browserFailure
+    })
+    execution.dispose = dispose
+    runtime.onEvent = vi.fn<(name: string) => void>()
+    runtime.onUpdate = vi.fn<() => void>()
+
+    try {
+      expect(() => runtime.dispose()).toThrow(
+        new AggregateError([failure, browserFailure], 'Could not release resources', {
+          cause: failure,
+        }),
+      )
+      expect(dispose).toHaveBeenCalledTimes(1)
+      expect(runtime.onEvent).toBeUndefined()
+      expect(runtime.onUpdate).toBeUndefined()
+      expect(runtime.isDisposed).toBe(true)
+
+      runtime.dispose()
+      runtime.updateParameters({})
+      expect(dispose).toHaveBeenCalledTimes(1)
+    } finally {
+      factory.mockRestore()
+    }
   })
 
   it.each([false, true])(

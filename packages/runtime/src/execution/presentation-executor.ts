@@ -1,3 +1,5 @@
+import { releaseResources } from '../evaluation/resource-cleanup.ts'
+import type { PreviewOperation } from './preview-operation.ts'
 import { materializeEffect } from './native-effect.ts'
 import { layerPropertyKey, layerPropertyMatchesTarget } from '../model/presentation.ts'
 import {
@@ -38,7 +40,6 @@ import {
   type EvaluatedLayer,
   type LayerResolution,
 } from '../composition/layers.ts'
-export { waapiProperty } from '../motion/animation.ts'
 import type { SourceConnection } from '../evaluation/reactive-value.ts'
 import { evaluate, type VariableValues } from '../evaluation/expression.ts'
 import type { Definition } from '../model/definition.ts'
@@ -387,7 +388,7 @@ export class PresentationExecutor {
     const cleanups = [...this.sourceCleanups]
     this.sourceCleanups.clear()
 
-    for (const cleanup of cleanups) cleanup()
+    releaseResources(cleanups)
   }
 
   readonly connectSource: SourceConnection = (source, publish) => {
@@ -1026,12 +1027,6 @@ export class PresentationExecutor {
     }
   }
 
-  get animations(): readonly Animation[] {
-    return this.active
-      .filter((entry) => this.presentationMode !== 'preview' || entry.preview)
-      .map((entry) => entry.animation)
-  }
-
   configureControllers(definition: Definition, values: VariableValues) {
     this.controllers.clear()
 
@@ -1635,7 +1630,11 @@ export class PresentationExecutor {
     }
   }
 
+  private previewRevision = 0
+
   beginPreview(writes: readonly StyleWrite[]) {
+    this.previewRevision++
+
     for (const controller of this.controllers.keys()) controller.setPreview(true)
 
     this.presented.clear()
@@ -1650,6 +1649,7 @@ export class PresentationExecutor {
 
   /** Restores ordinary ownership from displayed CSS before accepting another input delta. */
   abortPreview() {
+    this.previewRevision++
     this.cancel()
     this.restore()
     this.environment?.refreshOwnership()
@@ -1665,6 +1665,27 @@ export class PresentationExecutor {
     if (this.presentationMode === 'live') return
 
     this.abortPreview()
+  }
+
+  /** Issues a generation-scoped capability; continuing live leave effects are never scrubbed. */
+  completePreview(): PreviewOperation {
+    const revision = this.previewRevision
+    const effects = new Set(this.active.filter((entry) => entry.preview).map((entry) => entry.id))
+    const current = () => revision === this.previewRevision && this.presentationMode === 'preview'
+
+    return Object.freeze({
+      seek: (milliseconds: number) => {
+        if (!current() || !Number.isFinite(milliseconds)) return
+
+        for (const entry of this.active) {
+          if (entry.preview && effects.has(entry.id))
+            entry.animation.currentTime = Math.max(0, milliseconds)
+        }
+      },
+      end: () => {
+        if (current()) this.endCompositionPreview()
+      },
+    })
   }
 
   applyPlan(

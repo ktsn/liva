@@ -1,9 +1,13 @@
-import { executorOf } from '../../../../runtime/src/__test__/helpers/presence.ts'
-import { afterEach, expect, it } from 'vite-plus/test'
+import {
+  assembleRuntime,
+  nativeEffects,
+  type RuntimeAssembly,
+} from '../../../../runtime/src/__test__/helpers/assembly.ts'
+import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { cdp, userEvent } from 'vite-plus/test/browser'
 import type { CDPSession } from '@vitest/browser-playwright'
 import { createApp, nextTick, type App } from 'vue'
-import { LivaInstance, decodeBundle, layerTargets, type RuntimeDiagnostic } from '@liva/runtime'
+import { decodeBundle, layerTargets, type RuntimeDiagnostic } from '@liva/runtime'
 import fixture from '../../../../../fixtures/toggle.json'
 import EditorPanel from '../components/EditorPanel.ce.vue'
 import TimingControls from '../components/TimingControls.ce.vue'
@@ -22,11 +26,11 @@ const toggleFields: EditorReply['fields'] = [
 
 let app: App | undefined
 let host: HTMLElement | undefined
-let runtime: LivaInstance | undefined
+let runtime: RuntimeAssembly | undefined
 
 afterEach(() => {
   app?.unmount()
-  runtime?.dispose()
+  runtime?.runtime.dispose()
   host?.remove()
 })
 
@@ -95,15 +99,19 @@ async function setupEditor(
   host.setAttribute('aria-label', 'Test motion')
   document.body.append(host)
   const diagnostics: RuntimeDiagnostic[] = []
-  runtime = new LivaInstance(definition, inputs, (diagnostic) => diagnostics.push(diagnostic))
+  runtime = assembleRuntime(definition, inputs, (diagnostic) => diagnostics.push(diagnostic))
   controller.observe('mount', {
-    root: host,
-    runtime,
-    executor: executorOf(runtime),
+    label: 'Test motion',
+    bounds: () => {
+      const { top, bottom, left, right, width, height } = host!.getBoundingClientRect()
+      return { top, bottom, left, right, width, height }
+    },
+    runtime: runtime.runtime,
+    inspection: runtime.inspection,
     definition,
-    component: { livaSource: 'source' },
+    source: 'source',
   })
-  runtime.bind(
+  runtime.executor.bind(
     [...new Set(layerTargets(definition).map((target) => target.name))].map((name) => {
       const element = document.createElement('div')
 
@@ -120,6 +128,23 @@ async function setupEditor(
 
   return { controller, definition, diagnostics }
 }
+
+it('keeps the editor usable when selected instance bounds are unavailable', async () => {
+  const { controller } = await setupEditor()
+  const binding = [...controller.entries.values()][0].binding
+  const bounds = vi.spyOn(binding, 'bounds').mockReturnValue(undefined)
+  const scroll = vi.spyOn(window, 'scrollBy')
+
+  await click('Motion editor')
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+
+  expect(bounds).toHaveBeenCalled()
+  expect(scroll).not.toHaveBeenCalled()
+  expect(host!.querySelector('[aria-label="Liva motion editor"]')).not.toBeNull()
+
+  bounds.mockRestore()
+  scroll.mockRestore()
+})
 
 it('opens composition playback, scrubs and restores on close', async () => {
   const { controller } = await setupEditor()
@@ -140,7 +165,7 @@ it('opens composition playback, scrubs and restores on close', async () => {
   await click('Close')
 
   expect(button('Motion editor')).toBeDefined()
-  expect(runtime!.composition.states.toggle).toBe('off')
+  expect(runtime!.runtime.composition.states.toggle).toBe('off')
 })
 
 it('offers Instant with no interpolation fields and emits immediate timing', async () => {
@@ -542,7 +567,7 @@ it('stops timeline playback when application state supersedes the preview', asyn
   expect(button('Pause')).toBeDefined()
   expect(controller.previewActive).toBe(true)
 
-  runtime!.updateParameters({ mode: 'on' })
+  runtime!.runtime.updateParameters({ mode: 'on' })
   controller.observe('update', controller.selected!.binding)
 
   await new Promise(requestAnimationFrame)
@@ -550,7 +575,7 @@ it('stops timeline playback when application state supersedes the preview', asyn
 
   expect(button('Play')).toBeDefined()
   expect(controller.previewActive).toBe(false)
-  expect(runtime!.composition.states.toggle).toBe('on')
+  expect(runtime!.runtime.composition.states.toggle).toBe('on')
   expect(controller.message).toContain('Application state superseded the preview')
 })
 
@@ -596,7 +621,7 @@ it.each(['enter', 'leave'] as const)(
       },
     ])
     expect(host!.querySelector('[aria-label="From state"]')).toBeNull()
-    expect(runtime!.composition.layers.base).toBe(true)
+    expect(runtime!.runtime.composition.layers.base).toBe(true)
   },
 )
 
@@ -884,7 +909,7 @@ it('initializes independent composition selectors and swaps complete selections'
   expect(toHover.checked).toBe(false)
   expect(selectValue('From machine state')).toBe('active')
   expect(selectValue('To machine state')).toBe('idle')
-  expect(runtime!.composition).toEqual({
+  expect(runtime!.runtime.composition).toEqual({
     layers: { base: true, hover: false },
     states: { machine: 'idle' },
   })
@@ -901,10 +926,10 @@ it('selects duplicate transitions without changing other layers and clears incom
   await input('Existing transition', identity)
   await input('Playhead', '100')
 
-  expect(runtime!.animations).toHaveLength(1)
+  expect(nativeEffects(runtime!.executor)).toHaveLength(1)
   expect(toHover.checked).toBe(true)
 
-  const effect = runtime!.animations[0].effect
+  const effect = nativeEffects(runtime!.executor)[0].effect
 
   if (!(effect instanceof KeyframeEffect)) throw new Error('Expected a keyframe animation')
 
@@ -944,11 +969,11 @@ it('shows all To properties and permits playback for equal compositions without 
   await input('Playhead', '100')
 
   expect(controller.previewActive).toBe(true)
-  expect(runtime!.animations).toHaveLength(1)
+  expect(nativeEffects(runtime!.executor)).toHaveLength(1)
 
   await click('End preview')
 
-  expect(runtime!.animations).toHaveLength(0)
+  expect(nativeEffects(runtime!.executor)).toHaveLength(0)
 })
 
 it('keeps source unchanged for pointer gestures on composition rows', async () => {
@@ -1094,7 +1119,7 @@ it('ignores invalid transition instructions hidden by the effective owner', asyn
   await input('Playhead', '100')
 
   expect(host!.querySelector('[role="alert"]')).toBeNull()
-  expect(runtime!.animations).toHaveLength(1)
+  expect(nativeEffects(runtime!.executor)).toHaveLength(1)
   expect(diagnostics.filter((item) => item.code === 'runtime.inspection')).toEqual([])
 
   host!.querySelector<HTMLInputElement>('[aria-label="To cover enabled"]')!.click()
@@ -1145,9 +1170,13 @@ it('inspects the replacement instance and reinitializes its current composition 
   const original = controller.selected!.binding
 
   controller.observe('unmount', original)
-  runtime!.dispose()
-  runtime = new LivaInstance(definition, { amount: 0.75, duration: 400 })
-  controller.observe('mount', { ...original, runtime })
+  runtime!.runtime.dispose()
+  runtime = assembleRuntime(definition, { amount: 0.75, duration: 400 })
+  controller.observe('mount', {
+    ...original,
+    runtime: runtime.runtime,
+    inspection: runtime.inspection,
+  })
   await tick()
   await click('▸ body')
   await click('opacity')
@@ -1222,8 +1251,8 @@ it('applies composition edit replies to the selected preview without changing ap
     { op: 'set', path: 'layered/layer/base/target/body/property/opacity/value', value: '0.5' },
   ])
   expect(host!.querySelector<HTMLInputElement>('[aria-label="Source value"]')!.value).toBe('0.5')
-  expect(runtime!.definition).toEqual(compositionDefinition)
-  expect(runtime!.composition?.layers.hover).toBe(false)
+  expect(runtime!.runtime.definition).toEqual(compositionDefinition)
+  expect(runtime!.runtime.composition?.layers.hover).toBe(false)
   expect(button('Save to source').disabled).toBe(false)
 })
 
@@ -1272,7 +1301,7 @@ it('ignores a composition source preview ended while compilation was pending', a
   await tick()
 
   expect(controller.previewActive).toBe(false)
-  expect(runtime!.definition).toEqual(compositionDefinition)
+  expect(runtime!.runtime.definition).toEqual(compositionDefinition)
 })
 
 it('preserves unapplied composition source input across timeline zoom renders', async () => {
@@ -1572,12 +1601,12 @@ it('uses one composition baseline for lifecycle rows and isolated scrub-ready pl
 
   await expect.poll(() => controller.previewActive).toBe(true)
 
-  expect(runtime!.animations).toHaveLength(2)
-  expect(runtime!.composition?.states.machine).toBe('idle')
+  expect(nativeEffects(runtime!.executor)).toHaveLength(2)
+  expect(runtime!.runtime.composition?.states.machine).toBe('idle')
 
   await click('End preview')
 
-  expect(runtime!.animations).toHaveLength(0)
+  expect(nativeEffects(runtime!.executor)).toHaveLength(0)
 })
 
 it.each(['enter', 'leave'] as const)(

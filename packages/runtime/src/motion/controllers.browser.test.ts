@@ -1,13 +1,18 @@
+import {
+  assembleRuntime,
+  nativeEffects,
+  type RuntimeAssembly,
+} from '../__test__/helpers/assembly.ts'
 import { capturePresence } from '../__test__/helpers/presence.ts'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { Definition, Expression } from '../model/definition.ts'
 import { PresenceOperation } from '../execution/presence-operation.ts'
-import { LivaInstance, type RuntimeDiagnostic } from '../execution/instance.ts'
+import type { RuntimeDiagnostic } from '../execution/execution-contracts.ts'
 import { decodeProperty } from './property-codec.ts'
 import { PropertyMotion, springMotion } from './property-motion.ts'
 
 const reference = (...path: string[]): Expression => ({ kind: 'reference', path })
-const instances: LivaInstance[] = []
+const instances: RuntimeAssembly[] = []
 const elements: HTMLElement[] = []
 
 function definition(component: 'x' | 'y' = 'x'): Definition {
@@ -99,11 +104,11 @@ function setup(
   elements.push(element)
   const errors: RuntimeDiagnostic[] = []
   const inputs = { input: 0, enabled: false, sensitivity: 1, destination: 100, ...extraInputs }
-  const instance = new LivaInstance(transform(definition(component)), inputs, (error) =>
+  const instance = assembleRuntime(transform(definition(component)), inputs, (error) =>
     errors.push(error),
   )
   instances.push(instance)
-  instance.bind([['self', element]])
+  instance.executor.bind([['self', element]])
 
   return { element, instance, inputs, errors }
 }
@@ -300,7 +305,7 @@ function setupSwitchingControllers() {
     ...fixture,
     update: (changes: Partial<typeof inputs>) => {
       inputs = { ...inputs, ...changes }
-      fixture.instance.updateParameters(inputs)
+      fixture.instance.runtime.updateParameters(inputs)
     },
   }
 }
@@ -310,7 +315,7 @@ async function frame() {
 }
 
 afterEach(() => {
-  for (const instance of instances.splice(0)) instance.dispose()
+  for (const instance of instances.splice(0)) instance.runtime.dispose()
   for (const element of elements.splice(0)) element.remove()
 })
 
@@ -326,7 +331,7 @@ describe('relative property controllers', () => {
     document.body.append(element)
     elements.push(element)
     const errors: RuntimeDiagnostic[] = []
-    const instance = new LivaInstance(
+    const instance = assembleRuntime(
       {
         name: 'aliasOwnership',
         parameters: [
@@ -385,22 +390,22 @@ describe('relative property controllers', () => {
       (error) => errors.push(error),
     )
     instances.push(instance)
-    instance.bind([['self', element]])
+    instance.executor.bind([['self', element]])
 
-    instance.updateParameters({ input: 10, covered: false })
+    instance.runtime.updateParameters({ input: 10, covered: false })
 
     expect(getComputedStyle(element).getPropertyValue(physical)).toBe('110px')
 
-    instance.updateParameters({ input: 10, covered: true })
-    instance.updateParameters({ input: 50, covered: true })
+    instance.runtime.updateParameters({ input: 10, covered: true })
+    instance.runtime.updateParameters({ input: 50, covered: true })
 
     expect(getComputedStyle(element).getPropertyValue(physical)).toBe('200px')
 
-    instance.updateParameters({ input: 50, covered: false })
+    instance.runtime.updateParameters({ input: 50, covered: false })
 
     expect(getComputedStyle(element).getPropertyValue(physical)).toBe('200px')
 
-    instance.updateParameters({ input: 60, covered: false })
+    instance.runtime.updateParameters({ input: 60, covered: false })
 
     expect(getComputedStyle(element).getPropertyValue(physical)).toBe('210px')
     expect(errors).toEqual([])
@@ -431,7 +436,7 @@ describe('relative property controllers', () => {
       elements.push(element)
 
       const errors: RuntimeDiagnostic[] = []
-      const instance = new LivaInstance(
+      const instance = assembleRuntime(
         {
           name: 'presence-controller',
           parameters: [{ name: 'input', type: 'number' }],
@@ -495,8 +500,8 @@ describe('relative property controllers', () => {
       )
 
       instances.push(instance)
-      instance.bind([['self', element]])
-      instance.updateParameters({ input: 10 })
+      instance.executor.bind([['self', element]])
+      instance.runtime.updateParameters({ input: 10 })
 
       const session = new PresenceOperation(capturePresence(instance, 'leave', ['self']), 'leave')
 
@@ -508,7 +513,7 @@ describe('relative property controllers', () => {
 
         animation.pause()
         animation.currentTime = 500
-        instance.updateParameters({ input: 50 })
+        instance.runtime.updateParameters({ input: 50 })
 
         const before = decodeProperty(element, property)?.values
 
@@ -516,7 +521,7 @@ describe('relative property controllers', () => {
 
         expect(decodeProperty(element, property)?.values).toEqual(before)
 
-        instance.updateParameters({ input: 60 })
+        instance.runtime.updateParameters({ input: 60 })
 
         const after = decodeProperty(element, property)?.values
 
@@ -546,7 +551,7 @@ describe('relative property controllers', () => {
 
       if (hidden) {
         element.style.display = 'none'
-        instance.updateParameters({ ...inputs, phase: 1 })
+        instance.runtime.updateParameters({ ...inputs, phase: 1 })
       }
 
       const work = capturePresence(instance, 'enter', ['self'])
@@ -554,13 +559,13 @@ describe('relative property controllers', () => {
       const session = new PresenceOperation(work, 'enter')
       const events: string[] = []
 
-      instance.onEvent = (event) => events.push(event)
+      instance.runtime.onEvent = (event) => events.push(event)
 
       try {
         session.initialize()
         session.play()
 
-        const original = instance.animations[0]
+        const original = nativeEffects(instance.executor)[0]
 
         original.pause()
         original.currentTime = 0
@@ -569,7 +574,7 @@ describe('relative property controllers', () => {
         const release = vi.spyOn(PropertyMotion.prototype, 'endControl')
 
         try {
-          instance.updateParameters({ ...inputs, phase: 0 })
+          instance.runtime.updateParameters({ ...inputs, phase: 0 })
 
           await Promise.resolve()
 
@@ -588,12 +593,12 @@ describe('relative property controllers', () => {
         ])
         expect(events).toEqual([])
         expect(session.isFinished).toBe(false)
-        expect(instance.animations).toContain(original)
+        expect(nativeEffects(instance.executor)).toContain(original)
 
         element.style.display = ''
-        instance.updateParameters({ ...inputs, phase: 2 })
+        instance.runtime.updateParameters({ ...inputs, phase: 2 })
 
-        const replacement = instance.animations[0]
+        const replacement = nativeEffects(instance.executor)[0]
 
         expect(replacement).not.toBe(original)
 
@@ -638,17 +643,17 @@ describe('relative property controllers', () => {
     )
 
     element.style.display = 'none'
-    instance.updateParameters({ ...inputs, phase: 1, covered: false })
+    instance.runtime.updateParameters({ ...inputs, phase: 1, covered: false })
 
     const session = new PresenceOperation(capturePresence(instance, 'enter', ['self']), 'enter')
     const events: string[] = []
 
-    instance.onEvent = (event) => events.push(event)
+    instance.runtime.onEvent = (event) => events.push(event)
 
     try {
       session.initialize()
       session.play()
-      instance.updateParameters({ ...inputs, phase: 0, covered: true })
+      instance.runtime.updateParameters({ ...inputs, phase: 0, covered: true })
 
       expect(await session.finished).toBe('completed')
       expect(events).toEqual(['invalid'])
@@ -686,11 +691,11 @@ describe('relative property controllers', () => {
     other.style.cssText = element.style.cssText
     document.body.append(other)
     elements.push(other)
-    instance.bind([
+    instance.executor.bind([
       ['self', element],
       ['self', other],
     ])
-    instance.updateParameters({ ...inputs, input: 10 })
+    instance.runtime.updateParameters({ ...inputs, input: 10 })
 
     const session = new PresenceOperation(
       capturePresence(instance, 'leave', ['self'], { element: element }),
@@ -705,7 +710,7 @@ describe('relative property controllers', () => {
 
       await Promise.resolve()
 
-      instance.updateParameters({ ...inputs, input: 50 })
+      instance.runtime.updateParameters({ ...inputs, input: 50 })
 
       expect(decodeProperty(other, 'translate')?.values[0]).toBe(100)
 
@@ -713,7 +718,7 @@ describe('relative property controllers', () => {
 
       expect(decodeProperty(other, 'translate')?.values[0]).toBe(100)
 
-      instance.updateParameters({ ...inputs, input: 60 })
+      instance.runtime.updateParameters({ ...inputs, input: 60 })
 
       expect(decodeProperty(other, 'translate')?.values[0]).toBe(110)
       expect(decodeProperty(element, 'translate')?.values[0]).toBe(110)
@@ -759,13 +764,13 @@ describe('relative property controllers', () => {
 
       try {
         now = 1020
-        instance.updateParameters({ ...inputs, input: 20 })
+        instance.runtime.updateParameters({ ...inputs, input: 20 })
 
         const work = capturePresence(instance, 'leave', ['self'])
 
         now = numeric ? 1040 : 1080
-        instance.updateParameters({ ...inputs, input: 20 })
-        instance.dispose()
+        instance.runtime.updateParameters({ ...inputs, input: 20 })
+        instance.runtime.dispose()
         now = start
 
         const session = new PresenceOperation(work, 'leave')
@@ -818,8 +823,8 @@ describe('relative property controllers', () => {
 
   it('replaces a source call moved to another receiving address during HMR', () => {
     const { instance, element, inputs, errors } = setup()
-    instance.updateParameters({ ...inputs, enabled: true, input: 10 })
-    instance.updateParameters({ ...inputs, enabled: true, input: 30 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 10 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 30 })
     const original = definition()
     const replacement = document.createElement('div')
     replacement.style.cssText = 'width:200px;height:80px;translate:250px 40px 5px;'
@@ -833,9 +838,9 @@ describe('relative property controllers', () => {
       })),
     }
 
-    instance.replaceDefinition(updated)
-    instance.bind([['other', replacement]])
-    instance.updateParameters({ ...inputs, enabled: true, input: 40 })
+    instance.runtime.replaceDefinition(updated)
+    instance.executor.bind([['other', replacement]])
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 40 })
 
     expect(decodeProperty(element, 'translate')?.values).toEqual([100, 20, 3])
     expect(decodeProperty(replacement, 'translate')?.values).toEqual([260, 40, 5])
@@ -848,7 +853,7 @@ describe('relative property controllers', () => {
     document.body.append(element)
     elements.push(element)
     const errors: RuntimeDiagnostic[] = []
-    const instance = new LivaInstance(
+    const instance = assembleRuntime(
       {
         name: 'rotation',
         letBindings: [
@@ -886,7 +891,7 @@ describe('relative property controllers', () => {
     )
     instances.push(instance)
 
-    instance.bind([['self', element]])
+    instance.executor.bind([['self', element]])
     await frame()
     await frame()
 
@@ -932,7 +937,7 @@ describe('relative property controllers', () => {
 
       clock.mockReturnValue(140)
       update({ enabled: false, useSecond: false, destination: 200 })
-      const animation = instance.animations[0]
+      const animation = nativeEffects(instance.executor)[0]
 
       if (!(animation?.effect instanceof KeyframeEffect)) throw new Error('Expected return spring')
 
@@ -998,11 +1003,11 @@ describe('relative property controllers', () => {
     }))
     element.style.display = 'none'
 
-    instance.updateParameters({ ...inputs, enabled: true, input: 20 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 20 })
     await frame()
 
     expect(element.style.translate).toBe('100px 20px 3px')
-    expect(instance.composition.states.base).toBe('controlled')
+    expect(instance.runtime.composition.states.base).toBe('controlled')
     expect(errors).toEqual([])
   })
 
@@ -1036,10 +1041,10 @@ describe('relative property controllers', () => {
         },
       ],
     }))
-    instance.updateParameters({ ...inputs, enabled: true, input: 10 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 10 })
 
-    instance.updateParameters({ ...inputs, enabled: true, input: 30 })
-    instance.updateParameters({ ...inputs, enabled: true, input: 40 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 30 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 40 })
 
     expect(decodeProperty(element, 'translate')?.values).toEqual([130, 20, 3])
     expect(errors).toEqual([])
@@ -1056,12 +1061,12 @@ describe('relative property controllers', () => {
         },
       )
       const inspect = () =>
-        instance
-          .inspectComposition(instance.composition)
+        instance.inspection
+          .inspectComposition(instance.runtime.composition)
           .presentation.targets.find((target) => target.name === 'self')
           ?.properties.find((property) => property.name === 'translate')?.value
 
-      instance.updateParameters({ ...inputs, input: 20 })
+      instance.runtime.updateParameters({ ...inputs, input: 20 })
 
       const before = inspect()
       const session = new PresenceOperation(capturePresence(instance, phase, ['self']), phase)
@@ -1093,7 +1098,7 @@ describe('relative property controllers', () => {
       },
     )
 
-    instance.updateParameters({ ...inputs, input: 20 })
+    instance.runtime.updateParameters({ ...inputs, input: 20 })
 
     const session = new PresenceOperation(capturePresence(instance, 'leave', ['self']), 'leave')
 
@@ -1102,14 +1107,17 @@ describe('relative property controllers', () => {
 
       const leave = element.getAnimations()[0]
 
-      instance.previewComposition(instance.composition, instance.composition)
+      instance.inspection.previewComposition(
+        instance.runtime.composition,
+        instance.runtime.composition,
+      )
 
       expect(decodeProperty(element, 'translate')?.values).toEqual([120, 20, 3])
-      expect(instance.animations).toEqual([])
+      expect(nativeEffects(instance.executor)).toEqual([])
       expect(element.getAnimations()).toContain(leave)
       expect(session.isFinished).toBe(false)
 
-      instance.endCompositionPreview()
+      instance.executor.endCompositionPreview()
 
       expect(session.isFinished).toBe(false)
       expect(errors).toEqual([])
@@ -1146,7 +1154,7 @@ describe('relative property controllers', () => {
         { enabled: true },
       )
 
-      instance.updateParameters({ ...inputs, input: 20 })
+      instance.runtime.updateParameters({ ...inputs, input: 20 })
 
       const session = new PresenceOperation(capturePresence(instance, 'leave', ['self']), 'leave')
 
@@ -1155,13 +1163,13 @@ describe('relative property controllers', () => {
 
         const leave = element.getAnimations()[0]
 
-        instance.updateParameters({ ...inputs, input: 30 })
-        instance.previewComposition(
+        instance.runtime.updateParameters({ ...inputs, input: 30 })
+        instance.inspection.previewComposition(
           { layers: { base: true, active: false }, states: {} },
-          instance.composition,
+          instance.runtime.composition,
         )
 
-        expect(instance.animations.length).toBeGreaterThan(0)
+        expect(nativeEffects(instance.executor).length).toBeGreaterThan(0)
 
         if (completion === 'completion') {
           leave.finish()
@@ -1174,13 +1182,13 @@ describe('relative property controllers', () => {
 
         expect(await session.finished).toBe('completed')
 
-        instance.endCompositionPreview()
+        instance.executor.endCompositionPreview()
 
         const before = decodeProperty(element, 'translate')
 
         if (!before) throw new Error('Expected readable control origin after preview')
 
-        instance.updateParameters({ ...inputs, input: 40 })
+        instance.runtime.updateParameters({ ...inputs, input: 40 })
 
         expect(decodeProperty(element, 'translate')?.values[0]).toBe(before.values[0] + 10)
         expect(errors).toEqual([])
@@ -1194,20 +1202,20 @@ describe('relative property controllers', () => {
 
   it('freezes controller observations while scrubbing and resumes the live session afterwards', async () => {
     const { instance, element, inputs, errors } = setup()
-    instance.updateParameters({ ...inputs, enabled: true, input: 10 })
-    instance.updateParameters({ ...inputs, enabled: true, input: 30 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 10 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 30 })
     const active = { layers: { base: true, active: true }, states: {} }
     const inactive = { layers: { base: true, active: false }, states: {} }
 
-    instance.previewComposition(active, inactive)
-    for (const animation of instance.animations) animation.currentTime = 100
+    instance.inspection.previewComposition(active, inactive)
+    for (const animation of nativeEffects(instance.executor)) animation.currentTime = 100
     await frame()
-    instance.previewComposition(active, active)
+    instance.inspection.previewComposition(active, active)
 
     expect(decodeProperty(element, 'translate')?.values).toEqual([120, 20, 3])
-    expect(instance.animations).toHaveLength(0)
+    expect(nativeEffects(instance.executor)).toHaveLength(0)
 
-    instance.updateParameters({ ...inputs, enabled: true, input: 40 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 40 })
 
     expect(errors).toEqual([])
   })
@@ -1219,23 +1227,23 @@ describe('relative property controllers', () => {
     const active = { layers: { base: true, active: true, second: false }, states: {} }
     const inactive = { layers: { base: true, active: false, second: false }, states: {} }
     const observeSecond = () =>
-      instance
+      instance.inspection
         .inspectComposition(inactive)
         .presentation.targets.find((target) => target.name === 'self')
         ?.properties.find((property) => property.name === '--second-observed')?.value
 
-    instance.previewComposition(active, inactive)
+    instance.inspection.previewComposition(active, inactive)
 
-    expect(instance.animations).toHaveLength(1)
+    expect(nativeEffects(instance.executor)).toHaveLength(1)
 
-    instance.animations[0].currentTime = 50
+    nativeEffects(instance.executor)[0].currentTime = 50
 
     await frame()
 
     expect(decodeProperty(element, 'translate')?.values[0]).not.toBe(120)
     expect(observeSecond()).toBe('120')
 
-    instance.endCompositionPreview()
+    instance.executor.endCompositionPreview()
     element.style.translate = '200px 20px 3px'
 
     expect(observeSecond()).toBe('200')
@@ -1247,19 +1255,19 @@ describe('relative property controllers', () => {
     update({ enabled: true, input: 10 })
     update({ input: 30 })
 
-    instance.previewComposition(
+    instance.inspection.previewComposition(
       { layers: { base: true, active: true, second: false }, states: {} },
       { layers: { base: true, active: false, second: true }, states: {} },
     )
-    instance.endCompositionPreview()
+    instance.executor.endCompositionPreview()
 
     // The live owner must apply its final 10px input delta before releasing to the spring.
     update({ enabled: false, input: 40 })
 
-    expect(instance.animations).toHaveLength(1)
+    expect(nativeEffects(instance.executor)).toHaveLength(1)
 
-    instance.animations[0].pause()
-    instance.animations[0].currentTime = 0
+    nativeEffects(instance.executor)[0].pause()
+    nativeEffects(instance.executor)[0].currentTime = 0
 
     expect(decodeProperty(element, 'translate')?.values).toEqual([130, 20, 3])
     expect(errors).toEqual([])
@@ -1267,15 +1275,15 @@ describe('relative property controllers', () => {
 
   it('replaces target motion histories and detaches resources from the old target', async () => {
     const { instance, element, inputs, errors } = setup()
-    instance.updateParameters({ ...inputs, enabled: true, input: 10 })
-    instance.updateParameters({ ...inputs, enabled: true, input: 40 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 10 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 40 })
     const replacement = document.createElement('div')
     replacement.style.cssText = 'width:200px;height:80px;translate:250px 0px;'
     document.body.append(replacement)
     elements.push(replacement)
 
-    instance.bind([['self', replacement]])
-    instance.updateParameters({ ...inputs, enabled: true, input: 50 })
+    instance.executor.bind([['self', replacement]])
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 50 })
     await frame()
 
     expect(decodeProperty(element, 'translate')?.values).toEqual([100, 20, 3])
@@ -1297,8 +1305,8 @@ describe('relative property controllers', () => {
     }))
     element.style.display = 'none'
 
-    instance.updateParameters({ ...inputs, enabled: true, input: 10 })
-    instance.updateParameters({ ...inputs, enabled: true, input: 30 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 10 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 30 })
     await frame()
 
     expect(element.style.translate).toBe('100px 20px 3px')
@@ -1314,28 +1322,28 @@ describe('relative property controllers', () => {
   it('captures mid-input origins once and preserves unmapped translation axes', () => {
     const { element, instance, inputs, errors } = setup()
 
-    instance.updateParameters({ ...inputs, enabled: true, input: 50 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 50 })
 
     expect(decodeProperty(element, 'translate')?.values).toEqual([100, 20, 3])
 
-    instance.updateParameters({ ...inputs, enabled: true, input: 70 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 70 })
 
     expect(decodeProperty(element, 'translate')?.values).toEqual([120, 20, 3])
     expect(getComputedStyle(element).getPropertyValue('--observed').trim()).toBe('120')
-    expect(instance.animations).toHaveLength(0)
+    expect(nativeEffects(instance.executor)).toHaveLength(0)
     expect(errors).toEqual([])
   })
 
   it('rebases sensitivity changes without moving and ignores obscured destinations', () => {
     const { element, instance, inputs, errors } = setup()
-    instance.updateParameters({ ...inputs, enabled: true, input: 10 })
-    instance.updateParameters({ ...inputs, enabled: true, input: 30 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 10 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 30 })
 
-    instance.updateParameters({ ...inputs, enabled: true, input: 30, sensitivity: -2 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 30, sensitivity: -2 })
 
     expect(decodeProperty(element, 'translate')?.values).toEqual([120, 20, 3])
 
-    instance.updateParameters({
+    instance.runtime.updateParameters({
       ...inputs,
       enabled: true,
       input: 40,
@@ -1349,9 +1357,9 @@ describe('relative property controllers', () => {
 
   it('maps the scalar source to the selected destination component', () => {
     const { element, instance, inputs, errors } = setup('y')
-    instance.updateParameters({ ...inputs, enabled: true, input: 10 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 10 })
 
-    instance.updateParameters({ ...inputs, enabled: true, input: 30 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 30 })
 
     expect(decodeProperty(element, 'translate')?.values).toEqual([100, 40, 3])
     expect(errors).toEqual([])
@@ -1359,11 +1367,11 @@ describe('relative property controllers', () => {
 
   it('samples inactive springs on evaluation and reacquires their displayed origin', async () => {
     const { element, instance, inputs, errors } = setup()
-    instance.updateParameters({ ...inputs, enabled: true, input: 10 })
-    instance.updateParameters({ ...inputs, enabled: true, input: 50 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 10 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 50 })
 
-    instance.updateParameters({ ...inputs, enabled: false, input: 50 })
-    const animation = instance.animations[0]
+    instance.runtime.updateParameters({ ...inputs, enabled: false, input: 50 })
+    const animation = nativeEffects(instance.executor)[0]
     if (!animation) throw new Error('Expected a return spring')
     animation.pause()
     animation.currentTime = 100
@@ -1374,16 +1382,16 @@ describe('relative property controllers', () => {
     // Animation frames alone no longer publish controller observations.
     expect(Number(getComputedStyle(element).getPropertyValue('--observed'))).toBe(140)
 
-    instance.updateParameters({ ...inputs, enabled: true, input: 50 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 50 })
 
     expect(Number(getComputedStyle(element).getPropertyValue('--observed'))).toBeCloseTo(
       displayed?.[0] ?? 0,
       2,
     )
     expect(decodeProperty(element, 'translate')?.values[0]).toBeCloseTo(displayed?.[0] ?? 0, 2)
-    expect(instance.animations).toHaveLength(0)
+    expect(nativeEffects(instance.executor)).toHaveLength(0)
 
-    instance.updateParameters({ ...inputs, enabled: true, input: 60 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 60 })
 
     expect(decodeProperty(element, 'translate')?.values[0]).toBeCloseTo(
       (displayed?.[0] ?? 0) + 10,
@@ -1394,11 +1402,11 @@ describe('relative property controllers', () => {
 
   it('rolls back invalid computed input without changing the active pose', () => {
     const { element, instance, inputs, errors } = setup()
-    instance.updateParameters({ ...inputs, enabled: true, input: 10 })
-    instance.updateParameters({ ...inputs, enabled: true, input: 30 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 10 })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: 30 })
     const before = decodeProperty(element, 'translate')?.values
 
-    instance.updateParameters({ ...inputs, enabled: true, input: Infinity })
+    instance.runtime.updateParameters({ ...inputs, enabled: true, input: Infinity })
 
     expect(decodeProperty(element, 'translate')?.values).toEqual(before)
     expect(errors.at(-1)?.code).toBe('runtime.parameter')

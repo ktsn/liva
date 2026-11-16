@@ -1,3 +1,5 @@
+import { createEventValue } from './events.ts'
+import { ReactiveCallStore } from './reactive-call-store.ts'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { EvaluationFixture } from '../__test__/helpers/evaluation.ts'
 import * as functions from '../builtins/index.ts'
@@ -69,6 +71,200 @@ function installCounter() {
 afterEach(() => vi.restoreAllMocks())
 
 describe('stable reactive calls', () => {
+  it.each([false, true])(
+    'preserves rejection/cleanup causes, releases every new call, suppresses failed publications and permits reuse when second cleanup fails=%s',
+    async (secondFails) => {
+      const failure = new Error('Rejected candidate')
+      const cleanup = new Error('Candidate cleanup failed')
+      const secondCleanup = new Error('Second cleanup failed')
+      const secondDispose = vi.fn<() => void>(() => {
+        if (secondFails) throw secondCleanup
+      })
+      let publish: (() => void) | undefined
+      const source: ReactiveCall = {
+        value: 1,
+        bind: () => () => {},
+        prepareUpdate: () => ({ value: 1, commit() {}, discard() {} }),
+        dispose() {},
+      }
+      const candidate: ReactiveCall = {
+        ...source,
+        value: 2,
+        dispose() {
+          publish?.()
+          throw cleanup
+        },
+      }
+      const factory = vi
+        .spyOn(functions, 'callBuiltin')
+        .mockImplementation((name) =>
+          name === 'bad'
+            ? candidate
+            : name === 'second'
+              ? { ...source, value: 3, dispose: secondDispose }
+              : source,
+        )
+      const calls = new ReactiveCallStore()
+      const update = vi.fn<() => void>()
+      calls.evaluate((evaluation) => evaluation.invoke('live', 0, 'live', {}))
+      calls.bind((_source, notify) => {
+        publish = () => notify(1)
+        return () => {
+          publish = undefined
+        }
+      }, update)
+      let caught: unknown
+
+      try {
+        calls.evaluate((evaluation) => {
+          evaluation.invoke('bad', 0, 'bad', {})
+          evaluation.invoke('second', 0, 'second', {})
+          throw failure
+        })
+      } catch (error) {
+        caught = error
+      }
+
+      await Promise.resolve()
+
+      expect(caught).toEqual(
+        new AggregateError(
+          [
+            failure,
+            secondFails
+              ? new AggregateError([cleanup, secondCleanup], 'Could not release resources', {
+                  cause: cleanup,
+                })
+              : cleanup,
+          ],
+          'Could not discard failed call evaluation',
+          {
+            cause: failure,
+          },
+        ),
+      )
+      expect(secondDispose).toHaveBeenCalledTimes(1)
+      expect(update).not.toHaveBeenCalled()
+      expect(calls.evaluate((evaluation) => evaluation.invoke('live', 0, 'live', {}))).toBe(1)
+      expect(factory).toHaveBeenCalledTimes(3)
+
+      publish?.()
+      expect(update).toHaveBeenCalledTimes(1)
+
+      calls.dispose()
+    },
+  )
+
+  it('retains already accepted ownership when retiring an obsolete call throws', () => {
+    const cleanup = new Error('Retiring call failed')
+    const dispose = vi.fn<() => void>()
+    const source: ReactiveCall = {
+      value: 2,
+      bind: () => () => {},
+      prepareUpdate: () => ({ value: 2, commit() {}, discard() {} }),
+      dispose,
+    }
+    const factory = vi.spyOn(functions, 'callBuiltin').mockImplementation((name) =>
+      name === 'old'
+        ? {
+            ...source,
+            value: 1,
+            dispose() {
+              throw cleanup
+            },
+          }
+        : source,
+    )
+    const calls = new ReactiveCallStore()
+    calls.evaluate((evaluation) => evaluation.invoke('old', 0, 'old', {}))
+
+    expect(() =>
+      calls.evaluate((evaluation) => evaluation.invoke('current', 0, 'current', {})),
+    ).toThrow(cleanup)
+    expect(dispose).not.toHaveBeenCalled()
+    expect(calls.evaluate((evaluation) => evaluation.invoke('current', 0, 'current', {}))).toBe(2)
+    expect(factory).toHaveBeenCalledTimes(2)
+
+    calls.dispose()
+    expect(dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['binding', 'store'] as const)(
+    'invalidates queued notifications and releases all binding resources when %s cleanup fails',
+    async (scope) => {
+      const failure = new Error('First connection cleanup failed')
+      const closed: number[] = []
+      const disposed: number[] = []
+      const factory = vi.spyOn(functions, 'callBuiltin').mockImplementation((_name, args) => ({
+        value: args.index,
+        bind: () => () => {},
+        prepareUpdate: () => ({ value: args.index, commit() {}, discard() {} }),
+        dispose() {
+          disposed.push(Number(args.index))
+        },
+      }))
+      const calls = new ReactiveCallStore()
+      calls.evaluate((evaluation) =>
+        [1, 2].map((index) => evaluation.invoke(String(index), 0, 'source', { index })),
+      )
+      const update = vi.fn<() => void>()
+      const event = createEventValue()
+      const cleanups = calls.bind((source, publish) => {
+        publish(source.value, { time: 1, event, snapshots: new Map([[source, source.value]]) })
+
+        return () => {
+          closed.push(Number(source.value))
+          if (source.value === 1) throw failure
+        }
+      }, update)
+
+      expect(() => (scope === 'store' ? calls.dispose() : cleanups[0]())).toThrow(failure)
+
+      await Promise.resolve()
+      await Promise.resolve()
+
+      expect(closed).toEqual([1, 2])
+      expect(update).not.toHaveBeenCalled()
+      expect(disposed).toEqual(scope === 'store' ? [1, 2] : [])
+
+      calls.dispose()
+
+      expect(disposed).toEqual([1, 2])
+      expect(factory).toHaveBeenCalledTimes(2)
+    },
+  )
+
+  it('releases every candidate-only call after a disposer fails while preserving borrowed live calls', () => {
+    const failure = new Error('Candidate disposer failed')
+    const disposed: number[] = []
+    vi.spyOn(functions, 'callBuiltin').mockImplementation((_name, args) => ({
+      value: args.index,
+      bind: () => () => {},
+      prepareUpdate: () => ({ value: args.index, commit() {}, discard() {} }),
+      dispose() {
+        disposed.push(Number(args.index))
+        if (args.index === 2) throw failure
+      },
+    }))
+    const live = new ReactiveCallStore()
+    live.evaluate((evaluation) => evaluation.invoke('borrowed', 0, 'source', { index: 1 }))
+    const candidate = new ReactiveCallStore(live, ['borrowed'])
+    candidate.evaluate((evaluation) =>
+      ['borrowed', 'candidate', 'other'].map((name, index) =>
+        evaluation.invoke(name, 0, 'source', { index: index + 1 }),
+      ),
+    )
+
+    expect(() => candidate.dispose(live)).toThrow(failure)
+    expect(disposed).toEqual([2, 3])
+
+    candidate.dispose(live)
+    expect(disposed).toEqual([2, 3])
+
+    live.dispose()
+    expect(disposed).toEqual([2, 3, 1])
+  })
+
   it('updates one instance while aliases share the transaction snapshot', () => {
     const counter = installCounter()
     const graph = new EvaluationFixture(bindings, { input: 1 })
