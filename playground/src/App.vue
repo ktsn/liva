@@ -17,6 +17,7 @@ import { RouterLink, RouterView } from 'vue-router'
         <RouterLink class="demo-link" to="/layout-bounds">Measured layout</RouterLink>
         <RouterLink class="demo-link" to="/drag">Drag</RouterLink>
         <RouterLink class="demo-link" to="/swipe">Swipe</RouterLink>
+        <RouterLink class="demo-link" to="/bottom-sheet">Bottom sheet</RouterLink>
       </nav>
     </aside>
     <main class="demo-content">
