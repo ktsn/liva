@@ -89,6 +89,19 @@ Use `pnpm typecheck`, `vp run lint` and `vp run fmt:check` for separate static c
 or `vp run fmt` to format. Preserve `<liva>` block contents when formatting Vue files.
 Keep the root Vize/Vite+ configuration wrapper for browser test initialization.
 
+Place browser compatibility tests alongside the implementation as
+`*.cross-browser.test.ts`. The root test configuration runs these files in Chromium,
+Firefox and WebKit; `*.browser.test.ts` runs in Chromium, and other `*.test.ts` files
+run in Node. `vp test --run` includes all three groups. CI includes the Chromium
+compatibility tests in the unit/component coverage check and runs Firefox and
+WebKit compatibility tests in their browser matrix jobs.
+
+To run only the compatibility tests without whole-package coverage checks:
+
+```sh
+vp test --run --project 'cross-browser-*' --coverage.enabled=false
+```
+
 ## Zed extension
 
 Install [wasi-sdk](https://github.com/WebAssembly/wasi-sdk/releases), then build the

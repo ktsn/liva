@@ -94,7 +94,7 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Run unit and component tests
-        run: vp test --run
+        run: vp test --run --project unit --project 'browser*' --project cross-browser-chromium
 
       - name: Check production isolation and playback
         run: node scripts/test-production.ts
@@ -144,3 +144,9 @@ jobs:
         env:
           PLAYWRIGHT_BROWSER: ${{ matrix.browser }}
         run: pnpm exec playwright test --project="$PLAYWRIGHT_BROWSER"
+
+      - name: Run cross-browser component tests
+        if: matrix.browser != 'chromium'
+        env:
+          PLAYWRIGHT_BROWSER: ${{ matrix.browser }}
+        run: vp test --run --project="cross-browser-$PLAYWRIGHT_BROWSER" --coverage.enabled=false

@@ -72,3 +72,35 @@ export type {
 export { isCssProperty } from './model/definition.ts'
 
 export { resolveLayoutConfigurations } from './composition/layout.ts'
+
+export {
+  identityProjection,
+  multiplyProjection,
+  inverseProjection,
+  projectionMotion,
+  projectionComponents,
+  projectionState,
+  projectionTransform,
+} from './layout/projection.ts'
+export type {
+  ProjectionBox,
+  ProjectionState,
+  ProjectionMatrix,
+  ProjectionMotionResult,
+  ProjectionTweenSampler,
+  ProjectionComponents,
+  ProjectionTransformResult,
+} from './layout/projection.ts'
+export {
+  decodeCornerRadii,
+  decodeBoxShadows,
+  correctCornerRadii,
+  correctBoxShadows,
+} from './layout/style-correction.ts'
+export type {
+  CornerRadii,
+  Radius,
+  BoxShadow,
+  CorrectionScale,
+  CorrectionTransform,
+} from './layout/style-correction.ts'
