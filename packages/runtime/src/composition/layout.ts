@@ -14,6 +14,7 @@ import {
   type Declaration,
   type Definition,
   type GuardedTransition,
+  type Target,
 } from '../model/definition.ts'
 import type {
   LayoutDeclaration,
@@ -24,6 +25,10 @@ import type {
 
 function isLayoutDeclaration(declaration: Declaration): declaration is LayoutDeclaration {
   return !isCssProperty(declaration)
+}
+
+function targetHasLayout(target: Target<Declaration>): boolean {
+  return target.properties.some(isLayoutDeclaration)
 }
 
 function sourceIdentity(source: DeclarationSource<LayoutDeclaration>): LayoutDeclarationSource {
@@ -72,6 +77,16 @@ export function resolveSelectedLayout(
   values: VariableValues,
   transitions: ReadonlyMap<string, GuardedTransition>,
 ): readonly ResolvedLayoutConfiguration[] {
+  // Ordinary CSS-only updates need no layout ownership/provenance calculation.
+  // Test declarations rather than enabled axes: an explicit none still has provenance.
+  if (
+    !selection.some(
+      ({ layer, state }) =>
+        layer.targets.some(targetHasLayout) || state?.targets.some(targetHasLayout),
+    )
+  )
+    return []
+
   const ownership = resolveDeclarationCascade(
     isCssProperty,
     selection,

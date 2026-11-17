@@ -34,6 +34,73 @@ describe('layout declaration cascade', () => {
     expect(configuration(definition(layer('base', none)))[0]).toMatchObject({ axes: none })
   })
 
+  it.each(['inactive layer', 'unselected state'])(
+    'does not participate through an %s declaration',
+    (scope) => {
+      const css = {
+        name: 'self',
+        properties: [{ name: 'transform', value: { kind: 'literal' as const, value: 'none' } }],
+      }
+      const layout = {
+        name: 'self',
+        properties: [
+          {
+            ...declaration(),
+            timingExpression: { kind: 'reference' as const, path: ['unavailable'] },
+          },
+        ],
+      }
+      const source =
+        scope === 'inactive layer'
+          ? definition(
+              { name: 'base', targets: [css] },
+              { name: 'disabled', when: { kind: 'boolean', value: false }, targets: [layout] },
+            )
+          : definition({
+              name: 'phase',
+              initialState: 'off',
+              targets: [css],
+              states: [
+                { name: 'off', targets: [] },
+                { name: 'on', targets: [layout] },
+              ],
+            })
+
+      const result = resolveLayers(source, {})
+
+      expect(result.layout).toEqual([])
+      expect(result.presentation.targets[0].properties[0]).toMatchObject({
+        name: 'transform',
+        value: 'none',
+      })
+    },
+  )
+
+  it('retains state-only participation and explicit none provenance', () => {
+    const source = definition({
+      name: 'phase',
+      initialState: 'on',
+      targets: [
+        {
+          name: 'self',
+          properties: [{ name: 'transform', value: { kind: 'literal', value: 'none' } }],
+        },
+      ],
+      states: [
+        { name: 'on', targets: [{ name: 'self', properties: [declaration(none, instant)] }] },
+      ],
+    })
+
+    const [result] = configuration(source)
+
+    expect(result).toMatchObject({
+      axes: none,
+      timing: instant,
+      source: { layer: 'phase', state: 'on' },
+      explicitTransform: true,
+    })
+  })
+
   it('replaces the whole selection while inheriting timing independently', () => {
     const base = layer('base', full, spring)
     const override = layer('override', position)
