@@ -1,3 +1,4 @@
+import type { LayoutBoxConstraints } from '../layout/layout-constraints.ts'
 import { batchLayoutWrites } from '../layout/layout-write-phase.ts'
 import { waapiProperty } from '../motion/animation.ts'
 import { resolveLayoutConfigurations } from '../composition/layout.ts'
@@ -231,7 +232,12 @@ export class PresentationExecutor {
   private readonly layoutTransforms = new Map<HTMLElement, string>()
   private readonly layoutEffects = new Map<
     HTMLElement,
-    { animation: Animation; effect: KeyframeEffect }
+    {
+      animation: Animation
+      effect: KeyframeEffect
+      constraints?: LayoutBoxConstraints
+      addresses: Set<string>
+    }
   >()
   private readonly layoutMeasurements = new Map<Animation, 'active' | 'releasing'>()
   onLayoutChange?: () => void
@@ -293,8 +299,15 @@ export class PresentationExecutor {
    * Temporary projection overrides CSS at important priority. Ordinary style writes
    * and generated output use the same ownership/rebase implementation, with separate
    * lifetimes so release reveals current CSS, including intervening inline edits.
+   * Optional constraints are fixed used CSS lengths captured from the natural box:
+   * they retain destination padding/text layout when an absolute containing block
+   * changes. Undefined transform releases all temporary properties and native output.
    */
-  layoutTransform(element: HTMLElement, transform: string | undefined) {
+  layoutTransform(
+    element: HTMLElement,
+    transform: string | undefined,
+    constraints?: LayoutBoxConstraints,
+  ) {
     batchLayoutWrites((finishLayoutWrites) => {
       if (transform === undefined) {
         const output = this.layoutEffects.get(element)
@@ -308,14 +321,22 @@ export class PresentationExecutor {
           output.animation.cancel()
           // Discard transform transitions created from generated values, so release
           // cannot continue a size interpolation after projection has ended. This
-          // target's transform was owned; unrelated properties/elements stay intact.
-          finishLayoutWrites(element, () => {
-            // A later write in the same phase may have reacquired this output.
-            if (this.layoutEffects.get(element) === output && !this.layoutTransforms.has(element)) {
-              this.layoutEffects.delete(element)
-              this.layoutOwned = this.layoutOwned.filter((entry) => entry !== owned)
-            }
-          })
+          // target's transform and optional stabilization properties were owned;
+          // unrelated properties/elements stay intact.
+          finishLayoutWrites(
+            element,
+            [...output.addresses, ...(output.constraints?.keys() ?? [])],
+            () => {
+              // A later write in the same phase may have reacquired this output.
+              if (
+                this.layoutEffects.get(element) === output &&
+                !this.layoutTransforms.has(element)
+              ) {
+                this.layoutEffects.delete(element)
+                this.layoutOwned = this.layoutOwned.filter((entry) => entry !== owned)
+              }
+            },
+          )
         }
 
         // Retain ownership until restoration succeeds, so failed cleanup remains
@@ -325,15 +346,43 @@ export class PresentationExecutor {
       }
 
       let output = this.layoutEffects.get(element)
+      const created = output === undefined
+      const sizingChanged =
+        (output?.constraints?.size ?? 0) !== (constraints?.size ?? 0) ||
+        [...(constraints ?? [])].some(
+          ([property, value]) => output?.constraints?.get(property) !== value,
+        )
+      if (sizingChanged) {
+        const owned = this.layoutOwned.find((entry) => entry.element === element)
+        if (owned) {
+          writeLayoutStyle(element, () => {
+            element.style.cssText = restoredStyle(owned, element.style.cssText).cssText
+          })
+          this.layoutOwned = this.layoutOwned.filter((entry) => entry !== owned)
+        }
+        finishLayoutWrites(element, [
+          'transform',
+          ...(output?.addresses ?? []),
+          ...(output?.constraints?.keys() ?? []),
+          ...(constraints?.keys() ?? []),
+        ])
+      }
       if (!output) {
-        finishLayoutWrites(element)
+        finishLayoutWrites(element, ['transform', ...(constraints?.keys() ?? [])])
         const effect = new KeyframeEffect(element, [{ transform }, { transform }], {
           duration: 1,
           fill: 'both',
         })
         const animation = new Animation(effect, element.ownerDocument.timeline)
-        output = { animation, effect }
+        output = { animation, effect, addresses: new Set(['transform']) }
         this.layoutEffects.set(element, output)
+      }
+
+      if (sizingChanged || created) {
+        const owner = output
+        finishLayoutWrites(element, ['transform', ...(constraints?.keys() ?? [])], (addresses) => {
+          for (const address of addresses) owner.addresses.add(address)
+        })
       }
 
       if (output.animation.playState === 'idle') {
@@ -345,10 +394,18 @@ export class PresentationExecutor {
       // generic effect gives this same owned value later animation composite order;
       // the inline path still overrides author-important declarations. Both paths
       // carry the identical numeric output and have one Executor-owned lifetime.
-      output.effect.setKeyframes([{ transform }, { transform }])
-      writeLayoutStyle(element, () =>
-        this.write(element, 'transform', transform, 'important', 'layout'),
-      )
+      const frame = {
+        transform,
+        ...Object.fromEntries(
+          [...(constraints ?? [])].map(([property, value]) => [waapiProperty(property), value]),
+        ),
+      }
+      output.effect.setKeyframes([frame, frame])
+      this.write(element, 'transform', transform, 'important', 'layout')
+      if (sizingChanged)
+        for (const [property, value] of constraints ?? [])
+          this.write(element, property, value, 'important', 'layout')
+      if (sizingChanged) output.constraints = constraints ? new Map(constraints) : undefined
       this.layoutTransforms.set(element, transform)
     })
   }
@@ -370,13 +427,17 @@ export class PresentationExecutor {
     )
     this.layoutMeasurements.set(animation, 'active')
     const projection = this.layoutTransforms.get(element)
+    const constraints = this.layoutEffects.get(element)?.constraints
 
     try {
       animation.pause()
       animation.currentTime = 0
-      // Only our own outer style owner can be suspended. Authored effects and
-      // declarations keep their identity, timing, priority and completion promises.
-      if (projection !== undefined) this.layoutTransform(element, undefined)
+      // Neutralize only generated visual projection. Keep its fixed logical size
+      // constraints/padding during this collector read so destination text/containing-block
+      // layout stays stable. The shared natural-measurement prepare phase releases
+      // all output instead. Unrelated authored effects keep their own clocks.
+      if (projection !== undefined)
+        this.layoutTransform(element, 'matrix(1, 0, 0, 1, 0, 0)', constraints)
     } catch (error) {
       releaseResources([
         () => {
@@ -393,7 +454,8 @@ export class PresentationExecutor {
       }
 
       try {
-        if (projection !== undefined && !this.disposed) this.layoutTransform(element, projection)
+        if (projection !== undefined && !this.disposed)
+          this.layoutTransform(element, projection, constraints)
       } finally {
         this.cancelLayoutMeasurement(animation)
       }
@@ -1678,12 +1740,22 @@ export class PresentationExecutor {
     }
 
     const beforeCss = element.style.cssText
-    if (propertyRule(property)?.kind === 'length') {
-      // Keep CSS logical/physical aliases in the same order as the resolved cascade.
-      element.style.removeProperty(property)
+    const mutate = (action: () => void) => {
+      if (scope === 'layout') writeLayoutStyle(element, action)
+      else action()
+    }
+    if (
+      propertyRule(property)?.kind === 'length' ||
+      (scope === 'layout' && property !== 'transform')
+    ) {
+      // Keep logical/physical aliases in cascade order. Temporary logical size
+      // constraints also follow current physical min/max declarations. Record
+      // every actual mutation separately so intermediate own writes cannot look
+      // like external layout changes to the shared MutationObserver.
+      mutate(() => element.style.removeProperty(property))
     }
 
-    element.style.setProperty(property, value, priority)
+    mutate(() => element.style.setProperty(property, value, priority))
 
     const after = inlineDeclarations(element.style)
 
@@ -1775,10 +1847,14 @@ export class PresentationExecutor {
   }
 
   private restore(preserveLifecycle = false, elements?: ReadonlySet<HTMLElement>) {
-    const projections = [...this.layoutTransforms].filter(
-      ([element]) => !elements || elements.has(element),
-    )
-    for (const [element] of projections) this.layoutTransform(element, undefined)
+    const projections = [...this.layoutTransforms]
+      .filter(([element]) => !elements || elements.has(element))
+      .map(([element, transform]) => ({
+        element,
+        transform,
+        constraints: this.layoutEffects.get(element)?.constraints,
+      }))
+    for (const { element } of projections) this.layoutTransform(element, undefined)
 
     const owned = this.owned.filter((entry) => !elements || elements.has(entry.element))
     const protectedValues = preserveLifecycle
@@ -1812,7 +1888,8 @@ export class PresentationExecutor {
       this.write(element, property, value, priority)
     }
 
-    for (const [element, transform] of projections) this.layoutTransform(element, transform)
+    for (const { element, transform, constraints } of projections)
+      this.layoutTransform(element, transform, constraints)
   }
 
   bind(entries: readonly (readonly [string, HTMLElement])[]) {

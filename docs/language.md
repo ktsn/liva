@@ -444,6 +444,12 @@ Text uses the destination line breaks throughout size projection. Participating
 children receive their own correction; other descendants scale normally with the
 parent. `measure()` continues to report untransformed destination geometry, including
 when a generated transform temporarily changes an absolute child's containing block.
+For participating absolute boxes, Liva temporarily preserves differing used logical
+padding and fixes min/max sizes when needed to retain natural destination text layout
+under that changed containing block. These fixed constraints respect writing mode
+and box sizing, share the transform's ownership and cleanup, and restore current CSS
+when released. They are
+not width/height animation tracks.
 
 Enabling layout and changing geometry in one update uses a fresh pre-update shape.
 Initial mount, replacement, missing geometry and undefined required size ratios

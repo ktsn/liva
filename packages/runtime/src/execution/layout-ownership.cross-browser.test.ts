@@ -157,6 +157,117 @@ describe('Executor temporary layout ownership', () => {
     ).toBe(true)
   })
 
+  it('owns fixed logical constraints with the transform and releases to current important CSS', () => {
+    const { assembly, targets, errors } = setup(layoutDefinition(), { active: false })
+    const root = targets.get('self')!
+    root.style.cssText =
+      'width:400px;height:100px;min-inline-size:80px!important;max-inline-size:500px!important;transition:all 1000ms linear;'
+    const constraints = new Map([
+      ['min-inline-size', '200px'],
+      ['max-inline-size', '200px'],
+    ] as const)
+
+    assembly.executor.layoutTransform(root, 'scale(.5)', constraints)
+    expect(getComputedStyle(root).width).toBe('200px')
+    root.style.setProperty('max-inline-size', '300px', 'important')
+    assembly.executor.layoutTransform(
+      root,
+      'scale(.75)',
+      new Map([
+        ['min-inline-size', '250px'],
+        ['max-inline-size', '250px'],
+      ]),
+    )
+    expect(getComputedStyle(root).width).toBe('250px')
+    assembly.executor.layoutCleanup()
+
+    expect(root.style.minInlineSize).toBe('80px')
+    expect(root.style.maxInlineSize).toBe('300px')
+    expect(root.style.getPropertyPriority('max-inline-size')).toBe('important')
+    expect(getComputedStyle(root).width).toBe('300px')
+    expect(root.style.width).toBe('400px')
+    expect(root.style.height).toBe('100px')
+    expect(root.getAnimations()).toEqual([])
+    expect(errors).toEqual([])
+  })
+
+  it.each(['horizontal-tb', 'vertical-rl'])(
+    'orders fixed logical constraints after important physical aliases in %s',
+    (writingMode) => {
+      const { assembly, targets } = setup(layoutDefinition(), { active: false })
+      const root = targets.get('self')!
+      root.style.cssText = `width:400px;height:400px;writing-mode:${writingMode};min-inline-size:80px!important;max-inline-size:500px!important;min-width:100px!important;max-width:450px!important;min-height:100px!important;max-height:450px!important;transition:all 1000ms linear;`
+
+      assembly.executor.layoutTransform(
+        root,
+        'scale(.5)',
+        new Map([
+          ['min-inline-size', '200px'],
+          ['max-inline-size', '200px'],
+        ]),
+      )
+
+      expect(getComputedStyle(root).inlineSize).toBe('200px')
+      expect(getComputedStyle(root).blockSize).toBe('400px')
+      assembly.executor.layoutCleanup()
+      expect(getComputedStyle(root).inlineSize).toBe('400px')
+      expect(getComputedStyle(root).blockSize).toBe('400px')
+      expect(root.style.minInlineSize).toBe('80px')
+      expect(root.style.maxInlineSize).toBe('500px')
+      expect(root.getAnimations()).toEqual([])
+    },
+  )
+
+  it('releases previously owned physical constraint transitions after a writing-mode change', () => {
+    const { assembly, targets } = setup(layoutDefinition(), { active: false })
+    const root = targets.get('self')!
+    root.style.cssText =
+      'width:400px;height:400px;writing-mode:horizontal-tb;min-width:100px!important;max-width:450px!important;min-height:100px!important;max-height:450px!important;transition:all 1000ms linear;'
+    assembly.executor.layoutTransform(
+      root,
+      'scale(.5)',
+      new Map([
+        ['min-inline-size', '200px'],
+        ['max-inline-size', '200px'],
+      ]),
+    )
+    expect(getComputedStyle(root).width).toBe('200px')
+
+    root.style.writingMode = 'vertical-rl'
+    assembly.executor.layoutCleanup()
+
+    expect(getComputedStyle(root).width).toBe('400px')
+    expect(getComputedStyle(root).height).toBe('400px')
+    expect(root.getAnimations()).toEqual([])
+    expect(root.style.writingMode).toBe('vertical-rl')
+  })
+
+  it('restores a current important padding shorthand after logical padding stabilization', () => {
+    const { assembly, targets } = setup(layoutDefinition(), { active: false })
+    const root = targets.get('self')!
+    root.style.cssText =
+      'width:200px;height:100px;padding:5%!important;transition:all 1000ms linear;'
+    const constraints = new Map([
+      ['padding-inline-start', '20px'],
+      ['padding-inline-end', '20px'],
+      ['padding-block-start', '20px'],
+      ['padding-block-end', '20px'],
+    ] as const)
+    assembly.executor.layoutTransform(root, 'scale(.5)', constraints)
+    expect(getComputedStyle(root).paddingTop).toBe('20px')
+
+    root.style.setProperty('padding', '10%', 'important')
+    assembly.executor.layoutCleanup()
+
+    expect(root.style.padding).toBe('10%')
+    expect(root.style.getPropertyPriority('padding')).toBe('important')
+    expect(root.style.paddingInlineStart).toBe('')
+    expect(root.style.paddingInlineEnd).toBe('')
+    expect(root.style.paddingBlockStart).toBe('')
+    expect(root.style.paddingBlockEnd).toBe('')
+    expect(root.getAnimations()).toEqual([])
+  })
+
   it('suppresses automatic output on every physical alias when another alias owns explicit none', () => {
     const source: PropertyIRDefinition = {
       ...layoutDefinition(),
@@ -336,11 +447,12 @@ describe('Executor temporary layout ownership', () => {
       const { assembly, targets } = setup(layoutDefinition(), { active: false })
       const root = targets.get('self')!
       assembly.executor.layoutTransform(root, 'matrix(.5,0,0,.5,0,0)')
+      const before = new Set(root.getAnimations())
       const restore = assembly.executor.layoutMeasure(
         root,
         new Map([['transform', 'matrix(1,0,0,1,0,0)']]),
       )
-      const held = root.getAnimations()[0]
+      const held = root.getAnimations().find((animation) => !before.has(animation))
       if (!held) throw new Error('Expected live native observation')
       const cause = new Error('Native cancellation failed once')
       const cancel = vi.spyOn(held, 'cancel').mockImplementationOnce(() => {
@@ -366,12 +478,14 @@ describe('Executor temporary layout ownership', () => {
 
       expect(held.playState).toBe('idle')
       expect(cancel).toHaveBeenCalledTimes(2)
-      const current = root.getAnimations()[0]
+      const current = root.getAnimations()
       restore()
-      expect(root.getAnimations()).toHaveLength(retry === 'next-read' ? 1 : 0)
-      expect(root.getAnimations()[0]).toBe(current)
+      expect(root.getAnimations()).toEqual(current)
+      expect(current).toHaveLength(retry === 'next-read' ? 2 : 0)
       expect(cancel).toHaveBeenCalledTimes(2)
-      expect(root.style.transform).toBe('')
+      expect(getComputedStyle(root).transform).toBe(
+        retry === 'next-read' ? 'matrix(1, 0, 0, 1, 0, 0)' : 'none',
+      )
       next?.()
       assembly.executor.layoutCleanup()
       expect(root.getAnimations()).toEqual([])

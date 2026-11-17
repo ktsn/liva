@@ -1,3 +1,4 @@
+import type { LayoutAbsoluteBox } from './layout-constraints.ts'
 import type { ProjectionBox, ProjectionMatrix } from './projection.ts'
 
 export type LayoutBounds = Readonly<{
@@ -427,6 +428,18 @@ export class LayoutReadBatch {
 
       return precision + magnitude * norm * inverseNorm * 2 ** -20
     }, 0)
+    const absolute =
+      measured.position === 'absolute'
+        ? {
+            containingBlock: measured.offsetParent,
+            inlineSize: measured.style.inlineSize,
+            blockSize: measured.style.blockSize,
+            paddingInlineStart: measured.style.paddingInlineStart,
+            paddingInlineEnd: measured.style.paddingInlineEnd,
+            paddingBlockStart: measured.style.paddingBlockStart,
+            paddingBlockEnd: measured.style.paddingBlockEnd,
+          }
+        : undefined
     const snapshot = (excluded: ReadonlySet<HTMLElement>): LayoutProjectionSnapshot => {
       let frame = new DOMMatrix()
 
@@ -444,6 +457,7 @@ export class LayoutReadBatch {
         origin: { x: measured.origin.x, y: measured.origin.y },
         positionPrecision,
         cssTransform: measured.cssTransform,
+        absolute,
         withoutTransforms: snapshot,
       }
     }
@@ -473,6 +487,8 @@ export interface LayoutProjectionSnapshot {
   readonly positionPrecision: number
   /** A non-none CSS transform already establishes the target's containing block. */
   readonly cssTransform: boolean
+  /** Used logical CSS sizes (respecting box-sizing/writing-mode), before generated containing blocks. */
+  readonly absolute?: LayoutAbsoluteBox
   /** Replays retained numeric links with selected ancestor CSS transform properties overridden. No DOM reads. */
   readonly withoutTransforms: (ancestors: ReadonlySet<HTMLElement>) => LayoutProjectionSnapshot
 }

@@ -1,3 +1,8 @@
+import {
+  layoutConstraintPhases,
+  layoutConstraintSources,
+  type LayoutConstraintProperty,
+} from './layout-constraints.ts'
 import { batchLayoutWrites } from './layout-write-phase.ts'
 import { releaseResources } from '../evaluation/resource-cleanup.ts'
 import {
@@ -34,6 +39,7 @@ type Motion = {
   readonly motion: ProjectionShapeMotionResult
   start: number
   cumulative: ProjectionMatrix
+  constraints?: Map<LayoutConstraintProperty, string>
 }
 
 function enabled(candidate: LayoutCandidate): boolean {
@@ -56,7 +62,11 @@ function sameGeometry(
         Math.abs(a.box[axis] - b.box[axis]) <=
         (axis === 'x' || axis === 'y' ? a.positionPrecision + b.positionPrecision : 1e-7),
     ) &&
-    (['a', 'b', 'c', 'd'] as const).every((axis) => Math.abs(a.frame[axis] - b.frame[axis]) < 1e-7)
+    (['a', 'b', 'c', 'd'] as const).every(
+      (axis) => Math.abs(a.frame[axis] - b.frame[axis]) < 1e-7,
+    ) &&
+    a.absolute?.containingBlock === b.absolute?.containingBlock &&
+    layoutConstraintSources.every((source) => a.absolute?.[source] === b.absolute?.[source])
   )
 }
 
@@ -441,10 +451,47 @@ export class LayoutCoordinator {
     // The renderer uses these actual local dimensions/frames while the trajectory
     // retains the natural physical destination, including absolute percentage boxes.
     batchLayoutWrites(() => {
-      for (const [element, motion] of this.motions)
+      for (const [element, motion] of this.motions) {
+        motion.constraints = undefined
         motion.candidate.participant.layoutTransform(element, 'matrix(1, 0, 0, 1, 0, 0)')
+      }
     })
-    const frames = this.read(candidates)
+    let frames = this.read(candidates)
+
+    // Transform establishes a containing block for absolute descendants. Preserve
+    // their destination text layout with fixed used-size constraints, not dimension
+    // animation. CSSOM logical sizes already account for box-sizing/writing-mode.
+    // Restore differing percentage padding first, then inline layout; auto block
+    // size can recover naturally before the final block-size check.
+    for (const rules of layoutConstraintPhases) {
+      let changed = false
+      batchLayoutWrites(() => {
+        for (const [element, motion] of this.motions) {
+          const natural = motion.destination.absolute
+          const actual = frames.get(element)?.absolute
+          if (!natural || !actual || natural.containingBlock === actual.containingBlock) continue
+
+          const constraints = motion.constraints ?? new Map<LayoutConstraintProperty, string>()
+          let constrained = false
+          for (const [property, source] of rules) {
+            if (natural[source] === actual[source]) continue
+            constraints.set(property, natural[source])
+            constrained = true
+          }
+          if (!constrained) continue
+
+          motion.constraints = constraints
+          motion.candidate.participant.layoutTransform(
+            element,
+            'matrix(1, 0, 0, 1, 0, 0)',
+            constraints,
+          )
+          changed = true
+        }
+      })
+
+      if (changed) frames = this.read(candidates)
+    }
 
     batchLayoutWrites(() => {
       for (const [element, motion] of this.motions) {
@@ -494,7 +541,11 @@ export class LayoutCoordinator {
           motion.candidate.participant.layoutTransform(element, undefined)
         } else {
           motion.cumulative = output.cumulative
-          motion.candidate.participant.layoutTransform(element, output.transform)
+          motion.candidate.participant.layoutTransform(
+            element,
+            output.transform,
+            motion.constraints,
+          )
         }
       }
     })

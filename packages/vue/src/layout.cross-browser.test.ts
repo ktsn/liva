@@ -1038,7 +1038,7 @@ describe('Vue coordinated layout projection', () => {
       expect(child.style.transform).not.toBe('')
       // Generated transforms establish a different actual containing block. The
       // public reactive geometry must still describe the untransformed twin.
-      expect(getComputedStyle(child).width).toBe('100px')
+      expect(getComputedStyle(child).width).toBe('200px')
       const late = measure({ target: { name: 'child' } })
       releaseLate = late.bind(
         new Map([
@@ -1070,6 +1070,292 @@ describe('Vue coordinated layout projection', () => {
       twin.remove()
     }
   })
+
+  it.each(
+    ['content-box', 'border-box'].flatMap((boxSizing) =>
+      ['horizontal-tb', 'vertical-rl'].flatMap((writingMode) =>
+        ['6px', '5%'].map((padding) => ({ boxSizing, writingMode, padding })),
+      ),
+    ),
+  )(
+    'keeps destination text layout when projection changes an absolute containing block: %j',
+    async ({ boxSizing, writingMode, padding }) => {
+      const expanded = ref(false)
+      const source: Definition = {
+        ...definition(),
+        layers: [
+          {
+            name: 'base',
+            targets: ['self', 'child'].map((name) => ({
+              ...definition().layers[0].targets[0],
+              name,
+            })),
+          },
+        ],
+      }
+      const { host, errors } = await mount(
+        motionComponent(source, ({ root, target }) =>
+          h(
+            'section',
+            {
+              'data-reference': '',
+              style: { position: 'relative', width: '400px', height: '300px' },
+            },
+            [
+              root(
+                h(
+                  'div',
+                  {
+                    'data-item': '',
+                    style: {
+                      width: expanded.value ? '300px' : '200px',
+                      height: expanded.value ? '180px' : '100px',
+                      transformOrigin: '0 0',
+                    },
+                  },
+                  [
+                    target(
+                      h(
+                        'article',
+                        {
+                          'data-child': '',
+                          style: {
+                            position: 'absolute',
+                            left: '25%',
+                            top: '25%',
+                            width: '50%',
+                            height: '50%',
+                            boxSizing,
+                            writingMode,
+                            border: '2px solid',
+                            padding,
+                            transformOrigin: '0 0',
+                          },
+                        },
+                        [
+                          h(
+                            'p',
+                            { 'data-text': '', style: { margin: 0, font: '16px/16px monospace' } },
+                            'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda',
+                          ),
+                          ...markers(),
+                        ],
+                      ),
+                      'child',
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      )
+      const reference = element(host, '[data-reference]')
+      const child = element(host, '[data-child]')
+      const twin = reference.cloneNode(true)
+      if (!(twin instanceof HTMLElement)) throw new Error('Expected HTML native twin')
+      const origin = reference.getBoundingClientRect()
+      Object.assign(twin.style, {
+        position: 'absolute',
+        left: `${origin.x + scrollX}px`,
+        top: `${origin.y + scrollY}px`,
+      })
+      document.body.append(twin)
+      const nativeChild = element(twin, '[data-child]')
+      const nativeParent = element(twin)
+      const fragments = (box: HTMLElement) => {
+        const range = document.createRange()
+        range.selectNodeContents(element(box, '[data-text]'))
+        const bounds = box.getBoundingClientRect()
+        return [...range.getClientRects()].map((rect) => ({
+          x: rect.x - bounds.x,
+          y: rect.y - bounds.y,
+          width: rect.width,
+          height: rect.height,
+        }))
+      }
+      const read = measure({ target: { name: 'child' } })
+      const releaseMeasure = read.bind(
+        new Map([
+          ['self', reference],
+          ['child', child],
+        ]),
+        () => {},
+      )
+      const write = vi.spyOn(child.style, 'setProperty')
+
+      try {
+        nativeParent.style.width = '300px'
+        nativeParent.style.height = '180px'
+        expanded.value = true
+        await flush()
+        const constraintWrites = () =>
+          write.mock.calls.filter(
+            ([property]) =>
+              property.startsWith('min-') ||
+              property.startsWith('max-') ||
+              property.startsWith('padding-'),
+          ).length
+        expect(constraintWrites()).toBeGreaterThan(0)
+        const assertDestination = () => {
+          expect(child.style.width).toBe('50%')
+          expect(child.style.height).toBe('50%')
+          expect(getComputedStyle(child).inlineSize).toBe(getComputedStyle(nativeChild).inlineSize)
+          expect(getComputedStyle(child).blockSize).toBe(getComputedStyle(nativeChild).blockSize)
+          expect(read.value).toEqual(readLayoutBounds(nativeChild, twin))
+          const actual = fragments(child)
+          const expected = fragments(nativeChild)
+          expect(actual).toHaveLength(expected.length)
+          for (let index = 0; index < actual.length; index++)
+            for (const axis of ['x', 'y', 'width', 'height'] as const)
+              expect(Math.abs(actual[index][axis] - expected[index][axis])).toBeLessThan(0.0005)
+          const displayed = corners(child)
+          const natural = corners(nativeChild)
+          for (let index = 0; index < displayed.length; index++) {
+            expect(Math.abs(displayed[index].x - natural[index].x)).toBeLessThan(0.0005)
+            expect(Math.abs(displayed[index].y - natural[index].y)).toBeLessThan(0.0005)
+          }
+        }
+        assertDestination()
+        // Drain native observation delivery before distinguishing retained playback
+        // from legitimate initial geometry invalidation/reinstallation.
+        await nativeTurn()
+        await nativeTurn()
+        frame(0)
+        const installed = constraintWrites()
+
+        for (const elapsed of [0, 250, 250, 500]) {
+          frame(elapsed)
+          assertDestination()
+          expect(constraintWrites()).toBe(installed)
+        }
+
+        expect(
+          write.mock.calls.some(([property]) => property === 'width' || property === 'height'),
+        ).toBe(false)
+        expect(child.style.minInlineSize).toBe('')
+        expect(child.style.maxInlineSize).toBe('')
+        expect(child.style.minBlockSize).toBe('')
+        expect(child.style.maxBlockSize).toBe('')
+        expect(child.getAnimations()).toEqual([])
+        expect(errors).toEqual([])
+      } finally {
+        write.mockRestore()
+        releaseMeasure()
+        twin.remove()
+      }
+    },
+  )
+
+  it.each(['text', 'minimum', 'padding'] as const)(
+    'retains automatic block sizing and settles on a genuine external %s change',
+    async (change) => {
+      const width = ref(200)
+      const source: Definition = {
+        ...definition(),
+        layers: [
+          {
+            name: 'base',
+            targets: ['self', 'child'].map((name) => ({
+              ...definition().layers[0].targets[0],
+              name,
+            })),
+          },
+        ],
+      }
+      const { host, errors } = await mount(
+        motionComponent(source, ({ root, target }) =>
+          h(
+            'section',
+            {
+              style: { position: 'relative', width: '400px', height: '300px' },
+            },
+            [
+              root(
+                h(
+                  'div',
+                  {
+                    'data-item': '',
+                    style: { width: `${width.value}px`, height: '100px', transformOrigin: '0 0' },
+                  },
+                  [
+                    target(
+                      h(
+                        'article',
+                        {
+                          'data-child': '',
+                          style: {
+                            position: 'absolute',
+                            width: '50%',
+                            padding: '5%',
+                            font: '16px/16px monospace',
+                            transformOrigin: '0 0',
+                          },
+                        },
+                        [
+                          h(
+                            'p',
+                            { 'data-text': '', style: { margin: 0 } },
+                            'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda',
+                          ),
+                        ],
+                      ),
+                      'child',
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      )
+      const parent = element(host)
+      const child = element(host, '[data-child]')
+      const naturalHeight = getComputedStyle(child).height
+
+      width.value = 300
+      await flush()
+      expect(child.style.minInlineSize).toBe('200px')
+      expect(child.style.minBlockSize).toBe('')
+      expect(child.style.maxBlockSize).toBe('')
+      expect(getComputedStyle(child).height).toBe(naturalHeight)
+      frame(250)
+      expect(parent.style.transform).not.toBe('')
+
+      if (change === 'text') {
+        element(child, '[data-text]').append(
+          ' additional external content alpha beta gamma delta epsilon zeta eta theta iota kappa lambda',
+        )
+      } else {
+        const style = document.createElement('style')
+        style.textContent =
+          '.liva-external-minimum { min-inline-size: 240px !important; } .liva-external-padding { padding: 10% !important; }'
+        host.append(style)
+        child.classList.add(`liva-external-${change}`)
+        // The generated important constraint masks this class from ResizeObserver.
+        // Mutation invalidation must read the underlying natural CSS before settling.
+      }
+      expect(getComputedStyle(child).inlineSize).toBe('200px')
+      await flush()
+      frame(0)
+
+      expect(parent.style.transform).toBe('')
+      expect(child.style.minInlineSize).toBe('')
+      expect(child.style.maxInlineSize).toBe('')
+      expect(child.style.minBlockSize).toBe('')
+      expect(child.style.maxBlockSize).toBe('')
+      expect(parseFloat(getComputedStyle(child).height) > parseFloat(naturalHeight)).toBe(
+        change === 'text',
+      )
+      expect(getComputedStyle(child).inlineSize).toBe(change === 'minimum' ? '240px' : '200px')
+      expect(getComputedStyle(child).paddingInlineStart).toBe(
+        change === 'padding' ? '40px' : '20px',
+      )
+      expect(parent.getAnimations()).toEqual([])
+      expect(child.getAnimations()).toEqual([])
+      expect(errors).toEqual([])
+    },
+  )
 
   it('captures a teleported root before Vue moves it between containers', async () => {
     const moved = ref(false)
