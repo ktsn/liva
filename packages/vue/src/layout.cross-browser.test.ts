@@ -419,6 +419,95 @@ describe('Vue coordinated layout projection', () => {
     expect(target.style.transform).toBe('')
     expect(errors).toEqual([])
   })
+  it.each(['page', 'nested', 'both'] as const)(
+    'retains the same active trajectory across %s scrolling and an unrelated Vue update',
+    async (scrolling) => {
+      const originalScroll = { x: window.scrollX, y: window.scrollY }
+      const expanded = ref(false)
+      const counter = ref(0)
+      const { host, errors } = await mount(
+        motionComponent(definition(), ({ root }) =>
+          h('div', { style: { width: '2000px', height: '2000px' } }, [
+            h('output', counter.value),
+            h(
+              'div',
+              { 'data-scroller': '', style: { width: '300px', height: '150px', overflow: 'auto' } },
+              [
+                root(
+                  h(
+                    'div',
+                    {
+                      'data-item': '',
+                      style: {
+                        position: 'relative',
+                        width: expanded.value ? '800px' : '600px',
+                        height: expanded.value ? '700px' : '400px',
+                        transformOrigin: '0 0',
+                      },
+                    },
+                    markers(),
+                  ),
+                ),
+              ],
+            ),
+          ]),
+        ),
+      )
+      const target = element(host)
+      const scroller = element(host, '[data-scroller]')
+
+      try {
+        await nativeTurn()
+        await nativeTurn()
+        frame(0)
+        expanded.value = true
+        await flush()
+        frame(250)
+        await nativeTurn()
+        await nativeTurn()
+        frame(0)
+        expect(target.style.transform).not.toBe('')
+
+        if (scrolling !== 'nested') window.scrollTo(35.5, 51.5)
+        if (scrolling !== 'page') scroller.scrollTo(27.5, 31.5)
+        await nativeTurn()
+        await nativeTurn()
+        frame(0)
+        const scroll = {
+          pageX: window.scrollX,
+          pageY: window.scrollY,
+          x: scroller.scrollLeft,
+          y: scroller.scrollTop,
+        }
+        expect(scrolling === 'nested' ? scroll.y : scroll.pageY).toBeGreaterThan(0)
+        const before = corners(target)
+        const transform = target.style.transform
+        expect(transform).not.toBe('')
+
+        counter.value++
+        await flush()
+        const after = corners(target)
+
+        expect(target.style.transform).toBe(transform)
+        expect({
+          pageX: window.scrollX,
+          pageY: window.scrollY,
+          x: scroller.scrollLeft,
+          y: scroller.scrollTop,
+        }).toEqual(scroll)
+        for (let index = 0; index < before.length; index++) {
+          expect(Math.abs(after[index].x - before[index].x)).toBeLessThan(0.0005)
+          expect(Math.abs(after[index].y - before[index].y)).toBeLessThan(0.0005)
+        }
+        frame(750)
+        expect(target.style.transform).toBe('')
+        expect(errors).toEqual([])
+      } finally {
+        window.scrollTo(originalScroll.x, originalScroll.y)
+      }
+    },
+  )
+
   it.each(
     ['WAAPI', 'CSS animation', 'CSS transition'].flatMap((kind) =>
       [false, true].map((important) => ({ kind, important })),

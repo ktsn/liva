@@ -389,7 +389,14 @@ export class LayoutReadBatch {
       const parent = boxes[index - 1]
       const transform = transforms?.get(parent.element) ?? parent
       const displacement = this.offset(child, parent)
-      const scroll = this.scroll(boxes, index)
+      // This global frame starts at the document border origin. Page scrolling
+      // already moves both centers equally and cancels in relativeOffset();
+      // adding it again would shift retained trajectories on an unrelated update.
+      // Nested scrolling still displaces only the child and must be restored.
+      const scroll =
+        parent.element === target.ownerDocument.scrollingElement
+          ? { x: 0, y: 0 }
+          : this.scroll(boxes, index)
 
       return {
         element: parent.element,
