@@ -183,56 +183,57 @@ test('nearest-root registration handles nested roots and conditional targets', a
   expect(await page.evaluate(() => document.getAnimations().length)).toBe(0)
 })
 
-test('invalid source retains last valid definition and fixed source resumes HMR', async ({
-  page,
-  browserName,
-}) => {
-  test.skip(browserName !== 'chromium', 'A shared source-writing HMR transaction runs once')
-  const { readFile, writeFile } = await import('node:fs/promises')
-  const file = new URL('../../playground/tests/Hmr.vue', import.meta.url)
-  const original = await readFile(file, 'utf8')
+test(
+  'invalid source retains last valid definition and fixed source resumes HMR',
+  { lock: '-exclusive-' },
+  async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'A shared source-writing HMR transaction runs once')
+    const { readFile, writeFile } = await import('node:fs/promises')
+    const file = new URL('../../playground/tests/Hmr.vue', import.meta.url)
+    const original = await readFile(file, 'utf8')
 
-  try {
-    await page.goto(`${base}/tests/hmr.html`)
-    const button = page.getByRole('button')
-    await expect(button).toHaveCSS('background-color', 'rgb(255, 0, 0)')
+    try {
+      await page.goto(`${base}/tests/hmr.html`)
+      const button = page.getByRole('button')
+      await expect(button).toHaveCSS('background-color', 'rgb(255, 0, 0)')
 
-    const updated = await page.evaluateHandle(async (origin) => {
-      const { createHotContext } = await import(`${origin}/@vite/client`)
-      const hot = createHotContext('/tests/hmr-observer')
+      const updated = await page.evaluateHandle(async (origin) => {
+        const { createHotContext } = await import(`${origin}/@vite/client`)
+        const hot = createHotContext('/tests/hmr-observer')
 
-      return {
-        finished: new Promise<void>((resolve) => {
-          const complete = ({ updates }: { updates: { path: string }[] }) => {
-            if (!updates.some(({ path }) => path.includes('/tests/Hmr.vue'))) return
+        return {
+          finished: new Promise<void>((resolve) => {
+            const complete = ({ updates }: { updates: { path: string }[] }) => {
+              if (!updates.some(({ path }) => path.includes('/tests/Hmr.vue'))) return
 
-            hot.off('vite:afterUpdate', complete)
-            resolve()
-          }
+              hot.off('vite:afterUpdate', complete)
+              resolve()
+            }
 
-          hot.on('vite:afterUpdate', complete)
-        }),
-      }
-    }, base)
+            hot.on('vite:afterUpdate', complete)
+          }),
+        }
+      }, base)
 
-    await writeFile(file, original.replace('duration: 50', 'duration: invalid'))
+      await writeFile(file, original.replace('duration: 50', 'duration: invalid'))
 
-    await expect
-      .poll(async () => (await page.request.get(`${base}/tests/Hmr.vue?raw`)).text())
-      .toContain('invalid')
+      await expect
+        .poll(async () => (await page.request.get(`${base}/tests/Hmr.vue?raw`)).text())
+        .toContain('invalid')
 
-    await updated.evaluate(({ finished }) => finished)
+      await updated.evaluate(({ finished }) => finished)
 
-    await updated.dispose()
+      await updated.dispose()
 
-    await button.click()
-    await expect(button).toHaveCSS('background-color', 'rgb(0, 0, 255)')
-    await expect(page.locator('vite-error-overlay')).toHaveCount(0)
+      await button.click()
+      await expect(button).toHaveCSS('background-color', 'rgb(0, 0, 255)')
+      await expect(page.locator('vite-error-overlay')).toHaveCount(0)
 
-    await writeFile(file, original.replace('background-color: red', 'background-color: green'))
-    await expect(button).toHaveCSS('background-color', 'rgb(0, 128, 0)')
-    await expect.poll(() => button.evaluate((e) => e.getAnimations().length)).toBe(0)
-  } finally {
-    await writeFile(file, original)
-  }
-})
+      await writeFile(file, original.replace('background-color: red', 'background-color: green'))
+      await expect(button).toHaveCSS('background-color', 'rgb(0, 128, 0)')
+      await expect.poll(() => button.evaluate((e) => e.getAnimations().length)).toBe(0)
+    } finally {
+      await writeFile(file, original)
+    }
+  },
+)

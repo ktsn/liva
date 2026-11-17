@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { setGestureTime } from './gesture-time.ts'
 
 declare global {
   interface Window {
@@ -9,7 +10,6 @@ declare global {
     teardown(): void
     effects: Animation[]
     childExit: Animation
-    gestureTime: number
   }
 }
 
@@ -28,25 +28,18 @@ async function releaseTimedSwipe(
     throw new Error('Expected a visible swipe face')
   }
 
-  await page.evaluate(() => {
-    window.gestureTime = 1000
-    Object.defineProperty(performance, 'now', { value: () => window.gestureTime })
-  })
+  await setGestureTime(page, 1000)
 
   await page.mouse.move(box.x + 30, box.y + 30)
   await page.mouse.down()
 
   for (const move of moves) {
-    await page.evaluate((time) => {
-      window.gestureTime = time
-    }, move.time)
+    await setGestureTime(page, move.time)
 
     await page.mouse.move(box.x + 30 + move.offset, box.y + 30)
   }
 
-  await page.evaluate((time) => {
-    window.gestureTime = time
-  }, releaseTime)
+  await setGestureTime(page, releaseTime)
 
   await page.mouse.up()
 }
@@ -438,9 +431,8 @@ test('swipe regrabs a moving spring without jumping and releases in the reverse 
     return parseFloat(getComputedStyle(element).translate)
   })
   const movingBox = (await face.boundingBox())!
-  await page.evaluate(() => {
-    window.gestureTime = 2000
-  })
+
+  await setGestureTime(page, 2000)
 
   await page.mouse.move(movingBox.x + 30, movingBox.y + 30)
   await page.mouse.down()
@@ -449,13 +441,9 @@ test('swipe regrabs a moving spring without jumping and releases in the reverse 
     displayed,
   )
 
-  await page.evaluate(() => {
-    window.gestureTime = 2010
-  })
+  await setGestureTime(page, 2010)
   await page.mouse.move(movingBox.x + 20, movingBox.y + 30)
-  await page.evaluate(() => {
-    window.gestureTime = 2020
-  })
+  await setGestureTime(page, 2020)
   await page.mouse.up()
 
   const destination = await face.evaluate((element) => {

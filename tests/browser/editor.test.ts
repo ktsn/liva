@@ -285,135 +285,139 @@ test('playback preferences survive form remounts and reset on reload', async ({ 
   await expect(loop).toHaveAttribute('aria-pressed', 'false')
 })
 
-test('timeline saves timing, new frames and endpoint state values with shared HMR', async ({
-  page,
-  browserName,
-}) => {
-  test.skip(browserName !== 'chromium', 'Shared source writes run once')
-  const original = await readFile(file, 'utf8')
-  try {
-    await open(page, true)
-    await track(page, 'box', 'background-color')
-    await page.getByLabel('Track duration', { exact: true }).fill('200')
-    await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
-    await expectMessage(page, 'Previewing')
-    await seek(page, 100)
-    await page.getByRole('button', { name: 'New keyframe at playhead' }).click()
-    await page.getByLabel('Keyframe source value', { exact: true }).fill('purple')
-    await page.getByRole('button', { name: 'Add keyframe', exact: true }).click()
-    await expectMessage(page, 'Previewing')
-    expect(await readFile(file, 'utf8')).toBe(original)
-    await save(page)
+test(
+  'timeline saves timing, new frames and endpoint state values with shared HMR',
+  { lock: '-exclusive-' },
+  async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'Shared source writes run once')
+    const original = await readFile(file, 'utf8')
 
-    const saved = await readFile(file, 'utf8')
-    expect(saved).toContain('transition off -> on')
-    expect(saved).toContain('@tween(duration: 200, easing: ease)')
-    expect(saved).toContain('50%')
-    expect(saved).toContain('%: purple')
-    expect(saved.slice(0, saved.indexOf('<liva'))).toBe(
-      original.slice(0, original.indexOf('<liva')),
-    )
-    await page
-      .getByLabel('Existing transition')
-      .selectOption(JSON.stringify({ layer: 'selection', index: 0 }))
-    await track(page, 'box', 'background-color')
-    await page.getByRole('button', { name: 'box.background-color 50%', exact: true }).click()
-    await page.getByRole('button', { name: 'Delete keyframe', exact: true }).click()
-    await save(page)
-    expect(await readFile(file, 'utf8')).not.toContain('purple')
+    try {
+      await open(page, true)
+      await track(page, 'box', 'background-color')
+      await page.getByLabel('Track duration', { exact: true }).fill('200')
+      await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
+      await expectMessage(page, 'Previewing')
+      await seek(page, 100)
+      await page.getByRole('button', { name: 'New keyframe at playhead' }).click()
+      await page.getByLabel('Keyframe source value', { exact: true }).fill('purple')
+      await page.getByRole('button', { name: 'Add keyframe', exact: true }).click()
+      await expectMessage(page, 'Previewing')
+      expect(await readFile(file, 'utf8')).toBe(original)
+      await save(page)
 
-    await track(page, 'box', 'background-color')
-    await page.getByLabel('Source value', { exact: true }).fill('green')
-    await page.getByRole('button', { name: 'Apply value', exact: true }).click()
-    await save(page)
-    expect(await readFile(file, 'utf8')).toContain('background-color: green')
-  } finally {
-    await restoreEditorToggle(page, original)
-  }
-})
+      const saved = await readFile(file, 'utf8')
+      expect(saved).toContain('transition off -> on')
+      expect(saved).toContain('@tween(duration: 200, easing: ease)')
+      expect(saved).toContain('50%')
+      expect(saved).toContain('%: purple')
+      expect(saved.slice(0, saved.indexOf('<liva'))).toBe(
+        original.slice(0, original.indexOf('<liva')),
+      )
+      await page
+        .getByLabel('Existing transition')
+        .selectOption(JSON.stringify({ layer: 'selection', index: 0 }))
+      await track(page, 'box', 'background-color')
+      await page.getByRole('button', { name: 'box.background-color 50%', exact: true }).click()
+      await page.getByRole('button', { name: 'Delete keyframe', exact: true }).click()
+      await save(page)
+      expect(await readFile(file, 'utf8')).not.toContain('purple')
 
-test('Instant timing saves, previews immediately, and removes back to inherited timing', async ({
-  page,
-  browserName,
-}) => {
-  test.skip(browserName !== 'chromium', 'Shared source writes run once')
-  const original = await readFile(file, 'utf8')
+      await track(page, 'box', 'background-color')
+      await page.getByLabel('Source value', { exact: true }).fill('green')
+      await page.getByRole('button', { name: 'Apply value', exact: true }).click()
+      await save(page)
+      expect(await readFile(file, 'utf8')).toContain('background-color: green')
+    } finally {
+      await restoreEditorToggle(page, original)
+    }
+  },
+)
 
-  try {
-    await open(page, true)
-    await track(page, 'box', 'background-color')
-    await page.getByLabel('Timing mode').selectOption('instant')
-    await expect(page.getByLabel('Track duration')).toHaveCount(0)
-    await expect(page.getByLabel('Track easing')).toHaveCount(0)
-    await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
-    await expectMessage(page, 'Previewing')
+test(
+  'Instant timing saves, previews immediately, and removes back to inherited timing',
+  { lock: '-exclusive-' },
+  async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'Shared source writes run once')
+    const original = await readFile(file, 'utf8')
 
-    await seek(page, 0)
-    const first = page.getByRole('button', { name: 'First', exact: true })
-    await expect(first).toHaveCSS('background-color', 'rgb(0, 0, 255)')
+    try {
+      await open(page, true)
+      await track(page, 'box', 'background-color')
+      await page.getByLabel('Timing mode').selectOption('instant')
+      await expect(page.getByLabel('Track duration')).toHaveCount(0)
+      await expect(page.getByLabel('Track easing')).toHaveCount(0)
+      await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
+      await expectMessage(page, 'Previewing')
 
-    await save(page)
+      await seek(page, 0)
+      const first = page.getByRole('button', { name: 'First', exact: true })
+      await expect(first).toHaveCSS('background-color', 'rgb(0, 0, 255)')
 
-    expect(await readFile(file, 'utf8')).toContain('@instant')
+      await save(page)
 
-    await page
-      .getByLabel('Existing transition')
-      .selectOption(JSON.stringify({ layer: 'selection', index: 0 }))
-    await track(page, 'box', 'background-color')
-    await expect(page.getByLabel('Timing mode')).toHaveValue('instant')
-    await page.getByRole('button', { name: 'Remove timing override', exact: true }).click()
-    await expectMessage(page, 'Previewing')
-    await expect(page.getByLabel('Timing mode')).toHaveValue('tween')
-    await expect(page.getByLabel('Track duration')).toHaveValue('50')
-  } finally {
-    await restoreEditorToggle(page, original)
-  }
-})
+      expect(await readFile(file, 'utf8')).toContain('@instant')
 
-test('Instant edits remain immediate when a motion shadows instant', async ({
-  page,
-  browserName,
-}) => {
-  test.skip(browserName !== 'chromium', 'Shared source writes run once')
-  const original = await readFile(file, 'utf8')
+      await page
+        .getByLabel('Existing transition')
+        .selectOption(JSON.stringify({ layer: 'selection', index: 0 }))
+      await track(page, 'box', 'background-color')
+      await expect(page.getByLabel('Timing mode')).toHaveValue('instant')
+      await page.getByRole('button', { name: 'Remove timing override', exact: true }).click()
+      await expectMessage(page, 'Previewing')
+      await expect(page.getByLabel('Timing mode')).toHaveValue('tween')
+      await expect(page.getByLabel('Track duration')).toHaveValue('50')
+    } finally {
+      await restoreEditorToggle(page, original)
+    }
+  },
+)
 
-  try {
-    await page.goto(`${base}/tests/editor.html`)
-    await writeFile(
-      file,
-      original.replace(
-        'motion motion(checked: boolean) {',
-        'motion motion(checked: boolean) {\n  let instant = tween(duration: 200)',
-      ),
-    )
-    await expect
-      .poll(() =>
-        page.evaluate(() =>
-          [...window.__LIVA_EDITOR__.entries.values()].some((entry) =>
-            entry.binding.definition.letBindings?.some((binding) => binding.name === 'instant'),
-          ),
+test(
+  'Instant edits remain immediate when a motion shadows instant',
+  { lock: '-exclusive-' },
+  async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'Shared source writes run once')
+    const original = await readFile(file, 'utf8')
+
+    try {
+      await page.goto(`${base}/tests/editor.html`)
+      await writeFile(
+        file,
+        original.replace(
+          'motion motion(checked: boolean) {',
+          'motion motion(checked: boolean) {\n  let instant = tween(duration: 200)',
         ),
       )
-      .toBe(true)
-    await open(page, true)
-    await track(page, 'box', 'background-color')
-    await page.getByLabel('Timing mode').selectOption('instant')
-    await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
-    await expectMessage(page, 'Previewing')
+      await expect
+        .poll(() =>
+          page.evaluate(() =>
+            [...window.__LIVA_EDITOR__.entries.values()].some((entry) =>
+              entry.binding.definition.letBindings?.some((binding) => binding.name === 'instant'),
+            ),
+          ),
+        )
+        .toBe(true)
+      await open(page, true)
+      await track(page, 'box', 'background-color')
+      await page.getByLabel('Timing mode').selectOption('instant')
+      await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
+      await expectMessage(page, 'Previewing')
 
-    await seek(page, 0)
-    await expect(page.getByRole('button', { name: 'First', exact: true })).toHaveCSS(
-      'background-color',
-      'rgb(0, 0, 255)',
-    )
+      await seek(page, 0)
+      await expect(page.getByRole('button', { name: 'First', exact: true })).toHaveCSS(
+        'background-color',
+        'rgb(0, 0, 255)',
+      )
 
-    await save(page)
+      await save(page)
 
-    expect(await readFile(file, 'utf8')).toContain('@tween(duration: 0)')
-  } finally {
-    await restoreEditorToggle(page, original)
-  }
-})
+      expect(await readFile(file, 'utf8')).toContain('@tween(duration: 0)')
+    } finally {
+      await restoreEditorToggle(page, original)
+    }
+  },
+)
 
 async function openSelf(page: Page) {
   await page.goto(`${base}/tests/editor-self.html`)
@@ -480,44 +484,45 @@ for (const phase of ['enter', 'leave']) {
   })
 }
 
-test('explicit self timing overrides save locally and remove back to block timing', async ({
-  page,
-  browserName,
-}) => {
-  test.skip(browserName !== 'chromium', 'Shared source writes run once')
-  const source = new URL('../../playground/tests/EditorSelf.vue', import.meta.url)
-  const original = await readFile(source, 'utf8')
+test(
+  'explicit self timing overrides save locally and remove back to block timing',
+  { lock: '-exclusive-' },
+  async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'Shared source writes run once')
+    const source = new URL('../../playground/tests/EditorSelf.vue', import.meta.url)
+    const original = await readFile(source, 'utf8')
 
-  try {
-    await openSelf(page)
-    await page
-      .getByLabel('Existing transition')
-      .selectOption(JSON.stringify({ layer: 'selection', index: 0 }))
-    await track(page, 'self', 'scale')
-    await page.getByLabel('Track duration').fill('300')
-    await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
-    await expectMessage(page, 'Previewing')
-    await expect(page.getByLabel('Track duration')).toHaveValue('300')
+    try {
+      await openSelf(page)
+      await page
+        .getByLabel('Existing transition')
+        .selectOption(JSON.stringify({ layer: 'selection', index: 0 }))
+      await track(page, 'self', 'scale')
+      await page.getByLabel('Track duration').fill('300')
+      await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
+      await expectMessage(page, 'Previewing')
+      await expect(page.getByLabel('Track duration')).toHaveValue('300')
 
-    await save(page)
+      await save(page)
 
-    const saved = await readFile(source, 'utf8')
-    expect(saved).toContain('self {')
-    expect(saved).toContain('opacity ~> {}')
-    expect(saved).toContain('@tween(duration: 200, easing: linear)')
-    expect(saved).toContain('@tween(duration: 300, easing: linear)')
+      const saved = await readFile(source, 'utf8')
+      expect(saved).toContain('self {')
+      expect(saved).toContain('opacity ~> {}')
+      expect(saved).toContain('@tween(duration: 200, easing: linear)')
+      expect(saved).toContain('@tween(duration: 300, easing: linear)')
 
-    await page
-      .getByLabel('Existing transition')
-      .selectOption(JSON.stringify({ layer: 'selection', index: 0 }))
-    await track(page, 'self', 'scale')
-    await page.getByRole('button', { name: 'Remove timing override', exact: true }).click()
-    await expectMessage(page, 'Previewing')
-    await expect(page.getByLabel('Track duration')).toHaveValue('200')
-  } finally {
-    await writeFile(source, original)
-  }
-})
+      await page
+        .getByLabel('Existing transition')
+        .selectOption(JSON.stringify({ layer: 'selection', index: 0 }))
+      await track(page, 'self', 'scale')
+      await page.getByRole('button', { name: 'Remove timing override', exact: true }).click()
+      await expectMessage(page, 'Previewing')
+      await expect(page.getByLabel('Track duration')).toHaveValue('200')
+    } finally {
+      await writeFile(source, original)
+    }
+  },
+)
 
 test('editor rejects invalid sessions, origins, hosts and oversized requests', async ({ page }) => {
   await page.goto(base)
@@ -755,42 +760,46 @@ test('loop settles under reduced motion and permits manual scrubbing', async ({ 
   expect(await playhead(page)).toBe(50)
 })
 
-test('motion-level lifecycle edits save with shared HMR', async ({ page, browserName }) => {
-  test.skip(browserName !== 'chromium', 'Shared source writes run once')
-  const lifecycleFile = new URL('../../playground/tests/EditorLifecycle.vue', import.meta.url)
-  const original = await readFile(lifecycleFile, 'utf8')
+test(
+  'motion-level lifecycle edits save with shared HMR',
+  { lock: '-exclusive-' },
+  async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'Shared source writes run once')
+    const lifecycleFile = new URL('../../playground/tests/EditorLifecycle.vue', import.meta.url)
+    const original = await readFile(lifecycleFile, 'utf8')
 
-  try {
-    await openLifecycle(page)
-    await page.getByLabel('Existing transition').selectOption('enter-default')
-    await page.getByLabel('Baseline active enabled').check()
-    await track(page, 'body', 'opacity')
-    await page.getByRole('button', { name: 'body.opacity 0%', exact: true }).click()
-    await page.getByLabel('Keyframe source value', { exact: true }).fill('${start * 2}')
-    await page.getByRole('button', { name: 'Apply keyframe', exact: true }).click()
-    await save(page)
+    try {
+      await openLifecycle(page)
+      await page.getByLabel('Existing transition').selectOption('enter-default')
+      await page.getByLabel('Baseline active enabled').check()
+      await track(page, 'body', 'opacity')
+      await page.getByRole('button', { name: 'body.opacity 0%', exact: true }).click()
+      await page.getByLabel('Keyframe source value', { exact: true }).fill('${start * 2}')
+      await page.getByRole('button', { name: 'Apply keyframe', exact: true }).click()
+      await save(page)
 
-    expect(await readFile(lifecycleFile, 'utf8')).toContain('0%: ${start * 2}')
+      expect(await readFile(lifecycleFile, 'utf8')).toContain('0%: ${start * 2}')
 
-    await page.getByLabel('Existing transition').selectOption('leave-default')
-    await page.getByLabel('Baseline active enabled').uncheck()
-    await track(page, 'body', 'opacity')
-    await page.getByLabel('Track duration', { exact: true }).fill('500')
-    await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
-    await save(page)
+      await page.getByLabel('Existing transition').selectOption('leave-default')
+      await page.getByLabel('Baseline active enabled').uncheck()
+      await track(page, 'body', 'opacity')
+      await page.getByLabel('Track duration', { exact: true }).fill('500')
+      await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
+      await save(page)
 
-    const saved = await readFile(lifecycleFile, 'utf8')
-    expect(saved).toContain('@tween(duration: 200, easing: linear)\n  leave')
-    expect(saved).toContain('@tween(duration: 500, easing: linear)')
-    expect(saved.slice(0, saved.indexOf('<liva'))).toBe(
-      original.slice(0, original.indexOf('<liva')),
-    )
-  } finally {
-    await writeFile(lifecycleFile, original)
-  }
-})
+      const saved = await readFile(lifecycleFile, 'utf8')
+      expect(saved).toContain('@tween(duration: 200, easing: linear)\n  leave')
+      expect(saved).toContain('@tween(duration: 500, easing: linear)')
+      expect(saved.slice(0, saved.indexOf('<liva'))).toBe(
+        original.slice(0, original.indexOf('<liva')),
+      )
+    } finally {
+      await writeFile(lifecycleFile, original)
+    }
+  },
+)
 
-test.describe('editor source HMR', () => {
+test.describe('editor source HMR', { lock: '-exclusive-' }, () => {
   const componentRoot = '../../packages/vite/src/editor/components/'
   const cases = [
     {
