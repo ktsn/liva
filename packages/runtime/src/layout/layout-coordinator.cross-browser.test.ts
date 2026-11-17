@@ -87,6 +87,24 @@ function fixture(
 }
 
 describe('LayoutCoordinator failure and registration ownership', () => {
+  it('ignores a captured transaction completion delivered after disposal', () => {
+    const { coordinator, root, resize, failures } = fixture()
+    resize(200)
+    coordinator.begin()
+    root.style.width = '300px'
+
+    coordinator.dispose()
+    const read = vi.spyOn(root, 'getBoundingClientRect')
+    coordinator.finish()
+    coordinator.begin()
+
+    expect(read).not.toHaveBeenCalled()
+    expect(root.style.transform).toBe('')
+    expect(root.getAnimations()).toEqual([])
+    expect(callbacks.size).toBe(0)
+    expect(failures).toEqual([])
+  })
+
   it('propagates destination capture failure, releases generated output and can accept a later transaction', () => {
     const { coordinator, root, failures, resize } = fixture()
     resize(200)
