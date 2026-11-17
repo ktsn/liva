@@ -68,7 +68,7 @@ fn css_template_json_preserves_quotes_comments_and_text_segments() {
         );
         let property = &compiled.definitions[0].layers[0].targets[0].properties[0];
         assert_eq!(
-            serde_json::to_value(&property.value).unwrap(),
+            serde_json::to_value(&property.css().unwrap().value).unwrap(),
             json!({"kind": "template", "parts": expected})
         );
     }
@@ -141,25 +141,25 @@ fn css_units_urls_and_escapes_keep_their_output_spelling() {
     );
     let properties = &definition.layers[0].targets[0].properties;
     assert_eq!(
-        properties[0].value,
+        properties[0].css().unwrap().value,
         PropertyValue::Literal {
             value: "calc(100% - 20px)".into()
         }
     );
     assert_eq!(
-        properties[1].value,
+        properties[1].css().unwrap().value,
         PropertyValue::Literal {
             value: r#"url("https://example.com/a.png")"#.into()
         }
     );
     assert_eq!(
-        serde_json::to_value(&properties[2].value).unwrap()["parts"],
+        serde_json::to_value(&properties[2].css().unwrap().value).unwrap()["parts"],
         json!([
             "\"\\41 ", {"kind": "reference", "path": ["label"]}, " \\n\""
         ])
     );
     assert_eq!(
-        properties[3].value,
+        properties[3].css().unwrap().value,
         PropertyValue::Literal {
             value: r"\)".into()
         }
@@ -187,7 +187,10 @@ fn quoted_templates_preserve_nested_quotes_and_escapes() {
                 .range;
         assert_eq!(source[range.start..range.end].trim(), template);
         assert!(matches!(
-            result.definitions[0].layers[0].targets[0].properties[0].value,
+            result.definitions[0].layers[0].targets[0].properties[0]
+                .css()
+                .unwrap()
+                .value,
             PropertyValue::Template { .. }
         ));
     }

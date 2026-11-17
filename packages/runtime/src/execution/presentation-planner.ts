@@ -4,6 +4,7 @@ import {
   type SpringObservation,
   type MotionSample,
 } from '../motion/property-motion.ts'
+import { isCssProperty } from '../model/definition.ts'
 import type { RenderedFrame } from '../model/presentation.ts'
 import {
   layerPropertyChanged,
@@ -40,6 +41,7 @@ export function orderedResolution(
         .find((candidate) => candidate.name === target)
         ?.properties.findIndex(
           (candidate) =>
+            isCssProperty(candidate) &&
             candidate.name === property.name &&
             (candidate.value.kind !== 'binding' || property.binding !== undefined),
         ) ?? -1

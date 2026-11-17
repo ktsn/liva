@@ -109,6 +109,45 @@ function setup(
 }
 
 describe('Runtime presentation coordination', () => {
+  it('exposes persistent layout without replaying an accepted directional transition', () => {
+    const axes = { x: true, y: true, width: false, height: false }
+    const spring = { kind: 'spring-duration', durationMs: 500, bounce: 0.1 } as const
+    const instant = { kind: 'tween', durationMs: 0, easing: 'linear' } as const
+    const source: Definition = {
+      name: 'layout-timing',
+      parameters: [{ name: 'enabled', type: 'boolean' }],
+      layers: [
+        {
+          name: 'phase',
+          initialState: 'off',
+          timing: spring,
+          targets: [{ name: 'box', properties: [{ kind: 'layout', name: '$layout', axes }] }],
+          states: [
+            { name: 'off', targets: [] },
+            { name: 'on', targets: [] },
+          ],
+          transitions: [
+            {
+              from: 'off',
+              to: 'on',
+              when: { kind: 'reference', path: ['enabled'] },
+              transition: { timing: instant, targets: [] },
+            },
+          ],
+        },
+      ],
+    }
+    const { runtime, plans, errors } = setup(source)
+
+    runtime.updateParameters({ enabled: true })
+
+    expect(plans[0].resolution.layout?.[0].timing).toEqual(instant)
+    expect(runtime.layout[0].timing).toEqual(spring)
+    expect(runtime.composition.states.phase).toBe('on')
+    expect(runtime.layout[0].timingSource?.transition).toBeUndefined()
+    expect(errors).toEqual([])
+  })
+
   it('requests presentation after terminal writes and controller release', () => {
     const { runtime, plans, observations, errors } = setup()
 

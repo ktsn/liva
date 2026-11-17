@@ -1,0 +1,190 @@
+{
+  "schemaVersion": 3,
+  "definitions": [
+    {
+      "name": "layoutConfig",
+      "letBindings": [
+        {
+          "name": "timing",
+          "initializer": {
+            "kind": "call",
+            "function": "tween",
+            "arguments": [
+              {
+                "name": "duration",
+                "value": {
+                  "kind": "reference",
+                  "path": ["duration"]
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "active",
+          "type": "boolean"
+        },
+        {
+          "name": "duration",
+          "type": "number"
+        }
+      ],
+      "layers": [
+        {
+          "timingExpression": {
+            "kind": "reference",
+            "path": ["timing"]
+          },
+          "name": "base",
+          "targets": [
+            {
+              "name": "self",
+              "properties": [
+                {
+                  "kind": "layout",
+                  "name": "$layout",
+                  "axes": {
+                    "x": true,
+                    "y": true,
+                    "width": true,
+                    "height": true
+                  }
+                },
+                {
+                  "name": "opacity",
+                  "value": {
+                    "kind": "literal",
+                    "value": "1"
+                  }
+                }
+              ]
+            },
+            {
+              "name": "content",
+              "properties": [
+                {
+                  "kind": "layout",
+                  "name": "$layout",
+                  "axes": {
+                    "x": false,
+                    "y": true,
+                    "width": false,
+                    "height": true
+                  },
+                  "timingExpression": {
+                    "kind": "call",
+                    "function": "spring",
+                    "arguments": [
+                      {
+                        "name": "stiffness",
+                        "value": {
+                          "kind": "number",
+                          "value": 300.0
+                        }
+                      },
+                      {
+                        "name": "damping",
+                        "value": {
+                          "kind": "number",
+                          "value": 25.0
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "active",
+          "when": {
+            "kind": "reference",
+            "path": ["active"]
+          },
+          "targets": [
+            {
+              "name": "self",
+              "properties": [
+                {
+                  "kind": "layout",
+                  "name": "$layout",
+                  "axes": {
+                    "x": true,
+                    "y": true,
+                    "width": false,
+                    "height": false
+                  },
+                  "timingExpression": {
+                    "kind": "reference",
+                    "path": ["instant"]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "transitions": [
+            {
+              "from": "off",
+              "to": "on",
+              "when": {
+                "kind": "reference",
+                "path": ["active"]
+              },
+              "transition": {
+                "targets": [
+                  {
+                    "timingExpression": {
+                      "kind": "reference",
+                      "path": ["instant"]
+                    },
+                    "name": "content",
+                    "properties": [
+                      {
+                        "name": "$layout"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "name": "phase",
+          "states": [
+            {
+              "name": "off",
+              "targets": []
+            },
+            {
+              "name": "on",
+              "targets": [
+                {
+                  "name": "content",
+                  "properties": [
+                    {
+                      "kind": "layout",
+                      "name": "$layout",
+                      "axes": {
+                        "x": false,
+                        "y": false,
+                        "width": false,
+                        "height": false
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "initialState": "off",
+          "targets": []
+        }
+      ]
+    }
+  ],
+  "diagnostics": []
+}

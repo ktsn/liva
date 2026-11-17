@@ -172,7 +172,11 @@ fn typed_destination(compiled: &Compilation, path: &str) -> Result<(String, Stri
                     .chain(layer.states.iter().flat_map(|state| &state.targets))
             })
             .any(|item| {
-                item.name == *target && item.properties.iter().any(|item| item.name == *property)
+                item.name == *target
+                    && item
+                        .properties
+                        .iter()
+                        .any(|item| item.css().is_some_and(|item| item.name == *property))
             });
 
         if !declared {
@@ -220,10 +224,11 @@ fn typed_destination(compiled: &Compilation, path: &str) -> Result<(String, Stri
         .chain(layer.states.iter().flat_map(|state| &state.targets))
         .any(|target| {
             target.name == target_name
-                && target
-                    .properties
-                    .iter()
-                    .any(|property| property.name == property_name)
+                && target.properties.iter().any(|property| {
+                    property
+                        .css()
+                        .is_some_and(|property| property.name == property_name)
+                })
         });
 
     if !declared {
@@ -442,6 +447,18 @@ pub fn apply_edits(source: &str, edits: &[Edit]) -> Result<EditResult, String> {
     check(&compiled)?;
 
     for edit in edits {
+        let path = match edit {
+            Edit::Easing { path, .. }
+            | Edit::Timing { path, .. }
+            | Edit::Set { path, .. }
+            | Edit::RemoveFrame { path }
+            | Edit::AddFrame { path, .. } => path,
+        };
+
+        if path.split('/').any(|segment| segment == "$layout") {
+            return Err("Layout configuration is inspection-only; edit $layout in source".into());
+        }
+
         let frame_path = match edit {
             Edit::Set { path, .. } | Edit::Easing { path, .. } | Edit::RemoveFrame { path } => {
                 path.rsplit_once("/frame/").map(|(track, _)| track)

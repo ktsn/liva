@@ -23,7 +23,7 @@ export interface Inspection {
   definition: Definition
   fields: {
     path: string
-    kind: 'value' | 'block'
+    kind: 'value' | 'block' | 'layout' | 'layout-value'
     value: string
     range?: { start: number; end: number }
   }[]
@@ -80,7 +80,8 @@ function isField(value: unknown): value is Inspection['fields'][number] {
   return (
     isRecord(value) &&
     typeof value.path === 'string' &&
-    (value.kind === 'value' || value.kind === 'block') &&
+    typeof value.kind === 'string' &&
+    ['value', 'block', 'layout', 'layout-value'].includes(value.kind) &&
     typeof value.value === 'string' &&
     (value.range === undefined ||
       (isRecord(value.range) &&

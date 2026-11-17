@@ -284,7 +284,8 @@ impl Parser<'_> {
                         }
                     })
                     .collect::<String>();
-                if !is_property(name.trim())
+                if name.trim() != "$layout"
+                    && !is_property(name.trim())
                     && (!in_track
                         || !name
                             .trim()
@@ -687,7 +688,7 @@ fn validate_blocks(node: &impl AstNode, depth: usize, diagnostics: &mut Vec<Diag
                 _ => false,
             }
         } else if PropertyBlock::cast(block.syntax().clone()).is_some() {
-            is_property(&header)
+            (header == "$layout" || is_property(&header))
                 && block.syntax().parent().is_some_and(|parent| {
                     Target::cast(parent.clone()).is_some()
                         || Layer::cast(parent.clone()).is_some()

@@ -1,3 +1,4 @@
+import type { LayoutDeclaration } from './layout.ts'
 import { isArrayOf, isDefinition, isRecord } from './validation.ts'
 
 export type Timing =
@@ -79,6 +80,13 @@ export interface Property {
   readonly value: PropertyValue
 }
 
+/** CSS and reserved layout declarations share source order, but have distinct value contracts. */
+export type Declaration = Property | LayoutDeclaration
+
+export function isCssProperty(declaration: Declaration): declaration is Property {
+  return !('kind' in declaration)
+}
+
 export interface Target<T> {
   /** Limits target timing to properties declared in its explicit block when root forms coexist. */
   readonly timingProperties?: readonly string[]
@@ -92,7 +100,7 @@ export interface State {
   readonly timingExpression?: Expression
   readonly timing?: Timing
   readonly name: string
-  readonly targets: readonly Target<Property>[]
+  readonly targets: readonly Target<Declaration>[]
 }
 
 export interface GuardedTransition {
@@ -108,7 +116,7 @@ export interface Layer {
   readonly timing?: Timing
   readonly name: string
   readonly when?: Expression
-  readonly targets: readonly Target<Property>[]
+  readonly targets: readonly Target<Declaration>[]
   readonly states?: readonly State[]
   readonly initialState?: string
   readonly transitions?: readonly GuardedTransition[]
@@ -138,7 +146,7 @@ export interface Definition {
 }
 
 export interface DefinitionBundle {
-  readonly schemaVersion: 2
+  readonly schemaVersion: 3
   readonly definitions: readonly Definition[]
 }
 
@@ -160,11 +168,11 @@ export function decodeBundle(json: string): DefinitionBundle {
 
   if (
     !isRecord(bundle) ||
-    bundle.schemaVersion !== 2 ||
+    bundle.schemaVersion !== 3 ||
     !isArrayOf(bundle.definitions, isDefinition)
   ) {
     throw new Error('Unsupported Liva Definition IR schema')
   }
 
-  return freezeDefinition({ schemaVersion: 2 as const, definitions: bundle.definitions })
+  return freezeDefinition({ schemaVersion: 3 as const, definitions: bundle.definitions })
 }

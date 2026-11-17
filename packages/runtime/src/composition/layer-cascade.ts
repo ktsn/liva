@@ -1,5 +1,7 @@
+import { isCssProperty } from '../model/definition.ts'
 import type {
   Definition,
+  Declaration,
   Layer,
   Property,
   State,
@@ -15,10 +17,12 @@ export interface LayerSelection {
   readonly state?: State
 }
 
-export interface PropertySource extends LayerSelection {
-  readonly target: Target<Property>
-  readonly property: Property
+export interface DeclarationSource<D extends Declaration = Declaration> extends LayerSelection {
+  readonly target: Target<Declaration>
+  readonly property: D
 }
+
+export type PropertySource = DeclarationSource<Property>
 
 export interface TimingDeclaration {
   readonly timing?: Timing
@@ -26,16 +30,16 @@ export interface TimingDeclaration {
 }
 
 export interface TimingSource extends LayerSelection {
-  readonly target?: Target<Property>
-  readonly property?: Property
+  readonly target?: Target<Declaration>
+  readonly property?: Declaration
   readonly declaration: TimingDeclaration
 }
 
-export interface CascadedProperty<Value, ResolvedTiming> {
+export interface CascadedProperty<Value, ResolvedTiming, D extends Declaration = Property> {
   readonly name: string
   readonly value: Value
-  readonly source: PropertySource
-  readonly declarations: readonly PropertySource[]
+  readonly source: DeclarationSource<D>
+  readonly declarations: readonly DeclarationSource<D>[]
   readonly timing?: ResolvedTiming
 }
 
@@ -130,10 +134,20 @@ export function resolveLayerCascade<Value, ResolvedTiming>(
   mapValue: (source: PropertySource) => Value,
   mapTiming: (source: TimingSource) => ResolvedTiming,
 ): readonly Target<CascadedProperty<Value, ResolvedTiming>>[] {
-  const targets = new Map<string, Map<string, CascadedProperty<Value, ResolvedTiming>>>()
+  return resolveDeclarationCascade(isCssProperty, selection, mapValue, mapTiming)
+}
+
+/** Shared precedence engine for CSS and reserved declarations; selection never evaluates values. */
+export function resolveDeclarationCascade<Value, ResolvedTiming, D extends Declaration>(
+  select: (declaration: Declaration) => declaration is D,
+  selection: Iterable<LayerSelection>,
+  mapValue: (source: DeclarationSource<D>) => Value,
+  mapTiming: (source: TimingSource) => ResolvedTiming,
+): readonly Target<CascadedProperty<Value, ResolvedTiming, D>>[] {
+  const targets = new Map<string, Map<string, CascadedProperty<Value, ResolvedTiming, D>>>()
 
   for (const { layer, state } of selection) {
-    const contributions = new Map<string, Map<string, PropertySource[]>>()
+    const contributions = new Map<string, Map<string, DeclarationSource<D>[]>>()
 
     for (const scope of [{ targets: layer.targets }, ...(state ? [state] : [])]) {
       for (const target of scope.targets) {
@@ -145,6 +159,8 @@ export function resolveLayerCascade<Value, ResolvedTiming>(
         }
 
         for (const property of target.properties) {
+          if (!select(property)) continue
+
           const declarations = properties.get(property.name) ?? []
           declarations.push({ layer, state: scope === state ? state : undefined, target, property })
           properties.set(property.name, declarations)
@@ -189,7 +205,7 @@ export function resolveLayerCascade<Value, ResolvedTiming>(
         const previous = properties.get(name)
         const timing = provider ? mapTiming(provider) : undefined
 
-        cascadeProperty<Omit<CascadedProperty<Value, ResolvedTiming>, 'timing'>, ResolvedTiming>(
+        cascadeProperty<Omit<CascadedProperty<Value, ResolvedTiming, D>, 'timing'>, ResolvedTiming>(
           properties,
           name,
           {

@@ -103,6 +103,20 @@ pub fn hovers(source: &str) -> Vec<Hover> {
 
         expression_hovers(&motion, &scope, &mut result);
 
+        for declaration in motion
+            .syntax()
+            .descendants()
+            .filter_map(liva_syntax::ast::LayoutDeclaration::cast)
+        {
+            if let Some(header) = declaration.header_node() {
+                result.push(Hover {
+                    builtin_target: false,
+                    range: liva_syntax::ast::significant_range(&header),
+                    label: "$layout: fixed physical position/scale axes; none disables correction. Timing follows the ordinary cascade. Edit selection in source.".into(),
+                });
+            }
+        }
+
         for target in motion
             .syntax()
             .descendants()

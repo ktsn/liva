@@ -24,3 +24,5 @@
 
 (selector_block name: (identifier) @variable.builtin
   (#eq? @variable.builtin "self"))
+
+(layout_name) @property

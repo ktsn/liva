@@ -139,16 +139,16 @@ fn drag_release_conditions_and_shared_layer_styles_compile_together() {
         definition.layers[0].targets[0]
             .properties
             .iter()
-            .find(|property| property.name == "opacity")
-            .map(|property| &property.value),
+            .find(|property| property.name() == "opacity")
+            .map(|property| &property.css().unwrap().value),
         Some(&PropertyValue::Literal { value: "1".into() })
     );
     assert_eq!(
         definition.layers[0].targets[1]
             .properties
             .iter()
-            .find(|property| property.name == "opacity")
-            .map(|property| &property.value),
+            .find(|property| property.name() == "opacity")
+            .map(|property| &property.css().unwrap().value),
         Some(&PropertyValue::Literal { value: "1".into() })
     );
 }

@@ -1,3 +1,4 @@
+import { isCssProperty } from '../model/definition.ts'
 import { describe, expect, it } from 'vite-plus/test'
 import {
   evaluate,
@@ -109,7 +110,11 @@ describe('expression evaluation', () => {
 
     expect(rendered.composition.layers).toEqual({ off: false, on: true })
     expect(rendered.presentation.targets[0].properties[0].value).toBe('12px')
-    expect(definition.layers[1].targets[0].properties[0].value).toEqual({
+    const declaration = definition.layers[1].targets[0].properties[0]
+
+    if (!isCssProperty(declaration)) throw new Error('Expected a CSS property')
+
+    expect(declaration.value).toEqual({
       kind: 'template',
       parts: [{ kind: 'reference', path: ['x'] }, 'px'],
     })

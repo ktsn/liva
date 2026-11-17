@@ -50,6 +50,29 @@ describe('editor message validation', () => {
     ).toBe(false)
   })
 
+  it.each(['layout', 'layout-value'])('accepts read-only %s source provenance', (kind) => {
+    expect(
+      isEditorReply({
+        ...reply,
+        fields: [
+          {
+            path: 'item/layer/base/target/self/property/$layout/value',
+            kind,
+            value: 'position',
+            range: { start: 10, end: 18 },
+          },
+        ],
+      }),
+    ).toBe(true)
+  })
+
+  it.each([null, 42, { toString: () => 'layout' }])(
+    'rejects non-string field kinds without coercion: %j',
+    (kind) => {
+      expect(isEditorReply({ ...reply, fields: [{ path: 'field', kind, value: '' }] })).toBe(false)
+    },
+  )
+
   it('accepts inspection replies and rejects malformed fields and error envelopes', () => {
     expect(isEditorReply(reply)).toBe(true)
     expect(

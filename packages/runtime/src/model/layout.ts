@@ -28,6 +28,16 @@ export interface LayoutDeclarationSource {
   readonly declaration: LayoutDeclaration
 }
 
+/** Timing provenance follows the same layer/state/target/property scopes as CSS. */
+export interface LayoutTimingSource {
+  readonly layer: string
+  readonly state?: string
+  readonly target?: string
+  readonly property?: string
+  /** Index in this layer's transitions when directional timing supplies the value. */
+  readonly transition?: number
+}
+
 /**
  * Effective layout configuration for one logical target, separate from CSS tracks.
  * Resolve at each geometry change/retarget even if the selection text is unchanged.
@@ -39,7 +49,9 @@ export interface ResolvedLayoutConfiguration {
   readonly axes: LayoutAxes
   readonly timing?: Timing
   readonly source: LayoutDeclarationSource
+  readonly timingSource?: LayoutTimingSource
   readonly declarations: readonly LayoutDeclarationSource[]
+  /** Ordinary layer/state ownership; scoped lifecycle/preview owners are execution facts. */
   readonly explicitTransform: boolean
 }
 
@@ -47,11 +59,11 @@ export interface ResolvedLayoutConfiguration {
 export function isLayoutAxes(value: unknown): value is LayoutAxes {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
 
-  const axes = value as Record<string, unknown>
-  const names = ['x', 'y', 'width', 'height'] as const
+  const names = ['x', 'y', 'width', 'height']
+  const entries = Object.entries(value)
 
   return (
-    Object.keys(axes).length === names.length &&
-    names.every((name) => typeof axes[name] === 'boolean')
+    entries.length === names.length &&
+    entries.every(([name, axis]) => names.includes(name) && typeof axis === 'boolean')
   )
 }

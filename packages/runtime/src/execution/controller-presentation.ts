@@ -1,6 +1,6 @@
 import { resolveComposition, type LayerResolution } from '../composition/layers.ts'
 import type { VariableValues } from '../evaluation/expression.ts'
-import type { Definition } from '../model/definition.ts'
+import { isCssProperty, type Definition } from '../model/definition.ts'
 import type { ExecutionPort } from './execution-contracts.ts'
 import {
   orderedResolution,
@@ -38,13 +38,17 @@ export function resolveControllerPresentation(
         ...layer,
         targets: layer.targets.map((target) => ({
           ...target,
-          properties: target.properties.filter((property) => property.value.kind !== 'binding'),
+          properties: target.properties.filter(
+            (property) => !isCssProperty(property) || property.value.kind !== 'binding',
+          ),
         })),
         states: layer.states?.map((state) => ({
           ...state,
           targets: state.targets.map((target) => ({
             ...target,
-            properties: target.properties.filter((property) => property.value.kind !== 'binding'),
+            properties: target.properties.filter(
+              (property) => !isCssProperty(property) || property.value.kind !== 'binding',
+            ),
           })),
         })),
       })),

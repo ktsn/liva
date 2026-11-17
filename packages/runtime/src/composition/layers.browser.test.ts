@@ -208,7 +208,7 @@ function setup(
   const element = document.createElement('div')
   element.style.color = 'red'
   document.body.append(element)
-  const decoded = decodeBundle(JSON.stringify({ schemaVersion: 2, definitions: [source] }))
+  const decoded = decodeBundle(JSON.stringify({ schemaVersion: 3, definitions: [source] }))
     .definitions[0]
   const instance = assembleRuntime(decoded, inputs, (error) => errors.push(error))
   instance.executor.bind([['body', element]])

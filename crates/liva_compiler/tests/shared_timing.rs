@@ -27,7 +27,13 @@ fn shared_timing_preserves_all_scopes_and_bodyless_transition_expressions() {
 
     assert!(layer.timing_expression.is_some());
     assert!(layer.targets[0].timing_expression.is_some());
-    assert!(layer.targets[0].properties[0].timing_expression.is_some());
+    assert!(
+        layer.targets[0].properties[0]
+            .css()
+            .unwrap()
+            .timing_expression
+            .is_some()
+    );
     assert!(
         layer
             .states
@@ -72,7 +78,13 @@ fn style_tracks_accept_shared_timing_without_flattening_its_origin() {
     let target = &result.definitions[0].layers[0].targets[0];
 
     assert!(target.timing_expression.is_some());
-    assert!(target.properties[0].timing_expression.is_none());
+    assert!(
+        target.properties[0]
+            .css()
+            .unwrap()
+            .timing_expression
+            .is_none()
+    );
 }
 
 #[test]

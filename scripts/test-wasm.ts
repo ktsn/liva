@@ -1,3 +1,4 @@
+import { isCssProperty } from '../packages/runtime/src/model/definition.ts'
 import { EvaluationFixture } from '../packages/runtime/src/__test__/helpers/evaluation.ts'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -11,6 +12,7 @@ import {
 } from '../packages/runtime/src/evaluation/expression.ts'
 
 for (const name of [
+  'layout-config',
   'constrained',
   'toggle',
   'self-target',
@@ -72,7 +74,7 @@ assert(malformedChoices.parameters)
 Object.assign(malformedChoices.parameters[0], { type: { kind: 'stringUnion', values: [] } })
 
 assert.throws(
-  () => decodeBundle(JSON.stringify({ schemaVersion: 2, definitions: [malformedChoices] })),
+  () => decodeBundle(JSON.stringify({ schemaVersion: 3, definitions: [malformedChoices] })),
   /schema/,
 )
 
@@ -107,9 +109,9 @@ const shadowValues = new EvaluationFixture(shadowed.letBindings, shadowInputs).e
 )
 
 assert.deepEqual(
-  shadowed.layers[0].targets[0].properties.map(
-    (property) => renderProperty(property, shadowValues).value,
-  ),
+  shadowed.layers[0].targets[0].properties
+    .filter(isCssProperty)
+    .map((property) => renderProperty(property, shadowValues).value),
   ['6', '3'],
 )
 

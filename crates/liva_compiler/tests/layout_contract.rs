@@ -44,3 +44,36 @@ fn layout_declaration_rejects_css_selection_sources_and_other_names() {
         assert!(serde_json::from_value::<LayoutDeclaration>(invalid).is_err());
     }
 }
+
+#[test]
+fn declaration_union_rejects_layout_disguised_as_css_or_overlapping_payloads() {
+    use liva_compiler::ir::Declaration;
+
+    for value in [
+        json!({"name": "$layout", "value": {"kind": "literal", "value": "position"}}),
+        json!({"kind": "layout", "name": "$layout", "axes": {"x": true, "y": true, "width": false, "height": false}, "value": {"kind": "literal", "value": "position"}}),
+        json!({"kind": "unknown", "name": "$layout", "axes": {"x": true, "y": true, "width": false, "height": false}}),
+    ] {
+        assert!(serde_json::from_value::<Declaration>(value).is_err());
+    }
+}
+
+#[test]
+fn layout_transition_validation_rejects_selection_and_lifecycle_payloads() {
+    use liva_compiler::ir::{Definition, PropertyTransition};
+
+    for value in [
+        json!({"name": "$layout", "keyframes": []}),
+        json!({"name": "$layout", "axes": {"x": true, "y": true, "width": false, "height": false}}),
+    ] {
+        assert!(serde_json::from_value::<PropertyTransition>(value).is_err());
+    }
+
+    for phase in ["enter", "leave"] {
+        let mut definition = json!({"name": "item", "layers": []});
+        definition[phase] =
+            json!({"targets": [{"name": "self", "properties": [{"name": "$layout"}]}]});
+
+        assert!(serde_json::from_value::<Definition>(definition).is_err());
+    }
+}

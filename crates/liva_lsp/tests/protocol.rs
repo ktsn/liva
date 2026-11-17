@@ -818,3 +818,99 @@ fn ambiguous_unclosed_middle_and_partial_escape_buffers_return_no_insertions() {
         }
     });
 }
+
+#[test]
+fn layout_declarations_expose_fixed_keyword_completion_hover_and_utf16_diagnostics() {
+    with_server(|client| {
+        for (uri, prefix, suffix) in [
+            ("file:///layout.liv", "// 日本😀\r\n", ""),
+            (
+                "file:///layout.vue",
+                "<template><div>日本😀</div></template>\r\n<liva lang=\"liva\">\r\n",
+                "\r\n</liva>",
+            ),
+        ] {
+            let marked = format!(
+                "{prefix}motion item {{ layer base {{ /* 😀 */ $layout: po¦ @instant }} }}{suffix}"
+            );
+            let byte = marked.find('¦').unwrap();
+            let source = marked.replace('¦', "");
+
+            notify(
+                client,
+                "textDocument/didOpen",
+                json!({"textDocument": {"uri": uri, "languageId": "liva", "version": 1, "text": source}}),
+            );
+            let errors = diagnostics(client);
+            let start = source.find("$layout").unwrap();
+
+            assert!(
+                errors["diagnostics"].as_array().unwrap().iter().any(
+                    |diagnostic| diagnostic["code"] == "semantic.layout"
+                        && diagnostic["range"]
+                            == reference_range(&source, start, start + "$layout".len())
+                )
+            );
+
+            let items = completion_at(client, uri, &source, byte);
+
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0]["label"], "position");
+            assert_eq!(items[0]["textEdit"]["newText"], "position");
+            assert_eq!(
+                items[0]["textEdit"]["range"],
+                reference_range(&source, byte - 2, byte)
+            );
+
+            let hover = request(client, 3, "textDocument/hover", json!({"textDocument": {"uri": uri}, "position": reference_position(&source, start + 2)})).response_result.unwrap();
+
+            assert!(
+                hover["contents"]["value"]
+                    .as_str()
+                    .unwrap()
+                    .contains("fixed physical")
+            );
+        }
+    });
+}
+
+#[test]
+fn layout_completion_keeps_timing_expressions_and_comments_in_their_own_contexts() {
+    with_server(|client| {
+        for (marked, expected) in [
+            ("motion item { layer base { $layout: ¦ } }", Some("none")),
+            (
+                "motion item { layer base { $layout: y /* gap */ he¦ } }",
+                Some("height"),
+            ),
+            (
+                "motion item { layer base { $layout: y @ins¦ } }",
+                Some("instant"),
+            ),
+            ("motion item { layer base { $layout: y /* po¦ */ } }", None),
+            ("motion item { layer base { $layout := po¦ } }", None),
+        ] {
+            let byte = marked.find('¦').unwrap();
+            let source = marked.replace('¦', "");
+            let uri = "file:///layout-context.liv";
+
+            notify(
+                client,
+                "textDocument/didOpen",
+                json!({"textDocument": {"uri": uri, "languageId": "liva", "version": 1, "text": source}}),
+            );
+            diagnostics(client);
+
+            let items = completion_at(client, uri, &source, byte);
+
+            if let Some(expected) = expected {
+                assert!(
+                    items.iter().any(|item| item["label"] == expected),
+                    "{marked}: {items:?}"
+                );
+            } else {
+                assert!(items.is_empty(), "{marked}: {items:?}");
+            }
+        }
+    });
+}

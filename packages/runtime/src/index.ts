@@ -22,6 +22,7 @@ export type {
   CssValue,
   PropertyValue,
   Property,
+  Declaration,
   Target,
   State,
   GuardedTransition,
@@ -44,6 +45,7 @@ export {
 } from './execution/lifecycle.ts'
 export {
   layerTargets,
+  declarationTargets,
   resolveComposition,
   resolveLayerTracks,
   compositionTransitions,
@@ -63,5 +65,10 @@ export type {
   LayoutAxes,
   LayoutDeclaration,
   LayoutDeclarationSource,
+  LayoutTimingSource,
   ResolvedLayoutConfiguration,
 } from './model/layout.ts'
+
+export { isCssProperty } from './model/definition.ts'
+
+export { resolveLayoutConfigurations } from './composition/layout.ts'

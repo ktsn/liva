@@ -1,3 +1,5 @@
+import { resolveLayoutConfigurations, resolveSelectedLayout } from './layout.ts'
+import type { ResolvedLayoutConfiguration } from '../model/layout.ts'
 import type { RuntimeValue } from '../evaluation/reactive-value.ts'
 import {
   cascadeProperty,
@@ -9,7 +11,14 @@ import {
 } from './layer-cascade.ts'
 import { timingValue } from '../evaluation/timing-values.ts'
 import { normalizeFrames, type ResolvedTrack } from './resolve.ts'
-import type { Definition, GuardedTransition, Property, Target } from '../model/definition.ts'
+import {
+  isCssProperty,
+  type Declaration,
+  type Definition,
+  type GuardedTransition,
+  type Property,
+  type Target,
+} from '../model/definition.ts'
 import {
   evaluate,
   renderProperty,
@@ -74,6 +83,11 @@ export interface CompositionTransition {
 }
 
 export interface LayerResolution {
+  /**
+   * Settings for this resolved update, including its temporary directional timing.
+   * These never enter CSS presentation/tracks; Runtime.layout reads persistent timing.
+   */
+  readonly layout?: readonly ResolvedLayoutConfiguration[]
   /** Ordinary declarations before controller CSS/fallback formatting; retained by reference. */
   readonly declarations?: LayerResolution['presentation']
   readonly composition: Composition
@@ -85,6 +99,14 @@ export interface LayerResolution {
 }
 
 export function layerTargets(definition: Definition): readonly Target<Property>[] {
+  return declarationTargets(definition).map((target) => ({
+    ...target,
+    properties: target.properties.filter(isCssProperty),
+  }))
+}
+
+/** Every potential authored receiver, including targets with only layout declarations. */
+export function declarationTargets(definition: Definition): readonly Target<Declaration>[] {
   return definition.layers.flatMap((layer) => [
     ...layer.targets,
     ...(layer.states ?? []).flatMap((state) => state.targets),
@@ -162,7 +184,8 @@ function resolveLayerSelection(
     }
   }
 
-  const evaluated = [...selectLayers()].map((selected): EvaluatedLayer => ({
+  const selectedLayers = [...selectLayers()]
+  const evaluated = selectedLayers.map((selected): EvaluatedLayer => ({
     id: selected.layer.name,
     targets: resolveLayerCascade(
       [selected],
@@ -182,6 +205,7 @@ function resolveLayerSelection(
   }))
 
   return {
+    layout: resolveSelectedLayout(selectedLayers, values, transitions),
     composition: { layers: activeLayers, states: Object.fromEntries(states) },
     states,
     transitions,
@@ -211,7 +235,13 @@ export function resolveComposition(
     composition,
   )
 
-  return { ...result, transitions: compositionTransitions(definition, composition, from, selected) }
+  const transitions = compositionTransitions(definition, composition, from, selected)
+
+  return {
+    ...result,
+    transitions,
+    layout: resolveLayoutConfigurations(definition, values, composition, transitions),
+  }
 }
 
 export function compositionTransitions(
