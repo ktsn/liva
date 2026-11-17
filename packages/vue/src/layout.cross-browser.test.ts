@@ -2110,4 +2110,95 @@ describe('Vue coordinated layout projection', () => {
       }
     },
   )
+  it('retries a failed transient observation cancellation through coordinator recovery and disposal', async () => {
+    const width = ref(100)
+    const { host, errors, app } = await mount(
+      motionComponent(definition(), ({ root }) =>
+        h(
+          'div',
+          {
+            'data-ancestor': '',
+            style: {
+              width: '400px',
+              height: '200px',
+              transform: 'rotate(25deg)',
+              transformOrigin: '0 0',
+            },
+          },
+          [
+            root(
+              h('div', { 'data-item': '', style: { width: `${width.value}px`, height: '40px' } }),
+            ),
+          ],
+        ),
+      ),
+    )
+    const target = element(host)
+    const handled: unknown[] = []
+    app.config.errorHandler = (error) => {
+      handled.push(error)
+    }
+    width.value = 200
+    await flush()
+    frame(250)
+    const cause = new Error('Transient observation cancellation failed once')
+    const held: Animation[] = []
+    let restoring = false
+    let fail = true
+    // Retain native methods only for explicit .call(this) in the wrappers below.
+    // eslint-disable-next-line typescript/unbound-method
+    const observeLayout = PresentationExecutor.prototype.layoutMeasure
+    // eslint-disable-next-line typescript/unbound-method
+    const cancel = Animation.prototype.cancel
+    vi.spyOn(PresentationExecutor.prototype, 'layoutMeasure').mockImplementation(function (
+      this: PresentationExecutor,
+      receiver,
+      properties,
+    ) {
+      const restore = observeLayout.call(this, receiver, properties)
+      return () => {
+        restoring = true
+        try {
+          restore()
+        } finally {
+          restoring = false
+        }
+      }
+    })
+    vi.spyOn(Animation.prototype, 'cancel').mockImplementation(function (this: Animation) {
+      const first =
+        this.effect instanceof KeyframeEffect ? this.effect.getKeyframes()[0] : undefined
+      if (
+        restoring &&
+        fail &&
+        first &&
+        'rotate' in first &&
+        'translate' in first &&
+        'scale' in first
+      ) {
+        fail = false
+        held.push(this)
+        throw cause
+      }
+      cancel.call(this)
+    })
+
+    width.value = 300
+    await flush()
+    await flush()
+
+    expect(held).toHaveLength(1)
+    expect(held[0].playState).toBe('idle')
+    expect(errors.map((error) => error.error)).toEqual([cause])
+    expect(handled).toEqual([cause])
+    width.value = 400
+    await flush()
+    frame(1000)
+    expect(held[0].playState).toBe('idle')
+    expect(target.style.transform).toBe('')
+    app.unmount()
+    apps.splice(apps.indexOf(app), 1)
+    expect(held[0].playState).toBe('idle')
+    expect(target.getAnimations()).toEqual([])
+  })
 })

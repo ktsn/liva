@@ -145,6 +145,7 @@ export class LayoutCoordinator {
             () =>
               participant.layoutTransform(element, undefined),
         ),
+        () => participant.layoutCleanup(),
         () => this.refreshObservation(),
       ])
     }
@@ -566,7 +567,11 @@ export class LayoutCoordinator {
     this.observed = []
 
     try {
-      releaseResources([() => this.settle(), () => cleanup?.()])
+      releaseResources([
+        () => this.settle(),
+        ...[...this.participants].map((participant) => () => participant.layoutCleanup()),
+        () => cleanup?.(),
+      ])
     } catch (cleanupError) {
       this.report(
         new AggregateError([error, cleanupError], 'Layout recovery failed', { cause: error }),
@@ -587,9 +592,14 @@ export class LayoutCoordinator {
     this.baseline = new Map()
     this.revisions.clear()
     this.observed = []
-    for (const participant of this.participants) participant.onLayoutChange = undefined
+    const participants = [...this.participants]
+    for (const participant of participants) participant.onLayoutChange = undefined
     this.participants.clear()
 
-    releaseResources([() => this.settle(), () => cleanup?.()])
+    releaseResources([
+      () => this.settle(),
+      ...participants.map((participant) => () => participant.layoutCleanup()),
+      () => cleanup?.(),
+    ])
   }
 }

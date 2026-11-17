@@ -245,4 +245,80 @@ describe('Executor temporary layout ownership', () => {
       operation.cancel('owner-teardown')
     }
   })
+  it.each(['cleanup', 'next-read', 'dispose'] as const)(
+    'retains a failed observation cancellation for %s retry without cancelling newer effects',
+    (retry) => {
+      const { assembly, targets } = setup(layoutDefinition(), { active: false })
+      const root = targets.get('self')!
+      assembly.executor.layoutTransform(root, 'matrix(.5,0,0,.5,0,0)')
+      const restore = assembly.executor.layoutMeasure(
+        root,
+        new Map([['transform', 'matrix(1,0,0,1,0,0)']]),
+      )
+      const held = root.getAnimations()[0]
+      if (!held) throw new Error('Expected live native observation')
+      const cause = new Error('Native cancellation failed once')
+      const cancel = vi.spyOn(held, 'cancel').mockImplementationOnce(() => {
+        throw cause
+      })
+      let caught: unknown
+      try {
+        restore()
+      } catch (error) {
+        caught = error
+      }
+      expect(caught).toBe(cause)
+      expect(held.playState).toBe('paused')
+      let next: (() => void) | undefined
+
+      if (retry === 'cleanup') assembly.executor.layoutCleanup()
+      else if (retry === 'next-read')
+        next = assembly.executor.layoutMeasure(
+          root,
+          new Map([['transform', 'matrix(1,0,0,1,0,0)']]),
+        )
+      else assembly.runtime.dispose()
+
+      expect(held.playState).toBe('idle')
+      expect(cancel).toHaveBeenCalledTimes(2)
+      const current = root.getAnimations()[0]
+      restore()
+      expect(root.getAnimations()).toHaveLength(retry === 'next-read' ? 1 : 0)
+      expect(root.getAnimations()[0]).toBe(current)
+      expect(cancel).toHaveBeenCalledTimes(2)
+      expect(root.style.transform).toBe('')
+      next?.()
+      assembly.executor.layoutCleanup()
+      expect(root.getAnimations()).toEqual([])
+      cancel.mockRestore()
+    },
+  )
+
+  it('preserves startup and cancellation causes while retaining failed native cleanup', () => {
+    const { assembly, targets } = setup(layoutDefinition(), { active: false })
+    const root = targets.get('self')!
+    const cause = new Error('Native startup failed')
+    const cleanupCause = new Error('Native cleanup failed')
+    const pause = vi.spyOn(Animation.prototype, 'pause').mockImplementationOnce(() => {
+      throw cause
+    })
+    const cancel = vi.spyOn(Animation.prototype, 'cancel').mockImplementationOnce(() => {
+      throw cleanupCause
+    })
+    let caught: unknown
+
+    try {
+      assembly.executor.layoutMeasure(root, new Map([['transform', 'none']]))
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBeInstanceOf(AggregateError)
+    expect(caught).toMatchObject({ cause, errors: [cause, cleanupCause] })
+    assembly.executor.layoutCleanup()
+    expect(cancel).toHaveBeenCalledTimes(2)
+    expect(root.getAnimations()).toEqual([])
+    pause.mockRestore()
+    cancel.mockRestore()
+  })
 })

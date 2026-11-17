@@ -16,5 +16,7 @@ export interface LayoutParticipant {
   layoutTransform(element: HTMLElement, transform: string | undefined): void
   /** Synchronous observation-only overrides; returned cleanup restores the current outer owner. */
   layoutMeasure(element: HTMLElement, properties: ReadonlyMap<string, string>): () => void
+  /** Releases temporary output/observations, retaining failed native resources for retry. */
+  layoutCleanup(): void
   onLayoutChange?: () => void
 }

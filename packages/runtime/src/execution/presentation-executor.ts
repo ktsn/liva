@@ -232,6 +232,7 @@ export class PresentationExecutor {
     HTMLElement,
     { animation: Animation; effect: KeyframeEffect }
   >()
+  private readonly layoutMeasurements = new Map<Animation, 'active' | 'releasing'>()
   onLayoutChange?: () => void
 
   get layoutRevision() {
@@ -327,8 +328,11 @@ export class PresentationExecutor {
       const animation = new Animation(effect, element.ownerDocument.timeline)
       output = { animation, effect }
       this.layoutEffects.set(element, output)
-      animation.pause()
-      animation.currentTime = 0
+    }
+
+    if (output.animation.playState === 'idle') {
+      output.animation.pause()
+      output.animation.currentTime = 0
     }
 
     // CSS transitions can interpolate even an important inline transform. A
@@ -353,12 +357,13 @@ export class PresentationExecutor {
   }
 
   /**
-   * Excludes visual transforms for one synchronous read without changing authored
-   * declarations or native effect objects. A generic replacement has later effect
+   * Excludes visual transforms for one synchronous read while preserving unrelated
+   * authored declarations and native effect objects. A generic replacement has later effect
    * order than CSS transitions/animations. The collector verifies actual cascade
    * effectiveness; author important declarations may still defeat this overlay.
    */
   layoutMeasure(element: HTMLElement, properties: ReadonlyMap<string, string>): () => void {
+    this.retryLayoutMeasurements()
     const frame = Object.fromEntries(
       [...properties].map(([property, value]) => [waapiProperty(property), value]),
     )
@@ -366,6 +371,7 @@ export class PresentationExecutor {
       new KeyframeEffect(element, [frame, frame], { duration: 1, fill: 'both' }),
       element.ownerDocument.timeline,
     )
+    this.layoutMeasurements.set(animation, 'active')
     const projection = this.layoutTransforms.get(element)
 
     try {
@@ -375,25 +381,62 @@ export class PresentationExecutor {
       // declarations keep their identity, timing, priority and completion promises.
       if (projection !== undefined) this.layoutTransform(element, undefined)
     } catch (error) {
-      animation.cancel()
-      throw error
+      releaseResources([
+        () => {
+          throw error
+        },
+        () => this.cancelLayoutMeasurement(animation),
+      ])
     }
 
     return () => {
+      if (this.layoutMeasurements.get(animation) !== 'active') {
+        this.cancelLayoutMeasurement(animation)
+        return
+      }
+
       try {
         if (projection !== undefined && !this.disposed) this.layoutTransform(element, projection)
       } finally {
-        animation.cancel()
+        this.cancelLayoutMeasurement(animation)
       }
     }
   }
 
-  private releaseLayout() {
+  /** Releases temporary output and retries retained observation cleanup. Failed resources stay owned. */
+  layoutCleanup() {
+    this.releaseLayout()
+  }
+
+  private cancelLayoutMeasurement(animation: Animation) {
+    if (!this.layoutMeasurements.has(animation)) return
+
+    this.layoutMeasurements.set(animation, 'releasing')
+    animation.cancel()
+    this.layoutMeasurements.delete(animation)
+  }
+
+  private retryLayoutMeasurements() {
     releaseResources(
-      [...new Set([...this.layoutTransforms.keys(), ...this.layoutEffects.keys()])].map(
+      [...this.layoutMeasurements]
+        .filter(([, state]) => state === 'releasing')
+        .map(
+          ([animation]) =>
+            () =>
+              this.cancelLayoutMeasurement(animation),
+        ),
+    )
+  }
+
+  private releaseLayout() {
+    releaseResources([
+      ...[...new Set([...this.layoutTransforms.keys(), ...this.layoutEffects.keys()])].map(
         (element) => () => this.layoutTransform(element, undefined),
       ),
-    )
+      ...[...this.layoutMeasurements.keys()].map(
+        (animation) => () => this.cancelLayoutMeasurement(animation),
+      ),
+    ])
   }
 
   private layerResolution: LayerResolution = emptyResolution()
