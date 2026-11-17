@@ -1,3 +1,4 @@
+import { isCssProperty } from '../model/definition.ts'
 import {
   assembleRuntime,
   nativeEffects,
@@ -810,7 +811,7 @@ describe('relative property controllers', () => {
             targets: layer.targets.map((target) => ({
               ...target,
               properties: target.properties.map((property) =>
-                property.value.kind === 'binding'
+                isCssProperty(property) && property.value.kind === 'binding'
                   ? { ...property, value: { kind: 'binding', expression } }
                   : property,
               ),

@@ -354,6 +354,80 @@ the affected track; subsequent input updates can still be processed.
 When `prefers-reduced-motion: reduce` is active, animations settle immediately;
 direct control and application state remain responsive.
 
+## Layout configuration
+
+`$layout` is a reserved Liva declaration, separate from CSS properties and timing
+decorators. It selects physical position and generated-scale axes for the root or
+a named target. Layout configuration is available for inspection; automatic geometry
+playback is not yet available.
+
+```liva
+motion item(dragging: boolean) {
+  layer base {
+    $layout: position size @spring(stiffness: 300, damping: 25)
+    content { $layout: y height }
+  }
+
+  layer dragging when dragging {
+    self { $layout: none }
+  }
+}
+```
+
+`position` selects `x y`; `size` selects `width height`. Individual axes can be
+combined in any order. Axes are physical: x increases rightward and y downward,
+including under RTL. Width and height select scale correction; they never request
+CSS width/height writes. `none` must appear alone and disables all automatic
+correction. An absent effective declaration also disables correction. Empty values,
+unknown keywords, repeated axes and overlapping aliases such as `position x` are errors.
+
+Root shorthand and an explicit `self` block address the same root. Named targets
+opt children into their own layout projection and ancestor-scale compensation;
+unregistered descendants scale with their parent. A later layer or selected state
+replaces the entire axis selection: overriding `position size` with `position`
+removes automatic size correction. Use layers/states for dynamic selection;
+`${...}`, controller attachment with `:=`, and selection keyframes are errors.
+Ordinary CSS properties, custom properties and CSS interpolation keep their usual behavior.
+
+Timing follows the ordinary property, target, state and layer precedence, independently
+of the selected axes. Postfix timing accepts the existing expressions, including
+`@spring(...)`, timing-valued bindings and `@instant`. Missing timing settles
+immediately. A directional transition can override timing with an empty track:
+
+```liva
+layer phase {
+  $layout: position @spring(duration: 350)
+  state closed initial {}
+  state open {}
+
+  transition closed -> open when expanded {
+    @instant
+    $layout ~> {}
+  }
+}
+```
+
+Directional timing belongs only to the update that selects that transition. A later
+geometry change resolves the current declaration timing again, even when the source
+selection is unchanged; it does not advance state machines or replay an old transition.
+Only the layer owning the effective selection supplies a directional override.
+`enter`/`leave` own CSS animation tracks and cannot declare `$layout` or its timing track.
+
+An effective explicit Liva `transform` declaration, including `transform: none`,
+disables automatic projection and child compensation on that target. Ordinary CSS
+transform is a separate browser-owned value. Width, height, translate and scale do
+not participate in this ownership rule.
+
+The runtime exposes effective axes, timing, transform ownership and declaration/timing
+provenance separately from CSS presentation. The editor preserves layout declarations
+and timing expressions as source-owned configuration; ordinary CSS value, timing and
+keyframe edits cannot rewrite them. Ordinary timeline preview has no before/after
+layout capture. Reproducing a layout transition requires before/after geometry,
+coordinated target identities, displayed shape/velocity and the underlying uncorrected
+radius/shadow styles. Generated transforms and captured dimensions must not be saved
+as authored CSS tracks. Dedicated captured-layout editing and playback are deferred
+to [#116](https://github.com/ktsn/liva/issues/116).
+
 ## Immediate timing
 
 `instant` is a built-in timing value. `@instant` immediately applies the resolved

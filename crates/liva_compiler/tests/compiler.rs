@@ -14,6 +14,10 @@ fn errors(source: &str) -> Vec<String> {
 fn fixture_json_matches_the_public_compilation_schema() {
     for (source, expected) in [
         (
+            include_str!("../../../fixtures/layout-config.liv"),
+            include_str!("../../../fixtures/layout-config.json"),
+        ),
+        (
             include_str!("../../../fixtures/constrained.liv"),
             include_str!("../../../fixtures/constrained.json"),
         ),
@@ -105,7 +109,10 @@ fn raw_css_and_byte_mappings() {
 
     assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
     assert_eq!(
-        result.definitions[0].layers[0].targets[0].properties[1].value,
+        result.definitions[0].layers[0].targets[0].properties[1]
+            .css()
+            .unwrap()
+            .value,
         PropertyValue::Literal {
             value: "imaginary !important".into()
         }

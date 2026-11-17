@@ -80,6 +80,11 @@ node!(Keyframe, |n: &SyntaxNode| n.kind() == Kind::Declaration
     && n.child::<Header>()
         .is_some_and(|h| h.semantic_text().ends_with('%')));
 node!(Property, |n: &SyntaxNode| n.kind() == Kind::Declaration);
+// Reserved declarations retain their typed view even when their value is malformed.
+node!(LayoutDeclaration, |n: &SyntaxNode| n.kind()
+    == Kind::Declaration
+    && n.child::<Header>()
+        .is_some_and(|header| header.semantic_text() == "$layout"));
 node!(Event, |n: &SyntaxNode| n.kind() == Kind::Event);
 node!(LetBinding, |n: &SyntaxNode| n.kind() == Kind::Let);
 node!(Parameter, |n: &SyntaxNode| n.kind() == Kind::Parameter);
@@ -96,8 +101,8 @@ node!(Interpolation, |n: &SyntaxNode| n.kind()
 macro_rules! implement {
     ($trait:ident: $($name:ident),+ $(,)?) => { $(impl $trait for $name {})+ };
 }
-implement!(HasHeader: Block, Motion, Layer, State, Transition, Target, PropertyBlock, Keyframe, Property, LetBinding, Parameter, Event, OnBlock);
-implement!(HasValue: Property, LetBinding, Keyframe);
+implement!(HasHeader: Block, Motion, Layer, State, Transition, Target, PropertyBlock, Keyframe, Property, LayoutDeclaration, LetBinding, Parameter, Event, OnBlock);
+implement!(HasValue: Property, LayoutDeclaration, LetBinding, Keyframe);
 implement!(HasItems: Document, Block, Motion, Layer, State, Transition, Target, PropertyBlock, OnBlock);
 
 impl Document {
@@ -300,7 +305,7 @@ pub fn animation_properties(node: &impl AstNode) -> impl Iterator<Item = Animati
 }
 
 impl Target {
-    /// CSS declarations and explicit tracks in source order, including malformed items.
+    /// Style/configuration declarations and explicit tracks in source order, including malformed items.
     pub fn animation_properties(&self) -> impl Iterator<Item = AnimationProperty> {
         animation_properties(self)
     }
@@ -413,5 +418,19 @@ impl Transition {
             }
             _ => None,
         }
+    }
+}
+
+impl LayoutDeclaration {
+    /// Raw fixed keywords before postfix timing, retaining malformed input for diagnostics.
+    pub fn selection(&self) -> Option<String> {
+        self.value_text()
+    }
+
+    /// Controller spelling is exposed for diagnostics; attachments are not valid selections.
+    pub fn is_attachment(&self) -> bool {
+        self.syntax()
+            .children_with_tokens()
+            .any(|element| element.as_token().is_some_and(|token| token.text() == ":="))
     }
 }

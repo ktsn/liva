@@ -1,6 +1,42 @@
 use crate::expression::{Expression, TemplatePart};
 use serde::{Deserialize, Serialize};
 
+/// Physical position and generated-scale axes. All false disables automatic layout.
+/// Width/height select scale correction; they never request CSS dimension writes.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LayoutAxes {
+    pub x: bool,
+    pub y: bool,
+    pub width: bool,
+    pub height: bool,
+}
+
+/// Fixed layout selection, independent of CSS values and keyframes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LayoutDeclaration {
+    pub kind: LayoutKind,
+    pub name: LayoutName,
+    pub axes: LayoutAxes,
+    #[serde(rename = "timingExpression", skip_serializing_if = "Option::is_none")]
+    pub timing_expression: Option<Expression>,
+}
+
+/// Layout is a separate declaration variant, never a CSS value kind.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum LayoutKind {
+    #[serde(rename = "layout")]
+    Layout,
+}
+
+/// The reserved declaration name is checked during deserialization as well as compilation.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum LayoutName {
+    #[serde(rename = "$layout")]
+    Layout,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Definition {
@@ -12,8 +48,10 @@ pub struct Definition {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<Event>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "css_lifecycle")]
     pub enter: Option<Transition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "css_lifecycle")]
     pub leave: Option<Transition>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layers: Vec<Layer>,
@@ -39,7 +77,7 @@ pub struct Layer {
     pub initial_state: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub when: Option<Expression>,
-    pub targets: Vec<Target<Property>>,
+    pub targets: Vec<Target<Declaration>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -57,7 +95,7 @@ pub struct State {
     #[serde(rename = "timingExpression", skip_serializing_if = "Option::is_none")]
     pub timing_expression: Option<Expression>,
     pub name: String,
-    pub targets: Vec<Target<Property>>,
+    pub targets: Vec<Target<Declaration>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -76,8 +114,47 @@ pub struct Target<T> {
 pub struct Property {
     #[serde(rename = "timingExpression", skip_serializing_if = "Option::is_none")]
     pub timing_expression: Option<Expression>,
+    #[serde(deserialize_with = "css_property_name")]
     pub name: String,
     pub value: PropertyValue,
+}
+
+fn css_property_name<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    let name = String::deserialize(deserializer)?;
+
+    if name.starts_with('$') {
+        return Err(serde::de::Error::custom(
+            "Reserved declarations are not CSS properties",
+        ));
+    }
+
+    Ok(name)
+}
+
+/// Authored declarations retain one common order while layout remains outside CSS values.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum Declaration {
+    Css(Property),
+    Layout(LayoutDeclaration),
+}
+
+impl Declaration {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Css(property) => &property.name,
+            Self::Layout(_) => "$layout",
+        }
+    }
+
+    pub fn css(&self) -> Option<&Property> {
+        match self {
+            Self::Css(property) => Some(property),
+            Self::Layout(_) => None,
+        }
+    }
 }
 
 /// One CSS endpoint: opaque text or structured text/expression interpolation parts.
@@ -119,6 +196,7 @@ pub struct Transition {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(try_from = "RawPropertyTransition")]
 pub struct PropertyTransition {
     #[serde(rename = "timingExpression", skip_serializing_if = "Option::is_none")]
     pub timing_expression: Option<Expression>,
@@ -127,6 +205,53 @@ pub struct PropertyTransition {
     pub timing: Option<Timing>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keyframes: Option<Vec<Frame>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RawPropertyTransition {
+    timing_expression: Option<Expression>,
+    name: String,
+    timing: Option<Timing>,
+    keyframes: Option<Vec<Frame>>,
+}
+
+impl TryFrom<RawPropertyTransition> for PropertyTransition {
+    type Error = &'static str;
+
+    fn try_from(value: RawPropertyTransition) -> Result<Self, Self::Error> {
+        if value.name == "$layout" && value.keyframes.is_some() {
+            return Err("$layout transition overrides contain timing only");
+        }
+
+        Ok(Self {
+            timing_expression: value.timing_expression,
+            name: value.name,
+            timing: value.timing,
+            keyframes: value.keyframes,
+        })
+    }
+}
+
+fn css_lifecycle<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Transition>, D::Error> {
+    let transition = Option::<Transition>::deserialize(deserializer)?;
+
+    if transition.as_ref().is_some_and(|transition| {
+        transition.targets.iter().any(|target| {
+            target
+                .properties
+                .iter()
+                .any(|property| property.name == "$layout")
+        })
+    }) {
+        return Err(serde::de::Error::custom(
+            "$layout timing is not a lifecycle CSS track",
+        ));
+    }
+
+    Ok(transition)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -175,7 +300,7 @@ impl Transition {
 }
 
 impl State {
-    /// Returns the authored declaration source, without evaluating expressions or tracks.
+    /// Returns an authored CSS declaration source, excluding layout and without evaluating expressions or tracks.
     pub fn value(&self, target: &str, property: &str) -> Option<&PropertyValue> {
         Some(
             &self
@@ -184,7 +309,7 @@ impl State {
                 .find(|t| t.name == target)?
                 .properties
                 .iter()
-                .find(|p| p.name == property)?
+                .find_map(|p| p.css().filter(|p| p.name == property))?
                 .value,
         )
     }

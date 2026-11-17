@@ -96,7 +96,10 @@ fn same_address_declarations_share_a_controller_and_inline_calls_lower_to_indepe
 
     assert_eq!(definition.let_bindings.len(), 2);
     assert!(matches!(
-        definition.layers[0].targets[0].properties[0].value,
+        definition.layers[0].targets[0].properties[0]
+            .css()
+            .unwrap()
+            .value,
         PropertyValue::Binding { .. }
     ));
 }
@@ -154,9 +157,9 @@ fn binding_compilation_does_not_restrict_properties_by_controller_shape() {
         let target = &result.definitions[0].layers[0].targets[0];
 
         assert_eq!(target.name, "self");
-        assert_eq!(target.properties[0].name, property);
+        assert_eq!(target.properties[0].name(), property);
         assert_eq!(
-            serde_json::to_value(&target.properties[0].value).unwrap(),
+            serde_json::to_value(&target.properties[0].css().unwrap().value).unwrap(),
             serde_json::json!({
                 "kind": "binding",
                 "expression": {"kind": "reference", "path": ["c"]}
@@ -250,7 +253,7 @@ fn inline_controllers_keep_independent_scope_identities_and_root_target_addresse
         )
         .flat_map(|target| {
             target.properties.iter().map(|property| {
-                let PropertyValue::Binding { expression } = &property.value else {
+                let PropertyValue::Binding { expression } = &property.css().unwrap().value else {
                     panic!("inline controller must lower to a property binding");
                 };
                 let liva_compiler::expression::ExpressionKind::Reference { path } =
@@ -268,7 +271,7 @@ fn inline_controllers_keep_independent_scope_identities_and_root_target_addresse
 
                 (
                     path[0].text.as_str(),
-                    (target.name.as_str(), property.name.as_str()),
+                    (target.name.as_str(), property.name()),
                 )
             })
         })

@@ -55,8 +55,11 @@ fn removing_a_local_override_restores_inheritance_without_rewriting_values() {
     .unwrap();
     let property = &restored.compilation.definitions[0].layers[0].targets[0].properties[0];
 
-    assert!(property.timing_expression.is_none());
-    assert!(matches!(property.value, PropertyValue::Template { .. }));
+    assert!(property.css().unwrap().timing_expression.is_none());
+    assert!(matches!(
+        property.css().unwrap().value,
+        PropertyValue::Template { .. }
+    ));
     assert!(restored.source.contains("@quick layer base"));
     assert!(!restored.source.contains("spring(duration: 300)"));
 }
@@ -74,7 +77,7 @@ fn adding_a_style_keyframe_preserves_the_original_expression_at_one_hundred_perc
     )
     .unwrap();
     let property = &result.compilation.definitions[0].layers[0].targets[0].properties[0];
-    let PropertyValue::Keyframes { frames } = &property.value else {
+    let PropertyValue::Keyframes { frames } = &property.css().unwrap().value else {
         panic!("Expected a style track")
     };
 
@@ -197,8 +200,10 @@ fn ordinary_track_conversion_retains_cross_layer_timing_inheritance() {
     .unwrap();
     let property = &result.compilation.definitions[0].layers[1].targets[0].properties[0];
 
-    assert!(property.timing_expression.is_none());
-    assert!(matches!(&property.value, PropertyValue::Keyframes { frames } if frames.len() == 2));
+    assert!(property.css().unwrap().timing_expression.is_none());
+    assert!(
+        matches!(&property.css().unwrap().value, PropertyValue::Keyframes { frames } if frames.len() == 2)
+    );
     assert!(result.source.contains("@tween(duration: 200) layer base"));
 }
 

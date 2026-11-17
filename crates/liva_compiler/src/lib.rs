@@ -5,6 +5,7 @@ mod diagnostic_source;
 pub mod edits;
 pub mod expression;
 pub mod ir;
+mod layout;
 pub mod scope;
 mod target;
 
@@ -339,7 +340,7 @@ impl Compiler {
         self.sources.insert(path.into(), node.syntax().clone());
         let mut range = node.range();
 
-        if kind == "value"
+        if matches!(kind, "value" | "layout-value")
             && let Some(decorator) = node.children::<syn::Decorator>().next()
         {
             range.end = decorator.range().start;
@@ -358,7 +359,7 @@ impl Compiler {
             },
         );
 
-        if kind == "block"
+        if matches!(kind, "block" | "layout")
             && let Some(decorator) = node.decorators().next()
         {
             let field = if syn::Keyframe::cast(node.syntax().clone()).is_some() {
@@ -366,12 +367,21 @@ impl Compiler {
             } else {
                 "timing"
             };
-            self.mapping(&format!("{path}/{field}/decorator"), &decorator, "block");
+            self.mapping(
+                &format!("{path}/{field}/decorator"),
+                &decorator,
+                if kind == "layout" { "layout" } else { "block" },
+            );
             self.mappings.insert(
                 format!("{path}/{field}"),
                 Mapping {
                     range: decorator.expression_range(),
-                    kind: "value".into(),
+                    kind: if kind == "layout" {
+                        "layout-value"
+                    } else {
+                        "value"
+                    }
+                    .into(),
                 },
             );
         }
@@ -441,6 +451,10 @@ impl Compiler {
         path: &str,
         scope: &expression::Scope,
     ) -> Transition {
+        let layout_timing = matches!(
+            node.selector(),
+            Some(syn::TransitionSelector::Directional { .. })
+        );
         let endpoint = if matches!(node.selector(), Some(syn::TransitionSelector::Enter)) {
             0.0
         } else {
@@ -449,7 +463,7 @@ impl Compiler {
         self.mapping(path, node, "block");
         let timing_expression = self.decorator_expression(node, scope, expression::Type::Timing);
         let targets = self.compile_targets(node, path, scope, |compiler, target, path, _, seen| {
-            compiler.transition_properties(target, path, scope, seen, endpoint)
+            compiler.transition_properties(target, path, scope, seen, endpoint, layout_timing)
         });
 
         Transition {
@@ -466,6 +480,7 @@ impl Compiler {
         scope: &expression::Scope,
         property_names: &mut BTreeMap<String, Range>,
         endpoint: f64,
+        layout_timing: bool,
     ) -> Vec<PropertyTransition> {
         let mut properties = vec![];
 
@@ -484,6 +499,12 @@ impl Compiler {
 
                     let offset = endpoint;
                     let name = property.header().unwrap_or_default();
+
+                    if name == "$layout" {
+                        self.error("semantic.layout", "Transitions may override $layout timing with an empty track; select axes in layers or states", &property);
+                        continue;
+                    }
+
                     self.unique(property_names, &name, &property);
                     let property_path = format!("{target_path}/property/{name}");
                     self.mapping(&property_path, &property, "block");
@@ -518,6 +539,12 @@ impl Compiler {
                 }
             };
             let name = property.header().unwrap_or_default();
+
+            if name == "$layout" && !layout_timing {
+                self.error("semantic.layout", "$layout timing overrides belong to directional layer transitions; enter/leave own CSS tracks", &property);
+                continue;
+            }
+
             self.unique(property_names, &name, &property);
             let property_path = format!("{target_path}/property/{name}");
             self.mapping(&property_path, &property, "block");
@@ -536,6 +563,15 @@ impl Compiler {
             }
 
             for frame in property.keyframes() {
+                if name == "$layout" {
+                    self.error(
+                        "semantic.layout",
+                        "$layout selection cannot use keyframes",
+                        &frame,
+                    );
+                    continue;
+                }
+
                 let invalid_attachment = self.reject_frame_attachment(&frame);
                 let raw = frame.header().unwrap();
                 let offset = raw.trim_end_matches('%').parse::<f64>().unwrap_or(f64::NAN) / 100.0;
@@ -612,6 +648,48 @@ impl Compiler {
         true
     }
 
+    fn layout_declaration(
+        &mut self,
+        declaration: &syn::LayoutDeclaration,
+        path: &str,
+        scope: &expression::Scope,
+    ) -> Option<LayoutDeclaration> {
+        let property_path = format!("{path}/property/$layout");
+        self.mapping(&property_path, declaration, "layout");
+
+        if let Some(value) = declaration.value_node() {
+            self.mapping(&format!("{property_path}/value"), &value, "layout-value");
+        }
+
+        let timing_expression =
+            self.decorator_expression(declaration, scope, expression::Type::Timing);
+
+        if declaration.is_attachment() {
+            self.error(
+                "semantic.layout",
+                "$layout does not accept controller attachments",
+                declaration,
+            );
+            return None;
+        }
+
+        let selection = declaration.selection().unwrap_or_default();
+        let axes = match layout::parse_selection(&selection) {
+            Ok(axes) => axes,
+            Err(message) => {
+                self.error("semantic.layout", message, declaration);
+                return None;
+            }
+        };
+
+        Some(LayoutDeclaration {
+            kind: LayoutKind::Layout,
+            name: LayoutName::Layout,
+            axes,
+            timing_expression,
+        })
+    }
+
     fn style_properties(
         &mut self,
         target: &syn::Block,
@@ -620,13 +698,21 @@ impl Compiler {
         seen: &mut BTreeMap<String, Range>,
         target_name: &str,
         controllers: &mut ControllerScope<'_>,
-    ) -> Vec<Property> {
+    ) -> Vec<Declaration> {
         let mut properties = vec![];
         for item in syn::animation_properties(target) {
             match item {
                 syn::AnimationProperty::Shorthand(property) => {
                     let name = property.header().unwrap_or_default();
                     self.unique(seen, &name, &property);
+
+                    if let Some(layout) = syn::LayoutDeclaration::cast(property.syntax().clone()) {
+                        if let Some(declaration) = self.layout_declaration(&layout, path, scope) {
+                            properties.push(Declaration::Layout(declaration));
+                        }
+
+                        continue;
+                    }
 
                     if !liva_syntax::is_property(&name) {
                         self.error("semantic.declaration", "Expected a CSS property", &property);
@@ -680,15 +766,21 @@ impl Compiler {
                     // Invalid attachments omit IR, but must not suppress independent diagnostics.
                     let Some(value) = value else { continue };
 
-                    properties.push(Property {
+                    properties.push(Declaration::Css(Property {
                         name,
                         value,
                         timing_expression,
-                    });
+                    }));
                 }
                 syn::AnimationProperty::Keyframes(track) => {
                     let name = track.header().unwrap_or_default();
                     self.unique(seen, &name, &track);
+
+                    if name == "$layout" {
+                        self.error("semantic.layout", "$layout selection cannot use keyframes; select axes in layers or states", &track);
+                        continue;
+                    }
+
                     let timing_expression =
                         self.decorator_expression(&track, scope, expression::Type::Timing);
                     let track_path = format!("{path}/property/{name}");
@@ -773,11 +865,11 @@ impl Compiler {
                         continue;
                     }
 
-                    properties.push(Property {
+                    properties.push(Declaration::Css(Property {
                         name,
                         value: PropertyValue::Keyframes { frames },
                         timing_expression,
-                    });
+                    }));
                 }
             }
         }
@@ -896,7 +988,7 @@ impl Compiler {
         path: &str,
         scope: &expression::Scope,
         controllers: &mut ControllerScope<'_>,
-    ) -> Vec<Target<Property>> {
+    ) -> Vec<Target<Declaration>> {
         self.compile_targets(node, path, scope, |compiler, target, path, name, seen| {
             compiler.style_properties(target, path, scope, seen, name, controllers)
         })
@@ -1266,7 +1358,7 @@ impl Compiler {
                                             && styles
                                                 .properties
                                                 .iter()
-                                                .any(|style| style.name == property.name)
+                                                .any(|style| style.name() == property.name)
                                     });
 
                                 if !declared {
@@ -1493,7 +1585,7 @@ pub fn compile(source: &str, development: bool) -> Compilation {
 
     definitions.retain(|d| !duplicates.contains(&d.name));
     Compilation {
-        schema_version: 2,
+        schema_version: 3,
         definitions,
         diagnostics: compiler.diagnostics,
         mappings: development.then_some(compiler.mappings),

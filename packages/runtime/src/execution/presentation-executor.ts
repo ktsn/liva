@@ -35,6 +35,7 @@ import { propertyRule } from '../motion/property-rules.ts'
 import { propertyController, type PropertyController } from '../motion/controllers.ts'
 import {
   layerTargets,
+  declarationTargets,
   composeEvaluatedLayers,
   changedLayerProperties,
   type EvaluatedLayer,
@@ -457,7 +458,7 @@ export class PresentationExecutor {
     if (hasLifecycle(definition)) return 'ready'
 
     const optional = this.optionalControllerTargets(definition)
-    const missing = layerTargets(definition).some(
+    const missing = declarationTargets(definition).some(
       (target) =>
         target.properties.length > 0 && !optional.has(target.name) && !targets.has(target.name),
     )

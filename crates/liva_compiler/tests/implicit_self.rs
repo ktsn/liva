@@ -150,8 +150,8 @@ fn target_names_css_properties_and_custom_tracks_are_distinguished_by_delimiters
             .collect::<Vec<_>>(),
         ["self", "opacity"]
     );
-    assert_eq!(layer.targets[0].properties[1].name, "--future-property");
-    assert_eq!(layer.targets[1].properties[0].name, "opacity");
+    assert_eq!(layer.targets[0].properties[1].name(), "--future-property");
+    assert_eq!(layer.targets[1].properties[0].name(), "opacity");
 }
 
 #[test]
@@ -232,7 +232,7 @@ fn implicit_root_properties_keep_their_own_timing_in_styles_and_transitions() {
                     target
                         .properties
                         .iter()
-                        .map(|property| &property.timing_expression)
+                        .map(|property| &property.css().unwrap().timing_expression)
                         .collect(),
                 )
             };

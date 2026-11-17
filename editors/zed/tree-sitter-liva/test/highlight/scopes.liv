@@ -96,3 +96,12 @@ motion choices(axis: "x" | 'y', fixed: "") {
 //                                     ^ string
   layer base {}
 }
+
+motion layoutExample {
+  layer base {
+    $layout: position size @instant
+//  ^ property
+    content { $layout: y height }
+//            ^ property
+  }
+}

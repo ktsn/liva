@@ -70,12 +70,21 @@ module.exports = grammar({
     property_track: ($) =>
       prec(
         2,
-        seq(optional($.decorator), field('name', choice($.identifier, $.css_token)), '~>', $.block),
+        seq(
+          optional($.decorator),
+          field('name', choice($.identifier, $.css_token, $.layout_name)),
+          '~>',
+          $.block,
+        ),
       ),
     selector_block: ($) =>
       prec(
         1,
-        seq(optional($.decorator), field('name', choice($.identifier, $.css_token)), $.block),
+        seq(
+          optional($.decorator),
+          field('name', choice($.identifier, $.css_token, $.layout_name)),
+          $.block,
+        ),
       ),
     call: ($) => prec(1, seq(field('function', $.identifier), $.parenthesized)),
     block: ($) => seq('{', repeat($._item), '}'),
@@ -89,8 +98,12 @@ module.exports = grammar({
     property: ($) =>
       prec(
         1,
-        seq(field('name', choice($.identifier, alias($.type, $.identifier))), choice(':', ':=')),
+        seq(
+          field('name', choice($.identifier, alias($.type, $.identifier), $.layout_name)),
+          choice(':', ':='),
+        ),
       ),
+    layout_name: () => '$layout',
     identifier: () => /[A-Za-z_][A-Za-z0-9_-]*/,
     number: () => /([0-9]+(\.[0-9]+)?|\.[0-9]+)(ms|s|px|deg|%)?/,
     string: () => choice(/"([^"\\]|\\.)*"/, /'([^'\\]|\\.)*'/),

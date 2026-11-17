@@ -1,5 +1,7 @@
+import { isLayoutAxes } from './layout.ts'
 import type {
   Definition,
+  Declaration,
   Layer,
   MotionParameter,
   Expression,
@@ -93,13 +95,16 @@ export function isFrame(value: unknown): value is Frame {
   )
 }
 
-function isPropertyTransition(value: unknown): value is PropertyTransition {
+function isPropertyTransition(value: unknown, layoutTiming = true): value is PropertyTransition {
   return (
     isRecord(value) &&
     typeof value.name === 'string' &&
+    (value.name !== '$layout' ||
+      (layoutTiming && hasOnlyFields(value, ['name', 'timing', 'timingExpression']))) &&
     (value.timingExpression === undefined || isExpression(value.timingExpression)) &&
     (value.timing === undefined || isTiming(value.timing)) &&
-    (value.keyframes === undefined || isArrayOf(value.keyframes, isFrame))
+    (value.keyframes === undefined ||
+      (value.name !== '$layout' && isArrayOf(value.keyframes, isFrame)))
   )
 }
 
@@ -111,22 +116,29 @@ function hasTimingProperties(value: Record<string, unknown>): boolean {
   )
 }
 
-function isTransitionTarget(value: unknown): value is Target<PropertyTransition> {
+function isTransitionTarget(
+  value: unknown,
+  layoutTiming: boolean,
+): value is Target<PropertyTransition> {
   return (
     isRecord(value) &&
     typeof value.name === 'string' &&
     hasTimingProperties(value) &&
     (value.timingExpression === undefined || isExpression(value.timingExpression)) &&
-    isArrayOf(value.properties, isPropertyTransition)
+    isArrayOf(value.properties, (property): property is PropertyTransition =>
+      isPropertyTransition(property, layoutTiming),
+    )
   )
 }
 
-function isTransition(value: unknown): value is Transition {
+function isTransition(value: unknown, layoutTiming = true): value is Transition {
   return (
     isRecord(value) &&
     (value.timingExpression === undefined || isExpression(value.timingExpression)) &&
     (value.timing === undefined || isTiming(value.timing)) &&
-    isArrayOf(value.targets, isTransitionTarget)
+    isArrayOf(value.targets, (target): target is Target<PropertyTransition> =>
+      isTransitionTarget(target, layoutTiming),
+    )
   )
 }
 
@@ -208,16 +220,33 @@ function isStyleScope(value: unknown): value is State {
         hasTimingProperties(target) &&
         (target.timingExpression === undefined || isExpression(target.timingExpression)) &&
         Array.isArray(target.properties) &&
-        target.properties.every(
-          (property: unknown) =>
-            isRecord(property) &&
-            hasOnlyFields(property, ['name', 'value', 'timing', 'timingExpression']) &&
-            typeof property.name === 'string' &&
-            isPropertyValue(property.value) &&
-            (property.timing === undefined || isTiming(property.timing)) &&
-            (property.timingExpression === undefined || isExpression(property.timingExpression)),
-        ),
+        target.properties.every(isDeclaration),
     )
+  )
+}
+
+function isDeclaration(value: unknown): value is Declaration {
+  if (!isRecord(value)) return false
+
+  const timing =
+    (value.timing === undefined || isTiming(value.timing)) &&
+    (value.timingExpression === undefined || isExpression(value.timingExpression))
+
+  if (value.kind === 'layout') {
+    return (
+      hasOnlyFields(value, ['kind', 'name', 'axes', 'timing', 'timingExpression']) &&
+      value.name === '$layout' &&
+      isLayoutAxes(value.axes) &&
+      timing
+    )
+  }
+
+  return (
+    hasOnlyFields(value, ['name', 'value', 'timing', 'timingExpression']) &&
+    typeof value.name === 'string' &&
+    !value.name.startsWith('$') &&
+    isPropertyValue(value.value) &&
+    timing
   )
 }
 
@@ -269,8 +298,8 @@ export function isDefinition(value: unknown): value is Definition {
           isParameterType(parameter.type),
       )) &&
     (value.letBindings === undefined || isArrayOf(value.letBindings, isLetBinding)) &&
-    (value.enter === undefined || isTransition(value.enter)) &&
-    (value.leave === undefined || isTransition(value.leave)) &&
+    (value.enter === undefined || isTransition(value.enter, false)) &&
+    (value.leave === undefined || isTransition(value.leave, false)) &&
     (value.events === undefined ||
       (Array.isArray(value.events) &&
         value.events.every(

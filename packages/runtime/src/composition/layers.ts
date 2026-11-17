@@ -1,3 +1,5 @@
+import { resolveSelectedLayout } from './layout.ts'
+import type { ResolvedLayoutConfiguration } from '../model/layout.ts'
 import type { RuntimeValue } from '../evaluation/reactive-value.ts'
 import {
   cascadeProperty,
@@ -9,7 +11,14 @@ import {
 } from './layer-cascade.ts'
 import { timingValue } from '../evaluation/timing-values.ts'
 import { normalizeFrames, type ResolvedTrack } from './resolve.ts'
-import type { Definition, GuardedTransition, Property, Target } from '../model/definition.ts'
+import {
+  isCssProperty,
+  type Declaration,
+  type Definition,
+  type GuardedTransition,
+  type Property,
+  type Target,
+} from '../model/definition.ts'
 import {
   evaluate,
   renderProperty,
@@ -74,6 +83,11 @@ export interface CompositionTransition {
 }
 
 export interface LayerResolution {
+  /**
+   * Settings for this resolved update, including its temporary directional timing.
+   * These never enter CSS presentation/tracks; Runtime.layout reads persistent timing.
+   */
+  readonly layout?: readonly ResolvedLayoutConfiguration[]
   /** Ordinary declarations before controller CSS/fallback formatting; retained by reference. */
   readonly declarations?: LayerResolution['presentation']
   readonly composition: Composition
@@ -85,6 +99,14 @@ export interface LayerResolution {
 }
 
 export function layerTargets(definition: Definition): readonly Target<Property>[] {
+  return declarationTargets(definition).map((target) => ({
+    ...target,
+    properties: target.properties.filter(isCssProperty),
+  }))
+}
+
+/** Every potential authored receiver, including targets with only layout declarations. */
+export function declarationTargets(definition: Definition): readonly Target<Declaration>[] {
   return definition.layers.flatMap((layer) => [
     ...layer.targets,
     ...(layer.states ?? []).flatMap((state) => state.targets),
@@ -98,26 +120,39 @@ export function resolveLayers(
   advance = true,
   event?: RuntimeValue,
 ): LayerResolution {
-  return resolveLayerSelection(definition, values, previous, advance, undefined, event)
+  return resolveLayerSelection(definition, values, { kind: 'live', previous, advance, event })
 }
+
+/** Explicit selections carry their validated transient timing into the same resolution pass. */
+type LayerSelectionMode =
+  | {
+      readonly kind: 'live'
+      readonly previous: ReadonlyMap<string, string>
+      readonly advance: boolean
+      readonly event?: RuntimeValue
+    }
+  | {
+      readonly kind: 'composition'
+      readonly composition: Composition
+      readonly transitions: ReadonlyMap<string, GuardedTransition>
+    }
 
 function resolveLayerSelection(
   definition: Definition,
   values: VariableValues,
-  previous: ReadonlyMap<string, string>,
-  advance: boolean,
-  selection?: Composition,
-  event?: RuntimeValue,
+  mode: LayerSelectionMode,
 ): LayerResolution {
   const activeLayers: Record<string, boolean> = Object.create(null)
   const states = new Map<string, string>()
-  const transitions = new Map<string, GuardedTransition>()
+  const transitions = new Map<string, GuardedTransition>(
+    mode.kind === 'composition' ? mode.transitions : undefined,
+  )
 
   function* selectLayers(): Generator<LayerSelection> {
-    if (selection) {
-      Object.assign(activeLayers, selection.layers)
+    if (mode.kind === 'composition') {
+      Object.assign(activeLayers, mode.composition.layers)
 
-      for (const selected of compositionLayerSelection(definition, selection)) {
+      for (const selected of compositionLayerSelection(definition, mode.composition)) {
         if (selected.state) states.set(selected.layer.name, selected.state.name)
 
         yield selected
@@ -139,13 +174,13 @@ function resolveLayerSelection(
         continue
       }
 
-      const current = previous.get(layer.name) ?? layer.initialState
-      const selected = advance
+      const current = mode.previous.get(layer.name) ?? layer.initialState
+      const selected = mode.advance
         ? layer.transitions?.findLast(
             (transition) =>
               transition.from === current &&
               (!transition.event ||
-                (event !== undefined && evaluate(transition.event, values) === event)) &&
+                (mode.event !== undefined && evaluate(transition.event, values) === mode.event)) &&
               evaluate(transition.when, values) === true,
           )
         : undefined
@@ -162,7 +197,8 @@ function resolveLayerSelection(
     }
   }
 
-  const evaluated = [...selectLayers()].map((selected): EvaluatedLayer => ({
+  const selectedLayers = [...selectLayers()]
+  const evaluated = selectedLayers.map((selected): EvaluatedLayer => ({
     id: selected.layer.name,
     targets: resolveLayerCascade(
       [selected],
@@ -182,6 +218,7 @@ function resolveLayerSelection(
   }))
 
   return {
+    layout: resolveSelectedLayout(selectedLayers, values, transitions),
     composition: { layers: activeLayers, states: Object.fromEntries(states) },
     states,
     transitions,
@@ -203,15 +240,13 @@ export function resolveComposition(
 
   if (from) validateComposition(definition, from)
 
-  const result = resolveLayerSelection(
-    definition,
-    values,
-    new Map(Object.entries(composition.states)),
-    false,
-    composition,
-  )
+  const transitions = compositionTransitions(definition, composition, from, selected)
 
-  return { ...result, transitions: compositionTransitions(definition, composition, from, selected) }
+  return resolveLayerSelection(definition, values, {
+    kind: 'composition',
+    composition,
+    transitions,
+  })
 }
 
 export function compositionTransitions(

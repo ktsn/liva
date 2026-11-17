@@ -1,3 +1,4 @@
+import { resolveLayoutConfigurations } from '../composition/layout.ts'
 import { releaseResources } from '../evaluation/resource-cleanup.ts'
 import { layerTargets, resolveLayers, type LayerResolution } from '../composition/layers.ts'
 import { parameterValues, LetBindingGraph, targetValues } from '../evaluation/let-bindings.ts'
@@ -94,6 +95,15 @@ export class Runtime {
 
   get composition() {
     return compositionSnapshot(this.resolution.composition)
+  }
+
+  /**
+   * Persistent settings for a fresh geometry transaction, without advancing state/events.
+   * Excludes past directional overrides; an input/state update's transient selection is
+   * supplied separately through ExecutionPort.present's next.layout configuration.
+   */
+  get layout() {
+    return resolveLayoutConfigurations(this.definition, this.values, this.resolution.composition)
   }
 
   readonly environment = {

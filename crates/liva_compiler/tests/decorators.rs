@@ -12,11 +12,11 @@ fn target_defaults_and_property_overrides_lower_timing_expressions() {
     let properties = &result.definitions[0].layers[0].targets[0].properties;
 
     assert_ne!(
-        properties[0].timing_expression,
-        properties[1].timing_expression
+        properties[0].css().unwrap().timing_expression,
+        properties[1].css().unwrap().timing_expression
     );
     assert_eq!(
-        properties[1].value,
+        properties[1].css().unwrap().value,
         PropertyValue::Literal { value: "1".into() }
     );
 }
@@ -27,7 +27,7 @@ fn style_tracks_lower_typed_easing_and_use_the_explicit_destination() {
         "motion button(amount: number) { layer idle { body { @tween(duration: 400) translate ~> { 0%: 0 20px; 50%: 0 5px @easeOut; 100%: ${amount}px 0 } } } }",
     );
     let property = &result.definitions[0].layers[0].targets[0].properties[0];
-    let PropertyValue::Keyframes { frames } = &property.value else {
+    let PropertyValue::Keyframes { frames } = &property.css().unwrap().value else {
         panic!("Expected a style track")
     };
 

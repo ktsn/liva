@@ -6,7 +6,7 @@ use crate::{
     scope::{Scope, Symbol, SymbolKind},
 };
 use liva_syntax::ast::expression::{Argument, Expr, ExprView};
-use liva_syntax::ast::{AstNode, Decorator, HasValue, Motion, Property};
+use liva_syntax::ast::{AstNode, Decorator, HasValue, LayoutDeclaration, Motion, Property};
 use liva_syntax::{Kind, Range, parse, parse_expression, quote_string};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -43,6 +43,10 @@ pub fn completions(source: &str, offset: usize) -> Vec<Completion> {
     else {
         return vec![];
     };
+    if let Some(choices) = layout_choices(&motion, source, offset) {
+        return choices;
+    }
+
     let mut compiler = Compiler {
         diagnostics: vec![],
         mappings: BTreeMap::new(),
@@ -73,6 +77,75 @@ pub fn completions(source: &str, offset: usize) -> Vec<Completion> {
     choices.extend(name_choices(&scope, typed));
 
     choices
+}
+
+fn layout_choices(motion: &Motion, source: &str, offset: usize) -> Option<Vec<Completion>> {
+    let declaration = motion
+        .syntax()
+        .descendants()
+        .filter_map(LayoutDeclaration::cast)
+        .find(|declaration| {
+            declaration
+                .value_node()
+                .is_some_and(|value| contains(&value.range(), offset))
+                && !declaration.decorators().any(|decorator| {
+                    decorator.range().start < offset && contains(&decorator.range(), offset)
+                })
+        })?;
+    let value = declaration.value_node()?;
+
+    if declaration.is_attachment() || in_comment(&value, offset) {
+        return Some(vec![]);
+    }
+
+    // As with closed string choices, filter by the prefix but replace the whole
+    // lexical token. Keeping its suffix would corrupt an otherwise valid selection.
+    let word = value
+        .syntax()
+        .descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| token.kind() != Kind::Trivia)
+        .find(|token| {
+            let range = token.text_range();
+
+            u32::from(range.start()) as usize <= offset && offset <= u32::from(range.end()) as usize
+        });
+    let (range, typed) = if let Some(word) = word {
+        if !liva_syntax::is_identifier(word.text()) {
+            return Some(vec![]);
+        }
+
+        let range = Range {
+            start: u32::from(word.text_range().start()) as usize,
+            end: u32::from(word.text_range().end()) as usize,
+        };
+        let prefix = source.get(range.start..offset)?;
+
+        (range, prefix)
+    } else {
+        (
+            Range {
+                start: offset,
+                end: offset,
+            },
+            "",
+        )
+    };
+
+    Some(
+        crate::layout::KEYWORDS
+            .iter()
+            .filter(|(name, _)| name.starts_with(typed))
+            .map(|(name, _)| Completion {
+                label: (*name).into(),
+                detail: "Fixed physical layout axes; edit configuration in source".into(),
+                text_edit: Some(CompletionEdit {
+                    range: range.clone(),
+                    new_text: (*name).into(),
+                }),
+            })
+            .collect(),
+    )
 }
 
 fn contains(range: &Range, point: usize) -> bool {

@@ -409,3 +409,60 @@ motion choices(axis: "x" | 'y', fixed: "", escaped: "a\\b" | 'a\'b') {
         (operator)
         (boolean)
         (block)))))
+
+==================
+Reserved layout declarations and directional timing
+==================
+motion item {
+  layer base { $layout: position size @instant; content { $layout: y height } }
+  layer phase { state off initial {} state on { self { $layout: none } }
+    transition off -> on when true { @instant $layout ~> {} }
+  }
+}
+---
+
+(source_file
+  (motion
+    (identifier)
+    (block
+      (layer
+        (identifier)
+        (block
+          (property
+            (layout_name))
+          (identifier)
+          (identifier)
+          (animation)
+          (punctuation)
+          (selector_block
+            (identifier)
+            (block
+              (property
+                (layout_name))
+              (identifier)
+              (identifier)))))
+      (layer
+        (identifier)
+        (block
+          (state
+            (identifier)
+            (block))
+          (state
+            (identifier)
+            (block
+              (selector_block
+                (identifier)
+                (block
+                  (property
+                    (layout_name))
+                  (identifier)))))
+          (transition
+            (identifier)
+            (identifier)
+            (boolean)
+            (block
+              (property_track
+                (decorator
+                  (animation))
+                (layout_name)
+                (block)))))))))

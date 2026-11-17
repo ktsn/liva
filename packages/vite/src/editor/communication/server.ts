@@ -72,7 +72,7 @@ export class EditorService {
         kind: field.kind,
         range: field.range,
         value:
-          field.kind === 'value'
+          field.kind === 'value' || field.kind === 'layout-value'
             ? bytes.subarray(field.range.start, field.range.end).toString().trim()
             : '',
       }))

@@ -15,11 +15,11 @@ export interface Diagnostic {
   related?: SourceRange[]
 }
 export interface Mapping {
-  kind: 'block' | 'value'
+  kind: 'block' | 'value' | 'layout' | 'layout-value'
   range: SourceRange
 }
 export interface Compilation {
-  schemaVersion: 2
+  schemaVersion: 3
   definitions: Definition[]
   diagnostics: Diagnostic[]
   mappings?: Record<string, Mapping>
@@ -117,7 +117,10 @@ function isDiagnostic(value: unknown): value is Diagnostic {
 /* v8 ignore next -- @preserve: ABI assertions inspect only bundled Rust output, not user input. */
 function isMapping(value: unknown): value is Mapping {
   return (
-    isRecord(value) && (value.kind === 'block' || value.kind === 'value') && isRange(value.range)
+    isRecord(value) &&
+    typeof value.kind === 'string' &&
+    ['block', 'value', 'layout', 'layout-value'].includes(value.kind) &&
+    isRange(value.range)
   )
 }
 
@@ -125,7 +128,7 @@ function isMapping(value: unknown): value is Mapping {
 function isCompilation(value: unknown): value is Compilation {
   return (
     isRecord(value) &&
-    value.schemaVersion === 2 &&
+    value.schemaVersion === 3 &&
     isArrayOf(value.definitions, isDefinition) &&
     isArrayOf(value.diagnostics, isDiagnostic) &&
     (value.mappings === undefined ||

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vite-plus/test'
 import fixture from '../../../../fixtures/toggle.json'
 import lifecycleFixture from '../../../../fixtures/lifecycle.json'
 import presenceFixture from '../../../../fixtures/presence.json'
-import { decodeBundle } from './definition.ts'
+import { decodeBundle, isCssProperty } from './definition.ts'
 import { isDefinition } from './validation.ts'
 
 const valid = fixture.definitions[0]
@@ -10,7 +10,7 @@ const valid = fixture.definitions[0]
 function expectInvalidDefinition(definition: unknown) {
   expect(isDefinition(definition)).toBe(false)
   expect(() =>
-    decodeBundle(JSON.stringify({ schemaVersion: 2, definitions: [definition] })),
+    decodeBundle(JSON.stringify({ schemaVersion: 3, definitions: [definition] })),
   ).toThrow('schema')
 }
 
@@ -21,6 +21,101 @@ describe('serialized definition validation', () => {
   const withPropertyValue = (value: unknown) => ({
     ...valid,
     layers: [{ name: 'base', targets: [{ name: 'self', properties: [{ name: 'scale', value }] }] }],
+  })
+
+  const withDeclaration = (declaration: unknown) => ({
+    ...valid,
+    layers: [{ name: 'base', targets: [{ name: 'self', properties: [declaration] }] }],
+  })
+  const layout = {
+    kind: 'layout',
+    name: '$layout',
+    axes: { x: true, y: false, width: false, height: true },
+  }
+
+  it('decodes and freezes dedicated layout declarations with timing expressions', () => {
+    const bundle = decodeBundle(
+      JSON.stringify({
+        schemaVersion: 3,
+        definitions: [withDeclaration({ ...layout, timingExpression: reference })],
+      }),
+    )
+    const declaration = bundle.definitions[0].layers[0].targets[0].properties[0]
+
+    expect(declaration).toEqual({ ...layout, timingExpression: reference })
+    expect(Object.isFrozen(declaration)).toBe(true)
+    expect('axes' in declaration && Object.isFrozen(declaration.axes)).toBe(true)
+  })
+
+  it.each([
+    null,
+    [],
+    { ...layout, kind: 'unknown' },
+    { ...layout, name: 'transform' },
+    { ...layout, axes: { x: true, y: false, width: false } },
+    { ...layout, axes: { ...layout.axes, x: 'yes' } },
+    { ...layout, axes: { ...layout.axes, anchor: 'center' } },
+    { ...layout, value: { kind: 'literal', value: 'position' } },
+    { ...layout, keyframes: [] },
+    { ...layout, timingExpression: {} },
+    { ...layout, timing: { kind: 'unknown' } },
+    { name: '$layout', value: { kind: 'literal', value: 'position' } },
+    { name: 'opacity', value: { kind: 'layout', axes: layout.axes } },
+  ])('rejects malformed or overlapping layout/CSS variants: %j', (declaration) => {
+    expect(isDefinition(withDeclaration(declaration))).toBe(false)
+    expectInvalidDefinition(withDeclaration(declaration))
+  })
+
+  it.each(['enter', 'leave'])('rejects layout as an ordinary %s track', (phase) => {
+    expect(
+      isDefinition({
+        ...withDeclaration(layout),
+        [phase]: { targets: [{ name: 'self', properties: [{ name: '$layout' }] }] },
+      }),
+    ).toBe(false)
+    expectInvalidDefinition({
+      ...withDeclaration(layout),
+      [phase]: {
+        timing: { kind: 'tween', durationMs: 0, easing: 'linear' },
+        targets: [{ name: 'self', properties: [{ name: '$layout' }] }],
+      },
+    })
+  })
+
+  it.each([
+    { name: '$layout', keyframes: [] },
+    { name: '$layout', keyframes: [endpoint] },
+    { name: '$layout', axes: layout.axes },
+    { name: '$layout', value: { kind: 'literal', value: 'position' } },
+  ])('rejects selection payloads in directional layout timing overrides: %j', (instruction) => {
+    const definition = {
+      ...withDeclaration(layout),
+      layers: [
+        {
+          name: 'phase',
+          targets: [],
+          states: [{ name: 'off', targets: [] }],
+          initialState: 'off',
+          transitions: [
+            {
+              from: 'off',
+              to: 'off',
+              when: { kind: 'boolean', value: true },
+              transition: { targets: [{ name: 'self', properties: [instruction] }] },
+            },
+          ],
+        },
+      ],
+    }
+
+    expect(isDefinition(definition)).toBe(false)
+    expectInvalidDefinition(definition)
+  })
+
+  it('rejects the preceding schema instead of interpreting layout as CSS', () => {
+    expect(() =>
+      decodeBundle(JSON.stringify({ schemaVersion: 2, definitions: [withDeclaration(layout)] })),
+    ).toThrow('schema')
   })
 
   it.each([
@@ -36,9 +131,13 @@ describe('serialized definition validation', () => {
     },
   ])('accepts and freezes the exclusive $kind declaration source', (value) => {
     const bundle = decodeBundle(
-      JSON.stringify({ schemaVersion: 2, definitions: [withPropertyValue(value)] }),
+      JSON.stringify({ schemaVersion: 3, definitions: [withPropertyValue(value)] }),
     )
-    const decoded = bundle.definitions[0].layers[0].targets[0].properties[0].value
+    const declaration = bundle.definitions[0].layers[0].targets[0].properties[0]
+
+    if (!isCssProperty(declaration)) throw new Error('Expected a CSS property')
+
+    const decoded = declaration.value
 
     expect(decoded).toEqual(value)
     expect(Object.isFrozen(decoded)).toBe(true)
@@ -95,7 +194,7 @@ describe('serialized definition validation', () => {
       const parameter = { name: 'choice', type: { kind: 'stringUnion', values } }
 
       const decoded = decodeBundle(
-        JSON.stringify({ schemaVersion: 2, definitions: [{ ...valid, parameters: [parameter] }] }),
+        JSON.stringify({ schemaVersion: 3, definitions: [{ ...valid, parameters: [parameter] }] }),
       ).definitions[0]
 
       expect(decoded.parameters).toEqual([parameter])
@@ -195,7 +294,7 @@ describe('serialized definition validation', () => {
     }
 
     expect(
-      decodeBundle(JSON.stringify({ schemaVersion: 2, definitions: [definition] })).definitions[0]
+      decodeBundle(JSON.stringify({ schemaVersion: 3, definitions: [definition] })).definitions[0]
         .enter,
     ).toEqual(definition.enter)
   })
@@ -235,7 +334,7 @@ describe('serialized definition validation', () => {
     }
 
     expect(
-      decodeBundle(JSON.stringify({ schemaVersion: 2, definitions: [definition] })).definitions[0],
+      decodeBundle(JSON.stringify({ schemaVersion: 3, definitions: [definition] })).definitions[0],
     ).toEqual(definition)
 
     for (const [changed, changedTransition] of [

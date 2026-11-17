@@ -45,13 +45,13 @@ fn layer_values_preserve_css_and_lower_interpolation() {
     let layers = &result.definitions[0].layers;
 
     assert_eq!(
-        layers[0].targets[0].properties[1].value,
+        layers[0].targets[0].properties[1].css().unwrap().value,
         PropertyValue::Literal {
             value: "0 2px".into()
         }
     );
     assert!(matches!(
-        layers[1].targets[0].properties[0].value,
+        layers[1].targets[0].properties[0].css().unwrap().value,
         PropertyValue::Template { .. }
     ));
 }
@@ -115,7 +115,7 @@ fn stateful_layers_keep_common_styles_and_state_overrides_separate() {
 
     assert_eq!(layer.initial_state.as_deref(), Some("idle"));
     assert_eq!(
-        layer.targets[0].properties[0].value,
+        layer.targets[0].properties[0].css().unwrap().value,
         PropertyValue::Literal { value: "1".into() }
     );
     assert_eq!(

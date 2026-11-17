@@ -32,12 +32,12 @@ fn declaration_sources_serialize_as_four_exclusive_variants() {
     assert_eq!(properties.len(), expected.len());
 
     for (property, expected) in properties.iter().zip(expected) {
-        let serialized = serde_json::to_value(&property.value).unwrap();
+        let serialized = serde_json::to_value(&property.css().unwrap().value).unwrap();
 
         assert_eq!(serialized, expected);
         assert_eq!(
             serde_json::from_value::<PropertyValue>(serialized).unwrap(),
-            property.value
+            property.css().unwrap().value
         );
     }
 }
