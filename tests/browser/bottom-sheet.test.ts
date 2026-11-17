@@ -127,6 +127,7 @@ test.describe('bottom sheet', () => {
 
     expect(bounds.width).toBe(393)
     expect(bounds.height).toBe(852)
+    await expect(page.getByRole('slider')).toHaveCSS('block-size', '56px')
 
     await page.getByRole('button', { name: 'Save this route' }).click()
 
@@ -415,6 +416,7 @@ test.describe('bottom sheet', () => {
     await expectSnap(page, 1)
     await page.getByRole('slider').press('Home')
     await expectSnap(page, 0)
+    await expect(page.getByRole('slider')).toHaveCSS('block-size', '56px')
     await page.getByRole('button', { name: 'Save this route' }).click()
     await expect(page.getByRole('button', { name: 'Route saved' })).toHaveAttribute(
       'aria-pressed',

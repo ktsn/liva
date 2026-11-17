@@ -225,7 +225,7 @@ async function controlSheet(event: KeyboardEvent) {
   position: absolute;
   inset-inline: 0;
   inset-block-end: 0;
-  min-block-size: 56px;
+  min-block-size: var(--sheet-header-height);
   display: flex;
   flex-direction: column;
   border-radius: 24px 24px 0 0;
@@ -234,7 +234,7 @@ async function controlSheet(event: KeyboardEvent) {
 }
 
 .sheet-handle {
-  flex: 0 0 56px;
+  flex: 0 0 var(--sheet-header-height);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -336,13 +336,14 @@ async function controlSheet(event: KeyboardEvent) {
 
 <liva lang="liva">
 motion bottomSheet(command: number) {
+  let headerHeight = 56
   let bounds = measure(target: self)
   let pointer = drag(target: handle)
   let movement = link(input: pointer.offset.y)
 
   // All positions are CSS pixels down from the frame's top. Controller velocity
   // is pixels per millisecond; 200ms is this demo's release projection policy.
-  let closedY = bounds.height - 56
+  let closedY = bounds.height - headerHeight
   let halfY = bounds.height * 0.5
   let expandedY = bounds.height * 0.1
   let projectedY = movement.value + movement.velocity * 200
@@ -351,6 +352,7 @@ motion bottomSheet(command: number) {
 
   @spring(stiffness: 300, damping: 30)
   layer position {
+    --sheet-header-height: ${headerHeight}px @instant
     --dragging: 0 @instant
     handle {}
 
