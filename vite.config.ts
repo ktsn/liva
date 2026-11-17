@@ -101,8 +101,7 @@ const config = defineViteConfig({
       include: ['packages/**/*.{ts,vue}'],
       exclude: [
         'packages/**/*.test.ts',
-        // Test assembly has no product behavior; its graph/store operations are exercised by callers.
-        'packages/**/__test__/helpers/**',
+        'packages/**/__test__/**',
         'packages/**/*.d.ts',
         'packages/**/wasm/**',
       ],

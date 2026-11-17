@@ -15,14 +15,6 @@ it('releases source adapter resources once across executor and binding cleanup',
   expect(cleanup).toHaveBeenCalledTimes(1)
 })
 
-it('rejects sources without a browser connection adapter', () => {
-  const executor = new PresentationExecutor(() => {})
-
-  expect(() => executor.connectSource({ value: 1 }, () => {})).toThrow(
-    'Source has no browser adapter',
-  )
-})
-
 it('retains connections registered while an older binding is disconnecting', () => {
   const executor = new PresentationExecutor(() => {})
   const cleanup = vi.fn<() => void>()

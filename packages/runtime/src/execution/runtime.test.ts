@@ -4,7 +4,6 @@ import type { ExecutionPort, RuntimeDiagnostic } from './execution-contracts.ts'
 import type { PresentationPlan } from './presentation-planner.ts'
 import { planReconciliation } from './presentation-planner.ts'
 import * as functions from '../builtins/index.ts'
-import { isReactiveSubscription } from '../evaluation/reactive-value.ts'
 import { Runtime } from './runtime.ts'
 
 const definition: Definition = {
@@ -58,8 +57,6 @@ function setup(
     initialize() {},
     configureControllers() {},
     connectSource(source, publish) {
-      if (!isReactiveSubscription(source)) throw new Error('Expected source adapter')
-
       return source.bind(new Map(), publish)
     },
     resetPresentation() {},

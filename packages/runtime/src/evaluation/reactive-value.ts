@@ -4,27 +4,18 @@ export type Scalar = number | boolean | string
 export type RuntimeValue = Scalar | { readonly [name: string]: RuntimeValue }
 
 /**
- * Evaluation-facing view of an existing builtin adapter, preserving its identity.
- * Producers return bind-capable adapters; recognition still checks value/bind so
- * ordinary records containing only value remain plain values. Browser connection
- * capabilities are omitted from this view and are used only by the executor.
- */
-export interface ReactiveSource {
-  readonly value: RuntimeValue
-}
-
-/**
  * Connects a source identity through the browser owner, preserving the same object
  * used by snapshot maps and controller capabilities. Returns an idempotent cleanup;
  * connection failures throw. Store guards synchronous publications during acceptance,
  * while the browser owner retains the native adapter resources and their cleanup.
  */
 export type SourceConnection = (
-  source: ReactiveSource,
+  source: ReactiveSubscription,
   publish: (value: RuntimeValue, notification?: ReactiveNotification) => void,
 ) => () => void
 
-export interface ReactiveSubscription extends ReactiveSource {
+export interface ReactiveSubscription {
+  readonly value: RuntimeValue
   bind(
     targets: ReadonlyMap<string, HTMLElement>,
     update: (value: RuntimeValue, notification?: ReactiveNotification) => void,
@@ -40,8 +31,7 @@ export interface PreparedUpdate {
   discard(): void
 }
 
-/** Stateful evaluation view of the same adapter-backed source identity. */
-export interface EvaluatedCall extends ReactiveSource {
+export interface ReactiveCall extends ReactiveSubscription {
   /**
    * Optionally reads a coherent observation at a performance.now()-compatible
    * millisecond timestamp without committing argument changes. Implementations may
@@ -60,17 +50,11 @@ export interface EvaluatedCall extends ReactiveSource {
   dispose(): void
 }
 
-/** Existing DOM-aware adapter, viewed as EvaluatedCall during evaluation. */
-export interface ReactiveCall extends EvaluatedCall, ReactiveSubscription {}
+export type FunctionResult = RuntimeValue | ReactiveSubscription | ReactiveCall
 
-export type FunctionResult = RuntimeValue | ReactiveSource | EvaluatedCall
-
-/** Builtin implementations return the DOM-capable adapter, retained by identity as a source. */
-export type BuiltinResult = RuntimeValue | ReactiveSubscription | ReactiveCall
-
-export function isReactiveCall(value: FunctionResult): value is EvaluatedCall {
+export function isReactiveCall(value: FunctionResult): value is ReactiveCall {
   return (
-    isReactiveSource(value) &&
+    isReactiveSubscription(value) &&
     'prepareUpdate' in value &&
     typeof value.prepareUpdate === 'function' &&
     'dispose' in value &&
@@ -78,16 +62,11 @@ export function isReactiveCall(value: FunctionResult): value is EvaluatedCall {
   )
 }
 
-export function isReactiveSource(value: FunctionResult): value is ReactiveSource {
+export function isReactiveSubscription(value: FunctionResult): value is ReactiveSubscription {
   return (
     typeof value === 'object' &&
     'value' in value &&
     'bind' in value &&
     typeof value.bind === 'function'
   )
-}
-
-/** Existing adapters share source identity; only browser execution uses this capability view. */
-export function isReactiveSubscription(value: FunctionResult): value is ReactiveSubscription {
-  return isReactiveSource(value)
 }

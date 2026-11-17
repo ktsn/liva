@@ -1,6 +1,5 @@
 import { LetBindingGraph } from '../../evaluation/let-bindings.ts'
 import { ReactiveCallStore } from '../../evaluation/reactive-call-store.ts'
-import { isReactiveSubscription } from '../../evaluation/reactive-value.ts'
 import type { ReactiveNotification } from '../../evaluation/events.ts'
 import type { VariableValues } from '../../evaluation/expression.ts'
 import type { LetBinding, Property, Target } from '../../model/definition.ts'
@@ -51,11 +50,7 @@ export class EvaluationFixture {
     targets: ReadonlyMap<string, HTMLElement>,
     update: (notification?: ReactiveNotification) => void,
   ) {
-    return this.calls.bind((source, publish) => {
-      if (!isReactiveSubscription(source)) throw new Error('Expected a browser adapter')
-
-      return source.bind(targets, publish)
-    }, update)
+    return this.calls.bind((source, publish) => source.bind(targets, publish), update)
   }
 
   dispose(retained?: EvaluationFixture) {

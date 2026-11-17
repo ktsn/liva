@@ -237,10 +237,11 @@ returns a value and a binding function whose cleanup releases browser resources.
 Runtime connects the call store through the executor without built-in-specific
 branches. The executor binds adapters to receiving elements and owns their browser
 cleanup. The let graph evaluates expressions in dependency order before layer
-resolution and template rendering. Builtins return `BuiltinResult`: a `RuntimeValue`,
+resolution and template rendering. Builtins return `FunctionResult`: a `RuntimeValue`,
 `ReactiveSubscription`, or stateful `ReactiveCall`. The store retains the same
-adapter objects through the DOM-free `FunctionResult` source/call views defined in
-`reactive-value.ts`. Source recognition uses the adapters' `value` and callable
+adapter objects defined in `reactive-value.ts`, reading their values and preparing
+stateful updates while delegating subscription binding to the executor.
+Subscription recognition uses the adapters' `value` and callable
 `bind` members. Ordinary records remain ordinary values. Each call site
 caches its evaluated arguments and result; unchanged arguments reuse that result.
 Subscription results expose their latest value. Changed arguments invoke ordinary
@@ -696,10 +697,10 @@ completion disposes the candidate store while preserving calls held by the live 
 
 `ReactiveCallStore` owns caches, coherent source snapshots, prepared updates,
 transactional acceptance/discard, and notification ordering. It connects evaluation
-sources through a DOM-free `SourceConnection` supplied by the executor. The executor
+subscriptions through a `SourceConnection` supplied by the executor. The executor
 invokes the existing adapter's `bind(elementMap, publish)` and owns native cleanup;
 no target map is passed through Runtime, graph, or store. Source identity is retained
-across interface views for snapshot maps and controller capability lookup.
+for snapshot maps and controller capability lookup.
 
 Preparation must be pure: it returns a candidate snapshot plus `commit()` and
 `discard()` without mutating committed state, allocating active browser resources,

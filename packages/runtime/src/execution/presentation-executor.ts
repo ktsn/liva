@@ -40,7 +40,7 @@ import {
   type LayerResolution,
 } from '../composition/layers.ts'
 export { waapiProperty } from '../motion/animation.ts'
-import { isReactiveSubscription, type SourceConnection } from '../evaluation/reactive-value.ts'
+import type { SourceConnection } from '../evaluation/reactive-value.ts'
 import { evaluate, type VariableValues } from '../evaluation/expression.ts'
 import type { Definition } from '../model/definition.ts'
 import { type ResolvedTrack } from '../composition/resolve.ts'
@@ -364,8 +364,6 @@ export class PresentationExecutor {
   }
 
   readonly connectSource: SourceConnection = (source, publish) => {
-    if (!isReactiveSubscription(source)) throw new Error('Source has no browser adapter')
-
     const cleanup = source.bind(new Map(this.representativeTargets()), publish)
     let connected = true
     const disconnect = () => {

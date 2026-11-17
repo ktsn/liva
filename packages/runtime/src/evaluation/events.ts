@@ -1,4 +1,4 @@
-import type { ReactiveSource, RuntimeValue } from './reactive-value.ts'
+import type { ReactiveSubscription, RuntimeValue } from './reactive-value.ts'
 
 const events = new WeakSet<object>()
 
@@ -9,7 +9,7 @@ const events = new WeakSet<object>()
  */
 export interface ReactiveNotification {
   readonly time: number
-  readonly snapshots: ReadonlyMap<ReactiveSource, RuntimeValue>
+  readonly snapshots: ReadonlyMap<ReactiveSubscription, RuntimeValue>
   readonly event?: RuntimeValue
 }
 
