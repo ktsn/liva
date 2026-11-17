@@ -403,11 +403,12 @@ export class LayoutCoordinator {
   ): Motion[] {
     this.motions.clear()
     const fresh: Motion[] = []
+    // Snapshot replay consumes this set synchronously. Grow it only after each
+    // accepted ancestor, preserving the same prefix for every following candidate.
+    const excluded = new Set<HTMLElement>()
 
     for (const candidate of candidates) {
-      const destination = snapshots
-        .get(candidate.element)
-        ?.withoutTransforms(new Set(this.motions.keys()))
+      const destination = snapshots.get(candidate.element)?.withoutTransforms(excluded)
       const previous = captures?.get(candidate.element)
       if (!enabled(candidate) || !destination || !previous) continue
 
@@ -422,6 +423,7 @@ export class LayoutCoordinator {
 
       if (unchanged) {
         this.motions.set(candidate.element, { ...existing, candidate })
+        excluded.add(candidate.element)
         continue
       }
 
@@ -446,6 +448,7 @@ export class LayoutCoordinator {
         cumulative: identityProjection,
       }
       this.motions.set(candidate.element, entry)
+      excluded.add(candidate.element)
       fresh.push(entry)
     }
 
