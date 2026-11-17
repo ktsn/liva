@@ -45,9 +45,8 @@ composition resolution evaluates expressions.
 Vue explicitly assembles `Runtime` and `PresentationExecutor`: it constructs the
 executor and runtime, attaches the logical environment, installs integration hooks,
 then registers receivers. Initialization failure releases call/browser resources
-and reports the original cause. `execution/instance.ts` remains a compatibility
-facade for direct ordinary/editor callers; lifecycle callers use executor captures
-and operation handles. Runtime owns accepted
+and reports the original cause. Callers address those participants directly;
+`RuntimeInspection` handles isolated inspection and preview. Runtime owns accepted
 parameters and let environments, reactive-call lifetime, ordinary layer/state
 history, conditional events, binding revisions, and the update queue. It does not
 receive elements or native effects. `execution-contracts.ts` defines the logical
@@ -129,14 +128,39 @@ no live controller operations.
 Presence start/end refreshes ownership without waiting for another input:
 released controllers transfer fresh input velocity, and reacquired controllers
 capture the displayed origin before outgoing effects are cancelled. Evaluation
-snapshots are refreshed after ownership changes.
+uses accepted inputs without consuming pending call notifications.
 
-Runtime also coordinates isolated inspection and preview planning. Preview effects
-use the same final planner and native materialization, begin paused at zero, and
-never join live completion groups. Exported preview Animation handles exclude
-continuing leave effects, so editor seeking cannot scrub live presence. Live group
-completion during preview releases its effects without changing frozen preview
-styles. Ending or failing a preview restores application presentation.
+`RuntimeInspection` coordinates isolated inspection and preview. Runtime's synchronous
+`evaluateCandidate(definition, transform)` owns candidate graphs/stores, reuses only
+compatible live calls, and runs transformation/validation inside `Store.evaluate`
+before acceptance. Candidate-only resources are released afterward; borrowed live
+calls remain owned by Runtime. Inspection does not advance live guards, event
+history, or accepted inputs. Live and isolated controller resolution share the same
+rules. `Runtime.definition` is getter-only; `replaceDefinition` explicitly validates
+and replaces the accepted environment.
+
+Preview effects use the same final planner and native materialization, begin paused
+at zero, and never join live completion groups. Executor returns a DOM-free
+`PreviewOperation` with `seek(milliseconds)` and `end()`. A handle addresses only its
+preview's effect IDs and expires on supersession, rebinding, application updates,
+or disposal. Seeking cannot scrub continuing leave. Live completion releases its
+effects without changing frozen preview styles. Ending or failing a preview
+restores accepted application presentation and external CSS. Preparation failures
+report their original cause and throw to callers; cleanup failures are also reported.
+
+Vue keeps elements and Executor registrations in private records. Observer payloads
+contain separate logical/inspection participants, definition metadata, an optional
+opaque source identity supplied by integration, and a label
+captured in the directive's `mounted` hook after created-hook DOM setup, and an
+on-demand `bounds()` operation. Bounds are plain viewport-relative CSS pixels and
+return undefined after unmount. Geometry is read only when requested. The editor
+receives neither the root element nor the Executor/native Animation registry.
+
+`index.ts` explicitly exports the role entry points, Definition IR/types and selected
+compiler/editor calculations. Required pure lifecycle helpers remain deliberate
+APIs: `hasLifecycle`, `lifecycleTransitions`, and `resolveLifecycleTracks`. Backend
+codecs, motion bookkeeping, graph/store implementation and native materialization
+are internal modules; no compatibility instance facade or public animation view remains.
 
 `PresenceOperation` is a DOM-free boundary barrier over opaque `PresenceCapture`
 handles, allowing one Vue boundary to aggregate repeated targets and multiple Motion
@@ -646,14 +670,14 @@ transitions with the same endpoints remain distinct. Only the final value owner'
 transition contributes animation instructions, including intermediate motion when
 the endpoints are equal.
 
-`Runtime.previewComposition(from, to, transitions?, definition?)` prepares
+`RuntimeInspection.previewComposition(from, to, transitions?, definition?)` prepares
 paused effects for explicit compositions using the instance's current input and let
 values. An optional candidate definition affects only that preview; the application
-definition and state-machine history remain intact. The `animations` interface
-supports forward and backward `currentTime` seeks, including under reduced motion.
+definition and state-machine history remain intact. Its returned `PreviewOperation`
+supports forward and backward `seek(milliseconds)`, including under reduced motion.
 Equal compositions can still contain intermediate style or transition motion.
 
-`endCompositionPreview()` releases the effects and restores the application's
+`PreviewOperation.end()` releases its effects and restores the application's
 composition and external CSS. Parameter or reactive-input updates, definition
 replacement, target changes, and disposal supersede the session. Preparation errors
 restore application presentation, report a diagnostic, and throw with the original
@@ -736,7 +760,17 @@ calls only for the same binding name, structurally identical initializer, matchi
 receiving addresses (including inactive states and aliases), and unchanged arguments.
 Changed or removed calls dispose; editor inspection uses an unbound candidate store
 and cannot update retained live calls. Executor-owned binding cleanup cancels browser
-resources; final store disposal also releases owned call instances.
+resources; final store disposal also releases owned call instances. Teardown invalidates source
+binding identity before releasing resources, so queued publications cannot reach a
+retired binding. Rejected evaluation and final disposal attempt all independent
+cleanups. Multiple failures propagate together with their original cause; Runtime
+still releases browser resources and clears callbacks, and Vue unregisters observer
+metadata/bounds while reporting disposal failure. Subscription changes invalidate
+all retiring delivery callbacks before backend cleanup and release all staged
+connections on failure, including disabling a callback retained by a throwing
+connector. Failed retirement cannot recreate already released backend resources;
+those registrations remain disconnected and can reconnect on a later evaluation.
+Accepted call caches are not silently rolled back or replaced by failed candidates.
 
 ### Property motion and event transactions
 

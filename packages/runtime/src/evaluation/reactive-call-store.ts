@@ -1,3 +1,4 @@
+import { releaseResources } from './resource-cleanup.ts'
 import type { ReactiveNotification } from './events.ts'
 import { callBuiltin } from '../builtins/index.ts'
 import {
@@ -20,11 +21,17 @@ type CallSite = {
 
 type CallSites = Map<string, Map<number, CallSite>>
 
+/** Delivery invalidation is independent of potentially throwing backend release. */
+type SubscriptionConnection = {
+  invalidate(): void
+  readonly cleanup: () => void
+}
+
 /** One subscription session; identity separates queued occurrences from later bindings. */
 type SubscriptionBinding = {
   connect: SourceConnection
   update: (notification?: ReactiveNotification) => void
-  cleanups: Map<ReactiveSubscription, () => void>
+  connections: Map<ReactiveSubscription, SubscriptionConnection>
 }
 
 /**
@@ -165,15 +172,27 @@ export class ReactiveCallStore {
       this.initializing = false
 
       return value
-    } finally {
+    } catch (error) {
       if (!committed) {
-        // Prepared updates have not changed live calls. Release only resources created
-        // by this attempt and suppress notifications from its unsuccessful binding work.
-        evaluation.discard()
-        this.notificationPending = pendingNotification
-        this.eventNotifications.length = pendingEvents
+        // A broken disposer must not hide the validation failure or leave the store
+        // evaluating forever. Failed-attempt publications are suppressed in either case.
+        try {
+          evaluation.discard()
+        } catch (cleanupError) {
+          // eslint-disable-next-line preserve-caught-error -- Both failures are retained; cause identifies the rejected evaluation.
+          throw new AggregateError(
+            [error, cleanupError],
+            'Could not discard failed call evaluation',
+            { cause: error },
+          )
+        } finally {
+          this.notificationPending = pendingNotification
+          this.eventNotifications.length = pendingEvents
+        }
       }
 
+      throw error
+    } finally {
       this.evaluating = false
       this.flushNotifications()
     }
@@ -189,11 +208,19 @@ export class ReactiveCallStore {
 
     this.disposed = true
 
-    // Unbind first so retiring a call cannot publish through this store's binding.
-    for (const cleanup of this.binding?.cleanups.values() ?? []) cleanup()
+    // Invalidate identity before cleanup: queued or disposer-time publications
+    // cannot reach a binding whose owner has already begun teardown.
+    const binding = this.binding
     this.binding = undefined
+    const cleanups = [...(binding?.connections.values() ?? [])]
+    binding?.connections.clear()
+    const owned = callResults(this.calls)
+    this.calls.clear()
 
-    disposeCalls(callResults(this.calls), retained ? callResults(retained.calls) : new Set())
+    releaseResources([
+      ...invalidateConnections(cleanups),
+      ...callDisposals(owned, retained ? callResults(retained.calls) : new Set()),
+    ])
   }
 
   private updateSubscriptions(results: ReadonlySet<FunctionResult>) {
@@ -201,60 +228,90 @@ export class ReactiveCallStore {
     if (!binding) return
 
     const active = new Set([...results].filter(isReactiveSubscription))
-    const added = new Map<ReactiveSubscription, () => void>()
+    const added = new Map<ReactiveSubscription, SubscriptionConnection>()
 
     // Stage additions without removing committed subscriptions: if a later bind
     // throws, only additions from this attempt need cleanup.
     try {
       for (const subscription of active) {
-        if (!binding.cleanups.has(subscription)) {
+        if (!binding.connections.has(subscription)) {
           let subscribed = true
-          const cleanup = binding.connect(subscription, (value, notification) => {
-            // Ignore callbacks retained by a removed subscription or an older binding.
-            if (!subscribed || this.binding !== binding) return
+          let cleanup: () => void
 
-            const snapshots = new Map<ReactiveSubscription, RuntimeValue>(notification?.snapshots)
-            const time = notification?.time ?? performance.now()
+          try {
+            cleanup = binding.connect(subscription, (value, notification) => {
+              // Ignore callbacks retained by a removed subscription or an older binding.
+              if (!subscribed || this.binding !== binding) return
 
-            // Capture all committed calls at one time before notifying the graph, so
-            // event handling and dependent controllers consume the same input sample.
-            for (const result of callResults(this.calls)) {
-              if (isReactiveSubscription(result) && !snapshots.has(result))
-                snapshots.set(
-                  result,
-                  isReactiveCall(result) && result.readSnapshot
-                    ? result.readSnapshot({ time })
-                    : result.value,
-                )
-            }
+              const snapshots = new Map<ReactiveSubscription, RuntimeValue>(notification?.snapshots)
+              const time = notification?.time ?? performance.now()
 
-            snapshots.set(subscription, value)
-            this.notify({
-              ...notification,
-              time: notification?.time ?? performance.now(),
-              snapshots,
+              // Capture all committed calls at one time before notifying the graph, so
+              // event handling and dependent controllers consume the same input sample.
+              for (const result of callResults(this.calls)) {
+                if (isReactiveSubscription(result) && !snapshots.has(result))
+                  snapshots.set(
+                    result,
+                    isReactiveCall(result) && result.readSnapshot
+                      ? result.readSnapshot({ time })
+                      : result.value,
+                  )
+              }
+
+              snapshots.set(subscription, value)
+              this.notify({
+                ...notification,
+                time: notification?.time ?? performance.now(),
+                snapshots,
+              })
             })
-          })
-          added.set(subscription, () => {
+          } catch (error) {
+            // The connector may retain its callback even though no cleanup was
+            // returned. Reject that delivery before rolling back earlier additions.
             subscribed = false
-            cleanup()
+
+            throw error
+          }
+
+          added.set(subscription, {
+            invalidate() {
+              subscribed = false
+            },
+            cleanup,
           })
         }
       }
     } catch (error) {
-      for (const cleanup of added.values()) cleanup()
-      throw error
+      this.rejectConnections([...added.values()], error)
     }
 
-    // All additions succeeded, so the binding can adopt the candidate subscription set.
-    for (const [subscription, cleanup] of binding.cleanups) {
-      if (!active.has(subscription)) {
-        cleanup()
-        binding.cleanups.delete(subscription)
-      }
+    // A failed retirement cannot undo a backend release. Remove its logical
+    // registration first so retained calls can reconnect on a subsequent attempt.
+    // Staged additions remain unowned until every old cleanup succeeds.
+    const retired = [...binding.connections].filter(([subscription]) => !active.has(subscription))
+    for (const [subscription] of retired) binding.connections.delete(subscription)
+
+    try {
+      releaseResources(invalidateConnections(retired.map(([, connection]) => connection)))
+    } catch (error) {
+      this.rejectConnections([...added.values()], error)
     }
 
-    for (const [subscription, cleanup] of added) binding.cleanups.set(subscription, cleanup)
+    for (const [subscription, connection] of added)
+      binding.connections.set(subscription, connection)
+  }
+
+  private rejectConnections(connections: readonly SubscriptionConnection[], error: unknown): never {
+    try {
+      releaseResources(invalidateConnections(connections))
+    } catch (cleanupError) {
+      // eslint-disable-next-line preserve-caught-error -- Retain both failures; cause identifies the original subscription failure.
+      throw new AggregateError([error, cleanupError], 'Could not roll back source connections', {
+        cause: error,
+      })
+    }
+
+    throw error
   }
 
   /**
@@ -269,7 +326,11 @@ export class ReactiveCallStore {
     const previous = this.binding
     const pendingEvents = this.eventNotifications.length
     const pendingNotification = this.notificationPending
-    const binding = { connect, update, cleanups: new Map<ReactiveSubscription, () => void>() }
+    const binding = {
+      connect,
+      update,
+      connections: new Map<ReactiveSubscription, SubscriptionConnection>(),
+    }
     this.binding = binding
 
     // Initial source connection may notify immediately. Use the evaluation guard until every
@@ -295,12 +356,21 @@ export class ReactiveCallStore {
 
     return [
       () => {
-        for (const cleanup of binding.cleanups.values()) cleanup()
-        binding.cleanups.clear()
         if (this.binding === binding) this.binding = undefined
+        const cleanups = [...binding.connections.values()]
+        binding.connections.clear()
+
+        releaseResources(invalidateConnections(cleanups))
       },
     ]
   }
+}
+
+/** Invalidates the whole retiring group before any backend can publish during cleanup. */
+function invalidateConnections(connections: readonly SubscriptionConnection[]): (() => void)[] {
+  for (const connection of connections) connection.invalidate()
+
+  return connections.map((connection) => connection.cleanup)
 }
 
 /**
@@ -384,8 +454,10 @@ class PreparedCalls implements ReactiveCallEvaluation {
   }
 
   discard() {
-    for (const update of this.prepared) update.discard()
-    for (const result of this.created) result.dispose()
+    releaseResources([
+      ...[...this.prepared].map((update) => () => update.discard()),
+      ...[...this.created].map((result) => () => result.dispose()),
+    ])
   }
 }
 
@@ -395,8 +467,16 @@ function callResults(calls: CallSites): Set<FunctionResult> {
   )
 }
 
+function callDisposals(
+  results: ReadonlySet<FunctionResult>,
+  retained: ReadonlySet<FunctionResult>,
+): (() => void)[] {
+  return [...results]
+    .filter((result) => !retained.has(result))
+    .filter(isReactiveCall)
+    .map((result) => () => result.dispose())
+}
+
 function disposeCalls(results: ReadonlySet<FunctionResult>, retained: ReadonlySet<FunctionResult>) {
-  for (const result of results) {
-    if (!retained.has(result) && isReactiveCall(result)) result.dispose()
-  }
+  releaseResources(callDisposals(results, retained))
 }

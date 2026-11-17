@@ -24,47 +24,37 @@ const edits = [
 ] satisfies Edit[]
 
 function binding(label: string) {
+  const preview = { seek: vi.fn<(time: number) => void>(), end: vi.fn<() => void>() }
   const runtime = {
     definition,
     composition: from,
-    inspectComposition: vi.fn<InstanceBinding['runtime']['inspectComposition']>(),
-    inspectLifecycle: vi.fn<InstanceBinding['runtime']['inspectLifecycle']>(),
-    previewComposition: vi.fn<InstanceBinding['runtime']['previewComposition']>(),
     replaceDefinition: vi.fn<InstanceBinding['runtime']['replaceDefinition']>(function (
       this: { definition: Definition },
       next: Definition,
     ) {
       this.definition = next
     }),
-    previewLifecycle: vi.fn<InstanceBinding['runtime']['previewLifecycle']>(),
   }
-  const result = {
-    root: {
-      getAttribute: () => label,
-      textContent: '',
-      getBoundingClientRect: vi.fn<HTMLElement['getBoundingClientRect']>(),
-    },
-    component: { livaSource: 'source' },
-    runtime,
-    executor: {
-      animations: [],
-      endCompositionPreview: vi.fn<InstanceBinding['executor']['endCompositionPreview']>(),
-    },
-    definition,
-  } satisfies EditorBinding
-  return result
-}
-
-function pendingDomBinding() {
-  const record: EditorBinding = binding('')
-  record.root.getAttribute = () => null
+  const inspection = {
+    inspectComposition: vi.fn<InstanceBinding['inspection']['inspectComposition']>(),
+    inspectLifecycle: vi.fn<InstanceBinding['inspection']['inspectLifecycle']>(),
+    previewComposition: vi
+      .fn<InstanceBinding['inspection']['previewComposition']>()
+      .mockReturnValue(preview),
+    previewLifecycle: vi
+      .fn<InstanceBinding['inspection']['previewLifecycle']>()
+      .mockReturnValue(preview),
+  }
 
   return {
-    record,
-    mount(label: string) {
-      record.root.getAttribute = () => label
-    },
-  }
+    label,
+    bounds: vi.fn<InstanceBinding['bounds']>(),
+    source: 'source',
+    runtime,
+    inspection,
+    preview,
+    definition,
+  } satisfies EditorBinding & { preview: typeof preview }
 }
 
 async function setup(send: (request: EditorRequest) => Promise<EditorReply>) {
@@ -114,7 +104,7 @@ describe('editor revision lifecycle', () => {
     await latest
     requests[0].response.resolve({ ...reply, sequence: requests[0].request.sequence })
     await old
-    expect(first.runtime.previewComposition).toHaveBeenCalledExactlyOnceWith(
+    expect(first.inspection.previewComposition).toHaveBeenCalledExactlyOnceWith(
       to,
       from,
       [],
@@ -126,14 +116,14 @@ describe('editor revision lifecycle', () => {
     requests[2].response.resolve({ ...reply, sequence: requests[2].request.sequence })
     await stale
     expect(first.runtime.definition).toBe(definition)
-    expect(first.runtime.previewComposition).toHaveBeenCalledTimes(1)
+    expect(first.inspection.previewComposition).toHaveBeenCalledTimes(1)
 
     await controller.cancel()
     const unmounted = controller.previewComposition(from, to)
     controller.observe('unmount', first)
     requests[3].response.resolve({ ...reply, sequence: requests[3].request.sequence })
     await unmounted
-    expect(first.runtime.previewComposition).toHaveBeenCalledTimes(1)
+    expect(first.inspection.previewComposition).toHaveBeenCalledTimes(1)
   })
 
   it.each(['selection', 'draft'])(
@@ -183,7 +173,7 @@ describe('editor selection and saves', () => {
     const controller = new EditorController(async () => reply)
     const orphan = binding('Orphan')
 
-    orphan.component.livaSource = ''
+    orphan.source = ''
     controller.observe('mount', orphan)
     controller.observe('update', orphan)
     controller.observe('unmount', orphan)
@@ -267,52 +257,47 @@ describe('editor selection and saves', () => {
     expect(listener).toHaveBeenCalledTimes(2)
   })
 
-  it('reconnects the same labeled DOM instance when HMR reverses mount order', async () => {
+  it('reconnects the same metadata identity when HMR reverses mount order', async () => {
     const controller = new EditorController(async () => reply)
-    const first = pendingDomBinding()
-    const second = pendingDomBinding()
-    const other = pendingDomBinding()
-    const replacement = pendingDomBinding()
+    const first = binding('First')
+    const second = binding('Second')
+    const other = binding('Second')
+    const replacement = binding('First')
 
-    controller.observe('mount', first.record)
-    controller.observe('mount', second.record)
-    first.mount('First')
-    second.mount('Second')
+    controller.observe('mount', first)
+    controller.observe('mount', second)
 
     await Promise.resolve()
     await controller.select([...controller.entries.keys()][0])
 
-    controller.observe('unmount', first.record)
-    controller.observe('unmount', second.record)
-    controller.observe('mount', other.record)
-    controller.observe('mount', replacement.record)
-    other.mount('Second')
-    replacement.mount('First')
+    controller.observe('unmount', first)
+    controller.observe('unmount', second)
+    controller.observe('mount', other)
+    controller.observe('mount', replacement)
 
     await Promise.resolve()
 
-    expect(controller.selected?.binding).toBe(replacement.record)
+    expect(controller.selected?.binding).toBe(replacement)
     expect([...controller.entries.values()].map((entry) => entry.label)).toEqual([
       'Second',
       'First',
     ])
   })
 
-  it('ignores label resolution for an instance removed before DOM setup finishes', async () => {
+  it('ignores a queued mount notification after the instance unregisters', async () => {
     const { controller, first } = await setup(async () => reply)
-    const replacement = pendingDomBinding()
+    const replacement = binding('First')
 
     controller.observe('unmount', first)
-    controller.observe('mount', replacement.record)
-    controller.observe('unmount', replacement.record)
-    replacement.mount('First')
+    controller.observe('mount', replacement)
+    controller.observe('unmount', replacement)
 
     await Promise.resolve()
 
     expect(controller.selected?.binding).toBe(first)
-    expect(
-      [...controller.entries.values()].some((entry) => entry.binding === replacement.record),
-    ).toBe(false)
+    expect([...controller.entries.values()].some((entry) => entry.binding === replacement)).toBe(
+      false,
+    )
   })
 
   it('restarts inspection when HMR remounts an instance during source loading', async () => {
@@ -324,7 +309,7 @@ describe('editor selection and saves', () => {
       .mockReturnValueOnce(replacementInspection.promise)
     const controller = new EditorController(send)
     const first = binding('First')
-    const replacement = pendingDomBinding()
+    const replacement = binding('First')
 
     controller.observe('mount', first)
 
@@ -332,8 +317,7 @@ describe('editor selection and saves', () => {
 
     const selecting = controller.select([...controller.entries.keys()][0])
     controller.observe('unmount', first)
-    controller.observe('mount', replacement.record)
-    replacement.mount('First')
+    controller.observe('mount', replacement)
 
     await Promise.resolve()
 
@@ -345,7 +329,7 @@ describe('editor selection and saves', () => {
     await selecting
     await Promise.resolve()
 
-    expect(controller.selected?.binding).toBe(replacement.record)
+    expect(controller.selected?.binding).toBe(replacement)
     expect(controller.inspection).toBe(reply)
   })
 
@@ -408,7 +392,7 @@ describe('editor selection and saves', () => {
       sequence: request.sequence,
     }))
 
-    first.runtime.previewComposition.mockImplementation(() => {
+    first.inspection.previewComposition.mockImplementation(() => {
       throw new Error('Could not prepare preview')
     })
 
@@ -498,7 +482,7 @@ it('ignores unrelated instance updates and only reattaches matching remounts', a
 
   const otherSource = binding('First')
 
-  otherSource.component.livaSource = 'other-source'
+  otherSource.source = 'other-source'
   controller.observe('mount', otherSource)
 
   await Promise.resolve()
@@ -529,13 +513,17 @@ describe('lifecycle preview coordination', () => {
 
       await controller.previewComposition(from, to, [], phase)
 
-      expect(first.runtime.previewLifecycle).toHaveBeenCalledExactlyOnceWith(phase, to, lifecycle)
-      expect(first.runtime.previewComposition).not.toHaveBeenCalled()
+      expect(first.inspection.previewLifecycle).toHaveBeenCalledExactlyOnceWith(
+        phase,
+        to,
+        lifecycle,
+      )
+      expect(first.inspection.previewComposition).not.toHaveBeenCalled()
       expect(first.runtime.replaceDefinition).not.toHaveBeenCalled()
 
       controller.endPreview()
 
-      expect(first.executor.endCompositionPreview).toHaveBeenCalled()
+      expect(first.preview.end).toHaveBeenCalled()
       expect(first.runtime.definition).toBe(definition)
     },
   )
@@ -563,7 +551,7 @@ describe('composition preview coordination', () => {
     pending[0].resolve({ ...reply, sequence: requests[0].sequence })
     await old
 
-    expect(first.runtime.previewComposition).toHaveBeenCalledExactlyOnceWith(
+    expect(first.inspection.previewComposition).toHaveBeenCalledExactlyOnceWith(
       toComposition,
       fromComposition,
       [],
@@ -598,7 +586,7 @@ describe('composition preview coordination', () => {
       pending.resolve({ ...reply, sequence })
       await preview
 
-      expect(first.runtime.previewComposition).not.toHaveBeenCalled()
+      expect(first.inspection.previewComposition).not.toHaveBeenCalled()
       expect(controller.previewActive).toBe(false)
     },
   )
@@ -618,7 +606,7 @@ describe('composition preview coordination', () => {
     }))
     const cause = new Error('WAAPI failed')
     const error = new Error('Preview failed', { cause })
-    first.runtime.previewComposition.mockImplementation(() => {
+    first.inspection.previewComposition.mockImplementation(() => {
       throw error
     })
 

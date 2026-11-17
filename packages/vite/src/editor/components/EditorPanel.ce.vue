@@ -67,10 +67,11 @@ function toggle() {
 function revealInstance() {
   void nextTick(() =>
     requestAnimationFrame(() => {
-      const root = controller.selected?.binding.root
-      if (!open.value || !root || !panel.value) return
+      const bounds = controller.selected?.binding.bounds
+      if (!open.value || !bounds || !panel.value) return
       const available = window.innerHeight - panel.value.getBoundingClientRect().height
-      const rect = root.getBoundingClientRect()
+      const rect = bounds()
+      if (!rect) return
       if (rect.bottom > available || rect.top < 0)
         window.scrollBy(0, rect.top - Math.max(0, (available - rect.height) / 2))
     }),

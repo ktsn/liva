@@ -56,15 +56,19 @@ for (const [button, id, removal] of [
     await card.evaluate((element: HTMLElement) => {
       element.style.opacity = '0.42'
     })
+    expect(
+      await page.evaluate(() =>
+        [...window.records].some((record) => record.label === 'panel Card Badge'),
+      ),
+    ).toBe(true)
     await page.locator('#' + button).click()
 
     await expect.poll(() => card.evaluate((element) => element.getAnimations().length)).toBe(3)
     expect(await presentation(page, id)).toEqual({ opacity: '0.42', scale: '1', translate: '0px' })
     if (removal)
       expect(
-        await page.evaluate(
-          (rootId) => [...window.records].some((record) => record.root.id === rootId),
-          id,
+        await page.evaluate(() =>
+          [...window.records].some((record) => record.label === 'panel Card Badge'),
         ),
       ).toBe(false)
 

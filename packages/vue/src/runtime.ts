@@ -2,6 +2,7 @@ import { LivaPresenceBoundary, type PresenceEntry, type PresenceTarget } from '.
 import type { App, ComponentCustomOptions, DirectiveBinding, ObjectDirective, Plugin } from 'vue'
 import {
   Runtime,
+  RuntimeInspection,
   PresentationExecutor,
   ROOT_TARGET,
   rootTargetBindings,
@@ -15,15 +16,44 @@ declare module 'vue' {
   }
 }
 
+/** Plain viewport-relative CSS-pixel bounds, read only when requested. */
+export interface InstanceBounds {
+  readonly top: number
+  readonly bottom: number
+  readonly left: number
+  readonly right: number
+  readonly width: number
+  readonly height: number
+}
+
+/** Editor/integration capabilities; target elements and native execution remain private to Vue. */
 export interface InstanceBinding {
+  readonly label: string
+  /** Optional opaque source identity supplied by the integration, never a filesystem path. */
+  readonly source?: string
+  readonly runtime: Runtime
+  readonly inspection: RuntimeInspection
+  readonly definition: Definition
+
+  /** Reads current viewport geometry; returns undefined after this registration unmounts. */
+  bounds(): InstanceBounds | undefined
+}
+
+interface RootBinding {
   readonly root: HTMLElement
-  readonly component: ComponentCustomOptions
   readonly runtime: Runtime
   readonly executor: PresentationExecutor
   readonly definition: Definition
+  readonly observed: Omit<InstanceBinding, 'label'> & { label: string }
 }
 
 export interface LivaOptions {
+  /**
+   * Extracts an optional opaque source identity before Runtime construction.
+   * A thrown error reports vue.initialization and aborts assembly. Development
+   * integration reads compiler mappings here; production needs no source metadata.
+   */
+  source?: (component: ComponentCustomOptions) => string | undefined
   onDiagnostic?: (diagnostic: RuntimeDiagnostic) => void
   observe?: (event: 'mount' | 'update' | 'unmount', instance: InstanceBinding) => void
 }
@@ -56,7 +86,7 @@ function sameKey(a: readonly unknown[], b: readonly unknown[]) {
 export function createLivaPlugin(options: LivaOptions = {}): Plugin {
   return {
     install(app: App) {
-      const roots = new Map<HTMLElement, InstanceBinding>()
+      const roots = new Map<HTMLElement, RootBinding>()
       const owners = new WeakMap<HTMLElement, object>()
       const targets = new Map<HTMLElement, { name: string; owner: object }>()
       const report = options.onDiagnostic ?? console.warn
@@ -81,7 +111,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
       let scheduled = false
 
       const reconcileNow = () => {
-        const bindings = new Map<InstanceBinding, [string, HTMLElement][]>()
+        const bindings = new Map<RootBinding, [string, HTMLElement][]>()
 
         for (const root of roots.values()) {
           bindings.set(root, [])
@@ -148,6 +178,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
 
         try {
           const value = motionValue(binding)
+          const source = options.source?.(component)
           const executor = new PresentationExecutor(report)
           let runtime: Runtime | undefined
 
@@ -170,14 +201,31 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
           }
           runtime.onEvent = (name) =>
             element.dispatchEvent(new CustomEvent(`liva-${name}`, { bubbles: true }))
-          const record = {
+          const inspection = new RuntimeInspection(runtime, executor, report)
+          const observed = {
+            label: definition.name,
+            source,
+            runtime,
+            inspection,
+            get definition() {
+              return runtime.definition
+            },
+            bounds() {
+              if (roots.get(element) !== record) return undefined
+
+              const { top, bottom, left, right, width, height } = element.getBoundingClientRect()
+
+              return { top, bottom, left, right, width, height }
+            },
+          }
+          const record: RootBinding = {
             root: element,
-            component,
             runtime,
             executor,
             definition,
+            observed,
           }
-          runtime.onUpdate = () => options.observe?.('update', record)
+          runtime.onUpdate = () => options.observe?.('update', observed)
           roots.set(element, record)
           owners.set(element, binding.instance!)
 
@@ -185,7 +233,6 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
             explicitOwners.set(element, { owner: binding.instance!, key: binding.value.owner })
           }
 
-          options.observe?.('mount', record)
           reconcile()
         } catch (error) {
           report({ code: 'vue.initialization', message: String(error), error })
@@ -199,12 +246,33 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
           for (const [target, registration] of lifecycleTargets) {
             if (explicitRoot(registration) === record) snapshotTarget(target)
           }
-          record.runtime.dispose()
-          roots.delete(element)
-          explicitOwners.delete(element)
-          options.observe?.('unmount', record)
-          reconcile()
+          try {
+            record.runtime.dispose()
+          } catch (error) {
+            report({ code: 'vue.disposal', message: String(error), error })
+          } finally {
+            roots.delete(element)
+            owners.delete(element)
+            explicitOwners.delete(element)
+
+            try {
+              options.observe?.('unmount', record.observed)
+            } finally {
+              reconcile()
+            }
+          }
         }
+      }
+
+      const observeMount = (element: HTMLElement) => {
+        const record = roots.get(element)
+        if (!record) return
+
+        // Vue has now populated attributes/children from its created-hook setup.
+        record.observed.label =
+          element.getAttribute('aria-label') ??
+          `${record.definition.name} ${element.textContent.trim().slice(0, 30)}`
+        options.observe?.('mount', record.observed)
       }
 
       const rootDirective: ObjectDirective<HTMLElement, MotionValue | PresenceBinding> = {
@@ -212,12 +280,14 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
           mount(element, binding)
           registerLifecycleTarget(element, binding, ROOT_TARGET)
         },
+        mounted: observeMount,
         updated(element, binding) {
           const record = roots.get(element)
 
           if (!record || record.definition.name !== binding.arg) {
             unmount(element)
             mount(element, binding)
+            observeMount(element)
             return
           }
 

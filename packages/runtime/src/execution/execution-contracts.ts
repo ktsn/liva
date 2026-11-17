@@ -1,3 +1,4 @@
+import type { PreviewOperation } from './preview-operation.ts'
 import type { Composition, LayerResolution } from '../composition/layers.ts'
 import type { ResolvedTrack } from '../composition/resolve.ts'
 import type { SourceConnection } from '../evaluation/reactive-value.ts'
@@ -51,7 +52,7 @@ export interface BindingFacts {
 
 /** Evaluation callbacks carry accepted environments, never browser observations. */
 export interface ExecutionEnvironment {
-  /** Returns Runtime's current definition, including direct assignments and replacements. */
+  /** Returns Runtime's current definition, including explicit replacements. */
   readonly definition: () => Definition
 
   /** Returns accepted inputs and evaluated let values; does not reevaluate or sample the DOM. */
@@ -212,12 +213,6 @@ export interface ExecutionPort {
    */
   applyPlan(plan: PresentationPlan): void
 
-  /** Freezes controller snapshots, clears old preview/live effects, and writes the planned baseline. */
-  beginPreview(writes: readonly StyleWrite[]): void
-
-  /** Restores application presentation after preview evaluation, observation, or preparation failed. */
-  abortPreview(): void
-
   /** Ends an active preview and restores the accepted presentation; otherwise does nothing. */
   endCompositionPreview(): void
 
@@ -227,6 +222,29 @@ export interface ExecutionPort {
    * independent leave sessions continue. Runtime guards repeated disposal.
    */
   dispose(): void
+}
+
+/** Browser capabilities used only by isolated inspection/preview coordination. */
+export interface InspectionExecutionPort extends Pick<
+  ExecutionPort,
+  | 'bindingFacts'
+  | 'releaseControllers'
+  | 'observeReceivers'
+  | 'applyControllers'
+  | 'presentationFacts'
+  | 'expandTracks'
+  | 'observeDisplayed'
+  | 'observeTracks'
+  | 'applyPlan'
+> {
+  /** Freezes controller snapshots, clears old preview/live effects, and writes the planned baseline. */
+  beginPreview(writes: readonly StyleWrite[]): void
+
+  /** Restores application presentation after preview evaluation, observation, or preparation failed. */
+  abortPreview(): void
+
+  /** Returns a handle scoped to the successfully materialized paused preview. */
+  completePreview(): PreviewOperation
 }
 
 /** Copies layer activation and state selections without reevaluation or exposing mutable internal records. */

@@ -1,7 +1,7 @@
+import type { RuntimeAssembly } from '../../packages/runtime/src/__test__/helpers/assembly.ts'
 import { test, expect, type Page } from '@playwright/test'
 import fixture from '../../fixtures/interaction.json' with { type: 'json' }
 import type { ReactiveSubscription } from '../../packages/runtime/src/evaluation/reactive-value.ts'
-import type { LivaInstance } from '../../packages/runtime/src/execution/instance.ts'
 
 declare global {
   interface Window {
@@ -15,8 +15,8 @@ declare global {
       cleanup: () => void
       siblingCleanup: () => void
       updates: number
-      instance: LivaInstance
-      siblingInstance: LivaInstance
+      instance: RuntimeAssembly
+      siblingInstance: RuntimeAssembly
       drag?: ReactiveSubscription
     }
   }
@@ -43,10 +43,10 @@ async function setup(page: Page, initiallyFocused = false) {
         updates: 0,
         cleanup: () => {},
         siblingCleanup: () => {},
-        siblingInstance: new window.liva.LivaInstance(
+        siblingInstance: window.assembleRuntime(
           window.liva.decodeBundle(JSON.stringify(definitionFixture)).definitions[0],
         ),
-        instance: new window.liva.LivaInstance(
+        instance: window.assembleRuntime(
           window.liva.decodeBundle(JSON.stringify(definitionFixture)).definitions[0],
         ),
       }
@@ -54,8 +54,8 @@ async function setup(page: Page, initiallyFocused = false) {
         state.updates++
       })
       state.siblingCleanup = other.bind(new Map([['body', sibling]]), () => {})
-      state.instance.bind([['body', target]])
-      state.siblingInstance.bind([['body', sibling]])
+      state.instance.executor.bind([['body', target]])
+      state.siblingInstance.executor.bind([['body', sibling]])
       window.interactions = state
     },
     { definitionFixture: fixture, focusedOnBind: initiallyFocused },
@@ -78,7 +78,7 @@ async function expectMatching(page: Page, target = 'target') {
 
         if (typeof value !== 'object') throw new Error('Expected an interaction snapshot')
 
-        const layers = window.interactions.instance.composition.layers
+        const layers = window.interactions.instance.runtime.composition.layers
         const names: Record<string, string> = {
           hover: 'hover',
           active: 'active',
@@ -102,10 +102,12 @@ test('interaction initializes from DOM matching without a transient animation', 
   await setup(page, true)
   await expectMatching(page)
 
-  expect(await page.evaluate(() => window.interactions.instance.animations.length)).toBe(0)
-  expect(await page.evaluate(() => window.interactions.instance.composition.layers.focus)).toBe(
-    true,
-  )
+  expect(
+    await page.evaluate(() => window.nativeEffects(window.interactions.instance.executor).length),
+  ).toBe(0)
+  expect(
+    await page.evaluate(() => window.interactions.instance.runtime.composition.layers.focus),
+  ).toBe(true)
 })
 
 test('interaction follows native mouse and keyboard pseudo-classes independently', async ({
@@ -124,7 +126,7 @@ test('interaction follows native mouse and keyboard pseudo-classes independently
   })
 
   expect(
-    await page.evaluate(() => window.interactions.siblingInstance.composition.layers),
+    await page.evaluate(() => window.interactions.siblingInstance.runtime.composition.layers),
   ).toMatchObject({ hover: false, active: false })
 
   await page.mouse.up()
@@ -166,7 +168,7 @@ test('interaction tracks descendant focus after replacing the target binding', a
     window.interactions.cleanup = subscription.bind(new Map([['body', parent]]), () => {
       window.interactions.updates++
     })
-    instance.bind([['body', parent]])
+    instance.executor.bind([['body', parent]])
   })
 
   await page.locator('#child-a').focus()
@@ -185,8 +187,8 @@ test('interaction releases listeners when instances are disposed', async ({ page
   await page.evaluate(() => {
     window.interactions.cleanup()
     window.interactions.siblingCleanup()
-    window.interactions.instance.dispose()
-    window.interactions.siblingInstance.dispose()
+    window.interactions.instance.runtime.dispose()
+    window.interactions.siblingInstance.runtime.dispose()
   })
   const previous = await page.evaluate(() => window.interactions.updates)
   await page.locator('#child-a').focus()

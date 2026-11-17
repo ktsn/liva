@@ -1,7 +1,8 @@
+import type { RuntimeAssembly } from '../../packages/runtime/src/__test__/helpers/assembly.ts'
 import { test, expect } from '@playwright/test'
 import { compile } from '../../packages/vite/wasm/liva_wasm.js'
 import { decodeBundle } from '../../packages/runtime/src/model/definition.ts'
-import type { RuntimeDiagnostic } from '../../packages/runtime/src/execution/instance.ts'
+import type { RuntimeDiagnostic } from '../../packages/runtime/src/execution/execution-contracts.ts'
 import derivedFixture from '../../fixtures/derived.json' with { type: 'json' }
 import cardFixture from '../../fixtures/card.json' with { type: 'json' }
 import toggleFixture from '../../fixtures/reactive-toggle.json' with { type: 'json' }
@@ -9,7 +10,7 @@ import toggleFixture from '../../fixtures/reactive-toggle.json' with { type: 'js
 declare global {
   interface Window {
     dragScale: Animation
-    letInstances: import('../../packages/runtime/src/execution/instance.ts').LivaInstance[]
+    letInstances: RuntimeAssembly[]
   }
 }
 
@@ -43,18 +44,18 @@ test('HMR derives an aliased controller address from inactive property bindings'
     document.body.append(element)
     const errors: RuntimeDiagnostic[] = []
     const inputs = { input: 0, active: false }
-    const instance = new window.liva.LivaInstance(before, inputs, (error) => errors.push(error))
+    const instance = window.assembleRuntime(before, inputs, (error) => errors.push(error))
 
     try {
-      instance.bind([['self', element]])
-      instance.updateParameters({ ...inputs, active: true, input: 10 })
-      instance.updateParameters({ ...inputs, active: true, input: 30 })
+      instance.executor.bind([['self', element]])
+      instance.runtime.updateParameters({ ...inputs, active: true, input: 10 })
+      instance.runtime.updateParameters({ ...inputs, active: true, input: 30 })
       const controlledWidth = getComputedStyle(element).width
 
-      instance.updateParameters({ ...inputs, input: 30 })
-      instance.replaceDefinition(after)
-      instance.updateParameters({ ...inputs, active: true, input: 30 })
-      instance.updateParameters({ ...inputs, active: true, input: 40 })
+      instance.runtime.updateParameters({ ...inputs, input: 30 })
+      instance.runtime.replaceDefinition(after)
+      instance.runtime.updateParameters({ ...inputs, active: true, input: 30 })
+      instance.runtime.updateParameters({ ...inputs, active: true, input: 40 })
 
       return {
         controlledWidth,
@@ -63,7 +64,7 @@ test('HMR derives an aliased controller address from inactive property bindings'
         errors,
       }
     } finally {
-      instance.dispose()
+      instance.runtime.dispose()
       element.remove()
     }
   }, definitions)
@@ -108,26 +109,26 @@ test('external component expressions reject invalid updates without changing the
 
     const errors: RuntimeDiagnostic[] = []
     const inputs = { axis: 'x', input: 0, active: false }
-    const instance = new window.liva.LivaInstance(definition, inputs, (error) => errors.push(error))
+    const instance = window.assembleRuntime(definition, inputs, (error) => errors.push(error))
     const readTranslate = () =>
       getComputedStyle(element)
         .translate.split(/\s+/)
         .map((part) => parseFloat(part))
 
     try {
-      instance.bind([['self', element]])
-      instance.updateParameters({ ...inputs, active: true })
-      instance.updateParameters({ ...inputs, active: true, input: 10 })
+      instance.executor.bind([['self', element]])
+      instance.runtime.updateParameters({ ...inputs, active: true })
+      instance.runtime.updateParameters({ ...inputs, active: true, input: 10 })
 
       const moved = readTranslate()
       const rejected = ['y', 'z'].map((axis) => {
-        instance.updateParameters({ ...inputs, active: true, axis, input: 50 })
+        instance.runtime.updateParameters({ ...inputs, active: true, axis, input: 50 })
 
         return readTranslate()
       })
 
       // Rejected updates must preserve the accepted axis and relative-control baseline.
-      instance.updateParameters({ ...inputs, active: true, input: 20 })
+      instance.runtime.updateParameters({ ...inputs, active: true, input: 20 })
 
       return {
         moved,
@@ -136,7 +137,7 @@ test('external component expressions reject invalid updates without changing the
         errors: errors.map(({ code, message }) => ({ code, message })),
       }
     } finally {
-      instance.dispose()
+      instance.runtime.dispose()
       element.remove()
     }
   }, externalDefinition)
@@ -166,10 +167,8 @@ test('drag follows input, preserves the scale effect, returns and can be interru
     element.id = 'card'
     element.style.cssText = 'width:200px;height:150px;touch-action:none;background:green'
     document.body.append(element)
-    const instance = new window.liva.LivaInstance(definition, {}, (error) =>
-      window.errors.push(error),
-    )
-    instance.bind([['body', element]])
+    const instance = window.assembleRuntime(definition, {}, (error) => window.errors.push(error))
+    instance.executor.bind([['body', element]])
     Object.assign(window, { instance, track: element })
   }, cardFixture)
   const card = page.locator('#card')
@@ -180,14 +179,16 @@ test('drag follows input, preserves the scale effect, returns and can be interru
   await page.mouse.move(x, y)
   await page.mouse.down()
   await expect
-    .poll(() => page.evaluate(() => window.instance.composition.states.interaction))
+    .poll(() => page.evaluate(() => window.instance.runtime.composition.states.interaction))
     .toBe('dragging')
   await page.evaluate(() => {
-    const scale = window.instance.animations.find((animation) =>
-      (animation.effect instanceof KeyframeEffect ? animation.effect.getKeyframes() : []).some(
-        (frame) => 'scale' in frame,
-      ),
-    )!
+    const scale = window
+      .nativeEffects(window.instance.executor)
+      .find((animation) =>
+        (animation.effect instanceof KeyframeEffect ? animation.effect.getKeyframes() : []).some(
+          (frame) => 'scale' in frame,
+        ),
+      )!
     scale.pause()
     scale.currentTime = 50
     Object.assign(window, { dragScale: scale })
@@ -195,22 +196,26 @@ test('drag follows input, preserves the scale effect, returns and can be interru
   await page.mouse.move(x + 80, y + 35)
   await page.mouse.move(x + 120, y + 45)
   expect(await card.evaluate((element) => getComputedStyle(element).translate)).toBe('120px 45px')
-  expect(await page.evaluate(() => window.instance.animations.includes(window.dragScale))).toBe(
-    true,
-  )
+  expect(
+    await page.evaluate(() =>
+      window.nativeEffects(window.instance.executor).includes(window.dragScale),
+    ),
+  ).toBe(true)
 
   await page.mouse.up()
   const released = await page.evaluate(() => {
     const { instance, track } = window
-    const translate = instance.animations.find((animation) =>
-      (animation.effect instanceof KeyframeEffect ? animation.effect.getKeyframes() : []).some(
-        (frame) => 'translate' in frame,
-      ),
-    )!
+    const translate = window
+      .nativeEffects(instance.executor)
+      .find((animation) =>
+        (animation.effect instanceof KeyframeEffect ? animation.effect.getKeyframes() : []).some(
+          (frame) => 'translate' in frame,
+        ),
+      )!
     translate.pause()
     translate.currentTime = 0
     return {
-      state: instance.composition.states.interaction,
+      state: instance.runtime.composition.states.interaction,
       first:
         translate.effect instanceof KeyframeEffect
           ? translate.effect.getKeyframes()[0].translate
@@ -228,7 +233,9 @@ test('drag follows input, preserves the scale effect, returns and can be interru
   await page.mouse.move(movedBox.x + 65, movedBox.y + 50)
   expect(await card.evaluate((element) => getComputedStyle(element).translate)).toBe('35px 20px')
   await page.mouse.up()
-  await expect.poll(() => page.evaluate(() => window.instance.animations.length)).toBe(0)
+  await expect
+    .poll(() => page.evaluate(() => window.nativeEffects(window.instance.executor).length))
+    .toBe(0)
   await expect(card).toHaveCSS('translate', '0px')
   await expect(card).toHaveCSS('scale', '1')
   expect(await page.evaluate(() => window.errors)).toEqual([])
@@ -242,11 +249,11 @@ test('pointer cancellation and disposal release capture and remove listeners', a
     element.id = 'card'
     element.style.cssText = 'width:200px;height:150px;touch-action:none'
     document.body.append(element)
-    const instance = new window.liva.LivaInstance(
+    const instance = window.assembleRuntime(
       window.liva.decodeBundle(JSON.stringify(fixture)).definitions[0],
       {},
     )
-    instance.bind([['body', element]])
+    instance.executor.bind([['body', element]])
     element.addEventListener('pointerdown', (event) => {
       element.dataset.pointer = String(event.pointerId)
     })
@@ -260,19 +267,21 @@ test('pointer cancellation and disposal release capture and remove listeners', a
     const id = Number(window.track.dataset.pointer)
     window.track.dispatchEvent(new PointerEvent('pointercancel', { pointerId: id }))
     return {
-      state: window.instance.composition.states.interaction,
+      state: window.instance.runtime.composition.states.interaction,
       captured: window.track.hasPointerCapture(id),
     }
   })
   expect(canceled).toEqual({ state: 'idle', captured: false })
   await page.mouse.up()
-  await expect.poll(() => page.evaluate(() => window.instance.animations.length)).toBe(0)
+  await expect
+    .poll(() => page.evaluate(() => window.nativeEffects(window.instance.executor).length))
+    .toBe(0)
 
   await page.mouse.move(box.x + 30, box.y + 30)
   await page.mouse.down()
   const disposed = await page.evaluate(() => {
     const id = Number(window.track.dataset.pointer)
-    window.instance.dispose()
+    window.instance.runtime.dispose()
     return {
       captured: window.track.hasPointerCapture(id),
       animations: window.track.getAnimations().length,
@@ -298,22 +307,24 @@ test('parameter updates select states and repeated values retain running effects
     const thumb = document.createElement('div')
     track.append(thumb)
     document.body.append(track)
-    const instance = new window.liva.LivaInstance(
+    const instance = window.assembleRuntime(
       window.liva.decodeBundle(JSON.stringify(fixture)).definitions[0],
       { checked: false },
     )
-    instance.bind([
+    instance.executor.bind([
       ['track', track],
       ['thumb', thumb],
     ])
-    instance.updateParameters({ checked: true })
-    const animations = [...instance.animations]
-    instance.updateParameters({ checked: true })
+    instance.runtime.updateParameters({ checked: true })
+    const animations = [...window.nativeEffects(instance.executor)]
+    instance.runtime.updateParameters({ checked: true })
     const snapshot = {
-      state: instance.composition.states.toggle,
-      same: animations.every((animation, index) => instance.animations[index] === animation),
+      state: instance.runtime.composition.states.toggle,
+      same: animations.every(
+        (animation, index) => window.nativeEffects(instance.executor)[index] === animation,
+      ),
     }
-    instance.dispose()
+    instance.runtime.dispose()
     return snapshot
   }, toggleFixture)
   expect(result).toEqual({ state: 'on', same: true })
@@ -362,11 +373,11 @@ test('lost capture, target rebinding and editor replacement do not retain draggi
     element.style.cssText = 'width:200px;height:150px;touch-action:none'
     document.body.append(element)
     const definition = window.liva.decodeBundle(JSON.stringify(fixture)).definitions[0]
-    const instance = new window.liva.LivaInstance(definition, {})
+    const instance = window.assembleRuntime(definition, {})
     element.addEventListener('pointerdown', (event) => {
       element.dataset.pointer = String(event.pointerId)
     })
-    instance.bind([['body', element]])
+    instance.executor.bind([['body', element]])
     Object.assign(window, { instance, track: element })
   }, cardFixture)
   const box = (await page.locator('#card').boundingBox())!
@@ -374,7 +385,7 @@ test('lost capture, target rebinding and editor replacement do not retain draggi
   for (const operation of ['lost', 'rebind', 'replace'] as const) {
     await page.mouse.move(box.x + 30, box.y + 30)
     await page.mouse.down()
-    expect(await page.evaluate(() => window.instance.composition.states.interaction)).toBe(
+    expect(await page.evaluate(() => window.instance.runtime.composition.states.interaction)).toBe(
       'dragging',
     )
 
@@ -383,14 +394,14 @@ test('lost capture, target rebinding and editor replacement do not retain draggi
       const id = Number(track.dataset.pointer)
       if (action === 'lost') track.releasePointerCapture(id)
       else if (action === 'rebind') {
-        instance.bind([])
-        instance.bind([['body', track]])
+        instance.executor.bind([])
+        instance.executor.bind([['body', track]])
       } else {
-        instance.replaceDefinition(instance.definition)
+        instance.runtime.replaceDefinition(instance.runtime.definition)
       }
       return {
         captured: track.hasPointerCapture(id),
-        selected: instance.composition.states.interaction,
+        selected: instance.runtime.composition.states.interaction,
       }
     }, operation)
     expect(snapshot.captured).toBe(false)
@@ -398,9 +409,11 @@ test('lost capture, target rebinding and editor replacement do not retain draggi
 
     await page.mouse.up()
     await expect
-      .poll(() => page.evaluate(() => window.instance.composition.states.interaction))
+      .poll(() => page.evaluate(() => window.instance.runtime.composition.states.interaction))
       .toBe('idle')
-    await expect.poll(() => page.evaluate(() => window.instance.animations.length)).toBe(0)
+    await expect
+      .poll(() => page.evaluate(() => window.nativeEffects(window.instance.executor).length))
+      .toBe(0)
   }
 })
 
@@ -431,10 +444,8 @@ test('dynamic errors retain the last valid value and inactive templates do not b
     element.id = 'card'
     element.style.cssText = 'width:200px;height:150px;touch-action:none'
     document.body.append(element)
-    const instance = new window.liva.LivaInstance(definition, {}, (error) =>
-      window.errors.push(error),
-    )
-    instance.bind([['body', element]])
+    const instance = window.assembleRuntime(definition, {}, (error) => window.errors.push(error))
+    instance.executor.bind([['body', element]])
     Object.assign(window, { instance, track: element })
   }, cardFixture)
   const box = (await page.locator('#card').boundingBox())!
@@ -443,10 +454,12 @@ test('dynamic errors retain the last valid value and inactive templates do not b
 
   await page.mouse.move(x, y)
   await page.mouse.down()
-  expect(await page.evaluate(() => window.instance.composition.states.interaction)).toBe('idle')
+  expect(await page.evaluate(() => window.instance.runtime.composition.states.interaction)).toBe(
+    'idle',
+  )
   await page.mouse.move(x + 20, y)
   await expect
-    .poll(() => page.evaluate(() => window.instance.composition.states.interaction))
+    .poll(() => page.evaluate(() => window.instance.runtime.composition.states.interaction))
     .toBe('dragging')
   await page.mouse.move(x + 25, y)
   expect(
@@ -459,9 +472,11 @@ test('dynamic errors retain the last valid value and inactive templates do not b
   ).toBe('4px')
   await page.mouse.up()
   await expect
-    .poll(() => page.evaluate(() => window.instance.composition.states.interaction))
+    .poll(() => page.evaluate(() => window.instance.runtime.composition.states.interaction))
     .toBe('idle')
-  await expect.poll(() => page.evaluate(() => window.instance.animations.length)).toBe(0)
+  await expect
+    .poll(() => page.evaluate(() => window.nativeEffects(window.instance.executor).length))
+    .toBe(0)
   expect(
     await page.evaluate(() => window.errors.every((error) => error.code === 'runtime.expression')),
   ).toBe(true)
@@ -511,25 +526,25 @@ test('typed parameter instances update CSS independently and retain values after
     const errors: string[] = []
     const instances = elements.map((element, index) => {
       document.body.append(element)
-      const instance = new window.liva.LivaInstance(
+      const instance = window.assembleRuntime(
         definition,
         { progress: index + 1, label: 'initial', enabled: false },
         (error) => errors.push(error.code),
       )
-      instance.bind([['body', element]])
+      instance.executor.bind([['body', element]])
       return instance
     })
 
-    instances[0].updateParameters({ progress: 25, label: 'updated', enabled: true })
-    instances[0].updateParameters({ progress: Infinity, label: 'invalid', enabled: true })
-    instances[0].updateParameters({ unknown: true })
-    instances[0].replaceDefinition(definition)
+    instances[0].runtime.updateParameters({ progress: 25, label: 'updated', enabled: true })
+    instances[0].runtime.updateParameters({ progress: Infinity, label: 'invalid', enabled: true })
+    instances[0].runtime.updateParameters({ unknown: true })
+    instances[0].runtime.replaceDefinition(definition)
     const snapshot = elements.map((element) => ({
       translate: element.style.translate,
       label: element.style.getPropertyValue('--label'),
     }))
 
-    for (const instance of instances) instance.dispose()
+    for (const instance of instances) instance.runtime.dispose()
     for (const element of elements) element.remove()
     return { snapshot, errors }
   })
@@ -554,12 +569,12 @@ test('missing parameters reject creation, updates and incompatible replacements 
 
     for (const input of [undefined, {}, 'off']) {
       try {
-        const unexpected = new window.liva.LivaInstance(
+        const unexpected = window.assembleRuntime(
           definition,
           // Exercise the JavaScript boundary with a removed string binding.
           input,
         )
-        unexpected.dispose()
+        unexpected.runtime.dispose()
       } catch (error) {
         failures.push(String(error))
       }
@@ -570,41 +585,43 @@ test('missing parameters reject creation, updates and incompatible replacements 
     track.append(thumb)
     document.body.append(track)
     const diagnostics: string[] = []
-    const instance = new window.liva.LivaInstance(definition, { checked: false }, (error) =>
+    const instance = window.assembleRuntime(definition, { checked: false }, (error) =>
       diagnostics.push(error.message),
     )
-    instance.bind([
+    instance.executor.bind([
       ['track', track],
       ['thumb', thumb],
     ])
-    instance.updateParameters({ checked: true })
-    const animations = [...instance.animations]
+    instance.runtime.updateParameters({ checked: true })
+    const animations = [...window.nativeEffects(instance.executor)]
 
-    instance.updateParameters({})
+    instance.runtime.updateParameters({})
 
     for (const parameters of [
       [...definition.parameters!, { name: 'added', type: 'number' as const }],
       [{ name: 'checked', type: 'number' as const }],
     ]) {
       try {
-        instance.replaceDefinition({ ...definition, parameters })
+        instance.runtime.replaceDefinition({ ...definition, parameters })
       } catch (error) {
         failures.push(String(error))
       }
     }
 
     const retained = {
-      definition: instance.definition === definition,
-      state: instance.composition.states.toggle,
-      selected: instance.composition.states.toggle,
+      definition: instance.runtime.definition === definition,
+      state: instance.runtime.composition.states.toggle,
+      selected: instance.runtime.composition.states.toggle,
       effects:
         animations.length > 0 &&
-        animations.every((animation, index) => instance.animations[index] === animation),
+        animations.every(
+          (animation, index) => window.nativeEffects(instance.executor)[index] === animation,
+        ),
     }
-    instance.updateParameters({ checked: false })
-    const recovered = instance.composition.states.toggle
+    instance.runtime.updateParameters({ checked: false })
+    const recovered = instance.runtime.composition.states.toggle
 
-    instance.dispose()
+    instance.runtime.dispose()
     track.remove()
     return { failures, diagnostics, retained, recovered }
   }, toggleFixture)
@@ -639,10 +656,8 @@ test('built-in subscriptions keep instance-local values across definition replac
       element.id = `source-card-${index}`
       element.style.cssText = 'width:150px;height:100px;margin:30px;touch-action:none'
       document.body.append(element)
-      const instance = new window.liva.LivaInstance(definition, {}, (error) =>
-        window.errors.push(error),
-      )
-      instance.bind([['body', element]])
+      const instance = window.assembleRuntime(definition, {}, (error) => window.errors.push(error))
+      instance.executor.bind([['body', element]])
       return instance
     })
     Object.assign(window, { letInstances: instances })
@@ -659,14 +674,14 @@ test('built-in subscriptions keep instance-local values across definition replac
 
   await page.evaluate(() => {
     const instance = window.letInstances[0]
-    instance.replaceDefinition(instance.definition)
+    instance.runtime.replaceDefinition(instance.runtime.definition)
   })
   await page.mouse.up()
 
   await expect(first).toHaveCSS('translate', '70px 30px')
   expect(
     await page.evaluate(() =>
-      window.letInstances.map((instance) => instance.composition.states.interaction),
+      window.letInstances.map((instance) => instance.runtime.composition.states.interaction),
     ),
   ).toEqual(['idle', 'idle'])
 
@@ -679,7 +694,7 @@ test('built-in subscriptions keep instance-local values across definition replac
   await page.mouse.up()
 
   await page.evaluate(() => {
-    for (const instance of window.letInstances) instance.dispose()
+    for (const instance of window.letInstances) instance.runtime.dispose()
   })
   expect(await page.evaluate(() => window.errors)).toEqual([])
 })
@@ -696,12 +711,10 @@ test('derived let bindings follow parameters and drag through aliases and preser
       element.id = `derived-${index}`
       element.style.cssText = 'width:150px;height:100px;margin:30px;touch-action:none'
       document.body.append(element)
-      const instance = new window.liva.LivaInstance(
-        definition,
-        { progress: 10, divisor: 1 },
-        (error) => window.errors.push(error),
+      const instance = window.assembleRuntime(definition, { progress: 10, divisor: 1 }, (error) =>
+        window.errors.push(error),
       )
-      instance.bind([['body', element]])
+      instance.executor.bind([['body', element]])
       return instance
     })
     Object.assign(window, { letInstances: instances })
@@ -715,23 +728,33 @@ test('derived let bindings follow parameters and drag through aliases and preser
   await page.mouse.down()
   await page.mouse.move(box.x + 60, box.y + 20)
   await expect(first).toHaveCSS('translate', '50px')
-  expect(await page.evaluate(() => window.letInstances[0].composition.layers.dragging)).toBe(true)
+  expect(
+    await page.evaluate(() => window.letInstances[0].runtime.composition.layers.dragging),
+  ).toBe(true)
 
-  await page.evaluate(() => window.letInstances[0].updateParameters({ progress: 20, divisor: 1 }))
+  await page.evaluate(() =>
+    window.letInstances[0].runtime.updateParameters({ progress: 20, divisor: 1 }),
+  )
   await expect(first).toHaveCSS('translate', '60px')
   await page.mouse.move(box.x + 70, box.y + 20)
   await expect(first).toHaveCSS('translate', '70px')
 
-  await page.evaluate(() => window.letInstances[0].updateParameters({ progress: 20, divisor: 0 }))
+  await page.evaluate(() =>
+    window.letInstances[0].runtime.updateParameters({ progress: 20, divisor: 0 }),
+  )
   await expect(first).toHaveCSS('translate', '70px')
-  await page.evaluate(() => window.letInstances[0].updateParameters({ progress: 30, divisor: 1 }))
+  await page.evaluate(() =>
+    window.letInstances[0].runtime.updateParameters({ progress: 30, divisor: 1 }),
+  )
   await expect(first).toHaveCSS('translate', '80px')
   await page.mouse.up()
-  expect(await page.evaluate(() => window.letInstances[0].composition.layers.dragging)).toBe(false)
+  expect(
+    await page.evaluate(() => window.letInstances[0].runtime.composition.layers.dragging),
+  ).toBe(false)
 
   await page.evaluate(() => {
     const instance = window.letInstances[0]
-    instance.replaceDefinition(instance.definition)
+    instance.runtime.replaceDefinition(instance.runtime.definition)
   })
   await expect(first).toHaveCSS('translate', '80px')
   await expect(second).toHaveCSS('translate', '10px')
@@ -740,6 +763,6 @@ test('derived let bindings follow parameters and drag through aliases and preser
   ])
 
   await page.evaluate(() => {
-    for (const instance of window.letInstances) instance.dispose()
+    for (const instance of window.letInstances) instance.runtime.dispose()
   })
 })

@@ -1,20 +1,16 @@
 import type { InstanceBinding } from '@liva/vue'
-import type { Composition, CompositionTransition } from '@liva/runtime'
+import type { PreviewOperation, Composition, CompositionTransition } from '@liva/runtime'
 import type { EditorReply, EditorRequest, Edit, Inspection } from './communication/protocol.ts'
 
-export type EditorBinding = Pick<InstanceBinding, 'component' | 'definition'> & {
-  readonly root: Pick<HTMLElement, 'getAttribute' | 'textContent' | 'getBoundingClientRect'>
+export type EditorBinding = Pick<InstanceBinding, 'source' | 'definition' | 'label' | 'bounds'> & {
   readonly runtime: Pick<
     InstanceBinding['runtime'],
-    | 'definition'
-    | 'replaceDefinition'
-    | 'previewLifecycle'
-    | 'composition'
-    | 'previewComposition'
-    | 'inspectComposition'
-    | 'inspectLifecycle'
+    'definition' | 'replaceDefinition' | 'composition'
   >
-  readonly executor: Pick<InstanceBinding['executor'], 'animations' | 'endCompositionPreview'>
+  readonly inspection: Pick<
+    InstanceBinding['inspection'],
+    'inspectComposition' | 'inspectLifecycle' | 'previewComposition' | 'previewLifecycle'
+  >
 }
 
 export interface Entry {
@@ -34,6 +30,7 @@ export class EditorController {
   playbackSpeed = 1
   playbackLoop = false
   previewActive = false
+  private preview?: PreviewOperation
   private sequence = 0
   private revision = 0
   private saving = false
@@ -60,12 +57,12 @@ export class EditorController {
 
   observe(event: 'mount' | 'update' | 'unmount', binding: EditorBinding) {
     if (event === 'mount') {
-      const sourceId = binding.component.livaSource
+      const sourceId = binding.source
       if (!sourceId) return
       const entry = {
         id: crypto.randomUUID(),
         sourceId,
-        label: binding.definition.name,
+        label: binding.label,
         binding,
       }
       this.entries.set(entry.id, entry)
@@ -74,10 +71,6 @@ export class EditorController {
       // Resolve identity after that synchronous DOM setup, before reconnecting HMR.
       queueMicrotask(() => {
         if (!this.active(entry)) return
-
-        entry.label =
-          binding.root.getAttribute('aria-label') ??
-          `${binding.definition.name} ${/* v8 ignore next -- @preserve: HTMLElement.textContent is a string; null applies to other Node kinds. */ binding.root.textContent?.trim().slice(0, 30) ?? ''}`
 
         if (
           this.selected &&
@@ -105,9 +98,12 @@ export class EditorController {
         if (this.selected === entry) {
           this.sequence++
           this.previewActive = false
+          this.preview?.end()
+          this.preview = undefined
         }
       } else if (this.selected === entry) {
-        binding.executor.endCompositionPreview()
+        this.preview?.end()
+        this.preview = undefined
         this.previewActive = false
         this.sequence++
         this.message = 'Application state superseded the preview. Your draft is retained.'
@@ -156,13 +152,7 @@ export class EditorController {
   seek(time: number) {
     if (!this.previewActive || !Number.isFinite(time)) return
 
-    /* v8 ignore start -- @preserve: A successful preview retains its selected mounted entry; selection changes clear previewActive. */
-    for (const animation of this.selected?.binding.executor.animations ??
-      []
-    /* v8 ignore stop -- @preserve */
-    ) {
-      animation.currentTime = Math.max(0, time)
-    }
+    this.preview?.seek(time)
   }
 
   async previewComposition(
@@ -199,8 +189,9 @@ export class EditorController {
       return undefined
 
     this.previewActive = false
-    if (phase) selected.binding.runtime.previewLifecycle(phase, to, reply.definition)
-    else selected.binding.runtime.previewComposition(from, to, transitions, reply.definition)
+    this.preview = phase
+      ? selected.binding.inspection.previewLifecycle(phase, to, reply.definition)
+      : selected.binding.inspection.previewComposition(from, to, transitions, reply.definition)
     this.previewActive = true
     this.message = 'Previewing this instance only. Source is unchanged.'
     this.notify()
@@ -216,8 +207,8 @@ export class EditorController {
 
   private restoreSelected() {
     this.previewActive = false
-    const selected = this.selected
-    selected?.binding.executor.endCompositionPreview()
+    this.preview?.end()
+    this.preview = undefined
   }
 
   async cancel() {

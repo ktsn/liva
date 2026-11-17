@@ -1,10 +1,16 @@
-import { describe, expect, it, vi } from 'vite-plus/test'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { Definition } from '../model/definition.ts'
 import type { ExecutionPort, RuntimeDiagnostic } from './execution-contracts.ts'
 import type { PresentationPlan } from './presentation-planner.ts'
 import { planReconciliation } from './presentation-planner.ts'
 import * as functions from '../builtins/index.ts'
 import { Runtime } from './runtime.ts'
+
+const runtimes: Runtime[] = []
+
+afterEach(() => {
+  for (const runtime of runtimes.splice(0)) runtime.dispose()
+})
 
 const definition: Definition = {
   name: 'planning-phases',
@@ -63,8 +69,6 @@ function setup(
     refreshSuspension() {},
     endCompositionPreview() {},
     dispose() {},
-    beginPreview() {},
-    abortPreview() {},
     terminalControls() {
       displayed = 0.4
     },
@@ -99,6 +103,7 @@ function setup(
   }
 
   runtime = new Runtime(execution, initialDefinition, inputs, (error) => errors.push(error))
+  runtimes.push(runtime)
 
   return { runtime, execution, plans, observations, errors }
 }
@@ -220,6 +225,203 @@ describe('Runtime presentation coordination', () => {
   })
 
   it.each([false, true])(
+    'keeps candidate resources alive through transformation, then releases them when rejected=%s',
+    (reject) => {
+      const { runtime } = setup()
+      const failure = new Error('Candidate validation failed')
+      const dispose = vi.fn<() => void>()
+      const factory = vi.spyOn(functions, 'callBuiltin').mockReturnValue({
+        value: 1,
+        bind: () => () => {},
+        prepareUpdate: () => ({ value: 1, commit() {}, discard() {} }),
+        dispose,
+      })
+      const candidate: Definition = {
+        name: 'candidate',
+        layers: [],
+        letBindings: [
+          {
+            name: 'resource',
+            initializer: { kind: 'call', function: 'createResource', arguments: [] },
+          },
+        ],
+      }
+      const before = runtime.composition
+
+      try {
+        const evaluate = () =>
+          runtime.evaluateCandidate(candidate, (values) => {
+            expect(dispose).not.toHaveBeenCalled()
+
+            if (reject) throw failure
+
+            return values.resource
+          })
+
+        let result: unknown
+        let caught: unknown
+
+        try {
+          result = evaluate()
+        } catch (error) {
+          caught = error
+        }
+
+        expect(caught).toBe(reject ? failure : undefined)
+        expect(result).toBe(reject ? undefined : 1)
+        expect(dispose).toHaveBeenCalledTimes(1)
+        expect(runtime.definition).toBe(definition)
+        expect(runtime.composition).toEqual(before)
+      } finally {
+        runtime.dispose()
+        factory.mockRestore()
+      }
+    },
+  )
+
+  it.each([false, true])(
+    'propagates cleanup failure and preserves validation cause when rejected=%s',
+    (reject) => {
+      const { runtime, errors } = setup()
+      const failure = new Error('Candidate validation failed')
+      const cleanup = new Error('Candidate disposal failed')
+      const factory = vi.spyOn(functions, 'callBuiltin').mockReturnValue({
+        value: 1,
+        bind: () => () => {},
+        prepareUpdate: () => ({ value: 1, commit() {}, discard() {} }),
+        dispose() {
+          throw cleanup
+        },
+      })
+      const candidate: Definition = {
+        name: 'cleanup-candidate',
+        layers: [],
+        letBindings: [
+          {
+            name: 'resource',
+            initializer: { kind: 'call', function: 'createResource', arguments: [] },
+          },
+        ],
+      }
+
+      try {
+        const evaluate = () =>
+          runtime.evaluateCandidate(candidate, () => {
+            if (reject) throw failure
+
+            return 1
+          })
+        let caught: unknown
+
+        try {
+          evaluate()
+        } catch (error) {
+          caught = error
+        }
+
+        expect(caught).toEqual(
+          reject
+            ? new AggregateError([failure, cleanup], 'Could not discard failed call evaluation', {
+                cause: failure,
+              })
+            : cleanup,
+        )
+        expect(errors).toEqual([])
+      } finally {
+        runtime.dispose()
+        factory.mockRestore()
+      }
+    },
+  )
+
+  it('keeps borrowed live calls owned when candidate transformation rejects', () => {
+    const dispose = vi.fn<() => void>()
+    const factory = vi.spyOn(functions, 'callBuiltin').mockReturnValue({
+      value: 1,
+      bind: () => () => {},
+      prepareUpdate: () => ({ value: 1, commit() {}, discard() {} }),
+      dispose,
+    })
+    const source: Definition = {
+      name: 'borrowed-candidate',
+      layers: [],
+      letBindings: [
+        {
+          name: 'resource',
+          initializer: { kind: 'call', function: 'createResource', arguments: [] },
+        },
+      ],
+    }
+    const { runtime } = setup(source, {})
+    const failure = new Error('Candidate rejected')
+
+    try {
+      expect(() =>
+        runtime.evaluateCandidate(source, () => {
+          throw failure
+        }),
+      ).toThrow(failure)
+      expect(factory).toHaveBeenCalledTimes(1)
+      expect(dispose).not.toHaveBeenCalled()
+
+      runtime.dispose()
+
+      expect(dispose).toHaveBeenCalledTimes(1)
+    } finally {
+      runtime.dispose()
+      factory.mockRestore()
+    }
+  })
+
+  it('finishes logical and executor teardown and preserves both call and executor failures', () => {
+    const failure = new Error('Call disposal failed')
+    const browserFailure = new Error('Executor disposal failed')
+    const factory = vi.spyOn(functions, 'callBuiltin').mockReturnValue({
+      value: 1,
+      bind: () => () => {},
+      prepareUpdate: () => ({ value: 1, commit() {}, discard() {} }),
+      dispose() {
+        throw failure
+      },
+    })
+    const source: Definition = {
+      name: 'teardown',
+      layers: [],
+      letBindings: [
+        { name: 'value', initializer: { kind: 'call', function: 'resource', arguments: [] } },
+      ],
+    }
+    const { runtime, execution } = setup(source, {})
+    const dispose = vi.fn<() => void>(() => {
+      throw browserFailure
+    })
+    execution.dispose = dispose
+    runtime.onEvent = vi.fn<(name: string) => void>()
+    runtime.onUpdate = vi.fn<() => void>()
+
+    try {
+      expect(() => runtime.dispose()).toThrow(
+        new AggregateError([failure, browserFailure], 'Could not release resources', {
+          cause: failure,
+        }),
+      )
+      expect(dispose).toHaveBeenCalledTimes(1)
+      expect(runtime.onEvent).toBeUndefined()
+      expect(runtime.onUpdate).toBeUndefined()
+      expect(runtime.isDisposed).toBe(true)
+
+      runtime.dispose()
+      runtime.updateParameters({})
+      runtime.replaceDefinition({ ...source, name: 'replacement' })
+
+      expect(runtime.definition).toBe(source)
+      expect(dispose).toHaveBeenCalledTimes(1)
+    } finally {
+      factory.mockRestore()
+    }
+  })
+
+  it.each([false, true])(
     'releases initialized calls and preserves the startup failure when cleanup fails=%s',
     (cleanupFails) => {
       const { runtime: previous, execution, errors } = setup()
@@ -264,4 +466,171 @@ describe('Runtime presentation coordination', () => {
       }
     },
   )
+})
+
+const eventDefinition: Definition = {
+  name: 'event',
+  parameters: [{ name: 'ready', type: 'boolean' }],
+  layers: [{ name: 'idle', targets: [] }],
+  events: [{ name: 'dismiss', when: { kind: 'reference', path: ['ready'] } }],
+}
+
+function createEventRuntime(ready: boolean, source = eventDefinition) {
+  return setup(source, { ready }).runtime
+}
+
+describe('conditional event edges', () => {
+  it.each([
+    { initial: false, values: [false, true, true, false, true], counts: [0, 1, 1, 1, 2] },
+    { initial: true, values: [true, false, true, true, false, true], counts: [0, 0, 1, 1, 1, 2] },
+  ])(
+    'emits only rising edges when the initial condition is $initial',
+    ({ initial, values, counts }) => {
+      const runtime = createEventRuntime(initial)
+      const emitted: string[] = []
+      runtime.onEvent = (name) => emitted.push(name)
+
+      const observed = values.map((ready) => {
+        runtime.updateParameters({ ready })
+        return emitted.length
+      })
+
+      expect(observed).toEqual(counts)
+      expect(emitted).toEqual(['dismiss', 'dismiss'])
+      expect(runtime.composition).toEqual({ layers: { idle: true }, states: {} })
+    },
+  )
+
+  it('tracks sibling Motion runtimes independently', () => {
+    const first = createEventRuntime(false)
+    const second = createEventRuntime(false)
+    const emitted: string[] = []
+    first.onEvent = (name) => emitted.push('first:' + name)
+    second.onEvent = (name) => emitted.push('second:' + name)
+
+    first.updateParameters({ ready: true })
+    second.updateParameters({ ready: true })
+    first.updateParameters({ ready: true })
+    second.updateParameters({ ready: true })
+
+    expect(emitted).toEqual(['first:dismiss', 'second:dismiss'])
+  })
+
+  it('tracks multiple conditions independently without changing visual state', () => {
+    const runtime = createEventRuntime(true, {
+      ...eventDefinition,
+      events: [
+        ...eventDefinition.events!,
+        {
+          name: 'reset',
+          when: { kind: 'unary', operator: '!', operand: { kind: 'reference', path: ['ready'] } },
+        },
+      ],
+    })
+    const emitted: string[] = []
+    runtime.onEvent = (name) => emitted.push(name)
+
+    runtime.updateParameters({ ready: false })
+    runtime.updateParameters({ ready: false })
+    runtime.updateParameters({ ready: true })
+
+    expect(emitted).toEqual(['reset', 'dismiss'])
+    expect(runtime.composition).toEqual({ layers: { idle: true }, states: {} })
+  })
+})
+
+describe('event lifecycle', () => {
+  it('does not emit after disposal', () => {
+    const runtime = createEventRuntime(false)
+    const emitted: string[] = []
+    runtime.onEvent = (name) => emitted.push(name)
+
+    runtime.dispose()
+    runtime.updateParameters({ ready: true })
+
+    expect(emitted).toEqual([])
+    expect(runtime.onEvent).toBeUndefined()
+  })
+
+  it('initializes replacement definitions without emitting an already-true condition', () => {
+    const runtime = createEventRuntime(true)
+    const emitted: string[] = []
+    runtime.onEvent = (name) => emitted.push(name)
+    const replacement: Definition = {
+      ...eventDefinition,
+      events: [{ name: 'replacement', when: { kind: 'reference', path: ['ready'] } }],
+    }
+
+    runtime.replaceDefinition(replacement)
+    runtime.updateParameters({ ready: true })
+    expect(emitted).toEqual([])
+
+    runtime.updateParameters({ ready: false })
+    runtime.updateParameters({ ready: true })
+    expect(emitted).toEqual(['replacement'])
+  })
+})
+
+describe('composition snapshots', () => {
+  const layered: Definition = {
+    ...eventDefinition,
+
+    layers: [
+      { name: 'visible', when: { kind: 'reference', path: ['ready'] }, targets: [] },
+      {
+        name: 'history',
+        targets: [],
+        initialState: 'idle',
+        states: [
+          { name: 'idle', targets: [] },
+          { name: 'done', targets: [] },
+        ],
+        transitions: [
+          {
+            from: 'idle',
+            to: 'done',
+            when: { kind: 'reference', path: ['ready'] },
+            transition: { targets: [] },
+          },
+        ],
+      },
+    ],
+  }
+
+  it('reads retained machine history and current ordinary layer activation', () => {
+    const runtime = createEventRuntime(false, layered)
+
+    expect(runtime.composition).toEqual({
+      layers: { visible: false },
+      states: { history: 'idle' },
+    })
+
+    runtime.updateParameters({ ready: true })
+    runtime.updateParameters({ ready: false })
+
+    expect(runtime.composition).toEqual({
+      layers: { visible: false },
+      states: { history: 'done' },
+    })
+  })
+
+  it('isolates returned snapshots and runtimes', () => {
+    const first = createEventRuntime(true, layered)
+    const second = createEventRuntime(false, layered)
+    const snapshot = first.composition
+
+    expect(snapshot).toBeDefined()
+
+    Object.assign(snapshot.layers, { visible: false })
+    Object.assign(snapshot.states, { history: 'idle' })
+
+    expect(first.composition).toEqual({
+      layers: { visible: true },
+      states: { history: 'done' },
+    })
+    expect(second.composition).toEqual({
+      layers: { visible: false },
+      states: { history: 'idle' },
+    })
+  })
 })

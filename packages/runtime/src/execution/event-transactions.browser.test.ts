@@ -1,10 +1,15 @@
+import {
+  assembleRuntime,
+  nativeEffects,
+  type RuntimeAssembly,
+} from '../__test__/helpers/assembly.ts'
 import { capturePresence } from '../__test__/helpers/presence.ts'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { Definition, Expression } from '../model/definition.ts'
 import type { ReactiveSubscription, RuntimeValue } from '../evaluation/reactive-value.ts'
 import { createEventValue, type ReactiveNotification } from '../evaluation/events.ts'
 import { PresenceOperation } from './presence-operation.ts'
-import { LivaInstance, type RuntimeDiagnostic } from './instance.ts'
+import type { RuntimeDiagnostic } from './execution-contracts.ts'
 import { springMotion } from '../motion/property-motion.ts'
 const sourceState = vi.hoisted<{ source?: ReactiveSubscription }>(() => ({}))
 
@@ -51,7 +56,7 @@ const withReleaseProjection: (definition: Definition) => Definition = (definitio
   })),
 })
 
-const instances: LivaInstance[] = []
+const instances: RuntimeAssembly[] = []
 const elements: HTMLElement[] = []
 
 function setup(transform: (definition: Definition) => Definition = (definition) => definition) {
@@ -185,9 +190,9 @@ function setup(transform: (definition: Definition) => Definition = (definition) 
   document.body.append(element)
   elements.push(element)
   const errors: RuntimeDiagnostic[] = []
-  const instance = new LivaInstance(transform(definition), {}, (error) => errors.push(error))
+  const instance = assembleRuntime(transform(definition), {}, (error) => errors.push(error))
   instances.push(instance)
-  instance.bind([['self', element]])
+  instance.executor.bind([['self', element]])
 
   function update(active: boolean, offset: number, event = false) {
     current = Object.freeze({ active, offset, release })
@@ -202,7 +207,7 @@ function setup(transform: (definition: Definition) => Definition = (definition) 
 }
 
 afterEach(() => {
-  for (const instance of instances.splice(0)) instance.dispose()
+  for (const instance of instances.splice(0)) instance.runtime.dispose()
   for (const element of elements.splice(0)) element.remove()
   sourceState.source = undefined
 })
@@ -210,15 +215,15 @@ afterEach(() => {
 describe('event snapshot transactions', () => {
   it('keeps the accepted composition visible to source events when preview ends', () => {
     const { instance, errors, update } = setup()
-    const before = instance.composition
+    const before = instance.runtime.composition
     const seen: boolean[] = []
 
-    instance.previewComposition(before, before)
-    instance.onEvent = () => seen.push(instance.composition.layers.dragging)
+    instance.inspection.previewComposition(before, before)
+    instance.runtime.onEvent = () => seen.push(instance.runtime.composition.layers.dragging)
     update(true, 90)
 
     expect(seen).toEqual([false])
-    expect(instance.composition.layers.dragging).toBe(true)
+    expect(instance.runtime.composition.layers.dragging).toBe(true)
     expect(errors).toEqual([])
   })
 
@@ -258,14 +263,14 @@ describe('event snapshot transactions', () => {
           : layer,
       ),
     }))
-    const before = instance.composition
+    const before = instance.runtime.composition
     const events: string[] = []
 
-    instance.previewComposition(before, before)
-    instance.onEvent = (event) => events.push(event)
+    instance.inspection.previewComposition(before, before)
+    instance.runtime.onEvent = (event) => events.push(event)
 
     expect(() => update(true, 100)).not.toThrow()
-    expect(instance.composition).toEqual(before)
+    expect(instance.runtime.composition).toEqual(before)
     expect(events).toEqual([])
     expect(errors).toEqual([
       expect.objectContaining({
@@ -277,7 +282,7 @@ describe('event snapshot transactions', () => {
     update(true, 90)
 
     expect(events).toEqual(['crossed'])
-    expect(instance.composition.layers.dragging).toBe(true)
+    expect(instance.runtime.composition.layers.dragging).toBe(true)
   })
 
   it('preserves the first controller input delta when a source notification ends preview', () => {
@@ -285,7 +290,10 @@ describe('event snapshot transactions', () => {
 
     update(true, 0)
     update(true, 20)
-    instance.previewComposition(instance.composition, instance.composition)
+    instance.inspection.previewComposition(
+      instance.runtime.composition,
+      instance.runtime.composition,
+    )
     update(true, 30)
 
     expect(getComputedStyle(element).translate).toBe('30px')
@@ -361,12 +369,13 @@ describe('event snapshot transactions', () => {
 
     const events: string[] = []
 
-    instance.onEvent = (event) => events.push(`${event}:${instance.composition.states.position}`)
+    instance.runtime.onEvent = (event) =>
+      events.push(`${event}:${instance.runtime.composition.states.position}`)
 
     try {
       update(false, 100, true)
 
-      expect(instance.composition.states.position).toBe('closed')
+      expect(instance.runtime.composition.states.position).toBe('closed')
       expect(events).toEqual([])
       expect(element.getAnimations()).toContain(original)
       expect(errors).toEqual([
@@ -378,7 +387,7 @@ describe('event snapshot transactions', () => {
 
       update(false, 90, true)
 
-      expect(instance.composition.states.position).toBe('open')
+      expect(instance.runtime.composition.states.position).toBe('open')
       expect(events).toEqual(['crossed:closed'])
       expect(session.isFinished).toBe(false)
 
@@ -429,33 +438,33 @@ describe('event snapshot transactions', () => {
         ],
       }
     })
-    instance.onEvent = () => update(false, 0, true)
+    instance.runtime.onEvent = () => update(false, 0, true)
     update(true, 0)
 
     update(false, 100, true)
     update(false, 100, true)
 
-    expect(instance.composition.states.position).toBe('open')
+    expect(instance.runtime.composition.states.position).toBe('open')
 
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(instance.composition.states.position).toBe('next')
+    expect(instance.runtime.composition.states.position).toBe('next')
     expect(errors).toEqual([])
   })
 
   it('discards occurrences queued before a later synchronous disposal', async () => {
     const { instance, element, update, errors } = setup()
-    instance.onEvent = () => update(false, 0, true)
+    instance.runtime.onEvent = () => update(false, 0, true)
     update(true, 0)
     update(false, 100, true)
 
-    expect(instance.composition.states.position).toBe('open')
-    instance.dispose()
+    expect(instance.runtime.composition.states.position).toBe('open')
+    instance.runtime.dispose()
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(instance.composition.states.position).toBe('open')
+    expect(instance.runtime.composition.states.position).toBe('open')
     expect(element.getAnimations()).toHaveLength(0)
     expect(errors).toEqual([])
   })
@@ -466,16 +475,16 @@ describe('event snapshot transactions', () => {
       const { instance, element, update, errors } = setup()
       let calls = 0
       const during: string[] = []
-      instance.onEvent = () => {
+      instance.runtime.onEvent = () => {
         calls++
         update(false, 0, true)
         update(false, 0, true)
-        instance.updateParameters({})
+        instance.runtime.updateParameters({})
 
-        during.push(instance.composition.states.position)
+        during.push(instance.runtime.composition.states.position)
 
-        if (mode === 'replace') instance.bind([])
-        if (mode === 'dispose') instance.dispose()
+        if (mode === 'replace') instance.executor.bind([])
+        if (mode === 'dispose') instance.runtime.dispose()
       }
       update(true, 0)
 
@@ -487,7 +496,9 @@ describe('event snapshot transactions', () => {
 
       expect(calls).toBe(1)
       expect(during).toEqual(['closed'])
-      expect(instance.composition.states.position).toBe(mode === 'deliver' ? 'next' : 'closed')
+      expect(instance.runtime.composition.states.position).toBe(
+        mode === 'deliver' ? 'next' : 'closed',
+      )
       expect(element.getAnimations()).toHaveLength(mode === 'deliver' ? 1 : 0)
       expect(errors).toEqual([])
     },
@@ -500,8 +511,8 @@ describe('event snapshot transactions', () => {
 
     update(false, 100, true)
 
-    expect(instance.composition.states.position).toBe('open')
-    const animation = instance.animations[0]
+    expect(instance.runtime.composition.states.position).toBe('open')
+    const animation = nativeEffects(instance.executor)[0]
     if (!(animation?.effect instanceof KeyframeEffect)) throw new Error('Expected return spring')
     expect(String(animation.effect.getKeyframes()[0].translate)).toMatch(/^100px(?: |$)/)
 
@@ -509,13 +520,13 @@ describe('event snapshot transactions', () => {
     await animation.finished
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 
-    expect(instance.composition.states.position).toBe('open')
+    expect(instance.runtime.composition.states.position).toBe('open')
     expect(parseFloat(getComputedStyle(element).translate)).toBe(120)
 
     update(true, 0)
     update(false, 0, true)
 
-    expect(instance.composition.states.position).toBe('next')
+    expect(instance.runtime.composition.states.position).toBe('next')
     expect(errors).toEqual([])
   })
 
@@ -547,7 +558,7 @@ describe('event snapshot transactions', () => {
     clock.mockReturnValue(sample.time)
     update(false, sample.input, true)
 
-    expect(instance.composition.states.position).toBe(sample.state)
+    expect(instance.runtime.composition.states.position).toBe(sample.state)
     expect(errors).toEqual([])
 
     clock.mockRestore()
@@ -562,7 +573,7 @@ describe('event snapshot transactions', () => {
     clock.mockReturnValue(120)
 
     update(false, 20, true)
-    const animation = instance.animations[0]
+    const animation = nativeEffects(instance.executor)[0]
     if (!(animation?.effect instanceof KeyframeEffect)) throw new Error('Expected momentum spring')
     const expected = springMotion(
       { kind: 'spring-physics', stiffness: 300, damping: 25, mass: 1 },
@@ -722,7 +733,7 @@ describe('event snapshot transactions', () => {
 
     update(false, sample.input, true)
 
-    expect(instance.composition.states.position).toBe(sample.state)
+    expect(instance.runtime.composition.states.position).toBe(sample.state)
     expect(errors).toEqual([])
 
     clock.mockRestore()
@@ -735,12 +746,12 @@ describe('event snapshot transactions', () => {
 
     update(false, 20, true)
 
-    expect(instance.composition.states.position).toBe('closed')
+    expect(instance.runtime.composition.states.position).toBe('closed')
 
     update(false, 200)
     await Promise.resolve()
 
-    expect(instance.composition.states.position).toBe('closed')
+    expect(instance.runtime.composition.states.position).toBe('closed')
     expect(errors).toEqual([])
   })
 })

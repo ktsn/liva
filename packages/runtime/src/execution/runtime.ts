@@ -1,15 +1,7 @@
-import {
-  layerTargets,
-  resolveLayers,
-  resolveComposition,
-  layerTrackTemplates,
-  completeLayerTrack,
-  type LayerResolution,
-  type Composition,
-  type CompositionTransition,
-} from '../composition/layers.ts'
+import { releaseResources } from '../evaluation/resource-cleanup.ts'
+import { layerTargets, resolveLayers, type LayerResolution } from '../composition/layers.ts'
 import { parameterValues, LetBindingGraph, targetValues } from '../evaluation/let-bindings.ts'
-import { evaluate, renderTransition, type VariableValues } from '../evaluation/expression.ts'
+import { evaluate, type VariableValues } from '../evaluation/expression.ts'
 import { ReactiveCallStore } from '../evaluation/reactive-call-store.ts'
 import type { ReactiveNotification } from '../evaluation/events.ts'
 import type { Definition } from '../model/definition.ts'
@@ -21,23 +13,12 @@ import {
 
 import {
   orderedResolution,
-  planControllerBindings,
-  planControllerPresentation,
-  planTrackObservations,
-  planTrack,
-  trackTiming,
-  planPreviewPresentation,
   planReconciliation,
   planMotionChange,
-  presentationWrites,
-  layerPropertyKey,
   type PresentationFacts,
-  type ReceiverAddresses,
-  type TrackPlan,
   type PresentationPlan,
 } from './presentation-planner.ts'
-import { captureLifecycleDefinition, resolveLifecycleTracks } from './lifecycle.ts'
-import type { ResolvedTrack } from '../composition/resolve.ts'
+import { resolveControllerPresentation } from './controller-presentation.ts'
 
 /**
  * Owns accepted inputs, evaluation/call lifetime, event and state-machine history,
@@ -46,7 +27,7 @@ import type { ResolvedTrack } from '../composition/resolve.ts'
  * the previous composition, and may invalidate the binding before presentation.
  */
 export class Runtime {
-  definition: Definition
+  private currentDefinition: Definition
   onUpdate?: () => void
   onEvent?: (name: string) => void
   private values: VariableValues
@@ -83,7 +64,7 @@ export class Runtime {
 
         for (const event of definition.events ?? []) evaluate(event.when, values)
       })
-      this.definition = definition
+      this.currentDefinition = definition
       execution.configureControllers(definition, this.values)
       this.evaluateEvents(false)
       this.resolution = resolveLayers(definition, this.values)
@@ -101,6 +82,14 @@ export class Runtime {
 
       throw error
     }
+  }
+
+  get definition(): Definition {
+    return this.currentDefinition
+  }
+
+  get isDisposed(): boolean {
+    return this.disposed
   }
 
   get composition() {
@@ -142,21 +131,29 @@ export class Runtime {
     )
   }
 
-  private snapshotValues(definition: Definition): VariableValues {
+  /**
+   * Evaluates a candidate with compatible borrowed calls and accepted parameters.
+   * The synchronous transform runs before candidate subscription/call acceptance;
+   * it must not publish events or presentation. All candidate-only calls are disposed,
+   * including when evaluation/validation throws; borrowed live calls remain owned.
+   */
+  evaluateCandidate<T>(definition: Definition, transform: (values: VariableValues) => T): T {
     const graph = new LetBindingGraph(definition.letBindings ?? [], layerTargets(definition))
     const calls = new ReactiveCallStore(this.calls, graph.compatibleBindings(this.graph))
-
     try {
-      return calls.evaluate((operations) => graph.evaluate(this.values, operations))
+      return calls.evaluate((operations) => graph.evaluate(this.values, operations, transform))
     } finally {
+      // A rejected evaluation already discards its newly created calls. Any cache
+      // left here is either accepted candidate ownership or a borrowed live call.
       calls.dispose(this.calls)
     }
   }
 
   private disconnectBindings() {
-    for (const cleanup of this.bindingCleanups) cleanup()
-
+    const cleanups = this.bindingCleanups
     this.bindingCleanups = []
+
+    releaseResources(cleanups)
   }
 
   private clearBindings() {
@@ -183,7 +180,13 @@ export class Runtime {
     this.values = this.evaluateValues(this.values)
     this.evaluateEvents(false)
     this.resolution = resolveLayers(this.definition, this.values, this.resolution.states, false)
-    this.resolution = this.controllerResolution(this.resolution, this.values, performance.now())
+    this.resolution = resolveControllerPresentation(
+      this.execution,
+      this.definition,
+      this.resolution,
+      this.values,
+      performance.now(),
+    )
     this.execution.initialize(this.resolution)
   }
 
@@ -235,7 +238,7 @@ export class Runtime {
     this.graph = graph
     this.calls = calls
     this.values = this.evaluateValues(variables)
-    this.definition = definition
+    this.currentDefinition = definition
     this.execution.configureControllers(definition, this.values)
     this.events.clear()
     this.evaluateEvents(false)
@@ -343,7 +346,13 @@ export class Runtime {
       const time = notification?.time ?? performance.now()
       this.execution.terminalControls(time)
       // Validation resolves presentation synchronously before accepting reactive calls.
-      const next = this.controllerResolution(resolution!, values, time)
+      const next = resolveControllerPresentation(
+        this.execution,
+        this.definition,
+        resolution!,
+        values,
+        time,
+      )
       this.applyPresentation(this.resolution, next)
       this.onUpdate?.()
     } catch (error) {
@@ -352,87 +361,8 @@ export class Runtime {
     }
   }
 
-  /** Calculation surrounds explicit browser-operation phases; no elements enter Runtime. */
-  private controllerResolution(
-    resolution: LayerResolution,
-    values: VariableValues,
-    time: number,
-    definition = this.definition,
-    live = true,
-  ): LayerResolution {
-    resolution = orderedResolution(resolution, definition)
-    const targets = new Set(
-      resolution.presentation.targets
-        .filter((target) => target.properties.some((property) => property.binding))
-        .map((target) => target.name),
-    )
-
-    if (targets.size === 0) {
-      if (live) this.execution.releaseControllers(time)
-
-      return resolution
-    }
-
-    const normal = resolveComposition(
-      {
-        ...definition,
-        layers: definition.layers.map((layer) => ({
-          ...layer,
-          targets: layer.targets.map((target) => ({
-            ...target,
-            properties: target.properties.filter((property) => property.value.kind !== 'binding'),
-          })),
-          states: layer.states?.map((state) => ({
-            ...state,
-            targets: state.targets.map((target) => ({
-              ...target,
-              properties: target.properties.filter((property) => property.value.kind !== 'binding'),
-            })),
-          })),
-        })),
-      },
-      values,
-      resolution.composition,
-    )
-    const receivers = this.execution.observeReceivers(resolution, targets, live)
-    const bindings = planControllerBindings(resolution, receivers)
-    const outputs = new Map(this.execution.applyControllers(bindings, values, time, live))
-
-    for (const receiver of receivers) {
-      for (const property of receiver.fallbacks)
-        outputs.set(layerPropertyKey(receiver.target, property), undefined)
-    }
-
-    return planControllerPresentation(resolution, normal, outputs, definition)
-  }
-
   private applyPresentation(previous: LayerResolution, next: LayerResolution) {
     this.execution.present(previous, next, this.values)
-  }
-
-  /** Numeric/displayed observations are requested only after canonical ownership is known. */
-  private planTracks(
-    sources: readonly {
-      readonly receiver: number
-      readonly source: ResolvedTrack
-      readonly declarations?: ReceiverAddresses['addresses']
-    }[],
-    facts: PresentationFacts,
-    fill: TrackPlan['fill'],
-  ) {
-    const timings = new Map(sources.map(({ source }) => [source, trackTiming(source)]))
-    const candidates = this.execution.expandTracks(sources)
-    const observations = planTrackObservations(candidates, facts.active, false)
-    const snapshots = this.execution.observeTracks(observations.requests)
-    const start: TrackPlan[] = []
-
-    for (const snapshot of snapshots) {
-      // The executor preserves each request's source and ownership facts. All requests
-      // passed the ownership filter, so these plans cannot be omitted; timings are cached above.
-      start.push(planTrack(snapshot, timings.get(snapshot.source)!, fill)!)
-    }
-
-    return { changed: observations.changed, start }
   }
 
   /** Presence ownership changes can reacquire a controller without waiting for another input. */
@@ -440,7 +370,9 @@ export class Runtime {
     const time = performance.now()
 
     this.execution.terminalControls(time)
-    this.resolution = this.controllerResolution(
+    this.resolution = resolveControllerPresentation(
+      this.execution,
+      this.definition,
       resolveLayers(this.definition, this.values, this.resolution.states, false),
       this.values,
       time,
@@ -471,252 +403,32 @@ export class Runtime {
     if (plan) this.execution.applyPlan(plan)
   }
 
-  inspectLifecycle(
-    phase: 'enter' | 'leave',
-    composition: Composition,
-    definition = this.definition,
-  ) {
-    const values = this.snapshotValues(definition)
-
-    return {
-      presentation: this.controllerResolution(
-        resolveComposition(definition, values, composition),
-        values,
-        performance.now(),
-        definition,
-        false,
-      ).presentation,
-      transition: captureLifecycleDefinition(definition, phase, values),
-    }
-  }
-
-  inspectComposition(
-    composition: Composition,
-    from?: Composition,
-    transitions: readonly CompositionTransition[] = [],
-    definition = this.definition,
-  ): LayerResolution {
-    try {
-      const values = this.snapshotValues(definition)
-
-      const resolution = this.controllerResolution(
-        resolveComposition(definition, values, composition, from, transitions),
-        values,
-        performance.now(),
-        definition,
-        false,
-      )
-
-      return {
-        ...resolution,
-        transitions: new Map(
-          [...resolution.transitions].flatMap(([name, transition]) => {
-            const targets = transition.transition.targets.flatMap((target) => {
-              const properties = target.properties.filter((property) =>
-                resolution.presentation.targets
-                  .find((item) => item.name === target.name)
-                  ?.properties.some((item) => item.name === property.name && item.owner === name),
-              )
-
-              return resolution.presentation.targets.some(
-                (item) =>
-                  item.name === target.name &&
-                  item.properties.some((property) => property.owner === name),
-              )
-                ? [{ ...target, properties }]
-                : []
-            })
-
-            if (
-              !resolution.presentation.targets.some((target) =>
-                target.properties.some((property) => property.owner === name),
-              )
-            )
-              return []
-
-            const rendered = renderTransition({ ...transition.transition, targets }, values)
-
-            return [
-              [
-                name,
-                {
-                  ...transition,
-                  transition: {
-                    timing: rendered.timing,
-                    targets: rendered.targets.map((target) => ({
-                      name: target.name,
-                      timingProperties: target.timingProperties,
-                      timing: target.timing,
-                      properties: target.properties.map((property) => ({
-                        name: property.name,
-                        timing: property.timing,
-                        keyframes: property.keyframes?.map((frame) => ({
-                          offset: frame.offset,
-                          value: frame.value,
-                          easing: frame.easing,
-                        })),
-                      })),
-                    })),
-                  },
-                },
-              ] as const,
-            ]
-          }),
-        ),
-      }
-    } catch (error) {
-      this.report({ code: 'runtime.inspection', message: String(error), error })
-      throw error
-    }
-  }
-
-  /** Frozen preview evaluation uses the same final planner without accepting application state. */
-  previewComposition(
-    from: Composition,
-    to: Composition,
-    transitions: readonly CompositionTransition[] = [],
-    definition = this.definition,
-    phase?: 'enter' | 'leave',
-  ): void {
-    if (this.disposed || this.execution.bindingFacts.suspended) {
-      throw new Error('Composition preview requires a mounted layer instance')
-    }
-
-    try {
-      const values = this.snapshotValues(definition)
-      const previous = this.controllerResolution(
-        resolveComposition(definition, values, from),
-        values,
-        performance.now(),
-        definition,
-        false,
-      )
-      const next = this.controllerResolution(
-        resolveComposition(definition, values, to, from, transitions),
-        values,
-        performance.now(),
-        definition,
-        false,
-      )
-      const lifecycle = phase ? captureLifecycleDefinition(definition, phase, values) : undefined
-      const facts = this.execution.presentationFacts()
-      this.execution.beginPreview(presentationWrites(previous, facts.receivers))
-
-      const templates = new Map(
-        facts.receivers.map((receiver) => {
-          const targetResolution = {
-            ...next,
-            presentation: {
-              ...next.presentation,
-              targets: next.presentation.targets.filter(
-                (target) => target.name === receiver.target,
-              ),
-            },
-          }
-          const tracks = phase
-            ? []
-            : [
-                ...layerTrackTemplates(
-                  previous,
-                  targetResolution,
-                  values,
-                  (message) => this.report({ code: 'runtime.endpoint', message }),
-                  () => true,
-                ),
-              ]
-
-          return [receiver.target, tracks] as const
-        }),
-      )
-      const requests = facts.receivers.flatMap((receiver) => {
-        const properties = phase
-          ? (lifecycle?.targets
-              .filter((target) => target.name === receiver.target)
-              .flatMap((target) => target.properties.map((property) => property.name)) ?? [])
-          : // Every logical target was assigned its templates above.
-            templates
-              .get(receiver.target)!
-              .filter((track) => track.implicitStart)
-              .map((track) => track.property)
-
-        return properties.map((property) => ({ receiver: receiver.id, property }))
-      })
-      const displayed = new Map(
-        this.execution
-          .observeDisplayed(requests)
-          .map((value) => [layerPropertyKey(String(value.receiver), value.property), value.value]),
-      )
-      const sources = facts.receivers.flatMap((receiver) => {
-        const read = (property: string) =>
-          displayed.get(layerPropertyKey(String(receiver.id), property))
-        const tracks = phase
-          ? resolveLifecycleTracks(phase, lifecycle, next.presentation, (target, property) =>
-              target === receiver.target ? read(property) : undefined,
-            )
-          : // Explicit starts need no displayed value; every implicit start was requested above.
-            templates
-              .get(receiver.target)!
-              .map((template) =>
-                completeLayerTrack(
-                  template,
-                  template.implicitStart ? read(template.property)! : '',
-                ),
-              )
-
-        return tracks.map((source) => ({
-          receiver: receiver.id,
-          source: phase ? { ...source, implicitStart: false } : source,
-        }))
-      })
-      // Lifecycle declarations have their own ownership. Ordinary previews share the application cascade.
-      const addresses = phase
-        ? []
-        : this.execution.observeReceivers(
-            next,
-            new Set(sources.map(({ source }) => source.target)),
-            false,
-          )
-      const tracks = this.planTracks(
-        sources.map((source) => ({
-          ...source,
-          declarations: addresses.find(
-            (receiver) =>
-              receiver.id === source.receiver && receiver.target === source.source.target,
-          )?.addresses,
-        })),
-        facts,
-        phase === 'leave' ? 'both' : 'backwards',
-      )
-      this.execution.applyPlan(planPreviewPresentation(next, facts.receivers, tracks.start))
-    } catch (cause) {
-      this.execution.abortPreview()
-      const error = new Error('Could not prepare composition preview', { cause })
-      this.report({ code: 'runtime.preview', message: error.message, error })
-
-      throw error
-    }
-  }
-
-  previewLifecycle(
-    phase: 'enter' | 'leave',
-    composition = this.resolution.composition,
-    definition = this.definition,
-  ): void {
-    this.previewComposition(composition, composition, [], definition, phase)
-  }
-
+  /**
+   * Freezes accepted data for retained leave, disconnects calls and releases live
+   * browser resources in order. Teardown attempts every independent owner, clears
+   * callbacks/history even on failure, and throws cleanup errors to the caller.
+   * Further disposal/parameter updates are inert.
+   */
   dispose() {
     if (this.disposed) return
 
-    this.queue.length = 0
-    this.execution.freezeEnvironment(true)
-    this.execution.releaseControllers()
-    this.clearBindings()
-    this.calls.dispose()
-    this.execution.dispose()
-    this.events.clear()
-    this.onEvent = undefined
-    this.onUpdate = undefined
     this.disposed = true
+    this.queue.length = 0
+
+    try {
+      // Keep normal phase order while allowing independent teardown to finish
+      // after a disposer fails. Freeze detached leave before disconnecting inputs.
+      releaseResources([
+        () => this.execution.freezeEnvironment(true),
+        () => this.execution.releaseControllers(),
+        () => this.clearBindings(),
+        () => this.calls.dispose(),
+        () => this.execution.dispose(),
+      ])
+    } finally {
+      this.events.clear()
+      this.onEvent = undefined
+      this.onUpdate = undefined
+    }
   }
 }

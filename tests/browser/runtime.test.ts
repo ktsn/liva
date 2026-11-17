@@ -1,3 +1,4 @@
+import type { RuntimeAssembly } from '../../packages/runtime/src/__test__/helpers/assembly.ts'
 import type { Definition as PropertyIRDefinition } from '../../packages/runtime/src/model/definition.ts'
 import { test, expect } from '@playwright/test'
 import type * as Runtime from '../../packages/runtime/src/index.ts'
@@ -5,10 +6,12 @@ import type * as Runtime from '../../packages/runtime/src/index.ts'
 declare global {
   interface Window {
     liva: typeof Runtime
+    assembleRuntime: typeof import('../../packages/runtime/src/__test__/helpers/assembly.ts').assembleRuntime
+    nativeEffects: typeof import('../../packages/runtime/src/__test__/helpers/assembly.ts').nativeEffects
     definition: Runtime.Definition
     errors: Runtime.RuntimeDiagnostic[]
-    instance: Runtime.LivaInstance
-    sibling: Runtime.LivaInstance
+    instance: RuntimeAssembly
+    sibling: RuntimeAssembly
     track: HTMLElement
     thumb: HTMLElement
   }
@@ -26,11 +29,11 @@ test.beforeEach(async ({ page }) => {
     thumb.style.cssText = 'width:20px;height:20px'
     track.append(thumb)
     document.querySelector('#fixture')!.append(track)
-    const instance = new window.liva.LivaInstance(window.definition, { mode: 'off' }, (error) =>
+    const instance = window.assembleRuntime(window.definition, { mode: 'off' }, (error) =>
       window.errors.push(error),
     )
     Object.assign(window, { track, thumb, instance })
-    instance.bind([
+    instance.executor.bind([
       ['track', track],
       ['thumb', thumb],
     ])
@@ -72,28 +75,29 @@ test('canonical previews seek both directions and restore overlapping declaratio
       ],
     }
     const element = document.createElement('div')
-    const instance = new window.liva.LivaInstance(definition)
+    const instance = window.assembleRuntime(definition)
     document.body.append(element)
 
     try {
-      instance.bind([['box', element]])
-      instance.previewComposition(
+      instance.executor.bind([['box', element]])
+      instance.inspection.previewComposition(
         { layers: { base: true, active: false }, states: {} },
         { layers: { base: true, active: true }, states: {} },
       )
 
-      await Promise.all(instance.animations.map((animation) => animation.ready))
+      await Promise.all(window.nativeEffects(instance.executor).map((animation) => animation.ready))
 
-      const count = instance.animations.length
+      const count = window.nativeEffects(instance.executor).length
       const samples = [750, 250].map((time) => {
-        for (const animation of instance.animations) animation.currentTime = time
+        for (const animation of window.nativeEffects(instance.executor))
+          animation.currentTime = time
 
         const style = getComputedStyle(element)
 
         return { left: style.left, right: style.right }
       })
 
-      instance.endCompositionPreview()
+      instance.executor.endCompositionPreview()
 
       return {
         count,
@@ -102,7 +106,7 @@ test('canonical previews seek both directions and restore overlapping declaratio
         remaining: element.getAnimations().length,
       }
     } finally {
-      instance.dispose()
+      instance.runtime.dispose()
       element.remove()
     }
   })
@@ -123,11 +127,11 @@ test('interpolates three properties, coordinates time, and cleans completed effe
   console.log(`Browser baseline ${browser.browserType().name()} ${browser.version()}`)
   const result = await page.evaluate(async () => {
     const { instance, track, thumb } = window
-    instance.updateParameters({ mode: 'on' })
-    await Promise.all(instance.animations.map((a) => a.ready))
-    const starts = instance.animations.map((a) => a.startTime)
+    instance.runtime.updateParameters({ mode: 'on' })
+    await Promise.all(window.nativeEffects(instance.executor).map((a) => a.ready))
+    const starts = window.nativeEffects(instance.executor).map((a) => a.startTime)
 
-    for (const animation of instance.animations) {
+    for (const animation of window.nativeEffects(instance.executor)) {
       animation.pause()
       animation.currentTime = 100
     }
@@ -137,7 +141,7 @@ test('interpolates three properties, coordinates time, and cleans completed effe
       translate: getComputedStyle(thumb).translate,
       scale: getComputedStyle(thumb).scale,
     }
-    const effects = [...instance.animations]
+    const effects = [...window.nativeEffects(instance.executor)]
     effects.forEach((a) => a.finish())
     await Promise.all(effects.map((a) => a.finished))
     await Promise.resolve()
@@ -179,9 +183,9 @@ test('spring overshoot is evaluated by the browser', async ({ page }) => {
         })),
       })),
     }
-    window.instance.replaceDefinition(definition)
-    window.instance.updateParameters({ mode: 'on' })
-    await Promise.all(window.instance.animations.map((a) => a.ready))
+    window.instance.runtime.replaceDefinition(definition)
+    window.instance.runtime.updateParameters({ mode: 'on' })
+    await Promise.all(window.nativeEffects(window.instance.executor).map((a) => a.ready))
     const curve = window.liva.sampleSpring({
       kind: 'spring-physics',
       stiffness: 300,
@@ -189,12 +193,14 @@ test('spring overshoot is evaluated by the browser', async ({ page }) => {
       mass: 1,
     })
     const peak = curve.samples.reduce((a, b) => (a.value > b.value ? a : b))
-    const animation = window.instance.animations.find(
-      (a) =>
-        a.effect instanceof KeyframeEffect &&
-        a.effect.target === window.thumb &&
-        'translate' in a.effect.getKeyframes()[0],
-    )!
+    const animation = window
+      .nativeEffects(window.instance.executor)
+      .find(
+        (a) =>
+          a.effect instanceof KeyframeEffect &&
+          a.effect.target === window.thumb &&
+          'translate' in a.effect.getKeyframes()[0],
+      )!
     animation.pause()
     animation.currentTime = peak.time * curve.durationMs
     return {
@@ -211,10 +217,10 @@ for (const progress of [0.25, 0.5, 0.75]) {
   test(`reversal at ${progress} preserves displayed values`, async ({ page }) => {
     const result = await page.evaluate(async (fraction) => {
       const { instance, thumb, track } = window
-      instance.updateParameters({ mode: 'on' })
-      await Promise.all(instance.animations.map((a) => a.ready))
+      instance.runtime.updateParameters({ mode: 'on' })
+      await Promise.all(window.nativeEffects(instance.executor).map((a) => a.ready))
 
-      for (const animation of instance.animations) {
+      for (const animation of window.nativeEffects(instance.executor)) {
         animation.pause()
         animation.currentTime = Number(animation.effect!.getTiming().duration) * fraction
       }
@@ -225,17 +231,22 @@ for (const progress of [0.25, 0.5, 0.75]) {
         getComputedStyle(track).backgroundColor,
       ]
       const before = read()
-      instance.updateParameters({ mode: 'off' })
-      for (const animation of instance.animations) {
+      instance.runtime.updateParameters({ mode: 'off' })
+      for (const animation of window.nativeEffects(instance.executor)) {
         animation.pause()
         animation.currentTime = 0
       }
       const after = read()
-      const effects = [...instance.animations]
+      const effects = [...window.nativeEffects(instance.executor)]
       effects.forEach((a) => a.finish())
       await Promise.all(effects.map((a) => a.finished))
       await Promise.resolve()
-      return { before, after, remaining: instance.animations.length, final: read() }
+      return {
+        before,
+        after,
+        remaining: window.nativeEffects(instance.executor).length,
+        final: read(),
+      }
     }, progress)
 
     result.before.forEach((value, i) => {
@@ -254,11 +265,11 @@ test('parameter updates preserve instance isolation, binding suspension, and sty
 }) => {
   const result = await page.evaluate(() => {
     const { instance, thumb, track } = window
-    const initial = instance.animations.length
-    instance.updateParameters({ mode: 'off' })
-    const noop = instance.animations.length
-    instance.updateParameters({ mode: false })
-    const state = instance.composition.states.toggle
+    const initial = window.nativeEffects(instance.executor).length
+    instance.runtime.updateParameters({ mode: 'off' })
+    const noop = window.nativeEffects(instance.executor).length
+    instance.runtime.updateParameters({ mode: false })
+    const state = instance.runtime.composition.states.toggle
     const siblingThumb = thumb.cloneNode()
     const siblingTrack = track.cloneNode()
     if (!(siblingThumb instanceof HTMLElement) || !(siblingTrack instanceof HTMLElement)) {
@@ -266,28 +277,29 @@ test('parameter updates preserve instance isolation, binding suspension, and sty
     }
     siblingTrack.append(siblingThumb)
     document.body.append(siblingTrack)
-    const sibling = new window.liva.LivaInstance(window.definition, { mode: 'off' })
-    sibling.bind([
+    const sibling = window.assembleRuntime(window.definition, { mode: 'off' })
+    sibling.executor.bind([
       ['track', siblingTrack],
       ['thumb', siblingThumb],
     ])
-    instance.updateParameters({ mode: 'on' })
+    instance.runtime.updateParameters({ mode: 'on' })
     const independent =
-      sibling.animations.length === 0 && sibling.composition.states.toggle === 'off'
-    instance.bind([['track', track]])
-    const suspended = instance.animations.length
-    instance.bind([
+      window.nativeEffects(sibling.executor).length === 0 &&
+      sibling.runtime.composition.states.toggle === 'off'
+    instance.executor.bind([['track', track]])
+    const suspended = window.nativeEffects(instance.executor).length
+    instance.executor.bind([
       ['track', track],
       ['thumb', thumb],
     ])
     const rebound = getComputedStyle(thumb).translate
-    instance.bind([
+    instance.executor.bind([
       ['track', track],
       ['thumb', thumb],
       ['thumb', siblingThumb],
     ])
-    instance.dispose()
-    sibling.dispose()
+    instance.runtime.dispose()
+    sibling.runtime.dispose()
     return {
       initial,
       noop,
@@ -315,12 +327,14 @@ test('parameter updates preserve instance isolation, binding suspension, and sty
 })
 
 test('reduced motion changes settle immediately', async ({ page }) => {
-  await page.evaluate(() => window.instance.updateParameters({ mode: 'on' }))
+  await page.evaluate(() => window.instance.runtime.updateParameters({ mode: 'on' }))
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await expect.poll(() => page.evaluate(() => window.instance.animations.length)).toBe(0)
+  await expect
+    .poll(() => page.evaluate(() => window.nativeEffects(window.instance.executor).length))
+    .toBe(0)
   expect(await page.evaluate(() => parseFloat(getComputedStyle(window.thumb).translate))).toBe(24)
-  await page.evaluate(() => window.instance.updateParameters({ mode: 'off' }))
-  expect(await page.evaluate(() => window.instance.animations.length)).toBe(0)
+  await page.evaluate(() => window.instance.runtime.updateParameters({ mode: 'off' }))
+  expect(await page.evaluate(() => window.nativeEffects(window.instance.executor).length)).toBe(0)
 })
 
 test('zero duration settles synchronously', async ({ page }) => {
@@ -350,11 +364,14 @@ test('zero duration settles synchronously', async ({ page }) => {
       ],
     }
 
-    window.instance.updateParameters({ mode: '0' })
-    window.instance.replaceDefinition(definition)
-    window.instance.updateParameters({ mode: '1' })
+    window.instance.runtime.updateParameters({ mode: '0' })
+    window.instance.runtime.replaceDefinition(definition)
+    window.instance.runtime.updateParameters({ mode: '1' })
 
-    return { value: window.track.style.opacity, effects: window.instance.animations.length }
+    return {
+      value: window.track.style.opacity,
+      effects: window.nativeEffects(window.instance.executor).length,
+    }
   })
 
   expect(result).toEqual({ value: '1', effects: 0 })
@@ -388,18 +405,18 @@ test('WAAPI exceptions retain a usable instance', async ({ page }) => {
       ],
     })
 
-    window.instance.updateParameters({ mode: '0' })
-    window.instance.replaceDefinition(make('invalid-easing'))
-    window.instance.updateParameters({ mode: '1' })
+    window.instance.runtime.updateParameters({ mode: '0' })
+    window.instance.runtime.replaceDefinition(make('invalid-easing'))
+    window.instance.runtime.updateParameters({ mode: '1' })
 
     const count = document.getAnimations().length
 
-    window.instance.replaceDefinition(make('linear'))
-    window.instance.updateParameters({ mode: '1' })
+    window.instance.runtime.replaceDefinition(make('linear'))
+    window.instance.runtime.updateParameters({ mode: '1' })
 
-    const recovered = window.instance.animations.length > 0
+    const recovered = window.nativeEffects(window.instance.executor).length > 0
 
-    window.instance.dispose()
+    window.instance.runtime.dispose()
 
     return { count, recovered, errors: window.errors.map((error) => error.code) }
   })
@@ -446,12 +463,12 @@ test('opaque CSS reaches the adapter', async ({ page }) => {
       })),
     }
 
-    window.instance.replaceDefinition(definition)
-    window.instance.updateParameters({ mode: 'on' })
+    window.instance.runtime.replaceDefinition(definition)
+    window.instance.runtime.updateParameters({ mode: 'on' })
 
-    const count = window.instance.animations.length
+    const count = window.nativeEffects(window.instance.executor).length
 
-    window.instance.dispose()
+    window.instance.runtime.dispose()
 
     return { count, errors: window.errors.map((error) => error.code) }
   })
@@ -502,11 +519,13 @@ for (const [easing, expected] of [
         })),
       }
 
-      window.instance.replaceDefinition(definition)
-      window.instance.updateParameters({ mode: 'on' })
-      await Promise.all(window.instance.animations.map((animation) => animation.ready))
+      window.instance.runtime.replaceDefinition(definition)
+      window.instance.runtime.updateParameters({ mode: 'on' })
+      await Promise.all(
+        window.nativeEffects(window.instance.executor).map((animation) => animation.ready),
+      )
 
-      const animation = window.instance.animations[0]
+      const animation = window.nativeEffects(window.instance.executor)[0]
 
       animation.pause()
       animation.currentTime = 250
@@ -516,7 +535,7 @@ for (const [easing, expected] of [
         effectEasing: animation.effect!.getTiming().easing,
       }
 
-      window.instance.dispose()
+      window.instance.runtime.dispose()
 
       return snapshot
     }, easing)
@@ -599,12 +618,14 @@ test('keyframe easing applies to the outgoing interval only', async ({ page }) =
       ],
     }
 
-    window.instance.replaceDefinition(definition)
-    window.instance.updateParameters({ mode: 'on' })
+    window.instance.runtime.replaceDefinition(definition)
+    window.instance.runtime.updateParameters({ mode: 'on' })
 
-    await Promise.all(window.instance.animations.map((animation) => animation.ready))
+    await Promise.all(
+      window.nativeEffects(window.instance.executor).map((animation) => animation.ready),
+    )
 
-    const animation = window.instance.animations[0]
+    const animation = window.nativeEffects(window.instance.executor)[0]
 
     animation.pause()
     animation.currentTime = 250
@@ -615,7 +636,7 @@ test('keyframe easing applies to the outgoing interval only', async ({ page }) =
 
     const secondInterval = Number(getComputedStyle(window.track).opacity)
 
-    window.instance.dispose()
+    window.instance.runtime.dispose()
 
     return { firstInterval, secondInterval }
   })
@@ -631,20 +652,20 @@ test('definition replacement preserves duplicate suspension and disposal respect
     const { instance, track, thumb, definition } = window
     const extra = document.createElement('div')
     document.body.append(extra)
-    instance.bind([
+    instance.executor.bind([
       ['track', track],
       ['thumb', thumb],
       ['thumb', extra],
     ])
-    instance.replaceDefinition(definition)
-    instance.updateParameters({ mode: 'on' })
-    const suspended = instance.animations.length
-    instance.bind([
+    instance.runtime.replaceDefinition(definition)
+    instance.runtime.updateParameters({ mode: 'on' })
+    const suspended = window.nativeEffects(instance.executor).length
+    instance.executor.bind([
       ['track', track],
       ['thumb', thumb],
     ])
     track.style.backgroundColor = 'rgb(9, 8, 7)'
-    instance.dispose()
+    instance.runtime.dispose()
     return {
       suspended,
       retained: track.style.backgroundColor,
@@ -691,9 +712,9 @@ test('restores shorthand side effects and overlapping longhands with priorities'
         },
       ],
     } satisfies PropertyIRDefinition
-    const instance = new window.liva.LivaInstance(definition, {})
-    instance.bind([['box', element]])
-    instance.dispose()
+    const instance = window.assembleRuntime(definition, {})
+    instance.executor.bind([['box', element]])
+    instance.runtime.dispose()
     return {
       css: element.style.cssText,
       value: element.style.marginLeft,
@@ -736,11 +757,11 @@ test('restores variable shorthands without overwriting unrelated external edits'
         },
       ],
     } satisfies PropertyIRDefinition
-    const instance = new window.liva.LivaInstance(definition, {})
-    instance.bind([['box', element]])
+    const instance = window.assembleRuntime(definition, {})
+    instance.executor.bind([['box', element]])
     element.style.width = '20px'
     element.style.removeProperty('color')
-    instance.dispose()
+    instance.runtime.dispose()
     return { margin: element.style.margin, width: element.style.width, color: element.style.color }
   })
 
@@ -776,14 +797,14 @@ test('tracks pending shorthand substitutions and retains external priority remov
         },
       ],
     } satisfies PropertyIRDefinition
-    const instance = new window.liva.LivaInstance(definition, {})
-    instance.bind([['box', element]])
-    instance.dispose()
+    const instance = window.assembleRuntime(definition, {})
+    instance.executor.bind([['box', element]])
+    instance.runtime.dispose()
     const restored = element.style.margin
-    const second = new window.liva.LivaInstance(definition, {})
-    second.bind([['box', element]])
+    const second = window.assembleRuntime(definition, {})
+    second.executor.bind([['box', element]])
     element.style.width = '20px'
-    second.dispose()
+    second.runtime.dispose()
     return {
       restored,
       margin: element.style.margin,
