@@ -79,7 +79,7 @@ Individual checks:
 | Rust tests                        | `cargo test --workspace --locked`                                |
 | WASM serialization contract       | `node scripts/test-wasm.ts`                                      |
 | Types, lint and formatting        | `pnpm check`                                                     |
-| Unit and component tests          | `vp test --run`                                                  |
+| Unit and component tests          | `pnpm test`                                                      |
 | Browser integration               | `pnpm exec playwright test`                                      |
 | Production isolation and playback | `node scripts/test-production.ts`                                |
 
@@ -92,9 +92,13 @@ Keep the root Vize/Vite+ configuration wrapper for browser test initialization.
 Place browser compatibility tests alongside the implementation as
 `*.cross-browser.test.ts`. The root test configuration runs these files in Chromium,
 Firefox and WebKit; `*.browser.test.ts` runs in Chromium, and other `*.test.ts` files
-run in Node. `vp test --run` includes all three groups. CI includes the Chromium
-compatibility tests in the unit/component coverage check and runs Firefox and
-WebKit compatibility tests in their browser matrix jobs.
+run in Node. `pnpm test` runs all three groups in two stages: `test:coverage`
+checks Node and Chromium with the required 100% V8 coverage, then
+`test:compatibility` runs Firefox and WebKit without coverage. V8 coverage requires
+Chromium, so a coverage-enabled run must select the Node/Chromium projects. Use
+`pnpm run test:coverage` for that selection. `scripts/verify.sh` uses the same
+complete `pnpm test` entry. CI runs the coverage stage in its checks job and the
+Firefox/WebKit compatibility projects in their browser matrix jobs.
 
 To run only the compatibility tests without whole-package coverage checks:
 

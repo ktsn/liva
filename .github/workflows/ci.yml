@@ -94,7 +94,7 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Run unit and component tests
-        run: vp test --run --project unit --project 'browser*' --project cross-browser-chromium
+        run: pnpm run test:coverage
 
       - name: Check production isolation and playback
         run: node scripts/test-production.ts
