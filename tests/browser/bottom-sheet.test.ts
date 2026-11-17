@@ -71,6 +71,7 @@ async function grab(page: Page) {
   await handle.evaluate((element) => {
     element.removeAttribute('data-before-grab')
     element.removeAttribute('data-after-grab')
+    element.removeAttribute('data-grab-active')
 
     element.addEventListener(
       'pointerdown',
@@ -87,12 +88,25 @@ async function grab(page: Page) {
           'data-motion-active',
           String(sheet.getAnimations().some((animation) => animation.playState === 'running')),
         )
-
-        queueMicrotask(() => {
-          element.setAttribute('data-after-grab', getComputedStyle(sheet).insetBlockStart)
-        })
       },
       { once: true, capture: true },
+    )
+
+    // Liva's mounted bubble listener runs first. Native event dispatch may run
+    // microtasks between listeners, so a capture-phase microtask is too early.
+    element.addEventListener(
+      'pointerdown',
+      () => {
+        const sheet = element.closest('.bottom-sheet')!
+        const frame = element.closest('.sheet-frame')!
+
+        element.setAttribute('data-after-grab', getComputedStyle(sheet).insetBlockStart)
+        element.setAttribute(
+          'data-grab-active',
+          getComputedStyle(frame).getPropertyValue('--dragging').trim(),
+        )
+      },
+      { once: true },
     )
   })
 
@@ -103,7 +117,7 @@ async function grab(page: Page) {
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
   await page.mouse.down()
 
-  return handle.evaluate((element) => {
+  const acquired = await handle.evaluate((element) => {
     const before = element.getAttribute('data-before-grab')
     const after = element.getAttribute('data-after-grab')
 
@@ -117,8 +131,13 @@ async function grab(page: Page) {
       before: parseFloat(before),
       after: parseFloat(after),
       animating: element.getAttribute('data-motion-active') === 'true',
+      active: element.getAttribute('data-grab-active') === '1',
     }
   })
+
+  expect(acquired.active).toBe(true)
+
+  return acquired
 }
 
 async function dragTo(page: Page, sheetY: number, hold = true) {
