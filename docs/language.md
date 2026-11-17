@@ -420,6 +420,8 @@ disables automatic projection and child compensation on that target. Ordinary CS
 transform is temporarily overridden while automatic projection owns the target.
 A CSS rotation can disappear during projection and return when it completes. Release
 reveals the current stylesheet/inline values, including edits made while animating.
+A CSS transform transition on that owned target can be interrupted; transitions of
+other properties and unprojected ancestors retain their ordinary ownership.
 Changing that hidden target transform alone does not restart its own layout motion;
 changes to the natural containing block of absolute descendants remain layout changes.
 Width, height, translate and scale do not participate in conflict detection or

@@ -531,6 +531,17 @@ export class ProjectionReadPhase {
               height: element.clientHeight,
             })
             const scrolling = element.ownerDocument.scrollingElement === element
+            // A temporary generic effect can suppress a CSS transition before
+            // its first presentation. Keep native transition creation/timing in
+            // the read-only path, including idle declarations with a delay.
+            const transformTransition =
+              style.transitionProperty
+                .split(',')
+                .some((property) => ['all', 'transform'].includes(property.trim())) &&
+              [style.transitionDuration, style.transitionDelay].some((times) =>
+                times.split(',').some((time) => parseFloat(time) !== 0),
+              )
+            if (transformTransition) observationSafe = false
             if (
               [style.overflowX, style.overflowY].some((value) =>
                 ['auto', 'scroll', 'hidden'].includes(value),

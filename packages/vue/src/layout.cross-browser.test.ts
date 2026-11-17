@@ -1978,4 +1978,136 @@ describe('Vue coordinated layout projection', () => {
     expect(target.getAnimations()).toEqual([])
     expect(frames.size).toBe(0)
   })
+  it.each(
+    [false, true].flatMap((important) =>
+      ['idle', 'paused', 'running'].map((mode) => ({ important, mode })),
+    ),
+  )(
+    'owns target transform output over CSS transitions and releases current CSS without touching opacity: %j',
+    async ({ important, mode }) => {
+      const width = ref(100)
+      const source: Definition = {
+        ...definition(),
+        layers: [
+          {
+            name: 'base',
+            targets: [
+              {
+                name: 'self',
+                properties: [
+                  {
+                    kind: 'layout',
+                    name: '$layout',
+                    axes: { x: false, y: false, width: true, height: false },
+                    timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }
+      const priority = important ? '!important' : ''
+      const { host, errors } = await mount(
+        motionComponent(source, ({ root }) => [
+          h(
+            'style',
+            `.liva-owned-transition { transform:translateX(0px) ${priority}; opacity:1; transition:transform 1000ms linear, opacity 1000ms linear; } .liva-owned-transition.shifted { transform:translateX(80px) ${priority}; opacity:.5; } .liva-owned-transition.current { transform:translateX(120px) ${priority}; }`,
+          ),
+          root(
+            h('div', {
+              'data-item': '',
+              class: 'liva-owned-transition',
+              style: { width: `${width.value}px`, height: '40px', transformOrigin: '0 0' },
+            }),
+          ),
+        ]),
+      )
+      const target = element(host)
+      let opacity: Animation | undefined
+      const events: string[] = []
+      target.addEventListener('transitioncancel', (event) => events.push(event.propertyName))
+
+      if (mode !== 'idle') {
+        getComputedStyle(target).getPropertyValue('transform')
+        target.classList.add('shifted')
+        await nativeTurn()
+        const effects = target
+          .getAnimations()
+          .filter((animation): animation is CSSTransition => animation instanceof CSSTransition)
+        const transform = effects.find((animation) => animation.transitionProperty === 'transform')
+        opacity = effects.find((animation) => animation.transitionProperty === 'opacity')
+        if (!transform || !opacity)
+          throw new Error('Expected real source transform and opacity transitions')
+        await Promise.all(effects.map((animation) => animation.ready))
+        if (mode === 'paused') {
+          transform.pause()
+          transform.currentTime = 400
+          opacity.pause()
+          opacity.currentTime = 250
+        }
+      }
+      const opacityEffect = opacity?.effect
+      const opacityTime = opacity?.currentTime
+      const opacityStart = opacity?.startTime
+      const completion = opacity?.finished
+      const reference = document.createElement('div')
+      reference.style.cssText = 'width:200px;height:40px;transform-origin:0 0'
+      host.append(reference)
+      const native = reference.animate([{ transform: 'scaleX(.5)' }, { transform: 'scaleX(1)' }], {
+        duration: 1000,
+        fill: 'both',
+        easing: 'linear',
+      })
+      native.pause()
+      native.currentTime = 0
+
+      try {
+        width.value = 200
+        await flush()
+        expect(target.getBoundingClientRect().width).toBeCloseTo(
+          reference.getBoundingClientRect().width,
+          3,
+        )
+        for (const delta of [250, 250]) {
+          frame(delta)
+          native.currentTime = time - 1000
+          expect(target.getBoundingClientRect().width).toBeCloseTo(
+            reference.getBoundingClientRect().width,
+            3,
+          )
+        }
+        target.classList.add('current')
+        await flush()
+        frame(500)
+        expect(target.style.transform).toBe('')
+        expect(target.getBoundingClientRect().width).toBeCloseTo(200, 3)
+        expect(new DOMMatrix(getComputedStyle(target).transform).e).toBeCloseTo(120, 3)
+        expect(target.getAnimations()).toHaveLength(mode === 'idle' ? 0 : 1)
+        expect(target.getAnimations()[0]).toBe(opacity)
+        expect(opacity?.effect).toBe(opacityEffect)
+        expect(opacity?.startTime).toBe(opacityStart)
+        expect(opacity?.finished).toBe(completion)
+        expect(events.filter((property) => property === 'opacity')).toEqual([])
+        expect(mode === 'paused' ? opacity?.currentTime : undefined).toBe(
+          mode === 'paused' ? opacityTime : undefined,
+        )
+        if (mode === 'running') {
+          await nativeTurn()
+          await nativeTurn()
+        }
+        expect(mode === 'running' ? Number(opacity?.currentTime) > Number(opacityTime) : true).toBe(
+          true,
+        )
+        if (opacity) {
+          opacity.finish()
+          await completion
+        }
+        expect(errors).toEqual([])
+      } finally {
+        native.cancel()
+        reference.remove()
+      }
+    },
+  )
 })
