@@ -150,4 +150,62 @@ describe('affine projection in real browsers', () => {
       root.remove()
     }
   })
+  it.each([
+    { width: 0, oldHeight: 40, height: 40 },
+    { width: 50, oldHeight: 0, height: 0 },
+    { width: 0, oldHeight: 0, height: 0 },
+    { width: 0, oldHeight: 40, height: 80 },
+  ])(
+    'projects measurable collapsed axes through a skewed frame: %j',
+    ({ width, oldHeight, height }) => {
+      const wrapper = document.createElement('div')
+      const child = document.createElement('div')
+      const ancestor = ancestors[1]
+      const frame = multiplyProjection(ancestor, { a: 1, b: 0, c: 0, d: 1, e: 20, f: 100 })
+      const oldFrame = multiplyProjection(ancestor, { a: 1, b: 0, c: 0, d: 1, e: 20, f: 20 })
+      const destination = { x: frame.e, y: frame.f, width, height }
+      const motion = projectionMotion(
+        {
+          box: { x: oldFrame.e, y: oldFrame.f, width, height: oldHeight },
+          velocity: { x: 0, y: 0, width: 0, height: 0 },
+        },
+        destination,
+        { x: true, y: true, width: false, height: true },
+        { kind: 'tween', durationMs: 100, easing: 'linear' },
+      )
+
+      if (motion.kind !== 'motion') throw new Error('Expected collapsed-axis motion')
+
+      wrapper.style.cssText = `position: absolute; left: 0; top: 0; transform-origin: 0 0; transform: ${css(ancestor)}`
+      child.style.cssText = `position: absolute; left: 20px; top: 100px; width: ${width}px; height: ${height}px; transform-origin: 0 0`
+      wrapper.append(child)
+      document.body.append(wrapper)
+
+      try {
+        for (const time of [0, 50, 100]) {
+          const sample = motion.sample(time)
+          const correction = projectionTransform(sample.box, destination, frame)
+
+          if (correction.kind !== 'projection') throw new Error('Expected collapsed-axis transform')
+
+          child.style.transform = correction.transform
+
+          const progress = time / 100
+          const expected = {
+            ...ancestor,
+            e: oldFrame.e + (frame.e - oldFrame.e) * progress,
+            f: oldFrame.f + (frame.f - oldFrame.f) * progress,
+          }
+          const measured = readLayoutBounds(child, wrapper)
+
+          expectRenderedBox(child, expected, width, oldHeight + (height - oldHeight) * progress)
+          expect(measured.attached).toBe(true)
+          expect(measured.width).toBe(width)
+          expect(measured.height).toBe(height)
+        }
+      } finally {
+        wrapper.remove()
+      }
+    },
+  )
 })

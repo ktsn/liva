@@ -348,3 +348,199 @@ describe('projection numeric boundaries', () => {
     expect(projectionState({ ...components, velocityScaleX: 1e308 }, destination)).toBeUndefined()
   })
 })
+
+describe('measurable collapsed axes', () => {
+  const positionOnly = { x: true, y: true, width: false, height: false }
+  const rest = { x: 0, y: 0, width: 0, height: 0 }
+
+  it.each([
+    { width: 0, height: 40 },
+    { width: 50, height: 0 },
+    { width: 0, height: 0 },
+  ])('animates position and roundtrips unchanged collapsed dimensions: %j', (dimensions) => {
+    const previous = { x: 10, y: 20, ...dimensions }
+    const next = { x: 30, y: 100, ...dimensions }
+    const motion = moving(
+      projectionMotion({ box: previous, velocity: rest }, next, positionOnly, physics),
+    )
+    const first = motion.sample(0)
+    const components = projectionComponents(first, next)
+
+    if (!components) throw new Error('Expected position components')
+
+    expect(first.box).toEqual(previous)
+    expect(motion.sample(40).box.x).toBeGreaterThan(previous.x)
+    expect(motion.sample(40).box.y).toBeGreaterThan(previous.y)
+    expect(motion.sample(40).box.width).toBe(dimensions.width)
+    expect(motion.sample(40).box.height).toBe(dimensions.height)
+    expect(components.scaleX).toBe(1)
+    expect(components.scaleY).toBe(1)
+    expect(components.velocityScaleX).toBe(0)
+    expect(components.velocityScaleY).toBe(0)
+    expect(projectionState(components, next)).toEqual(first)
+
+    const transform = projectionTransform(first.box, next)
+
+    if (transform.kind !== 'projection') throw new Error('Expected position projection')
+
+    expectMatrix(transform.matrix, { ...identityProjection, e: -20, f: -80 })
+  })
+
+  it('animates the reported y-only zero-width case without any scale ratio', () => {
+    const previous = { x: 10, y: 20, width: 0, height: 40 }
+    const next = { ...previous, y: 100 }
+    const motion = moving(
+      projectionMotion(
+        { box: previous, velocity: rest },
+        next,
+        { x: false, y: true, width: false, height: false },
+        physics,
+      ),
+    )
+    const first = projectionTransform(motion.sample(0).box, next)
+
+    if (first.kind !== 'projection') throw new Error('Expected y-only transform')
+
+    expect(motion.sample(40).box.y).toBeGreaterThan(previous.y)
+    expect(motion.sample(40).box.x).toBe(previous.x)
+    expectMatrix(first.matrix, { ...identityProjection, f: -80 })
+  })
+
+  it('snaps an inactive zero-size change while animating only y position', () => {
+    const previous = { x: 10, y: 20, width: 0, height: 40 }
+    const next = { x: 10, y: 100, width: 80, height: 40 }
+    const motion = moving(
+      projectionMotion(
+        { box: previous, velocity: rest },
+        next,
+        { x: false, y: true, width: false, height: false },
+        physics,
+      ),
+    )
+
+    expect(motion.sample(0).box).toEqual({ ...previous, width: 80 })
+    expect(motion.sample(40).box.y).toBeGreaterThan(previous.y)
+    expect(motion.sample(40).box.width).toBe(80)
+  })
+
+  it('clears stale velocity on inactive collapsed axes before planning mixed position/size motion', () => {
+    const previous = { x: 10, y: 20, width: 0, height: 40 }
+    const next = { x: 10, y: 100, width: 0, height: 80 }
+    const motion = moving(
+      projectionMotion(
+        { box: previous, velocity: { ...rest, width: 2 } },
+        next,
+        { x: false, y: true, width: false, height: true },
+        physics,
+      ),
+    )
+    const first = motion.sample(0)
+    const transform = projectionTransform(first.box, next)
+
+    if (transform.kind !== 'projection') throw new Error('Expected mixed-axis projection')
+
+    expect(first.velocity.width).toBe(0)
+    expect(motion.sample(40).box.width).toBe(0)
+    expect(motion.sample(40).box.height).toBeGreaterThan(previous.height)
+    expect(transform.scale).toEqual({ x: 1, y: 0.5 })
+    expectMatrix(transform.matrix, { ...identityProjection, d: 0.5, f: -80 })
+  })
+
+  it.each([
+    { oldSize: 40, size: 0 },
+    { oldSize: 0, size: 40 },
+  ])('settles a required singular/undefined size projection: %j', ({ oldSize, size }) => {
+    for (const axis of ['width', 'height'] as const) {
+      const previous = { x: 10, y: 20, width: 40, height: 40, [axis]: oldSize }
+      const next = { ...previous, [axis]: size }
+
+      expect(projectionMotion({ box: previous, velocity: rest }, next, all, physics)).toEqual({
+        kind: 'settle',
+        reason: 'geometry',
+      })
+      expect(projectionComponents({ box: previous, velocity: rest }, next)).toBeUndefined()
+      expect(projectionTransform(previous, next)).toEqual({ kind: 'settle', reason: 'geometry' })
+    }
+  })
+
+  it('rejects nonzero selected size velocity on an unchanged zero-size axis', () => {
+    const collapsed = { x: 10, y: 20, width: 0, height: 0 }
+
+    for (const axis of ['width', 'height'] as const) {
+      const state = { box: collapsed, velocity: { ...rest, [axis]: 1 } }
+
+      expect(projectionMotion(state, collapsed, all, physics)).toEqual({
+        kind: 'settle',
+        reason: 'geometry',
+      })
+      expect(projectionComponents(state, collapsed)).toBeUndefined()
+    }
+  })
+
+  it('rejects noncanonical collapsed-axis components instead of silently discarding size or velocity', () => {
+    const collapsed = { x: 10, y: 20, width: 0, height: 0 }
+    const canonical = projectionComponents({ box: collapsed, velocity: rest }, collapsed)
+
+    if (!canonical) throw new Error('Expected canonical components')
+
+    expect(projectionState({ ...canonical, scaleX: 2 }, collapsed)).toBeUndefined()
+    expect(projectionState({ ...canonical, scaleY: 2 }, collapsed)).toBeUndefined()
+    expect(projectionState({ ...canonical, velocityScaleX: 1 }, collapsed)).toBeUndefined()
+    expect(projectionState({ ...canonical, velocityScaleY: 1 }, collapsed)).toBeUndefined()
+    expect(projectionState({ ...canonical, scaleY: 0 }, collapsed)).toBeUndefined()
+  })
+})
+
+describe('projection representation limits', () => {
+  it('settles when a finite ratio cannot be represented through the supplied frame', () => {
+    const unit = { x: 0, y: 0, width: 1, height: 1 }
+    const collapsedFrames = [
+      {
+        frame: { a: 1e-200, b: 0, c: 0, d: 1e200, e: 0, f: 0 },
+        destination: { ...unit, width: 1e200 },
+      },
+      {
+        frame: { a: 1e200, b: 0, c: 0, d: 1e-200, e: 0, f: 0 },
+        destination: { ...unit, height: 1e200 },
+      },
+    ]
+
+    for (const entry of collapsedFrames) {
+      expect(projectionTransform(unit, entry.destination, entry.frame)).toEqual({
+        kind: 'settle',
+        reason: 'geometry',
+      })
+    }
+
+    expect(
+      projectionTransform({ ...unit, width: 1e200 }, unit, {
+        a: 1e200,
+        b: 0,
+        c: 0,
+        d: 1e-200,
+        e: 0,
+        f: 0,
+      }),
+    ).toEqual({ kind: 'settle', reason: 'geometry' })
+  })
+
+  it('rejects unrepresentable translation independently of finite dimension ratios', () => {
+    expect(
+      projectionComponents(
+        { ...start, box: { ...start.box, x: 1e308 } },
+        { ...destination, x: -1e308 },
+      ),
+    ).toBeUndefined()
+  })
+
+  it('settles an unrepresentable size-velocity ratio independently of the size ratio', () => {
+    const tiny = { x: 0, y: 0, width: 1e-308, height: 1 }
+    const state = { box: tiny, velocity: { x: 0, y: 0, width: 1e308, height: 0 } }
+
+    expect(projectionComponents(state, tiny)).toBeUndefined()
+    expect(projectionMotion(state, tiny, all, physics)).toEqual({
+      kind: 'settle',
+      reason: 'geometry',
+    })
+  })
+})

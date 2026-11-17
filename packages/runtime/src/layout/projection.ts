@@ -95,8 +95,26 @@ function box(values: readonly number[]): ProjectionBox {
   return { x: values[0], y: values[1], width: values[2], height: values[3] }
 }
 
-function usableBox(value: ProjectionBox): boolean {
-  return vector(value).every(Number.isFinite) && value.width > 0 && value.height > 0
+function measurableBox(value: ProjectionBox): boolean {
+  return vector(value).every(Number.isFinite) && value.width >= 0 && value.height >= 0
+}
+
+/**
+ * An unchanged collapsed dimension needs no scaling: identity/rate zero preserves
+ * its physical state without dividing 0/0. Changed or moving collapsed dimensions
+ * cannot be represented by an invertible generated scale and settle instead.
+ */
+function dimensionComponents(
+  value: number,
+  destination: number,
+  velocity: number,
+): readonly [number, number] | undefined {
+  if (destination === 0) return value === 0 && velocity === 0 ? [1, 0] : undefined
+
+  const scale = value / destination
+  const rate = velocity / destination
+
+  return scale > 0 && Number.isFinite(scale) && Number.isFinite(rate) ? [scale, rate] : undefined
 }
 
 /**
@@ -118,6 +136,9 @@ export type ProjectionTweenSampler = (elapsedMs: number) => { value: number; vel
 /**
  * Plans retained four-component motion without DOM reads or writes. Active axes
  * retain displayed shape/velocity; inactive axes immediately use destination/rest.
+ * Measurable zero width/height does not prevent position motion. An unchanged zero
+ * dimension with no selected size velocity needs no scale; selected size motion
+ * from/to zero settles because its generated scale would be undefined or singular.
  * Springs reuse property motion and inherit px/ms velocity, including at equal
  * endpoints. Tweens replace incoming velocity like ordinary CSS interpolation.
  * Linear easing is built in; other easings require a supplied browser sampler so
@@ -137,8 +158,8 @@ export function projectionMotion(
   if (!start || !destination) return { kind: 'settle', reason: 'missing' }
 
   if (
-    !usableBox(start.box) ||
-    !usableBox(destination) ||
+    !measurableBox(start.box) ||
+    !measurableBox(destination) ||
     !vector(start.velocity).every(Number.isFinite)
   )
     return { kind: 'settle', reason: 'geometry' }
@@ -149,6 +170,12 @@ export function projectionMotion(
   const end = vector(destination)
   const initial = axes.map((axis) => (selection[axis] ? start.box[axis] : destination[axis]))
   const velocity = axes.map((axis) => (selection[axis] ? start.velocity[axis] : 0))
+
+  if (
+    !dimensionComponents(initial[2], end[2], velocity[2]) ||
+    !dimensionComponents(initial[3], end[3], velocity[3])
+  )
+    return { kind: 'settle', reason: 'geometry' }
 
   if (initial.every((value, index) => value === end[index] && velocity[index] === 0))
     return { kind: 'settle', reason: 'inactive' }
@@ -215,7 +242,9 @@ export interface ProjectionComponents {
 /**
  * Converts displayed physical state into a new stationary destination basis.
  * Translation is relative to destination origin; scale and size velocity divide by
- * destination width/height. Undefined means invalid or unrepresentable geometry.
+ * destination width/height. An unchanged zero dimension with zero size velocity
+ * uses identity scale/rate zero. Changed or moving zero dimensions return undefined,
+ * as do nonfinite or unrepresentable components.
  * Use physical state when retargeting, rather than reusing old scale ratios.
  */
 export function projectionComponents(
@@ -223,21 +252,26 @@ export function projectionComponents(
   destination: ProjectionBox,
 ): ProjectionComponents | undefined {
   if (
-    !usableBox(state.box) ||
-    !usableBox(destination) ||
+    !measurableBox(state.box) ||
+    !measurableBox(destination) ||
     !vector(state.velocity).every(Number.isFinite)
   )
     return undefined
 
+  const horizontal = dimensionComponents(state.box.width, destination.width, state.velocity.width)
+  const vertical = dimensionComponents(state.box.height, destination.height, state.velocity.height)
+
+  if (!horizontal || !vertical) return undefined
+
   const result = {
     translateX: state.box.x - destination.x,
     translateY: state.box.y - destination.y,
-    scaleX: state.box.width / destination.width,
-    scaleY: state.box.height / destination.height,
+    scaleX: horizontal[0],
+    scaleY: vertical[0],
     velocityX: state.velocity.x,
     velocityY: state.velocity.y,
-    velocityScaleX: state.velocity.width / destination.width,
-    velocityScaleY: state.velocity.height / destination.height,
+    velocityScaleX: horizontal[1],
+    velocityScaleY: vertical[1],
   }
 
   return Object.values(result).every(Number.isFinite) ? result : undefined
@@ -245,13 +279,25 @@ export function projectionComponents(
 
 /**
  * Recovers displayed physical state from components in a stationary destination
- * basis. Undefined means invalid/collapsed geometry or unrepresentable components.
+ * basis. A zero destination dimension requires identity scale and rate zero, its
+ * canonical representation; other components cannot preserve that physical state.
+ * Undefined means negative/nonfinite geometry, a singular scale, or unrepresentable
+ * components. Unchanged collapsed axes remain available for position-only motion.
  */
 export function projectionState(
   components: ProjectionComponents,
   destination: ProjectionBox,
 ): ProjectionState | undefined {
-  if (!usableBox(destination) || !Object.values(components).every(Number.isFinite)) return undefined
+  if (!measurableBox(destination) || !Object.values(components).every(Number.isFinite))
+    return undefined
+
+  if (
+    components.scaleX <= 0 ||
+    components.scaleY <= 0 ||
+    (destination.width === 0 && (components.scaleX !== 1 || components.velocityScaleX !== 0)) ||
+    (destination.height === 0 && (components.scaleY !== 1 || components.velocityScaleY !== 0))
+  )
+    return undefined
 
   const result = {
     box: {
@@ -268,7 +314,7 @@ export function projectionState(
     },
   }
 
-  return usableBox(result.box) && vector(result.velocity).every(Number.isFinite)
+  return measurableBox(result.box) && vector(result.velocity).every(Number.isFinite)
     ? result
     : undefined
 }
@@ -304,7 +350,9 @@ export type ProjectionTransformResult =
  * prevents doubled projection; arbitrary supported 2D ancestors can create local
  * off-diagonal compensation terms. These are coordinate conversion, not composition
  * with the target's CSS transform, which the caller overrides until release.
- * Nonfinite, zero, negative or singular shapes settle explicitly. Negative spring
+ * Unchanged zero dimensions use identity scale, allowing position-only motion.
+ * Changed zero dimensions require undefined/singular scaling and settle explicitly,
+ * as do nonfinite/negative geometry and singular coordinate maps. Negative spring
  * size overshoot is settled instead of reflecting content through a collapsed box.
  * A stationary opted-in child still needs this compensation while any ancestor is
  * projected, even after its own motion finishes. Caller owns all writes,
@@ -322,8 +370,8 @@ export function projectionTransform(
   origin: Readonly<{ x: number; y: number }> = { x: 0, y: 0 },
 ): ProjectionTransformResult {
   if (
-    !usableBox(displayed) ||
-    !usableBox(destination) ||
+    !measurableBox(displayed) ||
+    !measurableBox(destination) ||
     ![origin.x, origin.y].every(Number.isFinite)
   )
     return { kind: 'settle', reason: 'geometry' }
@@ -333,8 +381,13 @@ export function projectionTransform(
 
   if (!inverseFrame || !inverseAncestor) return { kind: 'settle', reason: 'singular' }
 
-  const sx = displayed.width / destination.width
-  const sy = displayed.height / destination.height
+  const horizontal = dimensionComponents(displayed.width, destination.width, 0)
+  const vertical = dimensionComponents(displayed.height, destination.height, 0)
+
+  if (!horizontal || !vertical) return { kind: 'settle', reason: 'geometry' }
+
+  const sx = horizontal[0]
+  const sy = vertical[0]
   const desiredFrame = {
     a: localToReference.a * sx,
     b: localToReference.b * sx,
