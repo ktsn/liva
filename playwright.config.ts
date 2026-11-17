@@ -3,8 +3,7 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './tests/browser',
   fullyParallel: true,
-  // HMR tests edit source files shared by every browser and page.
-  workers: 1,
+  workers: process.env.CI ? 2 : undefined,
   use: { baseURL: 'http://127.0.0.1:4179' },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },

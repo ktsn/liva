@@ -1,27 +1,31 @@
 import { expect, it } from 'vite-plus/test'
 import { userEvent } from 'vite-plus/test/browser'
 import { interaction } from './interaction.ts'
+import type { RuntimeValue } from '../evaluation/reactive-value.ts'
 
-function bindInteraction(initiallyFocused = false) {
+async function bindInteraction(initiallyFocused = false) {
   const element = document.createElement('button')
   element.textContent = 'Interaction target'
   document.body.append(element)
 
+  // Establish native pointer state before counting notifications from the operation under test.
+  await userEvent.unhover(element)
+
   if (initiallyFocused) element.focus()
 
+  await nextFrame()
+
   const subscription = interaction({ target: { name: 'body' } })
-  let updates = 0
-  const cleanup = subscription.bind(new Map([['body', element]]), () => {
-    updates++
+  const updates: RuntimeValue[] = []
+  const cleanup = subscription.bind(new Map([['body', element]]), (value) => {
+    updates.push(value)
   })
 
   return {
     element,
     subscription,
     cleanup,
-    get updates() {
-      return updates
-    },
+    updates,
   }
 }
 
@@ -29,8 +33,8 @@ async function nextFrame() {
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 }
 
-it('initializes from the target matching state', () => {
-  const binding = bindInteraction(true)
+it('initializes from the target matching state', async () => {
+  const binding = await bindInteraction(true)
 
   try {
     expect(binding.subscription.value).toMatchObject({
@@ -45,20 +49,20 @@ it('initializes from the target matching state', () => {
 })
 
 it('publishes focus changes from the bound target', async () => {
-  const binding = bindInteraction()
+  const binding = await bindInteraction()
 
   try {
     binding.element.focus()
     await nextFrame()
 
     expect(binding.subscription.value).toMatchObject({ focus: true, focusWithin: true })
-    expect(binding.updates).toBe(1)
+    expect(binding.updates).toHaveLength(1)
 
     binding.element.blur()
     await nextFrame()
 
     expect(binding.subscription.value).toMatchObject({ focus: false, focusWithin: false })
-    expect(binding.updates).toBe(2)
+    expect(binding.updates).toHaveLength(2)
   } finally {
     binding.cleanup()
     binding.element.remove()
@@ -66,16 +70,16 @@ it('publishes focus changes from the bound target', async () => {
 })
 
 it('does not notify for unchanged snapshots across immediate and deferred rechecks', async () => {
-  const binding = bindInteraction(true)
+  const binding = await bindInteraction(true)
 
   try {
-    const previous = binding.updates
+    const previous = binding.updates.length
 
     document.dispatchEvent(new Event('pointermove'))
     document.dispatchEvent(new Event('pointermove'))
     await nextFrame()
 
-    expect(binding.updates).toBe(previous)
+    expect(binding.updates).toHaveLength(previous)
   } finally {
     binding.cleanup()
     binding.element.remove()
@@ -83,7 +87,7 @@ it('does not notify for unchanged snapshots across immediate and deferred rechec
 })
 
 it('releases listeners and resets the snapshot on disposal', async () => {
-  const binding = bindInteraction()
+  const binding = await bindInteraction()
 
   try {
     await userEvent.hover(binding.element)
@@ -91,14 +95,14 @@ it('releases listeners and resets the snapshot on disposal', async () => {
     binding.element.focus()
     binding.cleanup()
 
-    const previous = binding.updates
+    const previous = binding.updates.length
 
     binding.element.blur()
     binding.element.focus()
     await userEvent.hover(binding.element)
     await nextFrame()
 
-    expect(binding.updates).toBe(previous)
+    expect(binding.updates).toHaveLength(previous)
     expect(binding.subscription.value).toMatchObject({ focus: false, hover: false })
   } finally {
     binding.cleanup()

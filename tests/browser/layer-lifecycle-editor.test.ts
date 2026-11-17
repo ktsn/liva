@@ -92,68 +92,71 @@ test('leave scrubs bidirectionally without removing the DOM and restores the app
   await expect(first).toHaveCSS('opacity', '1')
 })
 
-test('typed lifecycle source expressions save and reach shared instances through HMR', async ({
-  page,
-  browserName,
-}) => {
-  test.skip(browserName !== 'chromium', 'Shared source writes run once')
+test(
+  'typed lifecycle source expressions save and reach shared instances through HMR',
+  { lock: '-exclusive-' },
+  async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'Shared source writes run once')
 
-  const file = new URL('../../playground/tests/EditorLayerLifecycle.vue', import.meta.url)
-  const original = await readFile(file, 'utf8')
+    const file = new URL('../../playground/tests/EditorLayerLifecycle.vue', import.meta.url)
+    const original = await readFile(file, 'utf8')
 
-  try {
-    await open(page)
-    await page.getByLabel('Existing transition').selectOption('enter-default')
-    await page.getByRole('button', { name: 'Toggle body tracks', exact: true }).click()
-    await page.getByRole('button', { name: 'body.opacity 0%', exact: true }).click()
-    await page.getByLabel('Keyframe source value', { exact: true }).fill('${start * 2}')
-    await page.getByRole('button', { name: 'Apply keyframe', exact: true }).click()
-
-    await expect.poll(() => page.evaluate(() => window.__LIVA_EDITOR__.previewActive)).toBe(true)
-
-    await seek(page, 0)
-
-    await expect(page.getByRole('button', { name: 'First lifecycle', exact: true })).toHaveCSS(
-      'opacity',
-      '0.4',
-    )
-
-    await page.getByRole('button', { name: 'Save to source', exact: true }).click()
-
-    await expect.poll(() => page.evaluate(() => window.__LIVA_EDITOR__.message)).toContain('Saved')
-    await expectCapturedStart(page, '0.4')
-
-    for (const label of ['First lifecycle', 'Second lifecycle']) {
-      const option = page
-        .getByLabel('Preview instance', { exact: true })
-        .getByRole('option', { name: new RegExp(label) })
-      const id = await option.getAttribute('value')
-
-      if (!id) throw new Error(`Missing preview instance: ${label}`)
-
-      await page.getByLabel('Preview instance', { exact: true }).selectOption(id)
+    try {
+      await open(page)
       await page.getByLabel('Existing transition').selectOption('enter-default')
+      await page.getByRole('button', { name: 'Toggle body tracks', exact: true }).click()
+      await page.getByRole('button', { name: 'body.opacity 0%', exact: true }).click()
+      await page.getByLabel('Keyframe source value', { exact: true }).fill('${start * 2}')
+      await page.getByRole('button', { name: 'Apply keyframe', exact: true }).click()
+
+      await expect.poll(() => page.evaluate(() => window.__LIVA_EDITOR__.previewActive)).toBe(true)
+
       await seek(page, 0)
 
-      await expect(page.getByRole('button', { name: label, exact: true })).toHaveCSS(
+      await expect(page.getByRole('button', { name: 'First lifecycle', exact: true })).toHaveCSS(
         'opacity',
         '0.4',
       )
+
+      await page.getByRole('button', { name: 'Save to source', exact: true }).click()
+
+      await expect
+        .poll(() => page.evaluate(() => window.__LIVA_EDITOR__.message))
+        .toContain('Saved')
+      await expectCapturedStart(page, '0.4')
+
+      for (const label of ['First lifecycle', 'Second lifecycle']) {
+        const option = page
+          .getByLabel('Preview instance', { exact: true })
+          .getByRole('option', { name: new RegExp(label) })
+        const id = await option.getAttribute('value')
+
+        if (!id) throw new Error(`Missing preview instance: ${label}`)
+
+        await page.getByLabel('Preview instance', { exact: true }).selectOption(id)
+        await page.getByLabel('Existing transition').selectOption('enter-default')
+        await seek(page, 0)
+
+        await expect(page.getByRole('button', { name: label, exact: true })).toHaveCSS(
+          'opacity',
+          '0.4',
+        )
+      }
+
+      const saved = await readFile(file, 'utf8')
+
+      expect(saved).toContain('0%: ${start * 2}')
+      expect(saved).toContain('@tween(duration: 200, easing: linear)\n  enter')
+      expect(saved.slice(0, saved.indexOf('<liva'))).toBe(
+        original.slice(0, original.indexOf('<liva')),
+      )
+    } finally {
+      await writeFile(file, original)
+
+      await expectCapturedStart(page, '0.2')
     }
-
-    const saved = await readFile(file, 'utf8')
-
-    expect(saved).toContain('0%: ${start * 2}')
-    expect(saved).toContain('@tween(duration: 200, easing: linear)\n  enter')
-    expect(saved.slice(0, saved.indexOf('<liva'))).toBe(
-      original.slice(0, original.indexOf('<liva')),
-    )
-  } finally {
-    await writeFile(file, original)
-
-    await expectCapturedStart(page, '0.2')
-  }
-})
+  },
+)
 
 test('application inputs end lifecycle preview and the next preview captures updated expressions', async ({
   page,
