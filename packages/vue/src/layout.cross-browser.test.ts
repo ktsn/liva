@@ -20,7 +20,7 @@ import {
   type LayoutAxes,
   type RuntimeDiagnostic,
 } from '@liva/runtime'
-import { createLivaPlugin } from './runtime.ts'
+import { createLivaPlugin, type LivaOptions, type InstanceBinding } from './runtime.ts'
 import { LivaPresenceBoundary, type PresenceEntry } from './presence.ts'
 import { measure } from '../../runtime/src/builtins/measure.ts'
 import { readLayoutBounds } from '../../runtime/src/layout/layout-bounds.ts'
@@ -95,13 +95,19 @@ async function flush() {
   await Promise.resolve()
 }
 
-async function mount(component: ReturnType<typeof defineComponent>) {
+async function mount(component: ReturnType<typeof defineComponent>, options: LivaOptions = {}) {
   const host = document.createElement('div')
   document.body.append(host)
   hosts.push(host)
   const errors: RuntimeDiagnostic[] = []
   const app = createApp(component).use(
-    createLivaPlugin({ onDiagnostic: (error) => errors.push(error) }),
+    createLivaPlugin({
+      ...options,
+      onDiagnostic: (error) => {
+        errors.push(error)
+        options.onDiagnostic?.(error)
+      },
+    }),
   )
   apps.push(app)
   app.mount(host)
@@ -2200,5 +2206,104 @@ describe('Vue coordinated layout projection', () => {
     apps.splice(apps.indexOf(app), 1)
     expect(held[0].playState).toBe('idle')
     expect(target.getAnimations()).toEqual([])
+  })
+
+  it('does not recreate runtimes from queued directive hooks after onDiagnostic unmounts the app', async () => {
+    const parentWidth = ref(100)
+    const childWidth = ref(40)
+    const childSource: Definition = {
+      ...definition(),
+      name: 'child',
+      layers: [
+        {
+          ...definition().layers[0],
+          targets: [...definition().layers[0].targets, { name: 'label', properties: [] }],
+        },
+      ],
+    }
+    const child = motionComponent(childSource, ({ root, target }) =>
+      root(
+        h('div', { 'data-child': '', style: { width: `${childWidth.value}px`, height: '30px' } }, [
+          target(
+            h('span', { style: { display: 'block', width: `${childWidth.value}px` } }, 'label'),
+            'label',
+          ),
+        ]),
+      ),
+    )
+    const parent = motionComponent(definition(), ({ root }) =>
+      root(
+        h('div', { 'data-item': '', style: { width: `${parentWidth.value}px`, height: '80px' } }, [
+          h(child),
+          h(child),
+        ]),
+      ),
+    )
+    const records: { event: string; binding: InstanceBinding }[] = []
+    // Installed after healthy mount, before the failure is armed below.
+    let stop!: () => void
+    const { host, app, errors } = await mount(parent, {
+      observe: (event, binding) => records.push({ event, binding }),
+      onDiagnostic: () => stop(),
+    })
+    stop = () => app.unmount()
+
+    const old = records.filter((record) => record.event === 'mount').map((record) => record.binding)
+    expect(old).toHaveLength(3)
+    expect(errors).toEqual([])
+
+    const handled: unknown[] = []
+    app.config.errorHandler = (error) => {
+      handled.push(error)
+    }
+
+    parentWidth.value = 200
+    await flush()
+    frame(250)
+
+    const cause = new Error('Unmount while reporting failed layout preparation')
+    let preparing = false
+    let fail = true
+    // Retain only for explicit .call(this) in the native fault wrappers.
+    // eslint-disable-next-line typescript/unbound-method
+    const observeLayout = PresentationExecutor.prototype.layoutMeasure
+    // eslint-disable-next-line typescript/unbound-method
+    const pause = Animation.prototype.pause
+    vi.spyOn(PresentationExecutor.prototype, 'layoutMeasure').mockImplementation(function (
+      this: PresentationExecutor,
+      receiver,
+      properties,
+    ) {
+      preparing = true
+
+      try {
+        return observeLayout.call(this, receiver, properties)
+      } finally {
+        preparing = false
+      }
+    })
+    vi.spyOn(Animation.prototype, 'pause').mockImplementation(function (this: Animation) {
+      if (preparing && fail) {
+        fail = false
+        throw cause
+      }
+
+      pause.call(this)
+    })
+
+    childWidth.value = 80
+    await flush()
+    await flush()
+    apps.splice(apps.indexOf(app), 1)
+
+    expect(records.filter((record) => record.event === 'mount')).toHaveLength(3)
+    expect(records.filter((record) => record.event === 'unmount')).toHaveLength(3)
+    expect(old.every((binding) => binding.runtime.isDisposed)).toBe(true)
+    expect(old.every((binding) => binding.bounds() === undefined)).toBe(true)
+    expect(host.children).toHaveLength(0)
+    expect(errors.map((error) => error.error)).toEqual([cause])
+    expect(handled).toEqual([cause])
+    expect(frames.size).toBe(0)
+    expect(document.getAnimations()).toEqual([])
   })
 })

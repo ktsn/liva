@@ -89,6 +89,14 @@ function sameKey(a: readonly unknown[], b: readonly unknown[]) {
 export function createLivaPlugin(options: LivaOptions = {}): Plugin {
   return {
     install(app: App) {
+      let disposed = false
+      // Vue can still deliver already-queued directive hooks after a callback
+      // unmounts the application. Those hooks must not reacquire browser owners.
+      const whileActive =
+        <Args extends unknown[]>(action: (...args: Args) => void) =>
+        (...args: Args) => {
+          if (!disposed) action(...args)
+        }
       const roots = new Map<HTMLElement, RootBinding>()
       const owners = new WeakMap<HTMLElement, object>()
       const targets = new Map<HTMLElement, { name: string; owner: object }>()
@@ -121,12 +129,14 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
 
         layoutScheduled = true
         void nextTick()
-          .then(() => {
-            layoutScheduled = false
-            reconcileNow()
-            layout.finish()
-            return undefined
-          })
+          .then(
+            whileActive(() => {
+              layoutScheduled = false
+              reconcileNow()
+              layout.finish()
+              return undefined
+            }),
+          )
           .catch((error) => report({ code: 'vue.layout', message: String(error), error }))
       }
       const beforeMutation = () => {
@@ -148,14 +158,17 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
       }
 
       app.mixin({
-        beforeMount: beforeMutation,
-        beforeUpdate: beforeMutation,
-        beforeUnmount: beforeMutation,
+        beforeMount: whileActive(beforeMutation),
+        beforeUpdate: whileActive(beforeMutation),
+        beforeUnmount: whileActive(beforeMutation),
       })
-      app.onUnmount(() => layout.dispose())
+      app.onUnmount(() => {
+        disposed = true
+        layout.dispose()
+      })
       let scheduled = false
 
-      const reconcileNow = () => {
+      const reconcileNow = whileActive(() => {
         const bindings = new Map<RootBinding, [string, HTMLElement][]>()
 
         for (const root of roots.values()) {
@@ -180,7 +193,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
         for (const [root, entries] of bindings) {
           root.executor.bind(rootTargetBindings(root.root, entries))
         }
-      }
+      })
 
       const reconcile = () => {
         if (scheduled) return
@@ -245,8 +258,9 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
 
             throw error
           }
-          runtime.onEvent = (name) =>
-            element.dispatchEvent(new CustomEvent(`liva-${name}`, { bubbles: true }))
+          runtime.onEvent = whileActive((name: string) =>
+            element.dispatchEvent(new CustomEvent(`liva-${name}`, { bubbles: true })),
+          )
           const inspection = new RuntimeInspection(runtime, executor, report)
           const observed = {
             label: definition.name,
@@ -272,7 +286,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
             observed,
             releaseLayout: layout.register(executor),
           }
-          runtime.onUpdate = () => options.observe?.('update', observed)
+          runtime.onUpdate = whileActive(() => options.observe?.('update', observed))
           roots.set(element, record)
           owners.set(element, binding.instance!)
 
@@ -329,26 +343,30 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
       }
 
       const rootDirective: ObjectDirective<HTMLElement, MotionValue | PresenceBinding> = {
-        created(element, binding) {
-          mount(element, binding)
-          registerLifecycleTarget(element, binding, ROOT_TARGET)
-        },
-        mounted: observeMount,
-        updated(element, binding) {
-          const record = roots.get(element)
-
-          if (!record || record.definition.name !== binding.arg) {
-            unmount(element)
+        created: whileActive(
+          (element: HTMLElement, binding: DirectiveBinding<MotionValue | PresenceBinding>) => {
             mount(element, binding)
-            observeMount(element)
-            return
-          }
+            registerLifecycleTarget(element, binding, ROOT_TARGET)
+          },
+        ),
+        mounted: whileActive(observeMount),
+        updated: whileActive(
+          (element: HTMLElement, binding: DirectiveBinding<MotionValue | PresenceBinding>) => {
+            const record = roots.get(element)
 
-          const value = motionValue(binding)
-          record.runtime.updateParameters(value ?? {})
+            if (!record || record.definition.name !== binding.arg) {
+              unmount(element)
+              mount(element, binding)
+              observeMount(element)
+              return
+            }
 
-          reconcile()
-        },
+            const value = motionValue(binding)
+            record.runtime.updateParameters(value ?? {})
+
+            reconcile()
+          },
+        ),
         beforeUnmount(element) {
           snapshotTarget(element)
           lifecycleTargets.delete(element)
@@ -414,21 +432,25 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
 
       app.component('LivaPresenceBoundary', LivaPresenceBoundary)
       app.directive('liva-entry', {
-        created(element: HTMLElement, binding: DirectiveBinding<PresenceEntry>) {
+        created: whileActive((element: HTMLElement, binding: DirectiveBinding<PresenceEntry>) => {
           binding.value.element = element
-        },
-        beforeUpdate(element: HTMLElement, binding: DirectiveBinding<PresenceEntry>) {
-          binding.value.element = element
-        },
+        }),
+        beforeUpdate: whileActive(
+          (element: HTMLElement, binding: DirectiveBinding<PresenceEntry>) => {
+            binding.value.element = element
+          },
+        ),
       })
 
       app.directive('liva', rootDirective)
       app.directive('liva-target', {
-        created(element, binding) {
-          bindTarget(element, binding)
-          registerLifecycleTarget(element, binding)
-        },
-        updated: bindTarget,
+        created: whileActive(
+          (element: HTMLElement, binding: DirectiveBinding<MotionValue | PresenceBinding>) => {
+            bindTarget(element, binding)
+            registerLifecycleTarget(element, binding)
+          },
+        ),
+        updated: whileActive(bindTarget),
         beforeUnmount(element: HTMLElement) {
           snapshotTarget(element)
           lifecycleTargets.delete(element)
