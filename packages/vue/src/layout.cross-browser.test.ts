@@ -122,6 +122,17 @@ function element(host: HTMLElement, selector = '[data-item]'): HTMLElement {
   return target
 }
 
+/** Native CSSOM serialization control; engines retain different decimal precision. */
+function nativeRadius(host: HTMLElement, value: string) {
+  const control = document.createElement('div')
+  control.style.borderTopLeftRadius = value
+  host.append(control)
+  const radius = getComputedStyle(control).borderTopLeftRadius
+  control.remove()
+
+  return radius
+}
+
 function markers() {
   return [
     [0, 0],
@@ -165,6 +176,155 @@ afterEach(async () => {
 })
 
 describe('Vue coordinated layout projection', () => {
+  it.each([false, true])(
+    'refreshes current %s-important CSS paint while keeping the layout clock',
+    async (important) => {
+      const expanded = ref(false)
+      const updated = ref(false)
+      const priority = important ? '!important' : ''
+      const { host, errors } = await mount(
+        motionComponent(definition(), ({ root }) =>
+          h('section', [
+            h(
+              'style',
+              `.paint-layout {border-radius:8px ${priority};box-shadow:rgb(20,40,60) 2px 4px 6px 1px ${priority}} .paint-layout.updated {border-radius:12px ${priority};box-shadow:rgb(60,80,100) 3px 6px 9px 2px ${priority}}`,
+            ),
+            root(
+              h('div', {
+                'data-item': '',
+                class: ['paint-layout', { updated: updated.value }],
+                style: {
+                  width: expanded.value ? '200px' : '100px',
+                  height: expanded.value ? '100px' : '50px',
+                },
+              }),
+            ),
+          ]),
+        ),
+      )
+      await nativeTurn()
+      frame(0)
+      const target = element(host)
+
+      expanded.value = true
+      await flush()
+
+      expect(getComputedStyle(target).borderTopLeftRadius).toBe('16px')
+      frame(250)
+      expect(getComputedStyle(target).borderTopLeftRadius).toBe('12.8px')
+      const transform = target.style.transform
+
+      updated.value = true
+      await flush()
+
+      expect(target.style.transform).toBe(transform)
+      expect(getComputedStyle(target).borderTopLeftRadius).toBe(nativeRadius(host, '19.2px'))
+      expect(getComputedStyle(target).boxShadow).toContain('4.8px 9.6px')
+      frame(250)
+      expect(getComputedStyle(target).borderTopLeftRadius).toBe('16px')
+      frame(500)
+      expect(getComputedStyle(target).borderTopLeftRadius).toBe('12px')
+      expect(target.style.borderRadius).toBe('')
+      expect(target.style.boxShadow).toBe('')
+      expect(target.getAnimations()).toEqual([])
+      expect(errors).toEqual([])
+    },
+  )
+
+  it('keeps source Liva corner animation independent of automatic projection and layer removal', async () => {
+    const expanded = ref(false)
+    const active = ref(false)
+    const ordinary: Definition['layers'][number] = {
+      name: 'ordinary',
+      when: { kind: 'reference', path: ['active'] },
+      timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
+      targets: [
+        {
+          name: 'self',
+          properties: [{ name: 'border-radius', value: { kind: 'literal', value: '24px' } }],
+        },
+      ],
+    }
+    const actualDefinition: Definition = {
+      ...definition(),
+      parameters: [{ name: 'active', type: 'boolean' }],
+      layers: [...definition().layers, ordinary],
+    }
+    const sourceDefinition: Definition = { ...actualDefinition, layers: [ordinary] }
+    const Actual = motionComponent(actualDefinition, ({ root }) =>
+      root(
+        h('div', {
+          'data-item': '',
+          style: {
+            width: expanded.value ? '200px' : '100px',
+            height: expanded.value ? '100px' : '25px',
+            borderRadius: '8px',
+          },
+        }),
+        { active: active.value },
+      ),
+    )
+    const Source = motionComponent(sourceDefinition, ({ root }) =>
+      root(
+        h('div', {
+          'data-source': '',
+          style: {
+            width: expanded.value ? '200px' : '100px',
+            height: expanded.value ? '100px' : '25px',
+            borderRadius: '8px',
+          },
+        }),
+        { active: active.value },
+      ),
+    )
+    const { host, errors } = await mount(
+      defineComponent({ setup: () => () => h('section', [h(Actual), h(Source)]) }),
+    )
+    await nativeTurn()
+    frame(0)
+    const target = element(host)
+    const source = element(host, '[data-source]')
+
+    expanded.value = true
+    active.value = true
+    await flush()
+    const authored = [target, source].map((node) =>
+      node.getAnimations().find((animation) => animation.effect?.getTiming().duration === 1000),
+    )
+    for (const animation of authored) {
+      if (!animation) throw new Error('Expected ordinary native corner effect')
+      animation.pause()
+      animation.currentTime = 250
+    }
+    const original = authored[0]
+    if (!original || !(original.effect instanceof KeyframeEffect))
+      throw new Error('Expected ordinary corner keyframes')
+    const effect = original.effect
+    const keyframes = effect.getKeyframes()
+    frame(250)
+
+    expect(getComputedStyle(source).borderTopLeftRadius).toBe('12px')
+    expect(getComputedStyle(target).borderTopLeftRadius).toBe(
+      nativeRadius(host, `${12 / 0.625}px ${12 / 0.4375}px`),
+    )
+    expect(original.currentTime).toBe(250)
+    expect(original.effect).toBe(effect)
+    expect(effect.getKeyframes()).toEqual(keyframes)
+
+    active.value = false
+    await flush()
+
+    expect(getComputedStyle(source).borderTopLeftRadius).toBe('8px')
+    expect(getComputedStyle(target).borderTopLeftRadius).toBe(
+      nativeRadius(host, `${8 / 0.625}px ${8 / 0.4375}px`),
+    )
+    frame(750)
+    expect(getComputedStyle(target).borderTopLeftRadius).toBe('8px')
+    expect(target.style.borderRadius).toBe('8px')
+    expect(target.getAnimations()).toEqual([])
+    expect(errors).toEqual([])
+  })
+
   it('installs position/size correction before paint while destination dimensions stay in layout', async () => {
     const expanded = ref(false)
     const { host, errors } = await mount(

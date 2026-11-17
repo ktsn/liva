@@ -1,3 +1,14 @@
+import { LayoutStyleBaseline } from './layout-style-baseline.ts'
+import { isLayoutStyleProperty } from '../layout/style-properties.ts'
+import {
+  observeLayoutStyles,
+  ownLayoutStyleSource,
+  layoutStyleSourceTimes,
+  changeLayoutStyleSource,
+  layoutStyleSourceRevision,
+  type LayoutStyleObservation,
+  type LayoutStyleProjection,
+} from '../layout/style-observation.ts'
 import { InlineStyleHistory, inlineDeclarations, type InlineValue } from './inline-style-history.ts'
 import type { LayoutBoxConstraints } from '../layout/layout-constraints.ts'
 import { batchLayoutWrites } from '../layout/layout-write-phase.ts'
@@ -220,6 +231,7 @@ const emptyResolution = (): LayerResolution => ({
 export class PresentationExecutor {
   private layoutGeneration = 0
   private layoutOwned: OwnedElement[] = []
+  private readonly layoutStyleSources = new Map<HTMLElement, LayoutStyleBaseline>()
   private readonly layoutTransforms = new Map<HTMLElement, string>()
   private readonly layoutEffects = new Map<
     HTMLElement,
@@ -227,6 +239,9 @@ export class PresentationExecutor {
       animation: Animation
       effect: KeyframeEffect
       constraints?: LayoutBoxConstraints
+      styles?: LayoutStyleProjection
+      correction: ReadonlyMap<string, string>
+      releaseStyleSource: () => void
       addresses: Set<string>
     }
   >()
@@ -298,6 +313,7 @@ export class PresentationExecutor {
     element: HTMLElement,
     transform: string | undefined,
     constraints?: LayoutBoxConstraints,
+    styles?: LayoutStyleProjection,
   ) {
     batchLayoutWrites((finishLayoutWrites) => {
       if (transform === undefined) {
@@ -325,7 +341,9 @@ export class PresentationExecutor {
               ) {
                 const current = this.layoutOwned.find((entry) => entry.element === element)
                 current?.history?.dispose()
+                output.releaseStyleSource()
                 this.layoutEffects.delete(element)
+                this.layoutStyleSources.delete(element)
                 this.layoutOwned = this.layoutOwned.filter((entry) => entry !== current)
               }
             },
@@ -335,12 +353,23 @@ export class PresentationExecutor {
         // Retain ownership until restoration succeeds, so failed cleanup remains
         // retryable by the executor's later teardown rather than becoming orphaned.
         this.layoutTransforms.delete(element)
+        if (!output) this.layoutStyleSources.delete(element)
         return
       }
 
       let output = this.layoutEffects.get(element)
       const created = output === undefined
+      const projection = styles ?? output?.styles
+      const correction = projection
+        ? this.layoutStyleSource(element).correct(projection.distortion)
+        : new Map<string, string>()
+      const previousCorrection = output?.correction
+      const correctionChanged =
+        previousCorrection !== undefined &&
+        (previousCorrection.size !== correction.size ||
+          [...correction.keys()].some((property) => !previousCorrection.has(property)))
       const sizingChanged =
+        correctionChanged ||
         (output?.constraints?.size ?? 0) !== (constraints?.size ?? 0) ||
         [...(constraints ?? [])].some(
           ([property, value]) => output?.constraints?.get(property) !== value,
@@ -362,21 +391,35 @@ export class PresentationExecutor {
         ])
       }
       if (!output) {
-        finishLayoutWrites(element, ['transform', ...(constraints?.keys() ?? [])])
+        finishLayoutWrites(element, [
+          'transform',
+          ...(constraints?.keys() ?? []),
+          ...correction.keys(),
+        ])
         const effect = new KeyframeEffect(element, [{ transform }, { transform }], {
           duration: 1,
           fill: 'both',
         })
         const animation = new Animation(effect, element.ownerDocument.timeline)
-        output = { animation, effect, addresses: new Set(['transform']) }
+        output = {
+          animation,
+          effect,
+          correction: new Map(),
+          addresses: new Set(['transform']),
+          releaseStyleSource: ownLayoutStyleSource(element, () => this.prepareStyleSource(element)),
+        }
         this.layoutEffects.set(element, output)
       }
 
       if (sizingChanged || created) {
         const owner = output
-        finishLayoutWrites(element, ['transform', ...(constraints?.keys() ?? [])], (addresses) => {
-          for (const address of addresses) owner.addresses.add(address)
-        })
+        finishLayoutWrites(
+          element,
+          ['transform', ...(constraints?.keys() ?? []), ...correction.keys()],
+          (addresses) => {
+            for (const address of addresses) owner.addresses.add(address)
+          },
+        )
       }
 
       if (output.animation.playState === 'idle') {
@@ -391,7 +434,10 @@ export class PresentationExecutor {
       const frame = {
         transform,
         ...Object.fromEntries(
-          [...(constraints ?? [])].map(([property, value]) => [waapiProperty(property), value]),
+          [...(constraints ?? []), ...correction].map(([property, value]) => [
+            waapiProperty(property),
+            value,
+          ]),
         ),
       }
       output.effect.setKeyframes([frame, frame])
@@ -399,9 +445,103 @@ export class PresentationExecutor {
       if (sizingChanged)
         for (const [property, value] of constraints ?? [])
           this.write(element, property, value, 'important', 'layout')
+      for (const [property, value] of correction)
+        this.write(element, property, value, 'important', 'layout')
       if (sizingChanged) output.constraints = constraints ? new Map(constraints) : undefined
+      output.correction = correction
+      output.styles = projection
       this.layoutTransforms.set(element, transform)
     })
+  }
+
+  /** Supplies fresh CSS/Liva paint values without reading geometry or restarting authored effects. */
+  layoutStyleObservation(
+    element: HTMLElement,
+    width: number,
+    height: number,
+  ): LayoutStyleObservation | undefined {
+    const baseline = this.layoutStyleSource(element)
+    const times = layoutStyleSourceTimes(element)
+    if (baseline.matches(width, height, layoutStyleSourceRevision(element.ownerDocument), times))
+      return undefined
+
+    return {
+      element,
+      read: () =>
+        baseline.read(
+          element,
+          width,
+          height,
+          layoutStyleSourceRevision(element.ownerDocument),
+          times,
+        ),
+    }
+  }
+
+  private layoutStyleSource(element: HTMLElement): LayoutStyleBaseline {
+    let baseline = this.layoutStyleSources.get(element)
+
+    if (!baseline) {
+      baseline = new LayoutStyleBaseline()
+      this.layoutStyleSources.set(element, baseline)
+    }
+
+    return baseline
+  }
+
+  /** Only paint output is excluded; transform and fixed layout stabilization remain installed. */
+  private prepareStyleSource(element: HTMLElement): () => void {
+    const output = this.layoutEffects.get(element)
+    const owned = this.layoutOwned.find((entry) => entry.element === element)
+    const transform = this.layoutTransforms.get(element)
+    if (!output || !owned || output.correction.size === 0 || transform === undefined)
+      return () => {}
+    const restore = () => {
+      if (
+        !this.disposed &&
+        this.layoutEffects.get(element) === output &&
+        this.layoutTransforms.has(element)
+      )
+        this.layoutTransform(
+          element,
+          this.layoutTransforms.get(element),
+          output.constraints,
+          output.styles,
+        )
+    }
+
+    try {
+      const source = restoredStyle(owned, element.style.cssText)
+      const frame = {
+        transform,
+        ...Object.fromEntries(
+          [...(output.constraints ?? [])].map(([property, value]) => [
+            waapiProperty(property),
+            value,
+          ]),
+        ),
+      }
+      output.effect.setKeyframes([frame, frame])
+      writeLayoutStyle(element, () => {
+        element.style.cssText = source.cssText
+      })
+      // Preserve all geometry declarations with their existing important priority.
+      for (const [property, value] of [['transform', transform], ...(output.constraints ?? [])])
+        writeLayoutStyle(element, () => element.style.setProperty(property, value, 'important'))
+    } catch (error) {
+      releaseResources([
+        () => {
+          throw error
+        },
+        restore,
+      ])
+    }
+
+    return restore
+  }
+
+  private withStyleSources<T>(elements: readonly HTMLElement[], read: () => T): T {
+    return observeLayoutStyles(elements, read)
   }
 
   /**
@@ -484,9 +624,13 @@ export class PresentationExecutor {
   private releaseLayout() {
     batchLayoutWrites(() =>
       releaseResources([
-        ...[...new Set([...this.layoutTransforms.keys(), ...this.layoutEffects.keys()])].map(
-          (element) => () => this.layoutTransform(element, undefined),
-        ),
+        ...[
+          ...new Set([
+            ...this.layoutTransforms.keys(),
+            ...this.layoutEffects.keys(),
+            ...this.layoutStyleSources.keys(),
+          ]),
+        ].map((element) => () => this.layoutTransform(element, undefined)),
         ...[...this.layoutMeasurements.keys()].map(
           (animation) => () => this.cancelLayoutMeasurement(animation),
         ),
@@ -783,6 +927,21 @@ export class PresentationExecutor {
       readonly interrupted?: boolean
       readonly properties?: readonly string[]
     } = {},
+  ): PresenceCapture {
+    const elements = [...this.representativeTargets()]
+      .filter(([name]) => names.includes(name))
+      .map(([, element]) => options.element ?? element)
+    return this.withStyleSources(elements, () => this.capturePresenceSource(phase, names, options))
+  }
+
+  private capturePresenceSource(
+    phase: 'enter' | 'leave',
+    names: readonly string[],
+    options: {
+      readonly element?: HTMLElement
+      readonly interrupted?: boolean
+      readonly properties?: readonly string[]
+    },
   ): PresenceCapture {
     const definition = this.definition
     const targets = new Map(
@@ -1153,7 +1312,10 @@ export class PresentationExecutor {
   /** Capture a running effect before cancellation; this preserves its displayed derivative. */
   private retainMotion(entry: ActiveTrack) {
     const time = performance.now()
-    const sample = this.propertyMotion.read(entry.receiver.element, entry.track.property, time)
+    const sample = this.withStyleSources(
+      isLayoutStyleProperty(entry.track.property) ? [entry.receiver.element] : [],
+      () => this.propertyMotion.read(entry.receiver.element, entry.track.property, time),
+    )
 
     if (sample)
       this.propertyMotion.endControl(
@@ -1503,48 +1665,60 @@ export class PresentationExecutor {
   observeDisplayed(requests: readonly DisplayedRequest[]): readonly DisplayedValue[] {
     const styles = new Map<number, CSSStyleDeclaration>()
 
-    return requests.map((request) => {
-      let style = styles.get(request.receiver)
+    return this.withStyleSources(
+      requests
+        .filter((request) => isLayoutStyleProperty(request.property))
+        .map((request) => this.receiver(request.receiver).element),
+      () =>
+        requests.map((request) => {
+          let style = styles.get(request.receiver)
 
-      if (!style) {
-        style = getComputedStyle(this.receiver(request.receiver).element)
-        styles.set(request.receiver, style)
-      }
+          if (!style) {
+            style = getComputedStyle(this.receiver(request.receiver).element)
+            styles.set(request.receiver, style)
+          }
 
-      return { ...request, value: style.getPropertyValue(request.property) }
-    })
+          return { ...request, value: style.getPropertyValue(request.property) }
+        }),
+    )
   }
 
   observeTracks(requests: readonly TrackObservationRequest[]): readonly TrackSnapshot[] {
-    return requests.map((request) => {
-      const element = this.receiver(request.receiver).element
+    return this.withStyleSources(
+      requests
+        .filter((request) => isLayoutStyleProperty(request.track.property))
+        .map((request) => this.receiver(request.receiver).element),
+      () =>
+        requests.map((request) => {
+          const element = this.receiver(request.receiver).element
 
-      return {
-        id: nextEffectId++,
-        receiver: request.receiver,
-        source: request.source,
-        track: request.track,
-        declarations: request.declarations,
-        interrupted: request.interrupted,
-        displayed: request.needs.displayed
-          ? getComputedStyle(element).getPropertyValue(request.track.property)
-          : undefined,
-        motion: request.needs.motion
-          ? this.propertyMotion.observeSpring(
-              element,
-              request.track.property,
-              request.track.keyframes.at(-1)!.value,
-            )
-          : undefined,
-        reference: request.reference
-          ? propertyReference(
-              element,
-              request.source.property,
-              request.source.keyframes.at(-1)!.value,
-            )
-          : undefined,
-      }
-    })
+          return {
+            id: nextEffectId++,
+            receiver: request.receiver,
+            source: request.source,
+            track: request.track,
+            declarations: request.declarations,
+            interrupted: request.interrupted,
+            displayed: request.needs.displayed
+              ? getComputedStyle(element).getPropertyValue(request.track.property)
+              : undefined,
+            motion: request.needs.motion
+              ? this.propertyMotion.observeSpring(
+                  element,
+                  request.track.property,
+                  request.track.keyframes.at(-1)!.value,
+                )
+              : undefined,
+            reference: request.reference
+              ? propertyReference(
+                  element,
+                  request.source.property,
+                  request.source.keyframes.at(-1)!.value,
+                )
+              : undefined,
+          }
+        }),
+    )
   }
 
   private clearReferenceFrame() {
@@ -1718,6 +1892,35 @@ export class PresentationExecutor {
     priority = '',
     scope: 'ordinary' | 'layout' = 'ordinary',
   ) {
+    const projection = this.layoutEffects.get(element)?.styles
+    if (scope === 'ordinary' && projection && isLayoutStyleProperty(property)) {
+      this.withStyleSources([element], () => {
+        this.writeSource(element, property, value, priority, scope)
+        this.layoutStyleSources
+          .get(element)
+          ?.read(
+            element,
+            projection.width,
+            projection.height,
+            layoutStyleSourceRevision(element.ownerDocument),
+            layoutStyleSourceTimes(element),
+          )
+      })
+      return
+    }
+
+    this.writeSource(element, property, value, priority, scope)
+  }
+
+  private writeSource(
+    element: HTMLElement,
+    property: string,
+    value: string,
+    priority: string,
+    scope: 'ordinary' | 'layout',
+  ) {
+    if (scope === 'ordinary' && isLayoutStyleProperty(property)) changeLayoutStyleSource(element)
+
     if (scope === 'ordinary' && property === 'transform') this.layoutTransform(element, undefined)
 
     const ownership = scope === 'ordinary' ? this.owned : this.layoutOwned
@@ -1833,16 +2036,23 @@ export class PresentationExecutor {
     const pending = new Map(this.dirtyProperties)
     this.dirtyProperties.clear()
 
-    for (const [element, properties] of pending) {
-      const protectedAddresses = new Set(
-        this.active
-          .filter((entry) => entry.receiver.element === element)
-          .flatMap((entry) => [...propertyAddresses(element, entry.track.property)]),
-      )
+    this.withStyleSources(
+      [...pending]
+        .filter(([, properties]) => [...properties].some(isLayoutStyleProperty))
+        .map(([element]) => element),
+      () => {
+        for (const [element, properties] of pending) {
+          const protectedAddresses = new Set(
+            this.active
+              .filter((entry) => entry.receiver.element === element)
+              .flatMap((entry) => [...propertyAddresses(element, entry.track.property)]),
+          )
 
-      for (const property of properties)
-        this.propertyMotion.record(element, property, time, protectedAddresses)
-    }
+          for (const property of properties)
+            this.propertyMotion.record(element, property, time, protectedAddresses)
+        }
+      },
+    )
   }
 
   private restore(preserveLifecycle = false, elements?: ReadonlySet<HTMLElement>) {
@@ -1852,6 +2062,7 @@ export class PresentationExecutor {
         element,
         transform,
         constraints: this.layoutEffects.get(element)?.constraints,
+        styles: this.layoutEffects.get(element)?.styles,
       }))
     for (const { element } of projections) this.layoutTransform(element, undefined)
 
@@ -1876,6 +2087,7 @@ export class PresentationExecutor {
       for (const property of written.keys()) dirty.add(property)
 
       this.dirtyProperties.set(element, dirty)
+      if ([...written.keys()].some(isLayoutStyleProperty)) changeLayoutStyleSource(element)
       element.style.cssText = restoredStyle(entry, element.style.cssText).cssText
     }
 
@@ -1887,8 +2099,21 @@ export class PresentationExecutor {
       this.write(element, property, value, priority)
     }
 
-    for (const { element, transform, constraints } of projections)
-      this.layoutTransform(element, transform, constraints)
+    const observations = projections.flatMap(({ element, styles }) => {
+      const observation =
+        styles && this.layoutStyleObservation(element, styles.width, styles.height)
+      return observation ? [observation] : []
+    })
+    observeLayoutStyles(
+      observations.map((observation) => observation.element),
+      () => {
+        for (const observation of observations) observation.read()
+      },
+    )
+    batchLayoutWrites(() => {
+      for (const { element, transform, constraints, styles } of projections)
+        this.layoutTransform(element, transform, constraints, styles)
+    })
   }
 
   bind(entries: readonly (readonly [string, HTMLElement])[]) {
@@ -2174,6 +2399,28 @@ export class PresentationExecutor {
           else this.report({ code: 'runtime.animation', message: String(error), error })
         })
     }
+    const elements = [
+      ...new Set(
+        prepared
+          .filter((entry) => isLayoutStyleProperty(entry.track.property))
+          .map((entry) => entry.receiver.element),
+      ),
+    ]
+    this.withStyleSources(elements, () => {
+      for (const element of elements) {
+        const projection = this.layoutEffects.get(element)?.styles
+        if (projection)
+          this.layoutStyleSources
+            .get(element)
+            ?.read(
+              element,
+              projection.width,
+              projection.height,
+              layoutStyleSourceRevision(element.ownerDocument),
+              layoutStyleSourceTimes(element),
+            )
+      }
+    })
     this.scheduleReferences()
   }
 

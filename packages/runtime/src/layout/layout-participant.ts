@@ -1,3 +1,4 @@
+import type { LayoutStyleProjection, LayoutStyleObservation } from './style-observation.ts'
 import type { LayoutBoxConstraints } from './layout-constraints.ts'
 import type { ResolvedLayoutConfiguration } from '../model/layout.ts'
 
@@ -17,13 +18,23 @@ export interface LayoutParticipant {
    * Temporary output uses ordinary inline ownership. Optional fixed logical min/max
    * constraints/padding retain a participating absolute box's natural used layout when an
    * ancestor projection changes its containing block; they never animate dimensions.
-   * Undefined transform releases both output and constraints to current CSS.
+   * Optional styles use cumulative generated local distortion and natural border-box
+   * dimensions, after the batched source observation below. Omitting styles retains
+   * the current paint context during geometry-only observation. Undefined transform
+   * releases all temporary output to current CSS.
    */
   layoutTransform(
     element: HTMLElement,
     transform: string | undefined,
     constraints?: LayoutBoxConstraints,
+    styles?: LayoutStyleProjection,
   ): void
+  /** Batches a fresh uncorrected paint baseline only when its source can have changed. */
+  layoutStyleObservation(
+    element: HTMLElement,
+    width: number,
+    height: number,
+  ): LayoutStyleObservation | undefined
   /** Synchronous observation-only overrides; returned cleanup restores the current outer owner. */
   layoutMeasure(element: HTMLElement, properties: ReadonlyMap<string, string>): () => void
   /** Releases temporary output/observations, retaining failed native resources for retry. */
