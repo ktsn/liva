@@ -44,6 +44,7 @@ const config = defineViteConfig({
   },
 
   test: {
+    maxWorkers: process.env.CI ? 2 : undefined,
     projects: [
       {
         extends: true,
@@ -89,7 +90,6 @@ const config = defineViteConfig({
         test: {
           name: 'browser',
           fileParallelism: true,
-          maxWorkers: process.env.CI ? 2 : undefined,
           include: ['packages/**/*.browser.test.ts'],
           browser: {
             enabled: true,
@@ -104,7 +104,6 @@ const config = defineViteConfig({
         test: {
           name: 'cross-browser',
           fileParallelism: true,
-          maxWorkers: process.env.CI ? 2 : undefined,
           include: ['packages/**/*.cross-browser.test.ts'],
           browser: {
             enabled: true,
