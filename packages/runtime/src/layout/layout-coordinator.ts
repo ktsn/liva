@@ -1,3 +1,4 @@
+import { batchLayoutWrites } from './layout-write-phase.ts'
 import { releaseResources } from '../evaluation/resource-cleanup.ts'
 import {
   LayoutReadBatch,
@@ -140,12 +141,17 @@ export class LayoutCoordinator {
       this.stopIfIdle()
 
       releaseResources([
-        ...removed.map(
-          ([element]) =>
-            () =>
-              participant.layoutTransform(element, undefined),
-        ),
-        () => participant.layoutCleanup(),
+        () =>
+          batchLayoutWrites(() =>
+            releaseResources([
+              ...removed.map(
+                ([element]) =>
+                  () =>
+                    participant.layoutTransform(element, undefined),
+              ),
+              () => participant.layoutCleanup(),
+            ]),
+          ),
         () => this.refreshObservation(),
       ])
     }
@@ -200,11 +206,13 @@ export class LayoutCoordinator {
   }
 
   private release() {
-    releaseResources(
-      [...this.motions].map(
-        ([element, motion]) =>
-          () =>
-            motion.candidate.participant.layoutTransform(element, undefined),
+    batchLayoutWrites(() =>
+      releaseResources(
+        [...this.motions].map(
+          ([element, motion]) =>
+            () =>
+              motion.candidate.participant.layoutTransform(element, undefined),
+        ),
       ),
     )
   }
@@ -218,15 +226,17 @@ export class LayoutCoordinator {
     const fallback = candidates[0]?.participant
 
     try {
-      if (fallback) {
-        for (const suspension of phase.suspensions) {
-          const owner = owners.get(suspension.element) ?? fallback
-          prepared.push({
-            element: suspension.element,
-            restore: owner.layoutMeasure(suspension.element, suspension.properties),
-          })
+      batchLayoutWrites(() => {
+        if (fallback) {
+          for (const suspension of phase.suspensions) {
+            const owner = owners.get(suspension.element) ?? fallback
+            prepared.push({
+              element: suspension.element,
+              restore: owner.layoutMeasure(suspension.element, suspension.properties),
+            })
+          }
         }
-      }
+      })
 
       // Important declarations can block the observation effect. Read every
       // effectiveness result before restoring any blocked overlay, so the final
@@ -235,15 +245,17 @@ export class LayoutCoordinator {
       const ineffective = prepared.filter(
         ({ element }) => !preservesViewports || !phase.neutral(element),
       )
-      for (const entry of ineffective) {
-        prepared.splice(prepared.indexOf(entry), 1)
-        entry.restore()
-      }
+      batchLayoutWrites(() => {
+        for (const entry of ineffective) {
+          prepared.splice(prepared.indexOf(entry), 1)
+          entry.restore()
+        }
+      })
 
       const batch = new LayoutReadBatch()
       return new Map(candidates.map(({ element }) => [element, phase.read(element, batch)]))
     } finally {
-      releaseResources(prepared.toReversed().map(({ restore }) => restore))
+      batchLayoutWrites(() => releaseResources(prepared.toReversed().map(({ restore }) => restore)))
     }
   }
 
@@ -339,23 +351,27 @@ export class LayoutCoordinator {
 
     const prepared: Motion[] = []
     try {
-      for (const motion of owned) {
-        prepared.push(motion)
-        motion.candidate.participant.layoutTransform(
-          motion.candidate.element,
-          'matrix(1, 0, 0, 1, 0, 0)',
-        )
-      }
+      batchLayoutWrites(() => {
+        for (const motion of owned) {
+          prepared.push(motion)
+          motion.candidate.participant.layoutTransform(
+            motion.candidate.element,
+            'matrix(1, 0, 0, 1, 0, 0)',
+          )
+        }
+      })
 
       return this.read(candidates)
     } finally {
-      releaseResources(
-        prepared
-          .toReversed()
-          .map(
-            (motion) => () =>
-              motion.candidate.participant.layoutTransform(motion.candidate.element, undefined),
-          ),
+      batchLayoutWrites(() =>
+        releaseResources(
+          prepared
+            .toReversed()
+            .map(
+              (motion) => () =>
+                motion.candidate.participant.layoutTransform(motion.candidate.element, undefined),
+            ),
+        ),
       )
     }
   }
@@ -424,56 +440,64 @@ export class LayoutCoordinator {
     // Identity establishes the same containing blocks as the generated transform.
     // The renderer uses these actual local dimensions/frames while the trajectory
     // retains the natural physical destination, including absolute percentage boxes.
-    for (const [element, motion] of this.motions)
-      motion.candidate.participant.layoutTransform(element, 'matrix(1, 0, 0, 1, 0, 0)')
+    batchLayoutWrites(() => {
+      for (const [element, motion] of this.motions)
+        motion.candidate.participant.layoutTransform(element, 'matrix(1, 0, 0, 1, 0, 0)')
+    })
     const frames = this.read(candidates)
 
-    for (const [element, motion] of this.motions) {
-      const frame = frames.get(element)
-      if (frame) motion.frame = frame
-      else {
-        this.motions.delete(element)
-        motion.candidate.participant.layoutTransform(element, undefined)
+    batchLayoutWrites(() => {
+      for (const [element, motion] of this.motions) {
+        const frame = frames.get(element)
+        if (frame) motion.frame = frame
+        else {
+          this.motions.delete(element)
+          motion.candidate.participant.layoutTransform(element, undefined)
+        }
       }
-    }
+    })
   }
 
   private render(time: number) {
     let released = false
 
-    for (const [element, motion] of this.motions) {
-      const running =
-        motion.motion.kind === 'motion' && time - motion.start < motion.motion.durationMs
-      if (running || parentMotion(element, this.motions)) continue
+    batchLayoutWrites(() => {
+      for (const [element, motion] of this.motions) {
+        const running =
+          motion.motion.kind === 'motion' && time - motion.start < motion.motion.durationMs
+        if (running || parentMotion(element, this.motions)) continue
 
-      this.motions.delete(element)
-      motion.candidate.participant.layoutTransform(element, undefined)
-      released = true
-    }
+        this.motions.delete(element)
+        motion.candidate.participant.layoutTransform(element, undefined)
+        released = true
+      }
+    })
 
     // An ending ancestor can release a containing block or ordinary CSS rotation.
     // Refresh only at this ownership boundary, never on ordinary playback frames.
     if (released && this.motions.size > 0)
       this.installFrames([...this.motions.values()].map((motion) => motion.candidate))
 
-    for (const [element, motion] of this.motions) {
-      const parent = parentMotion(element, this.motions)
-      const output = projectionShapeTransform(
-        sample(motion, time).shape,
-        motion.frame.box,
-        motion.frame.frame,
-        parent?.cumulative,
-        motion.frame.origin,
-      )
+    batchLayoutWrites(() => {
+      for (const [element, motion] of this.motions) {
+        const parent = parentMotion(element, this.motions)
+        const output = projectionShapeTransform(
+          sample(motion, time).shape,
+          motion.frame.box,
+          motion.frame.frame,
+          parent?.cumulative,
+          motion.frame.origin,
+        )
 
-      if (output.kind === 'settle') {
-        this.motions.delete(element)
-        motion.candidate.participant.layoutTransform(element, undefined)
-      } else {
-        motion.cumulative = output.cumulative
-        motion.candidate.participant.layoutTransform(element, output.transform)
+        if (output.kind === 'settle') {
+          this.motions.delete(element)
+          motion.candidate.participant.layoutTransform(element, undefined)
+        } else {
+          motion.cumulative = output.cumulative
+          motion.candidate.participant.layoutTransform(element, output.transform)
+        }
       }
-    }
+    })
   }
 
   private schedule() {
@@ -494,25 +518,27 @@ export class LayoutCoordinator {
   private ownershipChanged = () => {
     const candidates = new Map(this.candidates().map((candidate) => [candidate.element, candidate]))
 
-    for (const [element, motion] of this.motions) {
-      const candidate = candidates.get(element)
-      const sourceChanged =
-        candidate?.configuration?.source.declaration !==
-        motion.candidate.configuration?.source.declaration
-      if (
-        candidate &&
-        enabled(candidate) &&
-        !sourceChanged &&
-        !axes.some(
-          (axis) =>
-            motion.candidate.configuration?.axes[axis] && !candidate.configuration?.axes[axis],
+    batchLayoutWrites(() => {
+      for (const [element, motion] of this.motions) {
+        const candidate = candidates.get(element)
+        const sourceChanged =
+          candidate?.configuration?.source.declaration !==
+          motion.candidate.configuration?.source.declaration
+        if (
+          candidate &&
+          enabled(candidate) &&
+          !sourceChanged &&
+          !axes.some(
+            (axis) =>
+              motion.candidate.configuration?.axes[axis] && !candidate.configuration?.axes[axis],
+          )
         )
-      )
-        continue
+          continue
 
-      this.motions.delete(element)
-      motion.candidate.participant.layoutTransform(element, undefined)
-    }
+        this.motions.delete(element)
+        motion.candidate.participant.layoutTransform(element, undefined)
+      }
+    })
 
     this.stopIfIdle()
   }
@@ -576,11 +602,13 @@ export class LayoutCoordinator {
     if (this.frame !== undefined) cancelAnimationFrame(this.frame)
     this.frame = undefined
 
-    releaseResources(
-      motions.map(
-        ([element, motion]) =>
-          () =>
-            motion.candidate.participant.layoutTransform(element, undefined),
+    batchLayoutWrites(() =>
+      releaseResources(
+        motions.map(
+          ([element, motion]) =>
+            () =>
+              motion.candidate.participant.layoutTransform(element, undefined),
+        ),
       ),
     )
   }
@@ -593,8 +621,13 @@ export class LayoutCoordinator {
 
     try {
       releaseResources([
-        () => this.settle(),
-        ...[...this.participants].map((participant) => () => participant.layoutCleanup()),
+        () =>
+          batchLayoutWrites(() =>
+            releaseResources([
+              () => this.settle(),
+              ...[...this.participants].map((participant) => () => participant.layoutCleanup()),
+            ]),
+          ),
         () => cleanup?.(),
       ])
     } catch (cleanupError) {
@@ -622,8 +655,13 @@ export class LayoutCoordinator {
     this.participants.clear()
 
     releaseResources([
-      () => this.settle(),
-      ...participants.map((participant) => () => participant.layoutCleanup()),
+      () =>
+        batchLayoutWrites(() =>
+          releaseResources([
+            () => this.settle(),
+            ...participants.map((participant) => () => participant.layoutCleanup()),
+          ]),
+        ),
       () => cleanup?.(),
     ])
   }

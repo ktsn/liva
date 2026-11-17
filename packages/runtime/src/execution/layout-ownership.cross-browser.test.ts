@@ -1,3 +1,4 @@
+import { batchLayoutWrites } from '../layout/layout-write-phase.ts'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { nativeEffects } from '../__test__/helpers/assembly.ts'
 import { createBrowserRuntimeHarness } from '../__test__/helpers/browser-runtime.ts'
@@ -70,6 +71,90 @@ describe('Executor temporary layout ownership', () => {
     expect(root.style.getPropertyPriority('transform')).toBe('important')
     expect(root.style.width).toBe('200px')
     expect(errors).toEqual([])
+  })
+
+  it('materializes every target transition only after all owners finish their writes', () => {
+    const owners = [
+      setup(layoutDefinition(), { active: false }),
+      setup(layoutDefinition(), { active: false }),
+    ]
+    const elements = owners.map(({ targets }) => targets.get('self')!)
+    const events: string[] = []
+    const reads = elements.map((element, index) => {
+      const read = element.getAnimations.bind(element)
+      return vi.spyOn(element, 'getAnimations').mockImplementation(() => {
+        events.push(`read${index}`)
+        return read()
+      })
+    })
+
+    batchLayoutWrites(() => {
+      for (const [index, { assembly }] of owners.entries()) {
+        assembly.executor.layoutTransform(elements[index], 'scale(.5)')
+        events.push(`write${index}`)
+      }
+    })
+
+    expect(events).toEqual(['write0', 'write1', 'read0', 'read1'])
+    for (const read of reads) read.mockRestore()
+    expect(elements.every((element) => element.getAnimations().length === 1)).toBe(true)
+  })
+
+  it('keeps a reacquired native output when release and reacquisition share a write phase', () => {
+    const { assembly, targets } = setup(layoutDefinition(), { active: false })
+    const root = targets.get('self')!
+    root.style.transform = 'rotate(20deg)'
+    assembly.executor.layoutTransform(root, 'scale(.5)')
+    const output = root.getAnimations()[0]
+
+    batchLayoutWrites(() => {
+      assembly.executor.layoutTransform(root, undefined)
+      assembly.executor.layoutTransform(root, undefined)
+      assembly.executor.layoutTransform(root, 'scale(.75)')
+    })
+
+    expect(root.getAnimations()).toEqual([output])
+    expect(output.playState).toBe('paused')
+    expect(getComputedStyle(root).transform).toBe('matrix(0.75, 0, 0, 0.75, 0, 0)')
+    assembly.executor.layoutCleanup()
+    expect(root.getAnimations()).toEqual([])
+    expect(root.style.transform).toBe('rotate(20deg)')
+  })
+
+  it('preserves a write failure and still attempts independent native cleanup reads', () => {
+    const owners = [
+      setup(layoutDefinition(), { active: false }),
+      setup(layoutDefinition(), { active: false }),
+    ]
+    const elements = owners.map(({ targets }) => targets.get('self')!)
+    for (const [index, { assembly }] of owners.entries())
+      assembly.executor.layoutTransform(elements[index], 'scale(.5)')
+    const cause = new Error('Projection write failed')
+    const readCause = new Error('Transition materialization failed')
+    const failed = vi.spyOn(elements[0], 'getAnimations').mockImplementationOnce(() => {
+      throw readCause
+    })
+    const independent = vi.spyOn(elements[1], 'getAnimations')
+
+    expect(() =>
+      batchLayoutWrites(() => {
+        for (const [index, { assembly }] of owners.entries())
+          assembly.executor.layoutTransform(elements[index], undefined)
+        throw cause
+      }),
+    ).toThrow(
+      expect.objectContaining({ cause, errors: expect.arrayContaining([cause, readCause]) }),
+    )
+
+    expect(independent).toHaveBeenCalledTimes(1)
+    failed.mockRestore()
+    independent.mockRestore()
+    for (const { assembly } of owners) assembly.executor.layoutCleanup()
+    expect(
+      elements.every(
+        (element) => element.getAnimations().length === 0 && element.style.transform === '',
+      ),
+    ).toBe(true)
   })
 
   it('suppresses automatic output on every physical alias when another alias owns explicit none', () => {

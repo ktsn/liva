@@ -1,3 +1,4 @@
+import { batchLayoutWrites } from '../layout/layout-write-phase.ts'
 import { waapiProperty } from '../motion/animation.ts'
 import { resolveLayoutConfigurations } from '../composition/layout.ts'
 import type { LayoutCandidate } from '../layout/layout-participant.ts'
@@ -294,66 +295,62 @@ export class PresentationExecutor {
    * lifetimes so release reveals current CSS, including intervening inline edits.
    */
   layoutTransform(element: HTMLElement, transform: string | undefined) {
-    if (transform === undefined) {
-      const output = this.layoutEffects.get(element)
-      const owned = this.layoutOwned.find((entry) => entry.element === element)
-      if (owned)
-        writeLayoutStyle(element, () => {
-          element.style.cssText = restoredStyle(owned, element.style.cssText).cssText
-        })
+    batchLayoutWrites((finishLayoutWrites) => {
+      if (transform === undefined) {
+        const output = this.layoutEffects.get(element)
+        const owned = this.layoutOwned.find((entry) => entry.element === element)
+        if (owned)
+          writeLayoutStyle(element, () => {
+            element.style.cssText = restoredStyle(owned, element.style.cssText).cssText
+          })
 
-      if (output) {
-        output.animation.cancel()
-        // Discard transform transitions created from generated values, so release
-        // cannot continue a size interpolation after projection has ended. This
-        // target's transform was owned; unrelated properties/elements stay intact.
-        this.cancelLayoutTransitions(element)
-        this.layoutEffects.delete(element)
+        if (output) {
+          output.animation.cancel()
+          // Discard transform transitions created from generated values, so release
+          // cannot continue a size interpolation after projection has ended. This
+          // target's transform was owned; unrelated properties/elements stay intact.
+          finishLayoutWrites(element, () => {
+            // A later write in the same phase may have reacquired this output.
+            if (this.layoutEffects.get(element) === output && !this.layoutTransforms.has(element)) {
+              this.layoutEffects.delete(element)
+              this.layoutOwned = this.layoutOwned.filter((entry) => entry !== owned)
+            }
+          })
+        }
+
+        // Retain ownership until restoration succeeds, so failed cleanup remains
+        // retryable by the executor's later teardown rather than becoming orphaned.
+        this.layoutTransforms.delete(element)
+        return
       }
 
-      // Retain ownership until restoration succeeds, so failed cleanup remains
-      // retryable by the executor's later teardown rather than becoming orphaned.
-      this.layoutOwned = this.layoutOwned.filter((entry) => entry !== owned)
-      this.layoutTransforms.delete(element)
-      return
-    }
+      let output = this.layoutEffects.get(element)
+      if (!output) {
+        finishLayoutWrites(element)
+        const effect = new KeyframeEffect(element, [{ transform }, { transform }], {
+          duration: 1,
+          fill: 'both',
+        })
+        const animation = new Animation(effect, element.ownerDocument.timeline)
+        output = { animation, effect }
+        this.layoutEffects.set(element, output)
+      }
 
-    let output = this.layoutEffects.get(element)
-    if (!output) {
-      this.cancelLayoutTransitions(element)
-      const effect = new KeyframeEffect(element, [{ transform }, { transform }], {
-        duration: 1,
-        fill: 'both',
-      })
-      const animation = new Animation(effect, element.ownerDocument.timeline)
-      output = { animation, effect }
-      this.layoutEffects.set(element, output)
-    }
+      if (output.animation.playState === 'idle') {
+        output.animation.pause()
+        output.animation.currentTime = 0
+      }
 
-    if (output.animation.playState === 'idle') {
-      output.animation.pause()
-      output.animation.currentTime = 0
-    }
-
-    // CSS transitions can interpolate even an important inline transform. A
-    // generic effect gives this same owned value later animation composite order;
-    // the inline path still overrides author-important declarations. Both paths
-    // carry the identical numeric output and have one Executor-owned lifetime.
-    output.effect.setKeyframes([{ transform }, { transform }])
-    writeLayoutStyle(element, () =>
-      this.write(element, 'transform', transform, 'important', 'layout'),
-    )
-    this.layoutTransforms.set(element, transform)
-  }
-
-  /** Cancels only this owned target property's native CSS transitions, never other effects. */
-  private cancelLayoutTransitions(element: HTMLElement) {
-    // Materialize any transition created by a just-restored/updated declaration.
-    getComputedStyle(element).getPropertyValue('transform')
-    for (const animation of element.getAnimations()) {
-      if ('transitionProperty' in animation && animation.transitionProperty === 'transform')
-        animation.cancel()
-    }
+      // CSS transitions can interpolate even an important inline transform. A
+      // generic effect gives this same owned value later animation composite order;
+      // the inline path still overrides author-important declarations. Both paths
+      // carry the identical numeric output and have one Executor-owned lifetime.
+      output.effect.setKeyframes([{ transform }, { transform }])
+      writeLayoutStyle(element, () =>
+        this.write(element, 'transform', transform, 'important', 'layout'),
+      )
+      this.layoutTransforms.set(element, transform)
+    })
   }
 
   /**
@@ -429,14 +426,16 @@ export class PresentationExecutor {
   }
 
   private releaseLayout() {
-    releaseResources([
-      ...[...new Set([...this.layoutTransforms.keys(), ...this.layoutEffects.keys()])].map(
-        (element) => () => this.layoutTransform(element, undefined),
-      ),
-      ...[...this.layoutMeasurements.keys()].map(
-        (animation) => () => this.cancelLayoutMeasurement(animation),
-      ),
-    ])
+    batchLayoutWrites(() =>
+      releaseResources([
+        ...[...new Set([...this.layoutTransforms.keys(), ...this.layoutEffects.keys()])].map(
+          (element) => () => this.layoutTransform(element, undefined),
+        ),
+        ...[...this.layoutMeasurements.keys()].map(
+          (animation) => () => this.cancelLayoutMeasurement(animation),
+        ),
+      ]),
+    )
   }
 
   private layerResolution: LayerResolution = emptyResolution()
