@@ -1,10 +1,16 @@
-import { describe, expect, it, vi } from 'vite-plus/test'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { Definition } from '../model/definition.ts'
 import type { ExecutionPort, RuntimeDiagnostic } from './execution-contracts.ts'
 import type { PresentationPlan } from './presentation-planner.ts'
 import { planReconciliation } from './presentation-planner.ts'
 import * as functions from '../builtins/index.ts'
 import { Runtime } from './runtime.ts'
+
+const runtimes: Runtime[] = []
+
+afterEach(() => {
+  for (const runtime of runtimes.splice(0)) runtime.dispose()
+})
 
 const definition: Definition = {
   name: 'planning-phases',
@@ -97,6 +103,7 @@ function setup(
   }
 
   runtime = new Runtime(execution, initialDefinition, inputs, (error) => errors.push(error))
+  runtimes.push(runtime)
 
   return { runtime, execution, plans, observations, errors }
 }
@@ -405,6 +412,9 @@ describe('Runtime presentation coordination', () => {
 
       runtime.dispose()
       runtime.updateParameters({})
+      runtime.replaceDefinition({ ...source, name: 'replacement' })
+
+      expect(runtime.definition).toBe(source)
       expect(dispose).toHaveBeenCalledTimes(1)
     } finally {
       factory.mockRestore()
@@ -456,4 +466,171 @@ describe('Runtime presentation coordination', () => {
       }
     },
   )
+})
+
+const eventDefinition: Definition = {
+  name: 'event',
+  parameters: [{ name: 'ready', type: 'boolean' }],
+  layers: [{ name: 'idle', targets: [] }],
+  events: [{ name: 'dismiss', when: { kind: 'reference', path: ['ready'] } }],
+}
+
+function createEventRuntime(ready: boolean, source = eventDefinition) {
+  return setup(source, { ready }).runtime
+}
+
+describe('conditional event edges', () => {
+  it.each([
+    { initial: false, values: [false, true, true, false, true], counts: [0, 1, 1, 1, 2] },
+    { initial: true, values: [true, false, true, true, false, true], counts: [0, 0, 1, 1, 1, 2] },
+  ])(
+    'emits only rising edges when the initial condition is $initial',
+    ({ initial, values, counts }) => {
+      const runtime = createEventRuntime(initial)
+      const emitted: string[] = []
+      runtime.onEvent = (name) => emitted.push(name)
+
+      const observed = values.map((ready) => {
+        runtime.updateParameters({ ready })
+        return emitted.length
+      })
+
+      expect(observed).toEqual(counts)
+      expect(emitted).toEqual(['dismiss', 'dismiss'])
+      expect(runtime.composition).toEqual({ layers: { idle: true }, states: {} })
+    },
+  )
+
+  it('tracks sibling Motion runtimes independently', () => {
+    const first = createEventRuntime(false)
+    const second = createEventRuntime(false)
+    const emitted: string[] = []
+    first.onEvent = (name) => emitted.push('first:' + name)
+    second.onEvent = (name) => emitted.push('second:' + name)
+
+    first.updateParameters({ ready: true })
+    second.updateParameters({ ready: true })
+    first.updateParameters({ ready: true })
+    second.updateParameters({ ready: true })
+
+    expect(emitted).toEqual(['first:dismiss', 'second:dismiss'])
+  })
+
+  it('tracks multiple conditions independently without changing visual state', () => {
+    const runtime = createEventRuntime(true, {
+      ...eventDefinition,
+      events: [
+        ...eventDefinition.events!,
+        {
+          name: 'reset',
+          when: { kind: 'unary', operator: '!', operand: { kind: 'reference', path: ['ready'] } },
+        },
+      ],
+    })
+    const emitted: string[] = []
+    runtime.onEvent = (name) => emitted.push(name)
+
+    runtime.updateParameters({ ready: false })
+    runtime.updateParameters({ ready: false })
+    runtime.updateParameters({ ready: true })
+
+    expect(emitted).toEqual(['reset', 'dismiss'])
+    expect(runtime.composition).toEqual({ layers: { idle: true }, states: {} })
+  })
+})
+
+describe('event lifecycle', () => {
+  it('does not emit after disposal', () => {
+    const runtime = createEventRuntime(false)
+    const emitted: string[] = []
+    runtime.onEvent = (name) => emitted.push(name)
+
+    runtime.dispose()
+    runtime.updateParameters({ ready: true })
+
+    expect(emitted).toEqual([])
+    expect(runtime.onEvent).toBeUndefined()
+  })
+
+  it('initializes replacement definitions without emitting an already-true condition', () => {
+    const runtime = createEventRuntime(true)
+    const emitted: string[] = []
+    runtime.onEvent = (name) => emitted.push(name)
+    const replacement: Definition = {
+      ...eventDefinition,
+      events: [{ name: 'replacement', when: { kind: 'reference', path: ['ready'] } }],
+    }
+
+    runtime.replaceDefinition(replacement)
+    runtime.updateParameters({ ready: true })
+    expect(emitted).toEqual([])
+
+    runtime.updateParameters({ ready: false })
+    runtime.updateParameters({ ready: true })
+    expect(emitted).toEqual(['replacement'])
+  })
+})
+
+describe('composition snapshots', () => {
+  const layered: Definition = {
+    ...eventDefinition,
+
+    layers: [
+      { name: 'visible', when: { kind: 'reference', path: ['ready'] }, targets: [] },
+      {
+        name: 'history',
+        targets: [],
+        initialState: 'idle',
+        states: [
+          { name: 'idle', targets: [] },
+          { name: 'done', targets: [] },
+        ],
+        transitions: [
+          {
+            from: 'idle',
+            to: 'done',
+            when: { kind: 'reference', path: ['ready'] },
+            transition: { targets: [] },
+          },
+        ],
+      },
+    ],
+  }
+
+  it('reads retained machine history and current ordinary layer activation', () => {
+    const runtime = createEventRuntime(false, layered)
+
+    expect(runtime.composition).toEqual({
+      layers: { visible: false },
+      states: { history: 'idle' },
+    })
+
+    runtime.updateParameters({ ready: true })
+    runtime.updateParameters({ ready: false })
+
+    expect(runtime.composition).toEqual({
+      layers: { visible: false },
+      states: { history: 'done' },
+    })
+  })
+
+  it('isolates returned snapshots and runtimes', () => {
+    const first = createEventRuntime(true, layered)
+    const second = createEventRuntime(false, layered)
+    const snapshot = first.composition
+
+    expect(snapshot).toBeDefined()
+
+    Object.assign(snapshot.layers, { visible: false })
+    Object.assign(snapshot.states, { history: 'idle' })
+
+    expect(first.composition).toEqual({
+      layers: { visible: true },
+      states: { history: 'done' },
+    })
+    expect(second.composition).toEqual({
+      layers: { visible: false },
+      states: { history: 'idle' },
+    })
+  })
 })

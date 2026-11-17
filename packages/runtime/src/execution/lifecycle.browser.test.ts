@@ -1,3 +1,10 @@
+import { createBrowserRuntimeHarness } from '../__test__/helpers/browser-runtime.ts'
+import * as functions from '../builtins/index.ts'
+import { cdp } from 'vite-plus/test/browser'
+import type { CDPSession } from '@vitest/browser-playwright'
+import fixture from '../../../../fixtures/toggle.json'
+import { decodeBundle, type Definition as PropertyIRDefinition } from '../model/definition.ts'
+
 import {
   assembleRuntime,
   nativeEffects,
@@ -12,6 +19,8 @@ import { timingValue } from '../evaluation/timing-values.ts'
 import { Runtime } from './runtime.ts'
 import { PresentationExecutor } from './presentation-executor.ts'
 import type { Definition, Timing, Frame } from '../model/definition.ts'
+
+vi.mock('../builtins/index.ts', { spy: true })
 
 const elements: HTMLElement[] = []
 const sessions: PresenceOperation[] = []
@@ -776,5 +785,311 @@ describe('lifecycle effects', () => {
 
     expect(await operation.finished).toBe('owner-teardown')
     expect(element.style.opacity).toBe('0.7')
+  })
+})
+
+function updateMode(assembly: RuntimeAssembly, mode: string, options: { paused?: boolean } = {}) {
+  assembly.runtime.updateParameters({ mode })
+
+  if (options.paused) {
+    for (const animation of nativeEffects(assembly.executor)) animation.pause()
+  }
+}
+
+function startRegisteredLifecycle(
+  assembly: RuntimeAssembly,
+  phase: 'enter' | 'leave',
+  target: string,
+) {
+  const session = new PresenceOperation(capturePresence(assembly, phase, [target]), phase)
+  session.initialize()
+  session.initialize()
+  session.play()
+
+  return session
+}
+
+describe('lifecycle presentation coordination', () => {
+  const definition = decodeBundle(JSON.stringify(fixture)).definitions[0]
+  const harness = createBrowserRuntimeHarness()
+
+  function setupBrowserRuntime(
+    def = definition,
+    inputs: Record<string, unknown> = def.parameters?.some((parameter) => parameter.name === 'mode')
+      ? { mode: 'off' }
+      : {},
+  ) {
+    return harness.setup(def, inputs)
+  }
+
+  afterEach(() => harness.dispose())
+
+  const lifecyclePolicyDefinition: PropertyIRDefinition = {
+    name: 'lifecycle-policy',
+    parameters: [{ name: 'enabled', type: 'boolean' }],
+    layers: [
+      {
+        name: 'base',
+        targets: [
+          {
+            name: 'box',
+            properties: [{ name: 'opacity', value: { kind: 'literal', value: '1' } }],
+          },
+          {
+            name: 'exit',
+            properties: [{ name: 'opacity', value: { kind: 'literal', value: '1' } }],
+          },
+        ],
+      },
+      {
+        name: 'optional',
+        when: { kind: 'reference', path: ['enabled'] },
+        targets: [
+          {
+            name: 'box',
+            properties: [{ name: 'width', value: { kind: 'literal', value: '50px' } }],
+          },
+        ],
+      },
+    ],
+    enter: {
+      timing: { kind: 'tween', durationMs: 10000, easing: 'linear' },
+      targets: [
+        {
+          name: 'box',
+          properties: [
+            { name: 'opacity', keyframes: [{ offset: 0, value: { kind: 'literal', value: '0' } }] },
+            { name: 'width', keyframes: [{ offset: 0, value: { kind: 'literal', value: '0px' } }] },
+          ],
+        },
+      ],
+    },
+    leave: {
+      timing: { kind: 'tween', durationMs: 10000, easing: 'linear' },
+      targets: [
+        {
+          name: 'exit',
+          properties: [
+            { name: 'opacity', keyframes: [{ offset: 1, value: { kind: 'literal', value: '0' } }] },
+          ],
+        },
+      ],
+    },
+  }
+
+  it('keeps captured detached leave functional after logical call disposal fails', async () => {
+    const failure = new Error('Call disposal failed')
+    const factory = vi.spyOn(functions, 'callBuiltin').mockReturnValue({
+      value: 1,
+      bind: () => () => {},
+      prepareUpdate: () => ({ value: 1, commit() {}, discard() {} }),
+      dispose() {
+        throw failure
+      },
+    })
+    const source = {
+      ...definition,
+      letBindings: [
+        {
+          name: 'value',
+          initializer: { kind: 'call' as const, function: 'resource', arguments: [] },
+        },
+      ],
+      leave: {
+        timing: { kind: 'tween' as const, durationMs: 1000, easing: 'linear' },
+        targets: [
+          {
+            name: 'thumb',
+            properties: [
+              {
+                name: 'opacity',
+                keyframes: [
+                  { offset: 0, value: { kind: 'literal' as const, value: '1' } },
+                  { offset: 1, value: { kind: 'literal' as const, value: '0' } },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const { assembly, targets } = setupBrowserRuntime(source)
+    const captures = capturePresence(assembly, 'leave', ['thumb'])
+
+    try {
+      expect(() => assembly.runtime.dispose()).toThrow(failure)
+      targets.get('thumb')!.remove()
+      const leave = new PresenceOperation(captures, 'leave')
+      leave.play()
+      const effects = nativeEffects(assembly.executor)
+
+      expect(effects).toHaveLength(1)
+      effects[0].finish()
+
+      await expect(leave.finished).resolves.toBe('completed')
+
+      expect(nativeEffects(assembly.executor)).toEqual([])
+      expect(targets.get('thumb')!.style.opacity).toBe('')
+    } finally {
+      factory.mockRestore()
+    }
+  })
+
+  it('settles enter and leave together when reduced motion becomes active', async () => {
+    const { assembly, targets, errors } = setupBrowserRuntime(lifecyclePolicyDefinition, {
+      enabled: true,
+    })
+    const enter = startRegisteredLifecycle(assembly, 'enter', 'box')
+    const leave = startRegisteredLifecycle(assembly, 'leave', 'exit')
+    const media: CDPSession = cdp()
+
+    try {
+      await media.send('Emulation.setEmulatedMedia', {
+        features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
+      })
+
+      expect(await enter.finished).toBe('completed')
+      expect(await leave.finished).toBe('completed')
+      expect(targets.get('exit')!.getAnimations()).toHaveLength(0)
+      expect(targets.get('box')!.style.opacity).toBe('1')
+      expect(targets.get('box')!.style.width).toBe('50px')
+      expect(errors).toEqual([])
+    } finally {
+      leave.cancel('owner-teardown')
+
+      await media.send('Emulation.setEmulatedMedia', {
+        features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }],
+      })
+    }
+  })
+
+  it('reports asynchronous enter settlement failures after the native session completes', async () => {
+    const { assembly, targets, errors } = setupBrowserRuntime(lifecyclePolicyDefinition, {
+      enabled: true,
+    })
+    const enter = new PresenceOperation(
+      capturePresence(assembly, 'enter', ['box']),
+      'enter',
+      () => {},
+    )
+    enter.initialize()
+    enter.play()
+
+    const failure = new Error('Failed to apply lifecycle settlement')
+    const write = vi.spyOn(targets.get('box')!.style, 'setProperty').mockImplementationOnce(() => {
+      throw failure
+    })
+
+    try {
+      for (const animation of targets.get('box')!.getAnimations()) animation.finish()
+
+      expect(await enter.finished).toBe('completed')
+
+      await new Promise(requestAnimationFrame)
+
+      expect(errors).toEqual([
+        expect.objectContaining({ code: 'runtime.animation', error: failure }),
+      ])
+    } finally {
+      write.mockRestore()
+    }
+  })
+
+  it('plans enter completion restoration of removed declarations without cancelling a concurrent leave', async () => {
+    const { assembly, targets, errors } = setupBrowserRuntime(lifecyclePolicyDefinition, {
+      enabled: true,
+    })
+    const enter = startRegisteredLifecycle(assembly, 'enter', 'box')
+    const leave = startRegisteredLifecycle(assembly, 'leave', 'exit')
+    const box = targets.get('box')!
+
+    try {
+      assembly.runtime.updateParameters({ enabled: false })
+
+      for (const animation of box.getAnimations()) animation.finish()
+
+      expect(await enter.finished).toBe('completed')
+      expect(box.style.width).toBe('')
+      expect(box.style.opacity).toBe('1')
+      expect(leave.isFinished).toBe(false)
+      expect(errors).toEqual([])
+    } finally {
+      leave.cancel('owner-teardown')
+    }
+  })
+
+  it('releases only captured effects and keeps leave ownership through ordinary updates', async () => {
+    const source = {
+      ...definition,
+      leave: {
+        timing: { kind: 'tween' as const, durationMs: 1000, easing: 'linear' },
+        targets: [
+          {
+            name: 'thumb',
+            properties: [
+              {
+                name: 'translate',
+                keyframes: [{ offset: 1, value: { kind: 'literal' as const, value: '0px' } }],
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const { assembly, targets } = setupBrowserRuntime(source)
+
+    updateMode(assembly, 'on', { paused: true })
+
+    const before = [...nativeEffects(assembly.executor)]
+    const unrelated = before.find(
+      (animation) =>
+        animation.effect instanceof KeyframeEffect &&
+        animation.effect.target === targets.get('track'),
+    )
+    const session = new PresenceOperation(capturePresence(assembly, 'leave', ['thumb']), 'leave')
+
+    try {
+      session.initialize()
+
+      expect(nativeEffects(assembly.executor)).toContain(unrelated)
+      expect(nativeEffects(assembly.executor).length).toBeLessThan(before.length)
+
+      session.play()
+
+      const leave = nativeEffects(assembly.executor).find(
+        (animation) => !before.includes(animation),
+      )
+
+      updateMode(assembly, 'off', { paused: true })
+
+      expect(nativeEffects(assembly.executor)).toContain(leave)
+      expect(session.isFinished).toBe(false)
+    } finally {
+      session.cancel('owner-teardown')
+    }
+
+    expect(await session.finished).toBe('owner-teardown')
+  })
+
+  it('retains enter snapshots on input changes and cancels them on owner disposal', async () => {
+    const { assembly } = setupBrowserRuntime()
+    const interrupted = new PresenceOperation(capturePresence(assembly, 'enter', []), 'enter')
+
+    interrupted.initialize()
+    assembly.runtime.updateParameters({ mode: 'on' })
+
+    expect(assembly.runtime.composition.states.toggle).toBe('on')
+    expect(interrupted.isFinished).toBe(false)
+
+    interrupted.play()
+
+    expect(await interrupted.finished).toBe('completed')
+
+    const disposed = new PresenceOperation(capturePresence(assembly, 'enter', []), 'enter')
+
+    disposed.initialize()
+    assembly.runtime.dispose()
+
+    expect(await disposed.finished).toBe('owner-teardown')
   })
 })
