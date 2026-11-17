@@ -25,6 +25,8 @@ export interface ProjectionState {
 /**
  * Standard 2D affine map: (x,y) -> (a*x+c*y+e,b*x+d*y+f). Translation uses CSS px;
  * linear coefficients are unitless. Include ordinary transform-origin translations.
+ * Coefficients may be inherited/getter-backed, including a 2D DOMMatrix; unrelated
+ * properties are ignored. Caller guarantees the snapshot represents a 2D map.
  * Snapshots from different times must use the same scroll-neutral reference plane.
  */
 export interface ProjectionMatrix {
@@ -66,7 +68,8 @@ export function multiplyProjection(
  * determinant/inverse returns undefined; small finite scales are not replaced by epsilons.
  */
 export function inverseProjection(matrix: ProjectionMatrix): ProjectionMatrix | undefined {
-  if (!Object.values(matrix).every(Number.isFinite)) return undefined
+  if (![matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f].every(Number.isFinite))
+    return undefined
 
   const determinant = matrix.a * matrix.d - matrix.b * matrix.c
 

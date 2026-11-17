@@ -303,6 +303,12 @@ describe('projection coordinates and ancestor compensation', () => {
 })
 
 describe('projection numeric boundaries', () => {
+  it('inverts structural coefficient views independently of unrelated enumerable metadata', () => {
+    const matrix = { ...identityProjection, a: 2, d: 4, e: 10, f: -20, label: 'frame' }
+
+    expect(inverseProjection(matrix)).toEqual({ a: 0.5, b: -0, c: -0, d: 0.25, e: -5, f: 5 })
+  })
+
   it('rejects nonfinite and numerically unrepresentable affine inverses', () => {
     expect(inverseProjection({ ...identityProjection, e: Infinity })).toBeUndefined()
     expect(inverseProjection({ ...identityProjection, a: 1e308, d: 1e308 })).toBeUndefined()

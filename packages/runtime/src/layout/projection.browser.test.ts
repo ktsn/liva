@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vite-plus/test'
 import { readLayoutBounds } from './layout-bounds.ts'
 import {
   multiplyProjection,
+  inverseProjection,
   projectionMotion,
   projectionTransform,
   type ProjectionMatrix,
@@ -208,4 +209,41 @@ describe('affine projection in real browsers', () => {
       }
     },
   )
+  it('accepts native 2D DOMMatrix frames and ancestor correction directly', () => {
+    const frame = new DOMMatrix([1.5, 0.4, 0.7, 2, 20, 30])
+    const parent = new DOMMatrix([2, 0, 0, 0.5, 10, 20])
+    const destination = { x: 20, y: 30, width: 80, height: 40 }
+    const displayed = { x: 10, y: 50, width: 120, height: 20 }
+    const result = projectionTransform(displayed, destination, frame, parent)
+    const inverse = inverseProjection(frame)
+
+    if (result.kind !== 'projection' || !inverse)
+      throw new Error('Expected native matrix projection')
+
+    const actual = parent
+      .multiply(frame)
+      .multiply(
+        new DOMMatrix([
+          result.matrix.a,
+          result.matrix.b,
+          result.matrix.c,
+          result.matrix.d,
+          result.matrix.e,
+          result.matrix.f,
+        ]),
+      )
+    const expected = new DOMMatrix([2.25, 0.6, 0.35, 1, 10, 50])
+    const identity = frame.multiply(
+      new DOMMatrix([inverse.a, inverse.b, inverse.c, inverse.d, inverse.e, inverse.f]),
+    )
+
+    for (const key of ['a', 'b', 'c', 'd', 'e', 'f'] as const) {
+      expect(actual[key]).toBeCloseTo(expected[key], 10)
+    }
+
+    expect(identity.a).toBeCloseTo(1, 12)
+    expect(identity.d).toBeCloseTo(1, 12)
+    expect(identity.e).toBeCloseTo(0, 12)
+    expect(identity.f).toBeCloseTo(0, 12)
+  })
 })

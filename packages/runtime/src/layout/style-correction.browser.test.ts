@@ -102,4 +102,30 @@ describe('computed style correction', () => {
       target.remove()
     }
   })
+  it.each([
+    ['DOMMatrix', DOMMatrix],
+    ['DOMMatrixReadOnly', DOMMatrixReadOnly],
+  ] as const)('accepts native %s coefficients exposed through prototype getters', (_, Matrix) => {
+    const corners = decodeCornerRadii(['10px 20px', '0', '0', '0'], 200, 100)
+    const shadows = decodeBoxShadows('9px 7px 10px -5px black')
+    const radiusMatrix = new Matrix([3, 4, 0, 2, 80, -20])
+    const shadowMatrix = new Matrix([2, 1, 1, 3, 100, -20])
+
+    if (!corners || !shadows) throw new Error('Expected decoded baseline styles')
+
+    expect(correctCornerRadii(corners, radiusMatrix)?.[0]).toBe('2px 10px')
+
+    const output = correctBoxShadows(shadows, shadowMatrix)
+
+    if (!output) throw new Error('Expected native matrix shadow correction')
+
+    const corrected = decodeBoxShadows(output)
+
+    if (!corrected) throw new Error('Expected corrected shadows')
+
+    expect(corrected[0].x).toBeCloseTo(4, 12)
+    expect(corrected[0].y).toBeCloseTo(1, 12)
+    expect(corrected[0].blur).toBeCloseTo(10 / Math.sqrt(5), 12)
+    expect(corrected[0].spread).toBeCloseTo(-5 / Math.sqrt(5), 12)
+  })
 })

@@ -26,7 +26,10 @@ export interface CorrectionScale {
   readonly y: number
 }
 
-/** Cumulative generated local affine distortion, or positive diagonal scales as shorthand. */
+/**
+ * Cumulative generated local affine distortion, or positive diagonal scales as
+ * shorthand. Coefficients may be inherited/getter-backed, including a 2D DOMMatrix.
+ */
 export type CorrectionTransform = CorrectionScale | ProjectionMatrix
 
 /**
@@ -144,7 +147,7 @@ export function decodeBoxShadows(value: string): readonly BoxShadow[] | undefine
 function correctionBasis(correction: CorrectionTransform) {
   const matrix =
     'a' in correction
-      ? { ...correction, e: 0, f: 0 }
+      ? { a: correction.a, b: correction.b, c: correction.c, d: correction.d, e: 0, f: 0 }
       : { a: correction.x, b: 0, c: 0, d: correction.y, e: 0, f: 0 }
 
   if (!('a' in correction) && (correction.x <= 0 || correction.y <= 0)) return undefined
