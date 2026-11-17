@@ -914,3 +914,54 @@ fn layout_completion_keeps_timing_expressions_and_comments_in_their_own_contexts
         }
     });
 }
+
+#[test]
+fn layout_completion_applies_whole_tokens_without_damaging_adjacent_source() {
+    with_server(|client| {
+        for (uri, prefix, suffix) in [
+            ("file:///layout-token.liv", "// 日本😀\r\n", ""),
+            (
+                "file:///layout-token.vue",
+                "<template><div>日本😀</div></template>\r\n<liva lang=\"liva\">\r\n",
+                "\r\n</liva>",
+            ),
+        ] {
+            for (value, keyword) in [
+                ("¦position size @instant", "position"),
+                ("pos¦ition /* keep */ size @instant", "position"),
+                ("position¦@instant", "position"),
+                ("x he¦ight @instant", "height"),
+            ] {
+                let marked = format!(
+                    "{prefix}motion item {{ layer base {{ /* 😀 */ $layout: {value}; opacity: 1 }} }}{suffix}"
+                );
+                let byte = marked.find('¦').unwrap();
+                let source = marked.replace('¦', "");
+
+                notify(
+                    client,
+                    "textDocument/didOpen",
+                    json!({"textDocument": {"uri": uri, "languageId": "liva", "version": 1, "text": source}}),
+                );
+                assert_eq!(diagnostics(client)["diagnostics"], json!([]));
+
+                let choices = completion_at(client, uri, &source, byte);
+                let choice = choices
+                    .iter()
+                    .find(|choice| choice["label"] == keyword)
+                    .unwrap();
+                let edited = apply_completion(&source, choice);
+
+                assert_eq!(edited, source, "{value}");
+
+                notify(
+                    client,
+                    "textDocument/didChange",
+                    json!({"textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": edited}]}),
+                );
+
+                assert_eq!(diagnostics(client)["diagnostics"], json!([]));
+            }
+        }
+    });
+}

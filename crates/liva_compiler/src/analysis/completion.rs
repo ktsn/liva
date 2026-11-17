@@ -88,9 +88,9 @@ fn layout_choices(motion: &Motion, source: &str, offset: usize) -> Option<Vec<Co
             declaration
                 .value_node()
                 .is_some_and(|value| contains(&value.range(), offset))
-                && !declaration
-                    .decorators()
-                    .any(|decorator| contains(&decorator.range(), offset))
+                && !declaration.decorators().any(|decorator| {
+                    decorator.range().start < offset && contains(&decorator.range(), offset)
+                })
         })?;
     let value = declaration.value_node()?;
 
@@ -98,11 +98,39 @@ fn layout_choices(motion: &Motion, source: &str, offset: usize) -> Option<Vec<Co
         return Some(vec![]);
     }
 
-    let prefix = source.get(value.range().start..offset)?;
-    let typed = prefix
-        .rsplit(|character: char| !character.is_ascii_alphabetic())
-        .next()
-        .unwrap_or_default();
+    // As with closed string choices, filter by the prefix but replace the whole
+    // lexical token. Keeping its suffix would corrupt an otherwise valid selection.
+    let word = value
+        .syntax()
+        .descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| token.kind() != Kind::Trivia)
+        .find(|token| {
+            let range = token.text_range();
+
+            u32::from(range.start()) as usize <= offset && offset <= u32::from(range.end()) as usize
+        });
+    let (range, typed) = if let Some(word) = word {
+        if !liva_syntax::is_identifier(word.text()) {
+            return Some(vec![]);
+        }
+
+        let range = Range {
+            start: u32::from(word.text_range().start()) as usize,
+            end: u32::from(word.text_range().end()) as usize,
+        };
+        let prefix = source.get(range.start..offset)?;
+
+        (range, prefix)
+    } else {
+        (
+            Range {
+                start: offset,
+                end: offset,
+            },
+            "",
+        )
+    };
 
     Some(
         crate::layout::KEYWORDS
@@ -112,10 +140,7 @@ fn layout_choices(motion: &Motion, source: &str, offset: usize) -> Option<Vec<Co
                 label: (*name).into(),
                 detail: "Fixed physical layout axes; edit configuration in source".into(),
                 text_edit: Some(CompletionEdit {
-                    range: Range {
-                        start: offset - typed.len(),
-                        end: offset,
-                    },
+                    range: range.clone(),
                     new_text: (*name).into(),
                 }),
             })

@@ -1,6 +1,7 @@
 mod support;
 
 use liva_compiler::{
+    analysis::completions,
     compile,
     edits::{Edit, apply_edits},
     ir::{Declaration, LayoutAxes},
@@ -262,6 +263,37 @@ fn lifecycle_blocks_reject_layout_selection_and_timing_tracks() {
                 "{source}: {:?}",
                 result.diagnostics
             );
+        }
+    }
+}
+
+#[test]
+fn keyword_completion_replaces_the_whole_token_at_every_caret_boundary() {
+    for keyword in ["none", "position", "size", "x", "y", "width", "height"] {
+        let source = format!(
+            "// 日本😀\r\nmotion item {{ layer base {{ $layout: {keyword}@instant; opacity: 1 }} }}"
+        );
+        let start = source.find("$layout: ").unwrap() + "$layout: ".len();
+
+        for caret in 0..=keyword.len() {
+            let choices = completions(&source, start + caret);
+            let choice = choices
+                .iter()
+                .find(|choice| choice.label == keyword)
+                .unwrap();
+            let edit = choice.text_edit.as_ref().unwrap();
+            let mut edited = source.clone();
+
+            edited.replace_range(edit.range.start..edit.range.end, &edit.new_text);
+
+            assert_eq!(edit.range.start, start, "{keyword} at {caret}");
+            assert_eq!(
+                edit.range.end,
+                start + keyword.len(),
+                "{keyword} at {caret}"
+            );
+            assert_eq!(edited, source, "{keyword} at {caret}");
+            valid(&edited);
         }
     }
 }
