@@ -8,6 +8,7 @@ import {
   PresentationExecutor,
   ROOT_TARGET,
   rootTargetBindings,
+  releaseResources,
   type Definition,
   type RuntimeDiagnostic,
 } from '@liva/runtime'
@@ -208,19 +209,29 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
       const snapshotTarget = (element: HTMLElement) => {
         const target = lifecycleTargets.get(element)
         if (!target) return
-        const work = target.registration.capture(
-          'leave',
-          target.entries.some((entry) => entry.session !== undefined),
-        )
+        // A failed native source observation has no reusable capture, but the
+        // departing target must still detach from every retained Presence entry.
+        releaseResources([
+          () => {
+            const work = target.registration.capture(
+              'leave',
+              target.entries.some((entry) => entry.session !== undefined),
+            )
 
-        for (const entry of target.entries) {
-          /* v8 ignore else -- @preserve: Vue tears down each target once; this guard only preserves an earlier snapshot if teardown hooks overlap. */
-          if (work && !entry.snapshots.has(target.registration))
-            entry.snapshots.set(target.registration, work)
-          entry.beforeMutation = beforeRemoval
-          entry.targets.delete(target.registration)
-          queueMicrotask(() => entry.snapshots.delete(target.registration))
-        }
+            for (const entry of target.entries) {
+              /* v8 ignore else -- @preserve: Vue tears down each target once; this guard only preserves an earlier snapshot if teardown hooks overlap. */
+              if (work && !entry.snapshots.has(target.registration))
+                entry.snapshots.set(target.registration, work)
+            }
+          },
+          () => {
+            for (const entry of target.entries) {
+              entry.beforeMutation = beforeRemoval
+              entry.targets.delete(target.registration)
+              queueMicrotask(() => entry.snapshots.delete(target.registration))
+            }
+          },
+        ])
       }
 
       const mount = (element: HTMLElement, binding: DirectiveBinding) => {
@@ -303,32 +314,42 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
       const unmount = (element: HTMLElement) => {
         const record = roots.get(element)
 
-        if (record) {
-          for (const [target, registration] of lifecycleTargets) {
-            if (explicitRoot(registration) === record) snapshotTarget(target)
-          }
-          try {
-            record.releaseLayout()
-          } catch (error) {
-            report({ code: 'vue.layout-disposal', message: String(error), error })
-          }
+        if (!record) return
 
-          try {
-            record.runtime.dispose()
-          } catch (error) {
-            report({ code: 'vue.disposal', message: String(error), error })
-          } finally {
+        // Capture while the old binding can still resolve its receivers. Capture
+        // failures cannot skip another target, registration invalidation, or any
+        // independent browser/runtime owner. Invalidate before release callbacks
+        // so reentrant teardown cannot dispose/notify this registration twice.
+        releaseResources([
+          ...[...lifecycleTargets]
+            .filter(([, registration]) => explicitRoot(registration) === record)
+            .map(
+              ([target]) =>
+                () =>
+                  snapshotTarget(target),
+            ),
+          () => {
             roots.delete(element)
             owners.delete(element)
             explicitOwners.delete(element)
-
+          },
+          () => {
             try {
-              options.observe?.('unmount', record.observed)
-            } finally {
-              reconcile()
+              record.releaseLayout()
+            } catch (error) {
+              report({ code: 'vue.layout-disposal', message: String(error), error })
             }
-          }
-        }
+          },
+          () => {
+            try {
+              record.runtime.dispose()
+            } catch (error) {
+              report({ code: 'vue.disposal', message: String(error), error })
+            }
+          },
+          () => options.observe?.('unmount', record.observed),
+          reconcile,
+        ])
       }
 
       const observeMount = (element: HTMLElement) => {
@@ -368,9 +389,13 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
           },
         ),
         beforeUnmount(element) {
-          snapshotTarget(element)
-          lifecycleTargets.delete(element)
-          unmount(element)
+          releaseResources([
+            () => snapshotTarget(element),
+            () => {
+              lifecycleTargets.delete(element)
+            },
+            () => unmount(element),
+          ])
         },
       }
 
@@ -452,10 +477,14 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
         ),
         updated: whileActive(bindTarget),
         beforeUnmount(element: HTMLElement) {
-          snapshotTarget(element)
-          lifecycleTargets.delete(element)
-          targets.delete(element)
-          reconcile()
+          releaseResources([
+            () => snapshotTarget(element),
+            () => {
+              lifecycleTargets.delete(element)
+              targets.delete(element)
+            },
+            reconcile,
+          ])
         },
       })
     },

@@ -33,6 +33,8 @@ export type {
   DefinitionBundle,
 } from './model/definition.ts'
 export { isRecord, isArrayOf, isDefinition } from './model/validation.ts'
+// Shared adapter/runtime teardown preserves independent owners and original causes.
+export { releaseResources } from './evaluation/resource-cleanup.ts'
 export { ROOT_TARGET, rootTargetBindings } from './model/targets.ts'
 export type { RenderedFrame, RenderedProperty, RenderedState } from './model/presentation.ts'
 export type { ResolvedTrack } from './composition/resolve.ts'

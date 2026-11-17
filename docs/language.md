@@ -585,6 +585,9 @@ accepted inputs and ordinary presentation across disposal or definition replacem
 Necessary DOM-relative observations continue until its effects end.
 Vue waits for the currently applicable effects, including replacements, before
 removing or hiding the boundary. Reduced motion settles live playback immediately.
+If source capture fails during teardown, registrations and independent runtime/browser
+owners are still released. The original failure is reported through Vue's error
+handling; multiple independent cleanup failures retain the first cause.
 
 A conditional event is independent of state selection and animation completion:
 
