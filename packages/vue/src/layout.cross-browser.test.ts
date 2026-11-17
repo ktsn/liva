@@ -21,7 +21,7 @@ import {
   type RuntimeDiagnostic,
 } from '@liva/runtime'
 import { createLivaPlugin, type LivaOptions, type InstanceBinding } from './runtime.ts'
-import { LivaPresenceBoundary, type PresenceEntry } from './presence.ts'
+import { LivaPresenceBoundary, PresenceEntry } from './presence.ts'
 import { measure } from '../../runtime/src/builtins/measure.ts'
 import { readLayoutBounds } from '../../runtime/src/layout/layout-bounds.ts'
 
@@ -2575,6 +2575,160 @@ describe('Vue coordinated layout projection', () => {
       expect(target.getBoundingClientRect().width).toBeCloseTo(300, 3)
       frame(1000)
       expect(target.getBoundingClientRect().width).toBeCloseTo(400, 3)
+    },
+  )
+
+  it.each([
+    { scope: 'root', failing: 'self', notifyFails: false },
+    { scope: 'named', failing: 'first', notifyFails: false },
+    { scope: 'owned', failing: 'first', notifyFails: false },
+    { scope: 'owned', failing: 'second', notifyFails: true },
+  ])(
+    'releases $scope Presence registrations after a native $failing capture failure',
+    async ({ scope, failing, notifyFails }) => {
+      const shown = ref(true)
+      const width = ref(100)
+      const entries = new Map(
+        ['self', 'first', 'second'].map((name) => [name, new PresenceEntry()]),
+      )
+      const bindings = new Set<InstanceBinding>()
+      const cause = new Error('Native paint capture failed')
+      const notificationCause = new Error('Unmount observer failed')
+      const handled: unknown[] = []
+      const source: Definition = {
+        ...definition(),
+        layers: [
+          {
+            name: 'base',
+            targets: ['self', 'first', 'second'].map((name) => ({
+              name,
+              properties: definition().layers[0].targets[0].properties,
+            })),
+          },
+        ],
+        leave: {
+          timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
+          targets: ['self', 'first', 'second'].map((name) => ({
+            name,
+            properties: [
+              {
+                name: 'border-radius',
+                keyframes: [{ offset: 1, value: { kind: 'literal', value: '0px' } }],
+              },
+            ],
+          })),
+        },
+      }
+      // Every caller uses one of the three names initialized in entries above.
+      const metadata = (name: string, include: boolean) => ({
+        owner: ['root'],
+        value: {},
+        entries: include ? [entries.get(name)!] : undefined,
+      })
+
+      const component = defineComponent({
+        livaDefinitions: [source],
+        setup() {
+          const root = resolveDirective('liva')!
+          const target = resolveDirective('liva-target')!
+          const child = (name: string) =>
+            withDirectives(
+              h('div', {
+                'data-capture': name,
+                style: { width: `${width.value}px`, height: '40px', borderRadius: '8px' },
+              }),
+              [[target, metadata(name, scope !== 'root'), name, { compiled: true }]],
+            )
+
+          return () =>
+            shown.value || scope === 'named'
+              ? withDirectives(
+                  h(
+                    'section',
+                    {
+                      'data-capture': 'self',
+                      style: { width: `${width.value}px`, borderRadius: '8px' },
+                    },
+                    shown.value ? [child('first'), child('second')] : [],
+                  ),
+                  [[root, metadata('self', scope === 'root'), source.name, { compiled: true }]],
+                )
+              : null
+        },
+      })
+      const { host, app, errors } = await mount(component, {
+        observe(event, binding) {
+          if (event === 'mount') bindings.add(binding)
+          if (event === 'unmount') {
+            bindings.delete(binding)
+            if (notifyFails) throw notificationCause
+          }
+        },
+      })
+      app.config.errorHandler = (error) => handled.push(error)
+      await nativeTurn()
+      frame(0)
+      const previous = [...bindings]
+      width.value = 200
+      await flush()
+      const receiver = element(host, `[data-capture="${failing}"]`)
+      expect(receiver.style.transform).not.toBe('')
+      const captured = vi.spyOn(PresentationExecutor.prototype, 'capturePresence')
+      // The wrapper retains this native method only for explicit .call(this).
+      // eslint-disable-next-line typescript/unbound-method
+      const set = KeyframeEffect.prototype.setKeyframes
+      let injected = false
+      vi.spyOn(KeyframeEffect.prototype, 'setKeyframes').mockImplementation(function (
+        this: KeyframeEffect,
+        keyframes,
+      ) {
+        const properties = Object.keys(
+          Array.isArray(keyframes) ? (keyframes[0] ?? {}) : (keyframes ?? {}),
+        )
+
+        if (!injected && this.target === receiver && properties.join(',') === 'transform') {
+          injected = true
+          throw cause
+        }
+        set.call(this, keyframes)
+      })
+
+      shown.value = false
+      await flush()
+
+      expect(injected).toBe(true)
+      expect([...entries.values()].every((entry) => entry.targets.size === 0)).toBe(true)
+      expect(receiver.getAnimations()).toEqual([])
+      expect(captured.mock.calls.map(([, names]) => names)).toEqual(
+        scope === 'root' ? [['self']] : [['first'], ['second']],
+      )
+      expect(handled).toHaveLength(1)
+      const failure = handled[0]
+      expect(failure instanceof AggregateError ? failure.cause : failure).toBe(cause)
+      expect(failure instanceof AggregateError ? failure.errors : []).toEqual(
+        notifyFails ? [cause, notificationCause] : [],
+      )
+      expect(
+        previous.every((binding) => binding.runtime.isDisposed && binding.bounds() === undefined),
+      ).toBe(scope !== 'named')
+      expect(bindings.size).toBe(scope === 'named' ? 1 : 0)
+
+      shown.value = true
+      await flush()
+      width.value = 300
+      await flush()
+      frame(1000)
+
+      expect(element(host, '[data-capture="self"]').getBoundingClientRect().width).toBe(300)
+      expect(bindings.size).toBe(1)
+
+      apps.splice(apps.indexOf(app), 1)
+      app.unmount()
+      await flush()
+
+      expect(bindings.size).toBe(0)
+      expect(host.getAnimations({ subtree: true })).toEqual([])
+      expect(errors).toEqual([])
     },
   )
 
