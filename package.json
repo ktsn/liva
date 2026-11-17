@@ -20,7 +20,7 @@
     "@vizejs/vite-plugin": "0.732.0",
     "typescript": "7.1.0-dev.20261110.1",
     "vite-plus": "1.5.1",
-    "vize": "0.732.0"
+    "vize": "0.751.0"
   },
   "engines": {
     "node": "26.13.1"
