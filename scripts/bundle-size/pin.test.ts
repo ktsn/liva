@@ -1,16 +1,20 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { pin, readOnlyGitEnvironment } from './pin.mjs'
+import { pin, readOnlyGitEnvironment } from './pin.ts'
 
 const event = { pull_request: { number: 92, base: { ref: 'main' }, head: { sha: 'b'.repeat(40) } } }
 
-test('pins the base tip at start and actual head instead of merge-base or synthetic merge', () => {
-  const fetched = []
+await test('pins the base tip at start and actual head instead of merge-base or synthetic merge', () => {
+  const fetched: string[] = []
   const resolved = ['a'.repeat(40), 'b'.repeat(40)]
   const result = pin(
     event,
     (ref) => fetched.push(ref),
-    () => resolved.shift(),
+    () => {
+      const sha = resolved.shift()
+      assert(sha)
+      return sha
+    },
   )
 
   assert.deepEqual(fetched, ['refs/heads/main', 'refs/pull/92/head'])
@@ -22,7 +26,7 @@ test('pins the base tip at start and actual head instead of merge-base or synthe
   })
 })
 
-test('a head that changes while fetching is a failure rather than a silently different comparison', () => {
+await test('a head that changes while fetching is a failure rather than a silently different comparison', () => {
   assert.throws(
     () =>
       pin(
@@ -34,7 +38,7 @@ test('a head that changes while fetching is a failure rather than a silently dif
   )
 })
 
-test('private-repository authentication is scoped to the pinning fetch process', () => {
+await test('private-repository authentication is scoped to the pinning fetch process', () => {
   const parentEnvironment = { PATH: '/usr/bin' }
   const authenticated = readOnlyGitEnvironment(
     'read-token',
@@ -44,6 +48,8 @@ test('private-repository authentication is scoped to the pinning fetch process',
 
   assert.deepEqual(parentEnvironment, { PATH: '/usr/bin' })
   assert.equal(authenticated.GIT_CONFIG_KEY_0, 'http.https://github.com/.extraheader')
+  assert(authenticated.GIT_CONFIG_VALUE_0)
+
   assert.equal(
     Buffer.from(authenticated.GIT_CONFIG_VALUE_0.split('basic ')[1], 'base64').toString(),
     'x-access-token:read-token',

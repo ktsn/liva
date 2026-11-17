@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 
-test('skipped title/body edits cannot enter the active measurement cancellation group', async () => {
+await test('skipped title/body edits cannot enter the active measurement cancellation group', async () => {
   const workflow = await readFile(
     new URL('../../.github/workflows/bundle-size.yml', import.meta.url),
     'utf8',

@@ -1,3 +1,8 @@
+import type { Browser } from '@playwright/test'
+import type { Plugin } from 'vite-plus'
+import { array, object, text } from './data.ts'
+import { validateMeasurement } from './model.ts'
+import type { Bytes, Measurement, Metadata, Specification } from './types.ts'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -9,29 +14,40 @@ import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib'
 
-import { settings } from './model.mjs'
+import { settings } from './model.ts'
 
 export { settings }
-export const digest = (bytes) => createHash('sha256').update(bytes).digest('hex')
+export const digest = (bytes: string | Uint8Array) =>
+  createHash('sha256').update(bytes).digest('hex')
 const fixture = join(import.meta.dirname, 'fixture')
 
 /** Extract the decoded JSON argument, never the escaped JavaScript literal's length. */
-export function definitionJson(ast) {
-  const declaration = ast.body.find((node) => node.type === 'VariableDeclaration')
-  const argument = declaration?.declarations.find((node) => node.id.name === 'bundle')?.init
-    ?.arguments?.[0]
+export function definitionJson(ast: unknown): string {
+  const declaration = array(object(ast).body)
+    .map(object)
+    .find((node) => node.type === 'VariableDeclaration')
 
-  assert.equal(argument?.type, 'Literal', 'Unsupported production definition loader')
-  assert.equal(typeof argument.value, 'string', 'Missing embedded definition JSON')
+  assert(declaration, 'Unsupported production definition loader')
 
-  const parsed = JSON.parse(argument.value)
+  const binding = array(declaration.declarations)
+    .map(object)
+    .find((node) => object(node.id).name === 'bundle')
+
+  assert(binding && binding.init, 'Unsupported production definition loader')
+
+  const argument = object(array(object(binding.init).arguments)[0])
+
+  assert.equal(argument.type, 'Literal', 'Unsupported production definition loader')
+  assert(typeof argument.value === 'string', 'Missing embedded definition JSON')
+
+  const parsed = object(JSON.parse(argument.value))
 
   assert(Array.isArray(parsed.definitions) && parsed.definitions.length === 1)
 
   return argument.value
 }
 
-export function sizes(bytes, definition) {
+export function sizes(bytes: Buffer, definition: string): Bytes {
   return {
     minified: bytes.length,
     gzip: gzipSync(bytes, { level: settings.gzipLevel }).length,
@@ -42,9 +58,50 @@ export function sizes(bytes, definition) {
   }
 }
 
+// Revisions must expose these established callable APIs. Their return/behavior contracts
+// are checked by the build, output inspection and browser playback, not substituted from head.
+function isBuildApi(
+  value: unknown,
+): value is Pick<typeof import('vite-plus'), 'build' | 'version' | 'rolldownVersion'> {
+  const module = object(value)
+
+  return (
+    typeof module.build === 'function' &&
+    typeof module.version === 'string' &&
+    typeof module.rolldownVersion === 'string'
+  )
+}
+
+function isPluginFactory(value: unknown): value is { default: () => Plugin | Plugin[] } {
+  return typeof object(value).default === 'function'
+}
+
+function isBrowserClient(
+  value: unknown,
+): value is Pick<typeof import('@playwright/test'), 'chromium'> {
+  // Playwright's CommonJS export is a callable test function with browser properties.
+  if (
+    (typeof value !== 'function' && typeof value !== 'object') ||
+    value === null ||
+    !('chromium' in value)
+  )
+    return false
+
+  return typeof object(value.chromium).launch === 'function'
+}
+
 /** Exercise the measured bytes, loading Vue separately so it never affects the metrics. */
-async function playback(bytes, require, vueRequire, root) {
-  const { chromium } = require('@playwright/test')
+async function playback(
+  bytes: Buffer,
+  require: NodeJS.Require,
+  vueRequire: NodeJS.Require,
+  root: string,
+): Promise<void> {
+  const client: unknown = require('@playwright/test')
+
+  assert(isBrowserClient(client), 'Unsupported Playwright browser client')
+
+  const { chromium } = client
 
   const vue = await readFile(
     join(dirname(vueRequire.resolve('vue/package.json')), 'dist/vue.runtime.esm-browser.prod.js'),
@@ -60,25 +117,29 @@ async function playback(bytes, require, vueRequire, root) {
     )
   })
 
-  await new Promise((done, reject) => {
+  await new Promise<void>((done, reject) => {
     server.once('error', reject)
     server.listen(0, '127.0.0.1', done)
   })
 
-  let browser
+  let browser: Browser | undefined
 
   try {
     browser = await chromium.launch()
 
     const page = await browser.newPage()
-    const errors = []
+    const errors: string[] = []
 
     page.on('pageerror', (error) => errors.push(error.message))
     page.on('console', (message) => {
       if (message.type() === 'error') errors.push(message.text())
     })
 
-    await page.goto(`http://127.0.0.1:${server.address().port}`)
+    const address = server.address()
+
+    assert(address && typeof address !== 'string')
+
+    await page.goto(`http://127.0.0.1:${address.port}`)
 
     const button = page.getByRole('button', { name: 'Toggle opacity' })
 
@@ -95,12 +156,15 @@ async function playback(bytes, require, vueRequire, root) {
       ['false', '0.5'],
     ]) {
       await button.click()
-      await page.waitForFunction(
-        (expected) =>
-          getComputedStyle(document.querySelector('button')).opacity === expected &&
-          document.getAnimations().length === 0,
-        opacity,
-      )
+      await page.waitForFunction((expected) => {
+        const element = document.querySelector('button')
+
+        return (
+          element !== null &&
+          getComputedStyle(element).opacity === expected &&
+          document.getAnimations().length === 0
+        )
+      }, opacity)
       assert.equal(await button.getAttribute('aria-pressed'), pressed)
     }
 
@@ -110,31 +174,45 @@ async function playback(bytes, require, vueRequire, root) {
     try {
       await browser?.close()
     } finally {
-      await new Promise((done, reject) => server.close((error) => (error ? reject(error) : done())))
+      await new Promise<void>((done, reject) =>
+        server.close((error) => (error ? reject(error) : done())),
+      )
     }
   }
 }
 
 /** Target must have its own frozen dependencies and freshly built compiler WASM. */
-export async function measure(target, sha, output) {
+export async function measure(target: string, sha: string, output?: string): Promise<Measurement> {
   assert.equal(process.versions.node, settings.node, `Use Node ${settings.node}`)
 
   const require = createRequire(join(target, 'package.json'))
   const viteManifest = require.resolve('vite-plus/package.json')
-  const { build, version, rolldownVersion } = await import(
-    pathToFileURL(join(dirname(viteManifest), 'dist/index.js'))
+  const builder: unknown = await import(
+    pathToFileURL(join(dirname(viteManifest), 'dist/index.js')).href
   )
-  const { default: vize } = await import(pathToFileURL(require.resolve('@vizejs/vite-plugin')))
-  const { default: liva } = await import(pathToFileURL(join(target, 'packages/vite/src/index.ts')))
+  const vuePlugin: unknown = await import(
+    pathToFileURL(require.resolve('@vizejs/vite-plugin')).href
+  )
+  const livaPlugin: unknown = await import(
+    pathToFileURL(join(target, 'packages/vite/src/index.ts')).href
+  )
+
+  assert(isBuildApi(builder), 'Unsupported production build API')
+  assert(
+    isPluginFactory(vuePlugin) && isPluginFactory(livaPlugin),
+    'Unsupported production plugin API',
+  )
+
+  const { build, version, rolldownVersion } = builder
   const root = await mkdtemp(join(tmpdir(), 'liva-size-fixture-'))
 
   try {
     await cp(fixture, root, { recursive: true })
 
-    let definition
-    let modules
+    let definition: string | undefined
+    let modules: string[] | undefined
 
-    const observe = {
+    const observe: Plugin = {
       name: 'bundle-size-observer',
       enforce: 'post',
       transform(code, id) {
@@ -147,7 +225,7 @@ export async function measure(target, sha, output) {
         const chunks = Object.values(bundle)
 
         assert.equal(chunks.length, 1, 'Expected exactly one shipped file')
-        assert.equal(chunks[0].type, 'chunk')
+        assert(chunks[0].type === 'chunk')
         assert.deepEqual(chunks[0].imports, ['vue'], 'Unexpected shipped dependency')
         assert.deepEqual(chunks[0].dynamicImports, [])
 
@@ -163,7 +241,7 @@ export async function measure(target, sha, output) {
       root,
       mode: 'production',
       logLevel: 'warn',
-      plugins: [liva(), vize(), observe],
+      plugins: [livaPlugin.default(), vuePlugin.default(), observe],
       resolve: {
         alias: [
           { find: '@liva/runtime', replacement: join(target, 'packages/runtime/src/index.ts') },
@@ -177,14 +255,19 @@ export async function measure(target, sha, output) {
         sourcemap: false,
         write: false,
         rolldownOptions: {
-          input: join(root, 'main.js'),
-          external: settings.external,
+          input: join(root, 'main.ts'),
+          external: [...settings.external],
           output: { format: settings.format, codeSplitting: false, entryFileNames: 'bundle.js' },
         },
       },
     })
 
-    assert.equal(typeof definition, 'string', 'Production definition extraction failed')
+    assert(typeof definition === 'string', 'Production definition extraction failed')
+    assert(modules, 'Production modules were not observed')
+    assert(
+      !Array.isArray(result) && 'output' in result && result.output[0].type === 'chunk',
+      'Expected a single production chunk',
+    )
 
     for (const required of [
       '/packages/vue/src/',
@@ -221,37 +304,47 @@ export async function measure(target, sha, output) {
 
     await playback(bytes, require, vueRequire, root)
 
-    const dependencies = {}
-    const manifest = JSON.parse(await readFile(join(target, 'package.json'), 'utf8'))
+    const manifest = object(JSON.parse(await readFile(join(target, 'package.json'), 'utf8')))
+    const dependencies = Object.fromEntries(
+      await Promise.all(
+        [...Object.keys(object(manifest.devDependencies)), 'vue'].map(
+          async (name): Promise<[string, string]> => {
+            const path =
+              name === 'vue'
+                ? vueRequire.resolve('vue/package.json')
+                : join(target, 'node_modules', name, 'package.json')
 
-    for (const name of [...Object.keys(manifest.devDependencies), 'vue']) {
-      const path =
-        name === 'vue'
-          ? vueRequire.resolve('vue/package.json')
-          : join(target, 'node_modules', name, 'package.json')
+            return [name, text(object(JSON.parse(await readFile(path, 'utf8'))).version)]
+          },
+        ),
+      ),
+    )
 
-      dependencies[name] = JSON.parse(await readFile(path, 'utf8')).version
-    }
-
-    const metadata = {
+    const metadata: Metadata = {
       node: process.versions.node,
       rustc: execFileSync('rustc', ['--version'], { cwd: target, encoding: 'utf8' }).trim(),
-      wasmBindgen: (await readFile(join(target, 'crates/liva_wasm/Cargo.toml'), 'utf8')).match(
-        /^wasm-bindgen = "=([0-9.]+)"$/m,
-      )?.[1],
-      packageManager: manifest.packageManager,
+      wasmBindgen: text(
+        (await readFile(join(target, 'crates/liva_wasm/Cargo.toml'), 'utf8')).match(
+          /^wasm-bindgen = "=([0-9.]+)"$/m,
+        )?.[1],
+      ),
+      packageManager: text(manifest.packageManager),
       zlib: process.versions.zlib,
-      brotli: process.versions.brotli,
+      brotli: text(process.versions.brotli),
       vite: version,
       rolldown: rolldownVersion,
-      oxc: JSON.parse(
-        await readFile(
-          createRequire(createRequire(viteManifest).resolve('vite/package.json')).resolve(
-            'oxc-transform/package.json',
+      oxc: text(
+        object(
+          JSON.parse(
+            await readFile(
+              createRequire(createRequire(viteManifest).resolve('vite/package.json')).resolve(
+                'oxc-transform/package.json',
+              ),
+              'utf8',
+            ),
           ),
-          'utf8',
-        ),
-      ).version,
+        ).version,
+      ),
       dependencies,
       lockfile: digest(await readFile(join(target, 'pnpm-lock.yaml'))),
       cargoLockfile: digest(await readFile(join(target, 'Cargo.lock'))),
@@ -272,15 +365,15 @@ export async function measure(target, sha, output) {
       )
     }
 
-    return measurement
+    return validateMeasurement(measurement)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
 }
 
-export async function specification() {
+export async function specification(): Promise<Specification> {
   const parts = await Promise.all(
-    ['Button.vue', 'main.js'].map((name) => readFile(join(fixture, name))),
+    ['Button.vue', 'main.ts'].map((name) => readFile(join(fixture, name))),
   )
 
   return {
@@ -289,7 +382,9 @@ export async function specification() {
     harness: digest(
       Buffer.concat(
         await Promise.all(
-          ['measure.mjs', 'model.mjs'].map((name) => readFile(new URL(name, import.meta.url))),
+          ['measure.ts', 'model.ts', 'data.ts', 'types.ts'].map((name) =>
+            readFile(new URL(name, import.meta.url)),
+          ),
         ),
       ),
     ),

@@ -3,9 +3,10 @@ import { execFileSync } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { compare, prepareRevision } from './cli.mjs'
-import { measure } from './measure.mjs'
-import { validateResult } from './model.mjs'
+import { compare, prepareRevision } from './cli.ts'
+import { measure } from './measure.ts'
+import { measured } from './types.ts'
+import { validateResult } from './model.ts'
 
 // These source mutations exist only in disposable exported trees, never the checkout.
 const temporary = await mkdtemp(join(tmpdir(), 'liva-size-integration-'))
@@ -31,7 +32,7 @@ try {
 
   const larger = await measure(target, sha)
 
-  for (const metric of ['minified', 'gzip', 'brotli'])
+  for (const metric of ['minified', 'gzip', 'brotli'] as const)
     assert(larger.bytes[metric] > first.bytes[metric], `${metric} must detect growth`)
 
   assert.equal(larger.bytes.definitions, first.bytes.definitions)
@@ -68,7 +69,7 @@ try {
   await prepareRevision(sha, broken)
   await writeFile(join(broken, 'packages/runtime/src/index.ts'), 'export const broken = ;')
 
-  for (const side of ['base', 'head']) {
+  for (const side of ['base', 'head'] as const) {
     const result = await compare({
       base: sha,
       head: sha,
@@ -78,8 +79,11 @@ try {
 
     validateResult(result)
     assert.equal(result.status, 'failure')
-    assert.equal(typeof result[side].error, 'string')
-    assert(result[side === 'base' ? 'head' : 'base'].bytes.minified > 0)
+    const failed = result[side]
+    const succeeded = result[side === 'base' ? 'head' : 'base']
+
+    assert(!measured(failed) && typeof failed.error === 'string')
+    assert(measured(succeeded) && succeeded.bytes.minified > 0)
   }
 
   console.log(

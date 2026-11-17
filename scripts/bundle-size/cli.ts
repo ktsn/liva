@@ -4,14 +4,18 @@ import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { specification } from './measure.mjs'
+import { environment, object, text } from './data.ts'
+import { pullRequest } from './github-data.ts'
+import { validateMeasurement, validateResult } from './model.ts'
+import type { Comparison, Context, Side, SideResult } from './types.ts'
+import { specification } from './measure.ts'
 
-const run = (command, args, cwd, env = process.env) =>
+const run = (command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env) =>
   execFileSync(command, args, { cwd, env, stdio: ['ignore', 'inherit', 'inherit'] })
-const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim()
+const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8' }).trim()
 
 /** Export committed sources; the harness never writes tracked files in either revision. */
-export async function prepareRevision(revision, destination) {
+export async function prepareRevision(revision: string, destination: string): Promise<void> {
   await mkdir(destination)
 
   const archive = execFileSync('git', ['archive', revision], { maxBuffer: 50 * 1024 * 1024 })
@@ -47,6 +51,17 @@ export async function prepareRevision(revision, destination) {
   run('sh', ['scripts/build-wasm.sh'], destination, env)
 }
 
+interface CompareOptions {
+  base: string
+  head: string
+  baseDirectory: string
+  headDirectory: string
+  output?: string
+  context?: Context | null
+  prepareSources?: boolean
+  single?: boolean
+}
+
 export async function compare({
   base,
   head,
@@ -56,17 +71,17 @@ export async function compare({
   context = null,
   prepareSources = false,
   single = false,
-}) {
+}: CompareOptions): Promise<Comparison> {
   const result = {
     schema: 1,
     specification: await specification(),
     context,
-    base: { sha: base },
-    head: { sha: head },
+
     status: 'success',
   }
 
-  const targets = single
+  const sides: Partial<Record<Side, SideResult>> = {}
+  const targets: [Side, string, string][] = single
     ? [['head', head, headDirectory]]
     : [
         ['base', base, baseDirectory],
@@ -78,23 +93,26 @@ export async function compare({
       if (prepareSources) await prepareRevision(sha, directory)
 
       const resultFile = join(directory, '..', `${side}.measurement.json`)
-      const workerArgs = [join(import.meta.dirname, 'measure.mjs'), directory, sha, resultFile]
+      const workerArgs = [join(import.meta.dirname, 'measure.ts'), directory, sha, resultFile]
 
       if (output) workerArgs.push(join(output, side))
 
       // Fresh processes keep each revision's compiler, native tools and browser client isolated.
       run(process.execPath, workerArgs, process.cwd())
-      result[side] = JSON.parse(await readFile(resultFile, 'utf8'))
+      sides[side] = validateMeasurement(JSON.parse(await readFile(resultFile, 'utf8')))
     } catch (error) {
       result.status = 'failure'
-      result[side] = { sha, error: String(error.message).slice(0, 2000) }
+      sides[side] = {
+        sha,
+        error: String(error instanceof Error ? error.message : error).slice(0, 2000),
+      }
       console.error(`${side} (${sha}) measurement failed:`, error)
     }
   }
 
-  if (single) result.base = result.head
+  if (single) sides.base = sides.head
 
-  return result
+  return validateResult({ ...result, ...sides })
 }
 
 async function main() {
@@ -102,7 +120,7 @@ async function main() {
 
   assert(
     ['measure', 'compare', 'ci'].includes(command),
-    'Usage: node scripts/bundle-size/cli.mjs measure REV OUTPUT | compare BASE HEAD OUTPUT | ci OUTPUT',
+    'Usage: node scripts/bundle-size/cli.ts measure REV OUTPUT | compare BASE HEAD OUTPUT | ci OUTPUT',
   )
 
   const temporary = await mkdtemp(join(tmpdir(), 'liva-size-revisions-'))
@@ -113,27 +131,29 @@ async function main() {
   await mkdir(output, { recursive: true })
 
   try {
-    let context = null
+    let context: Context | null = null
     let base
     let head
 
     if (command === 'ci') {
-      const event = JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, 'utf8'))
-      const pr = event.pull_request
+      const event = object(JSON.parse(await readFile(environment('GITHUB_EVENT_PATH'), 'utf8')))
+      const pr = pullRequest(event.pull_request)
 
       assert.equal(process.env.GITHUB_EVENT_NAME, 'pull_request')
-      const pins = JSON.parse(
-        await readFile(join(process.env.RUNNER_TEMP, 'bundle-size-pins.json'), 'utf8'),
+      const pins = object(
+        JSON.parse(
+          await readFile(join(environment('RUNNER_TEMP'), 'bundle-size-pins.json'), 'utf8'),
+        ),
       )
 
       assert.equal(pins.pr, pr.number)
       assert.equal(pins.baseBranch, pr.base.ref)
       assert.equal(pins.head, pr.head.sha)
 
-      base = git('rev-parse', `${pins.base}^{commit}`)
-      head = git('rev-parse', `${pins.head}^{commit}`)
+      base = git('rev-parse', `${text(pins.base)}^{commit}`)
+      head = git('rev-parse', `${text(pins.head)}^{commit}`)
       context = {
-        repository: process.env.GITHUB_REPOSITORY,
+        repository: environment('GITHUB_REPOSITORY'),
         pr: pr.number,
         baseBranch: pr.base.ref,
         headRepository: pr.head.repo.full_name,

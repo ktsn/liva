@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { test } from 'node:test'
-import { marker } from './model.mjs'
-import { example } from './test-fixture.mjs'
+import { marker } from './model.ts'
+import { array, object } from './data.ts'
+import type { Comment, PullRequest, Run } from './github-data.ts'
+import type { Api, ApiOptions } from './report.ts'
+import { example, readField, replaceField } from './test-fixture.ts'
 import {
   githubApi,
   isCurrent,
@@ -10,9 +13,9 @@ import {
   report,
   verifyContext,
   workflowPath,
-} from './report.mjs'
+} from './report.ts'
 
-function zip(result, filename = 'result.json') {
+function zip(result: unknown, filename = 'result.json') {
   return execFileSync(
     'python3',
     [
@@ -28,6 +31,21 @@ sys.stdout.buffer.write(buffer.getvalue())`,
   )
 }
 
+interface Scenario {
+  comments?: Comment[]
+  conclusion?: string
+  artifact?: unknown
+  attempt?: number
+  newer?: boolean
+  changedHead?: boolean
+  changedBase?: boolean
+  fork?: boolean
+  otherPr?: boolean
+}
+interface Call extends ApiOptions {
+  path: string
+}
+
 function github({
   comments = [],
   conclusion = 'success',
@@ -38,14 +56,14 @@ function github({
   changedBase = false,
   fork = false,
   otherPr = false,
-} = {}) {
-  const pr = {
+}: Scenario = {}) {
+  const pr: PullRequest = {
     number: 92,
     state: 'open',
     head: { sha: '1'.repeat(40), ref: 'feature', repo: { id: 2, full_name: 'fork/liva' } },
-    base: { ref: 'main', sha: 'a'.repeat(40), repo: { full_name: 'ktsn/liva' } },
+    base: { ref: 'main', sha: 'a'.repeat(40), repo: { id: 1, full_name: 'ktsn/liva' } },
   }
-  const run = {
+  const run: Run = {
     id: 10000000001,
     run_attempt: 1,
     event: 'pull_request',
@@ -60,9 +78,9 @@ function github({
     repository: { full_name: 'ktsn/liva' },
     pull_requests: fork ? [] : [{ number: pr.number }],
   }
-  const calls = []
+  const calls: Call[] = []
   let prReads = 0
-  const api = async (path, options = {}) => {
+  const api: Api = async (path, options = {}) => {
     calls.push({ path, ...options })
 
     if (options.method) return {}
@@ -112,14 +130,22 @@ function github({
   return { api, event: { workflow_run: run }, calls, run, pr }
 }
 
-const writes = (calls) => calls.filter((call) => call.method)
+const writes = (calls: Call[]) => calls.filter((call) => call.method)
+function posted(calls: Call[]): Call & { body: { body: string } } {
+  const call = writes(calls)[0]
+
+  assert(call && call.body, 'Expected a comment publication')
+
+  return { ...call, body: call.body }
+}
+
 const botComment = {
   id: 40,
   user: { login: 'github-actions[bot]', type: 'Bot' },
   body: `${marker}\nold`,
 }
 
-test('creates one bot comment, ignores a user marker, and updates the bot comment', async () => {
+await test('creates one bot comment, ignores a user marker, and updates the bot comment', async () => {
   for (const comments of [
     [],
     [{ ...botComment, user: { login: 'someone', type: 'User' } }],
@@ -130,16 +156,16 @@ test('creates one bot comment, ignores a user marker, and updates the bot commen
     assert.equal(await report(api, event, 'ktsn/liva'), 'success')
     assert.equal(writes(calls).length, 1)
     assert.equal(writes(calls)[0].method, comments[0] === botComment ? 'PATCH' : 'POST')
-    assert(writes(calls)[0].body.body.startsWith(marker))
+    assert(posted(calls).body.body.startsWith(marker))
   }
 })
 
-test('failure on either measured side updates the existing comment', async () => {
-  for (const side of ['base', 'head']) {
+await test('failure on either measured side updates the existing comment', async () => {
+  for (const side of ['base', 'head'] as const) {
     const artifact = example()
 
-    artifact.status = 'failure'
-    artifact[side] = { sha: artifact[side].sha, error: 'build failed' }
+    replaceField(artifact, ['status'], 'failure')
+    replaceField(artifact, [side], { sha: artifact[side].sha, error: 'build failed' })
 
     const { api, event, calls } = github({
       comments: [botComment],
@@ -149,11 +175,11 @@ test('failure on either measured side updates the existing comment', async () =>
 
     assert.equal(await report(api, event, 'ktsn/liva'), 'failure')
     assert.equal(writes(calls)[0].method, 'PATCH')
-    assert.match(writes(calls)[0].body.body, new RegExp(`failed:.*${side}`))
+    assert.match(posted(calls).body.body, new RegExp(`failed:.*${side}`))
   }
 })
 
-test('failure before artifact creation supersedes the previous successful result', async () => {
+await test('failure before artifact creation supersedes the previous successful result', async () => {
   const { api, event, calls } = github({
     comments: [botComment],
     conclusion: 'failure',
@@ -162,44 +188,34 @@ test('failure before artifact creation supersedes the previous successful result
   })
 
   assert.equal(await report(api, event, 'ktsn/liva'), 'failure')
-  assert.match(writes(calls)[0].body.body, /setup or artifact publication/)
+  assert.match(posted(calls).body.body, /setup or artifact publication/)
   assert.equal(writes(calls)[0].method, 'PATCH')
 })
 
-test('invalid artifact and wrong PR are rejected and reporting fails after trusted failure update', async () => {
-  for (const change of [
-    (r) => {
-      r.context.pr = 12
-    },
-    (r) => {
-      r.context.run++
-    },
-    (r) => {
-      r.context.attempt++
-    },
-    (r) => {
-      r.context.baseBranch = 'other'
-    },
-    (r) => {
-      r.head.sha = '2'.repeat(40)
-    },
-    (r) => {
-      r.head.bytes.gzip = -1
-    },
-  ]) {
-    const artifact = example()
+await test('invalid artifact and wrong PR are rejected and reporting fails after trusted failure update', async () => {
+  const cases: [string[], unknown][] = [
+    [['context', 'pr'], 12],
+    [['context', 'run'], 10000000002],
+    [['context', 'attempt'], 2],
+    [['context', 'baseBranch'], 'other'],
+    [['head', 'sha'], '2'.repeat(40)],
+    [['head', 'bytes', 'gzip'], -1],
+  ]
 
-    change(artifact)
+  for (const [path, invalid] of cases) {
+    const artifact: unknown = example()
+
+    replaceField(artifact, path, invalid)
 
     const { api, event, calls } = github({ artifact })
 
     await assert.rejects(report(api, event, 'ktsn/liva'), /artifact rejected/)
-    assert.match(writes(calls)[0].body.body, /Measurement failed/)
-    assert.doesNotMatch(writes(calls)[0].body.body, /Minified JS/)
+    assert.match(posted(calls).body.body, /Measurement failed/)
+    assert.doesNotMatch(posted(calls).body.body, /Minified JS/)
   }
 })
 
-test('coercible string arrays are rejected at the comment publication boundary', async () => {
+await test('coercible string arrays are rejected at the comment publication boundary', async () => {
   for (const path of [
     ['specification', 'fixture'],
     ['specification', 'harness'],
@@ -211,21 +227,18 @@ test('coercible string arrays are rejected at the comment publication boundary',
     ['head', 'metadata', 'wasm'],
   ]) {
     const artifact = example()
-    const parent = path.slice(0, -1).reduce((value, key) => value[key], artifact)
-    const name = path.at(-1)
-
-    parent[name] = [parent[name]]
+    replaceField(artifact, path, [readField(artifact, path)])
 
     const { api, event, calls } = github({ artifact })
 
     await assert.rejects(report(api, event, 'ktsn/liva'), /artifact rejected/)
     assert.equal(writes(calls).length, 1)
-    assert.match(writes(calls)[0].body.body, /Measurement failed/)
-    assert.doesNotMatch(writes(calls)[0].body.body, /Minified JS/)
+    assert.match(posted(calls).body.body, /Measurement failed/)
+    assert.doesNotMatch(posted(calls).body.body, /Minified JS/)
   }
 })
 
-test('older runs, old attempts, changed heads and retargets cannot overwrite current comments', async () => {
+await test('older runs, old attempts, changed heads and retargets cannot overwrite current comments', async () => {
   for (const options of [
     { newer: true },
     { attempt: 2 },
@@ -239,16 +252,16 @@ test('older runs, old attempts, changed heads and retargets cannot overwrite cur
   }
 })
 
-test('fork association and a newer same-head run for a different PR still report the intended PR', async () => {
+await test('fork association and a newer same-head run for a different PR still report the intended PR', async () => {
   const { api, event, calls } = github({ fork: true, otherPr: true })
 
   assert.equal(await report(api, event, 'ktsn/liva'), 'success')
   assert.equal(writes(calls)[0].path, '/issues/92/comments')
 })
 
-test('unexpected workflow identity cannot reach artifact download or comment APIs', async () => {
+await test('unexpected workflow identity cannot reach artifact download or comment APIs', async () => {
   const { api, event, calls } = github()
-  const wrong = async (path, options) =>
+  const wrong: Api = async (path, options) =>
     path === `/actions/runs/${event.workflow_run.id}`
       ? { ...event.workflow_run, workflow_id: 99 }
       : api(path, options)
@@ -257,22 +270,37 @@ test('unexpected workflow identity cannot reach artifact download or comment API
   assert.deepEqual(writes(calls), [])
 })
 
-test('API comment write errors remain observable', async () => {
+await test('unknown workflow event and REST response fields are narrowed before publication', async () => {
+  const { api, event, calls } = github()
+  const invalidRun: Api = async (path, options) =>
+    path === `/actions/runs/${event.workflow_run.id}`
+      ? { ...event.workflow_run, head_sha: [event.workflow_run.head_sha] }
+      : api(path, options)
+
+  await assert.rejects(report(invalidRun, event, 'ktsn/liva'), /Expected string/)
+  await assert.rejects(
+    report(api, { workflow_run: { id: 'not-an-id' } }, 'ktsn/liva'),
+    /Expected positive integer/,
+  )
+  assert.deepEqual(writes(calls), [])
+})
+
+await test('API comment write errors remain observable', async () => {
   const { api, event } = github()
-  const failing = (path, options) =>
+  const failing: Api = (path, options) =>
     options?.method ? Promise.reject(new Error('API unavailable')) : api(path, options)
 
   await assert.rejects(report(failing, event, 'ktsn/liva'), /API unavailable/)
 })
 
-test('ZIP reader rejects extra paths, traversal names and oversized content', () => {
+await test('ZIP reader rejects extra paths, traversal names and oversized content', () => {
   assert.throws(() => readArtifact(zip(example(), '../result.json')))
   assert.throws(() => readArtifact(zip('x'.repeat(100_001))))
   assert.throws(() => readArtifact(Buffer.alloc(1_000_001)))
   assert.deepEqual(readArtifact(zip(example())), example())
 })
 
-test('final freshness guard requires matching live run attempt, latest event and open PR', () => {
+await test('final freshness guard requires matching live run attempt, latest event and open PR', () => {
   const { run, pr } = github()
 
   assert(isCurrent(run, run, run, pr))
@@ -282,17 +310,19 @@ test('final freshness guard requires matching live run attempt, latest event and
     verifyContext(example(), { ...run, head_sha: '2'.repeat(40) }, pr, 'ktsn/liva'),
   )
 })
-test('REST client paginates comment and workflow collections without following untrusted URLs', async () => {
-  for (const collection of [true, 'workflow_runs']) {
-    const requests = []
+await test('REST client paginates comment and workflow collections without following untrusted URLs', async () => {
+  for (const collection of [true, 'workflow_runs'] as const) {
+    const requests: string[] = []
     const api = githubApi({
       repository: 'ktsn/liva',
       token: 'test-token',
       apiUrl: 'https://api.github.com',
       fetcher: async (url) => {
-        requests.push(url)
+        const address = url instanceof Request ? url.url : url.toString()
 
-        const second = new URL(url).searchParams.get('page') === '2'
+        requests.push(address)
+
+        const second = new URL(address).searchParams.get('page') === '2'
         const rows = [{ id: second ? 2 : 1 }]
         const body = collection === true ? rows : { workflow_runs: rows }
 
@@ -303,13 +333,16 @@ test('REST client paginates comment and workflow collections without following u
     })
     const result = await api('/actions/runs?per_page=100', { paginate: collection })
 
-    assert.deepEqual(collection === true ? result : result.workflow_runs, [{ id: 1 }, { id: 2 }])
+    assert.deepEqual(collection === true ? array(result) : array(object(result).workflow_runs), [
+      { id: 1 },
+      { id: 2 },
+    ])
     assert.equal(requests.length, 2)
     assert(requests.every((url) => url.startsWith('https://api.github.com/repos/ktsn/liva/')))
   }
 })
 
-test('REST client rejects API errors and bounds downloads even without content-length', async () => {
+await test('REST client rejects API errors and bounds downloads even without content-length', async () => {
   const failed = githubApi({
     repository: 'ktsn/liva',
     token: 'test',

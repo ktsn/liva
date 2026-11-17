@@ -10,19 +10,20 @@
     "gzipLevel": 9,
     "brotliQuality": 11,
     "external": ["vue"],
-    "fixture": "29c173ebe321e3441462c34457b04c3348f4c136c42fc191228d1baf1c64bd94",
-    "harness": "3407a1cc4ff5bbbb95b31b0f097332b2f3d0b5c79a4b155a3fa8d8ac88452b05"
+    "fixture": "c9790a50346ddff03b06ea3a78a1b3928bb9892ed1188314365321f2fa6488d1",
+    "harness": "1ef6976b42f987847f39c50381864e6d678da81e889d5f1cf08613bc52801b8e"
   },
   "context": null,
+  "status": "success",
   "base": {
     "sha": "99138c83be315420cf29b17accf6d2911e2027c0",
+    "bundle": "532d6c9d29c2631e839ee4fd5242b36dcfdbd4b5513d0ada7fe41627389c90f0",
     "bytes": {
       "minified": 105840,
       "gzip": 30854,
       "brotli": 27604,
       "definitions": 591
     },
-    "bundle": "532d6c9d29c2631e839ee4fd5242b36dcfdbd4b5513d0ada7fe41627389c90f0",
     "metadata": {
       "node": "26.13.1",
       "rustc": "rustc 1.100.0 (0ef1bc386 2026-11-09)",
@@ -51,13 +52,13 @@
   },
   "head": {
     "sha": "99138c83be315420cf29b17accf6d2911e2027c0",
+    "bundle": "532d6c9d29c2631e839ee4fd5242b36dcfdbd4b5513d0ada7fe41627389c90f0",
     "bytes": {
       "minified": 105840,
       "gzip": 30854,
       "brotli": 27604,
       "definitions": 591
     },
-    "bundle": "532d6c9d29c2631e839ee4fd5242b36dcfdbd4b5513d0ada7fe41627389c90f0",
     "metadata": {
       "node": "26.13.1",
       "rustc": "rustc 1.100.0 (0ef1bc386 2026-11-09)",
@@ -83,6 +84,5 @@
       "cargoLockfile": "6885e02667d189d43f05bbdca193e42cc78a5028e55629276704f763d1d9d620",
       "wasm": "b1dbcf75a10d143fc35674438e032abee7699b091f62186d0747a63bbea16af4"
     }
-  },
-  "status": "success"
+  }
 }

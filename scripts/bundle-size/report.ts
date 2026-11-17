@@ -1,12 +1,23 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
-import { formatComment, marker, validateResult } from './model.mjs'
+import { array, environment, number, object } from './data.ts'
+import {
+  artifacts,
+  candidates,
+  comments as decodeComments,
+  pullRequest,
+  workflowRun,
+  type PullRequest,
+  type Run,
+} from './github-data.ts'
+import type { Comparison } from './types.ts'
+import { formatComment, marker, validateResult } from './model.ts'
 
 export const workflowPath = '.github/workflows/bundle-size.yml'
 
 /** Artifact identity is checked against live GitHub data, never used to select the PR. */
-export function verifyContext(result, run, pr, repository) {
+export function verifyContext(result: Comparison, run: Run, pr: PullRequest, repository: string) {
   const context = result.context
 
   assert(context, 'CI context missing')
@@ -21,13 +32,13 @@ export function verifyContext(result, run, pr, repository) {
   assert.equal(result.head.sha, pr.head.sha)
 }
 
-export function runIdentity(run) {
+export function runIdentity(run: Pick<Run, 'display_title'>) {
   const match = /^Bundle size PR #([1-9][0-9]*) to (.+)$/.exec(run.display_title || '')
 
   return match && { pr: Number(match[1]), baseBranch: match[2] }
 }
 
-export function matchesRun(run, pr) {
+export function matchesRun(run: Run, pr: PullRequest) {
   return (
     run.event === 'pull_request' &&
     run.head_sha === pr.head.sha &&
@@ -36,7 +47,7 @@ export function matchesRun(run, pr) {
   )
 }
 
-export function isCurrent(run, currentRun, latestRun, pr) {
+export function isCurrent(run: Run, currentRun: Run, latestRun: Run | undefined, pr: PullRequest) {
   return (
     pr.state === 'open' &&
     matchesRun(run, pr) &&
@@ -46,7 +57,7 @@ export function isCurrent(run, currentRun, latestRun, pr) {
 }
 
 /** Read exactly one bounded JSON file; no archive paths are extracted or executed. */
-export function readArtifact(zip) {
+export function readArtifact(zip: Buffer): unknown {
   assert(zip.length <= 1_000_000, 'Artifact ZIP too large')
 
   return JSON.parse(
@@ -68,18 +79,19 @@ with zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())) as archive:
   )
 }
 
-export async function report(api, event, repository) {
-  const notification = event.workflow_run
-  const run = await api(`/actions/runs/${notification.id}`)
-  const workflow = await api(`/actions/workflows/bundle-size.yml`)
+export async function report(api: Api, event: unknown, repository: string) {
+  const notification = object(object(event).workflow_run)
+  const run = workflowRun(await api(`/actions/runs/${number(notification.id)}`))
+  const workflow = object(await api(`/actions/workflows/bundle-size.yml`))
+  const workflowId = number(workflow.id)
 
   assert.equal(run.event, 'pull_request', 'Unexpected originating event')
-  assert.equal(run.workflow_id, workflow.id, 'Unexpected originating workflow')
+  assert.equal(run.workflow_id, workflowId, 'Unexpected originating workflow')
   assert.equal(run.path, workflowPath)
   assert.equal(run.repository.full_name, repository)
   assert.equal(run.status, 'completed')
 
-  if (run.run_attempt !== notification.run_attempt) return 'stale attempt'
+  if (run.run_attempt !== number(notification.run_attempt)) return 'stale attempt'
 
   if (run.conclusion === 'skipped') return 'irrelevant edit'
 
@@ -89,29 +101,28 @@ export async function report(api, event, repository) {
 
   // The API's run title remains available before checkout/install/artifact creation.
   // Commit association corroborates the title, including forks whose run PR list is empty.
-  const candidates = run.pull_requests?.length
+  const associated = run.pull_requests.length
     ? run.pull_requests
-    : await api(`/commits/${run.head_sha}/pulls`)
+    : candidates(await api(`/commits/${run.head_sha}/pulls`))
 
   assert(
-    candidates.some((candidate) => candidate.number === identity.pr),
+    associated.some((candidate) => candidate.number === identity.pr),
     'Run target is not associated with its commit',
   )
 
-  const pr = await api(`/pulls/${identity.pr}`)
+  const pr = pullRequest(await api(`/pulls/${identity.pr}`))
 
   assert.equal(pr.base.repo.full_name, repository)
 
   if (!matchesRun(run, pr) || pr.base.ref !== identity.baseBranch || pr.state !== 'open')
     return 'superseded or closed PR'
 
-  let result = null
-  let artifactError
+  let result: Comparison | null = null
+  let artifactError: unknown
   const artifactName = `bundle-size-${run.id}-${run.run_attempt}`
 
   try {
-    const artifacts = await api(`/actions/runs/${run.id}/artifacts`)
-    const matches = artifacts.artifacts.filter(
+    const matches = artifacts(await api(`/actions/runs/${run.id}/artifacts`)).filter(
       (artifact) => artifact.name === artifactName && !artifact.expired,
     )
 
@@ -120,9 +131,7 @@ export async function report(api, event, repository) {
     } else {
       assert.equal(matches.length, 1, 'Missing or duplicate result artifact')
       assert(matches[0].size_in_bytes <= 1_000_000, 'Artifact too large')
-      result = validateResult(
-        readArtifact(await api(`/actions/artifacts/${matches[0].id}/zip`, { binary: true })),
-      )
+      result = validateResult(readArtifact(await artifactBytes(api, matches[0].id)))
       verifyContext(result, run, pr, repository)
       assert.equal(
         result.status === 'success',
@@ -137,12 +146,13 @@ export async function report(api, event, repository) {
 
   const latest = async () => {
     const runs = await api(
-      `/actions/workflows/${workflow.id}/runs?event=pull_request&branch=${encodeURIComponent(pr.head.ref)}&per_page=100`,
+      `/actions/workflows/${workflowId}/runs?event=pull_request&branch=${encodeURIComponent(pr.head.ref)}&per_page=100`,
       { paginate: 'workflow_runs' },
     )
 
     // Run IDs increase on new events; rerunning an old run cannot reclaim freshness.
-    return runs.workflow_runs
+    return array(object(runs).workflow_runs)
+      .map(workflowRun)
       .filter(
         (candidate) =>
           candidate.head_repository?.id === pr.head.repo.id &&
@@ -153,7 +163,9 @@ export async function report(api, event, repository) {
       )
       .toSorted((a, b) => b.id - a.id)[0]
   }
-  const comments = await api(`/issues/${pr.number}/comments?per_page=100`, { paginate: true })
+  const comments = decodeComments(
+    await api(`/issues/${pr.number}/comments?per_page=100`, { paginate: true }),
+  )
   const previous = comments.filter(
     (comment) =>
       comment.user.login === 'github-actions[bot]' &&
@@ -164,8 +176,8 @@ export async function report(api, event, repository) {
   assert(previous.length <= 1, 'Multiple bundle-size bot comments')
 
   const [currentPr, currentRun, latestRun] = await Promise.all([
-    api(`/pulls/${pr.number}`),
-    api(`/actions/runs/${run.id}`),
+    api(`/pulls/${pr.number}`).then(pullRequest),
+    api(`/actions/runs/${run.id}`).then(workflowRun),
     latest(),
   ])
 
@@ -192,8 +204,37 @@ export async function report(api, event, repository) {
   return result ? result.status : 'failure'
 }
 
-export function githubApi({ repository, token, apiUrl, fetcher = fetch }) {
-  async function api(path, { binary = false, paginate = false, method = 'GET', body } = {}) {
+export interface ApiOptions {
+  binary?: boolean
+  paginate?: boolean | 'workflow_runs'
+  method?: 'GET' | 'POST' | 'PATCH'
+  body?: { body: string }
+}
+export type Api = (path: string, options?: ApiOptions) => Promise<unknown>
+
+async function artifactBytes(api: Api, id: number): Promise<Buffer> {
+  const bytes = await api(`/actions/artifacts/${id}/zip`, { binary: true })
+
+  assert(Buffer.isBuffer(bytes))
+
+  return bytes
+}
+
+export function githubApi({
+  repository,
+  token,
+  apiUrl,
+  fetcher = fetch,
+}: {
+  repository: string
+  token: string
+  apiUrl: string
+  fetcher?: typeof fetch
+}): Api {
+  async function api(
+    path: string,
+    { binary = false, paginate = false, method = 'GET', body }: ApiOptions = {},
+  ): Promise<unknown> {
     const response = await fetcher(`${apiUrl}/repos/${repository}${path}`, {
       method,
       headers: {
@@ -210,8 +251,10 @@ export function githubApi({ repository, token, apiUrl, fetcher = fetch }) {
     if (binary) {
       assert(Number(response.headers.get('content-length') || 0) <= 1_000_000)
 
-      const chunks = []
+      const chunks: Uint8Array[] = []
       let size = 0
+
+      assert(response.body, 'Missing artifact response body')
 
       for await (const chunk of response.body) {
         size += chunk.length
@@ -222,7 +265,7 @@ export function githubApi({ repository, token, apiUrl, fetcher = fetch }) {
       return Buffer.concat(chunks)
     }
 
-    const value = await response.json()
+    const value: unknown = await response.json()
 
     if (paginate && /rel="next"/.test(response.headers.get('link') || '')) {
       const next = new URL(path, 'https://api.github.com')
@@ -233,8 +276,11 @@ export function githubApi({ repository, token, apiUrl, fetcher = fetch }) {
       const rest = await api(`${next.pathname}${next.search}`, { paginate })
 
       return typeof paginate === 'string'
-        ? { ...value, [paginate]: value[paginate].concat(rest[paginate]) }
-        : value.concat(rest)
+        ? {
+            ...object(value),
+            [paginate]: array(object(value)[paginate]).concat(array(object(rest)[paginate])),
+          }
+        : array(value).concat(array(rest))
     }
 
     return value
@@ -244,18 +290,18 @@ export function githubApi({ repository, token, apiUrl, fetcher = fetch }) {
 }
 
 async function main() {
-  const repository = process.env.GITHUB_REPOSITORY
-  const token = process.env.GITHUB_TOKEN
+  const repository = environment('GITHUB_REPOSITORY')
+  const token = environment('GITHUB_TOKEN')
 
   assert(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository))
   assert(token, 'Missing GitHub token')
 
-  const api = githubApi({ repository, token, apiUrl: process.env.GITHUB_API_URL })
+  const api = githubApi({ repository, token, apiUrl: environment('GITHUB_API_URL') })
 
   console.log(
     await report(
       api,
-      JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, 'utf8')),
+      JSON.parse(await readFile(environment('GITHUB_EVENT_PATH'), 'utf8')),
       repository,
     ),
   )
