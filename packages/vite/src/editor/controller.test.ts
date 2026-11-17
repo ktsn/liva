@@ -386,6 +386,48 @@ describe('editor selection and saves', () => {
     controller.seek(10)
   })
 
+  it('reports an ended preview after restoring application ownership and retains the draft', async () => {
+    const { controller, first } = await setup(async (request) => ({
+      ...reply,
+      sequence: request.sequence,
+    }))
+    controller.setDraft(edits)
+    await controller.previewComposition(from, to)
+
+    controller.endPreview()
+
+    expect(first.preview.end).toHaveBeenCalledExactlyOnceWith()
+    expect(controller.previewActive).toBe(false)
+    expect(controller.message).toContain('Preview ended. Application state is restored')
+    expect(controller.draft).toEqual(edits)
+  })
+
+  it.each(['inactive diagnostic', 'active diagnostic', 'stale source'] as const)(
+    'preserves relevant feedback when ending a preview with %s',
+    async (status) => {
+      const { controller, first } = await setup(async (request) => ({
+        ...reply,
+        sequence: request.sequence,
+      }))
+
+      if (status !== 'inactive diagnostic') await controller.previewComposition(from, to)
+
+      if (status === 'stale source') controller.sourceChanged('source')
+      else controller.reportSourceDiagnostics('source', 'Mismatched delimiter')
+
+      const message = controller.message
+      const ends = first.preview.end.mock.calls.length
+
+      controller.endPreview()
+
+      expect(controller.previewActive).toBe(false)
+      expect(controller.message).toBe(message)
+      expect(first.preview.end).toHaveBeenCalledTimes(
+        ends + (status === 'active diagnostic' ? 1 : 0),
+      )
+    },
+  )
+
   it('reports runtime preview rejection and ignores stale inspection replies', async () => {
     const { controller, first } = await setup(async (request) => ({
       ...reply,
@@ -525,6 +567,8 @@ describe('lifecycle preview coordination', () => {
 
       expect(first.preview.end).toHaveBeenCalled()
       expect(first.runtime.definition).toBe(definition)
+      expect(controller.previewActive).toBe(false)
+      expect(controller.message).toContain('Preview ended. Application state is restored')
     },
   )
 })

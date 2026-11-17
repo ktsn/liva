@@ -162,6 +162,9 @@ it('opens composition playback, scrubs and restores on close', async () => {
   await click('End preview')
 
   expect(controller.previewActive).toBe(false)
+  expect(host!.querySelector('[aria-label="Editor feedback"]')?.textContent).toContain(
+    'Preview ended. Application state is restored',
+  )
 
   await click('Close')
 

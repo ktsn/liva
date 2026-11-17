@@ -21,6 +21,7 @@ export interface Entry {
 }
 
 const selectInstanceMessage = 'Select an instance to inspect its motion.'
+const previewingMessage = 'Previewing this instance only. Source is unchanged.'
 
 export class EditorController {
   readonly entries = new Map<string, Entry>()
@@ -196,15 +197,23 @@ export class EditorController {
       ? selected.binding.inspection.previewLifecycle(phase, to, reply.definition)
       : selected.binding.inspection.previewComposition(from, to, transitions, reply.definition)
     this.previewActive = true
-    this.message = 'Previewing this instance only. Source is unchanged.'
+    this.message = previewingMessage
     this.notify()
 
     return reply
   }
 
   endPreview() {
+    const wasActive = this.previewActive
     this.sequence++
     this.restoreSelected()
+
+    // Only replace the status owned by this preview. A diagnostic or stale-source
+    // message remains relevant even when its presentation is restored.
+    if (wasActive && this.message === previewingMessage) {
+      this.message = 'Preview ended. Application state is restored; your draft is retained.'
+    }
+
     this.notify()
   }
 
