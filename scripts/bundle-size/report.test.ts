@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { ZipEntry, createZipArchiveSync } from 'node:zlib'
 import { test } from 'node:test'
 import { marker } from './model.ts'
 import { array, object } from './data.ts'
@@ -15,20 +15,12 @@ import {
   workflowPath,
 } from './report.ts'
 
-function zip(result: unknown, filename = 'result.json') {
-  return execFileSync(
-    'python3',
-    [
-      '-c',
-      `import io,sys,zipfile
-buffer=io.BytesIO()
-with zipfile.ZipFile(buffer,'w') as archive:
-    archive.writestr(sys.argv[1], sys.stdin.buffer.read())
-sys.stdout.buffer.write(buffer.getvalue())`,
-      filename,
-    ],
-    { input: JSON.stringify(result) },
-  )
+function zip(result: unknown, filename = 'result.json'): Buffer {
+  const entry = ZipEntry.createSync(filename, Buffer.from(JSON.stringify(result)), {
+    method: 'store',
+  })
+
+  return Buffer.concat([...createZipArchiveSync([entry])])
 }
 
 interface Scenario {

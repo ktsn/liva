@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { ZipEntry } from 'node:zlib'
 import { readFile } from 'node:fs/promises'
 import { array, environment, number, object } from './data.ts'
 import {
@@ -56,27 +56,31 @@ export function isCurrent(run: Run, currentRun: Run, latestRun: Run | undefined,
   )
 }
 
-/** Read exactly one bounded JSON file; no archive paths are extracted or executed. */
-export function readArtifact(zip: Buffer): unknown {
-  assert(zip.length <= 1_000_000, 'Artifact ZIP too large')
+export const artifactLimits = Object.freeze({ archive: 1_000_000, json: 100_000 })
 
-  return JSON.parse(
-    execFileSync(
-      'python3',
-      [
-        '-c',
-        `
-import io, sys, zipfile
-with zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())) as archive:
-    files = archive.infolist()
-    assert len(files) == 1 and files[0].filename == 'result.json', 'Unexpected artifact files'
-    assert files[0].file_size <= 100000, 'Result JSON too large'
-    sys.stdout.buffer.write(archive.read(files[0]))
-`,
-      ],
-      { input: zip, maxBuffer: 100_000, stdio: ['pipe', 'pipe', 'pipe'] },
-    ).toString('utf8'),
-  )
+/** Read one regular result.json without extracting paths or exposing unverified content.
+ * Node 26.13.1's native ZIP API checks CRC and declared/actual size and limits allocation.
+ * Entries borrow the archive buffer, which is never mutated during this synchronous read.
+ */
+export function readArtifact(zip: Buffer): unknown {
+  assert(zip.length <= artifactLimits.archive, 'Artifact ZIP too large')
+
+  let file: ZipEntry | undefined
+
+  // Reading raw entries preserves duplicate names; indexing by name would hide them.
+  for (const entry of ZipEntry.read(zip)) {
+    assert(
+      file === undefined && entry.name === 'result.json' && entry.isFile,
+      'Unexpected artifact files',
+    )
+    file = entry
+  }
+
+  assert(file, 'Missing result.json')
+
+  const content = file.contentSync({ verify: true, maxSize: artifactLimits.json })
+
+  return JSON.parse(content.toString('utf8'))
 }
 
 export async function report(api: Api, event: unknown, repository: string) {
@@ -130,7 +134,7 @@ export async function report(api: Api, event: unknown, repository: string) {
       result = null
     } else {
       assert.equal(matches.length, 1, 'Missing or duplicate result artifact')
-      assert(matches[0].size_in_bytes <= 1_000_000, 'Artifact too large')
+      assert(matches[0].size_in_bytes <= artifactLimits.archive, 'Artifact too large')
       result = validateResult(readArtifact(await artifactBytes(api, matches[0].id)))
       verifyContext(result, run, pr, repository)
       assert.equal(
@@ -249,7 +253,7 @@ export function githubApi({
     assert(response.ok, `GitHub API ${method} ${path}: ${response.status}`)
 
     if (binary) {
-      assert(Number(response.headers.get('content-length') || 0) <= 1_000_000)
+      assert(Number(response.headers.get('content-length') || 0) <= artifactLimits.archive)
 
       const chunks: Uint8Array[] = []
       let size = 0
@@ -258,7 +262,7 @@ export function githubApi({
 
       for await (const chunk of response.body) {
         size += chunk.length
-        assert(size <= 1_000_000, 'Artifact download too large')
+        assert(size <= artifactLimits.archive, 'Artifact download too large')
         chunks.push(chunk)
       }
 
