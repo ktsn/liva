@@ -118,6 +118,7 @@ onScopeDispose(() => {
         </select>
         <button @click="toggle">Close</button>
       </div>
+      <p aria-label="Editor feedback" class="feedback" role="status">{{ state.message }}</p>
       <EditorForm
         v-if="state.inspection"
         :key="inspectionVersion"
@@ -147,6 +148,19 @@ onScopeDispose(() => {
   z-index: 2147483646;
 }
 
+.feedback {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 20;
+  margin: 0;
+  padding-block: 8px;
+  padding-inline: 14px;
+  border-block-end: 1px solid var(--liva-border-panel);
+  background: var(--liva-surface-panel);
+  color: var(--liva-text-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .instance {
   width: min(450px, 70vw);
 }

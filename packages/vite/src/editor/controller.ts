@@ -20,13 +20,15 @@ export interface Entry {
   binding: EditorBinding
 }
 
+const selectInstanceMessage = 'Select an instance to inspect its motion.'
+
 export class EditorController {
   readonly entries = new Map<string, Entry>()
   selected?: Entry
   inspection?: Inspection
   draft: Edit[] = []
   stale = false
-  message = 'Select an instance to inspect its motion.'
+  message = selectInstanceMessage
   playbackSpeed = 1
   playbackLoop = false
   previewActive = false
@@ -125,6 +127,7 @@ export class EditorController {
     const selected = this.selected
     const sequence = this.sequence
     if (!selected) {
+      this.message = selectInstanceMessage
       this.notify()
       return
     }

@@ -426,6 +426,10 @@ cascade. Timing provenance distinguishes a selected directional transition from
 persistent declaration timing. Ordinary explicit transform ownership is a logical
 configuration fact; physical aliases and scoped execution owners are separate.
 Configuration is edited in source and does not become an ordinary CSS keyframe track.
+The editor's live feedback region shows loading, compiler diagnostics, preview and
+save status. Failed source updates retain the accepted definition and draft;
+correcting source and reinspecting replaces the diagnostic with the current status.
+Awaited preview/save failures still reject even when feedback is displayed.
 The editor preserves layout declarations
 and timing expressions as source-owned configuration; ordinary CSS value, timing and
 keyframe edits cannot rewrite them. Ordinary timeline preview has no before/after

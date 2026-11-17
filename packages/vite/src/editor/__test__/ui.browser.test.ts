@@ -308,6 +308,60 @@ it('edits duration and physics spring parameters through shared controls', async
   expect(timings.at(-1)).toEqual({ kind: 'spring-physics', stiffness: 500, damping: 30, mass: 2 })
 })
 
+it('renders current source loading, diagnostics and recovered status without losing the draft', async () => {
+  let finishInspection!: (reply: EditorReply) => void
+  const pending = new Promise<EditorReply>((resolve) => {
+    finishInspection = resolve
+  })
+  const definition = decodeBundle(JSON.stringify(fixture)).definitions[0]
+  let loading = true
+  const { controller } = await setupEditor(async (request) =>
+    loading
+      ? pending
+      : { hash: 'current', definition, fields: toggleFields, sequence: request.sequence },
+  )
+
+  await click('Motion editor')
+
+  const feedback = host!.querySelector<HTMLElement>('[aria-label="Editor feedback"]')
+  expect(feedback?.getAttribute('role')).toBe('status')
+  expect(feedback?.textContent).toContain('Loading source…')
+  loading = false
+  finishInspection({ hash: 'original', definition, fields: toggleFields })
+  await tick()
+  expect(feedback?.textContent).toContain('Preview affects this instance.')
+  const draft: EditorRequest['edits'] = [
+    {
+      op: 'set',
+      path: 'toggle/layer/toggle/target/track/property/background-color/value',
+      value: '#f00',
+    },
+  ]
+  controller.setDraft(draft)
+  controller.sourceChanged('source')
+  controller.reportSourceDiagnostics('source', 'Mismatched delimiter')
+  await tick()
+
+  expect(feedback?.textContent).toContain('Mismatched delimiter')
+  expect(controller.draft).toEqual(draft)
+  expect(controller.stale).toBe(true)
+  expect(button('Save to source').disabled).toBe(true)
+  controller.sourceChanged('source')
+  await tick()
+
+  expect(feedback?.textContent).not.toContain('Mismatched delimiter')
+  expect(feedback?.textContent).toContain('Source changed. Draft retained;')
+  expect(controller.draft).toEqual(draft)
+  await controller.cancel()
+  await tick()
+
+  expect(feedback?.textContent).toContain('Preview affects this instance.')
+  controller.report(new Error('Obsolete source failure'))
+  await input('Preview instance', '')
+
+  expect(feedback?.textContent).toBe('Select an instance to inspect its motion.')
+})
+
 it('reports preview, save and discard failures without discarding the draft', async () => {
   const definition = decodeBundle(JSON.stringify(fixture)).definitions[0]
   let failure = ''
@@ -322,6 +376,9 @@ it('reports preview, save and discard failures without discarding the draft', as
   await click('Play')
 
   expect(controller.message).toContain('Preview unavailable')
+  expect(host!.querySelector('[aria-label="Editor feedback"]')?.textContent).toContain(
+    'Preview unavailable',
+  )
   expect(controller.previewActive).toBe(false)
 
   await click('▸ track')
@@ -336,6 +393,9 @@ it('reports preview, save and discard failures without discarding the draft', as
   await click('Save to source')
 
   await expect.poll(() => controller.message).toContain('Save unavailable')
+  expect(host!.querySelector('[aria-label="Editor feedback"]')?.textContent).toContain(
+    'Save unavailable',
+  )
   expect(controller.draft).toHaveLength(1)
 
   failure = 'Inspect unavailable'
