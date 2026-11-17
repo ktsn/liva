@@ -1,6 +1,42 @@
 use crate::expression::{Expression, TemplatePart};
 use serde::{Deserialize, Serialize};
 
+/// Physical position and generated-scale axes. All false disables automatic layout.
+/// Width/height select scale correction; they never request CSS dimension writes.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LayoutAxes {
+    pub x: bool,
+    pub y: bool,
+    pub width: bool,
+    pub height: bool,
+}
+
+/// Fixed layout selection, independent of CSS values and keyframes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LayoutDeclaration {
+    pub kind: LayoutKind,
+    pub name: LayoutName,
+    pub axes: LayoutAxes,
+    #[serde(rename = "timingExpression", skip_serializing_if = "Option::is_none")]
+    pub timing_expression: Option<Expression>,
+}
+
+/// Layout is a separate declaration variant, never a CSS value kind.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum LayoutKind {
+    #[serde(rename = "layout")]
+    Layout,
+}
+
+/// The reserved declaration name is checked during deserialization as well as compilation.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum LayoutName {
+    #[serde(rename = "$layout")]
+    Layout,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Definition {

@@ -58,3 +58,10 @@ export {
 export type { PropertySource, TimingSource } from './composition/layer-cascade.ts'
 export { renderFrame } from './evaluation/expression.ts'
 export { sampleSpring } from './motion/spring.ts'
+
+export type {
+  LayoutAxes,
+  LayoutDeclaration,
+  LayoutDeclarationSource,
+  ResolvedLayoutConfiguration,
+} from './model/layout.ts'
