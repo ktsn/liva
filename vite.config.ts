@@ -50,7 +50,11 @@ const config = defineViteConfig({
         test: {
           name: 'unit',
           include: ['packages/**/*.test.ts'],
-          exclude: ['**/node_modules/**', 'packages/**/*.browser.test.ts'],
+          exclude: [
+            '**/node_modules/**',
+            'packages/**/*.browser.test.ts',
+            'packages/**/*.cross-browser.test.ts',
+          ],
         },
       },
       {
@@ -91,6 +95,24 @@ const config = defineViteConfig({
             headless: true,
             provider: playwright(),
             instances: [{ browser: 'chromium' }],
+          },
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'cross-browser',
+          fileParallelism: false,
+          include: ['packages/**/*.cross-browser.test.ts'],
+          browser: {
+            enabled: true,
+            headless: true,
+            provider: playwright(),
+            instances: [
+              { browser: 'chromium', name: 'cross-browser-chromium' },
+              { browser: 'firefox', name: 'cross-browser-firefox' },
+              { browser: 'webkit', name: 'cross-browser-webkit' },
+            ],
           },
         },
       },
