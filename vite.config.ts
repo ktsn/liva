@@ -1,9 +1,6 @@
 import { defineConfig } from '@vizejs/vite-plugin/vite-plus'
 import { defineConfig as defineViteConfig } from 'vite-plus'
 import { playwright } from 'vite-plus/test/browser-playwright'
-import { configDefaults } from 'vite-plus/test/config'
-
-const nativeInteractionTests = ['packages/runtime/src/builtins/interaction.browser.test.ts']
 
 const config = defineViteConfig({
   optimizeDeps: {
@@ -94,23 +91,6 @@ const config = defineViteConfig({
           name: 'browser',
           fileParallelism: true,
           include: ['packages/**/*.browser.test.ts'],
-          exclude: [...configDefaults.exclude, ...nativeInteractionTests],
-          browser: {
-            enabled: true,
-            headless: true,
-            provider: playwright(),
-            instances: [{ browser: 'chromium' }],
-          },
-        },
-      },
-      {
-        extends: true,
-        test: {
-          name: 'browser-interaction',
-          include: nativeInteractionTests,
-          // Other test pages must finish before observing native focus and hover changes.
-          sequence: { groupOrder: 1 },
-          fileParallelism: false,
           browser: {
             enabled: true,
             headless: true,
