@@ -116,3 +116,5 @@ export type {
   ProjectionShapeState,
   ProjectionShapeMotionResult,
 } from './layout/projection-shape.ts'
+
+export { LayoutCoordinator } from './layout/layout-coordinator.ts'

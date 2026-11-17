@@ -1,7 +1,9 @@
 import { LivaPresenceBoundary, type PresenceEntry, type PresenceTarget } from './presence.ts'
+import { nextTick } from 'vue'
 import type { App, ComponentCustomOptions, DirectiveBinding, ObjectDirective, Plugin } from 'vue'
 import {
   Runtime,
+  LayoutCoordinator,
   RuntimeInspection,
   PresentationExecutor,
   ROOT_TARGET,
@@ -44,6 +46,7 @@ interface RootBinding {
   readonly runtime: Runtime
   readonly executor: PresentationExecutor
   readonly definition: Definition
+  readonly releaseLayout: () => void
   readonly observed: Omit<InstanceBinding, 'label'> & { label: string }
 }
 
@@ -108,6 +111,48 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
         )?.[0]
         return element ? roots.get(element) : undefined
       }
+      const layout = new LayoutCoordinator((error) =>
+        report({ code: 'vue.layout', message: String(error), error }),
+      )
+      let layoutScheduled = false
+      const startMutation = () => {
+        layout.begin()
+        if (layoutScheduled) return
+
+        layoutScheduled = true
+        void nextTick()
+          .then(() => {
+            layoutScheduled = false
+            reconcileNow()
+            layout.finish()
+            return undefined
+          })
+          .catch((error) => report({ code: 'vue.layout', message: String(error), error }))
+      }
+      const beforeMutation = () => {
+        try {
+          startMutation()
+        } catch (error) {
+          report({ code: 'vue.layout', message: String(error), error })
+          throw error
+        }
+      }
+      const beforeRemoval = () => {
+        try {
+          startMutation()
+        } catch (error) {
+          // A failed capture is monitored, but must not strand Presence's retained
+          // DOM after its operation has already completed.
+          report({ code: 'vue.layout', message: String(error), error })
+        }
+      }
+
+      app.mixin({
+        beforeMount: beforeMutation,
+        beforeUpdate: beforeMutation,
+        beforeUnmount: beforeMutation,
+      })
+      app.onUnmount(() => layout.dispose())
       let scheduled = false
 
       const reconcileNow = () => {
@@ -159,6 +204,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
           /* v8 ignore else -- @preserve: Vue tears down each target once; this guard only preserves an earlier snapshot if teardown hooks overlap. */
           if (work && !entry.snapshots.has(target.registration))
             entry.snapshots.set(target.registration, work)
+          entry.beforeMutation = beforeRemoval
           entry.targets.delete(target.registration)
           queueMicrotask(() => entry.snapshots.delete(target.registration))
         }
@@ -224,6 +270,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
             executor,
             definition,
             observed,
+            releaseLayout: layout.register(executor),
           }
           runtime.onUpdate = () => options.observe?.('update', observed)
           roots.set(element, record)
@@ -246,6 +293,12 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
           for (const [target, registration] of lifecycleTargets) {
             if (explicitRoot(registration) === record) snapshotTarget(target)
           }
+          try {
+            record.releaseLayout()
+          } catch (error) {
+            report({ code: 'vue.layout-disposal', message: String(error), error })
+          }
+
           try {
             record.runtime.dispose()
           } catch (error) {
@@ -353,7 +406,10 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
           },
         }
         lifecycleTargets.set(element, target)
-        for (const entry of target.entries) entry.targets.add(target.registration)
+        for (const entry of target.entries) {
+          entry.beforeMutation = beforeRemoval
+          entry.targets.add(target.registration)
+        }
       }
 
       app.component('LivaPresenceBoundary', LivaPresenceBoundary)

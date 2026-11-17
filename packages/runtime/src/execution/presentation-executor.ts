@@ -1,3 +1,6 @@
+import { waapiProperty } from '../motion/animation.ts'
+import { resolveLayoutConfigurations } from '../composition/layout.ts'
+import type { LayoutCandidate } from '../layout/layout-participant.ts'
 import { releaseResources } from '../evaluation/resource-cleanup.ts'
 import type { PreviewOperation } from './preview-operation.ts'
 import { materializeEffect } from './native-effect.ts'
@@ -64,7 +67,7 @@ import {
   resolvePresenceTrack,
   normalizePresenceLayers,
 } from './presence-calculation.ts'
-import { trackLayoutAnimation } from '../layout/layout-scheduler.ts'
+import { trackLayoutAnimation, writeLayoutStyle } from '../layout/layout-scheduler.ts'
 import { PropertyMotion, type MotionSample } from '../motion/property-motion.ts'
 
 type InlineValue = { value: string; priority: string }
@@ -222,6 +225,134 @@ const emptyResolution = (): LayerResolution => ({
  * continue with retained browser resources after logical Runtime teardown.
  */
 export class PresentationExecutor {
+  private layoutGeneration = 0
+  private layoutOwned: OwnedElement[] = []
+  private readonly layoutTransforms = new Map<HTMLElement, string>()
+  onLayoutChange?: () => void
+
+  get layoutRevision() {
+    return this.layoutGeneration
+  }
+
+  /** Potential targets include inactive declarations, so enablement captures a fresh shape. */
+  layoutCandidates(transactionRevision?: number): readonly LayoutCandidate[] {
+    if (this.disposed) return []
+
+    const configurations =
+      transactionRevision !== undefined && transactionRevision === this.layoutRevision
+        ? resolveLayoutConfigurations(
+            this.definition,
+            this.values,
+            this.layerResolution.composition,
+          )
+        : (this.layerResolution.layout ?? [])
+    const candidates = new Map<HTMLElement, LayoutCandidate>()
+
+    for (const target of declarationTargets(this.definition)) {
+      if (!target.properties.some((property) => 'kind' in property)) continue
+
+      for (const receiver of this.targetReceivers.get(target.name) ?? []) {
+        const element = receiver.element
+        const explicit = this.layerResolution.presentation.targets.some(
+          (selected) =>
+            this.targetReceivers
+              .get(selected.name)
+              ?.some((binding) => binding.element === element) &&
+            selected.properties.some((property) => property.name === 'transform'),
+        )
+        const scoped =
+          this.lifecycleOwns(element, 'transform') ||
+          this.active.some(
+            (entry) => entry.receiver.element === element && entry.track.property === 'transform',
+          )
+        candidates.set(element, {
+          element,
+          configuration:
+            configurations.find((configuration) => configuration.target === target.name) ??
+            candidates.get(element)?.configuration,
+          blocked:
+            this.suspended ||
+            this.presentationMode !== 'live' ||
+            this.motion.matches ||
+            explicit ||
+            scoped,
+        })
+      }
+    }
+
+    return [...candidates.values()]
+  }
+
+  /**
+   * Temporary projection overrides CSS at important priority. Ordinary style writes
+   * and generated output use the same ownership/rebase implementation, with separate
+   * lifetimes so release reveals current CSS, including intervening inline edits.
+   */
+  layoutTransform(element: HTMLElement, transform: string | undefined) {
+    if (transform === undefined) {
+      const owned = this.layoutOwned.find((entry) => entry.element === element)
+      if (owned)
+        writeLayoutStyle(element, () => {
+          element.style.cssText = restoredStyle(owned, element.style.cssText).cssText
+        })
+
+      // Retain ownership until restoration succeeds, so failed cleanup remains
+      // retryable by the executor's later teardown rather than becoming orphaned.
+      this.layoutOwned = this.layoutOwned.filter((entry) => entry !== owned)
+      this.layoutTransforms.delete(element)
+      return
+    }
+
+    writeLayoutStyle(element, () =>
+      this.write(element, 'transform', transform, 'important', 'layout'),
+    )
+    this.layoutTransforms.set(element, transform)
+  }
+
+  /**
+   * Excludes visual transforms for one synchronous read without changing authored
+   * declarations or native effect objects. A generic replacement has later effect
+   * order than CSS transitions/animations. The collector verifies actual cascade
+   * effectiveness; author important declarations may still defeat this overlay.
+   */
+  layoutMeasure(element: HTMLElement, properties: ReadonlyMap<string, string>): () => void {
+    const frame = Object.fromEntries(
+      [...properties].map(([property, value]) => [waapiProperty(property), value]),
+    )
+    const animation = new Animation(
+      new KeyframeEffect(element, [frame, frame], { duration: 1, fill: 'both' }),
+      element.ownerDocument.timeline,
+    )
+    const projection = this.layoutTransforms.get(element)
+
+    try {
+      animation.pause()
+      animation.currentTime = 0
+      // Only our own outer style owner can be suspended. Authored effects and
+      // declarations keep their identity, timing, priority and completion promises.
+      if (projection !== undefined) this.layoutTransform(element, undefined)
+    } catch (error) {
+      animation.cancel()
+      throw error
+    }
+
+    return () => {
+      try {
+        if (projection !== undefined && !this.disposed) this.layoutTransform(element, projection)
+      } finally {
+        animation.cancel()
+      }
+    }
+  }
+
+  private releaseLayout() {
+    releaseResources(
+      [...this.layoutTransforms.keys()].map(
+        (element) => () => this.layoutTransform(element, undefined),
+      ),
+    )
+  }
+
   private layerResolution: LayerResolution = emptyResolution()
   private readonly operations = new Map<PresenceOperation, PresenceState>()
   private readonly presented = new Map<string, LayerResolution>()
@@ -273,6 +404,8 @@ export class PresentationExecutor {
 
   initialize(resolution: LayerResolution) {
     this.layerResolution = resolution
+    this.layoutGeneration++
+    this.onLayoutChange?.()
   }
 
   get bindingFacts(): BindingFacts {
@@ -1365,6 +1498,7 @@ export class PresentationExecutor {
   }
 
   private motionChanged = () => {
+    this.onLayoutChange?.()
     if (this.disposed) {
       if (this.motion.matches)
         this.present(
@@ -1433,9 +1567,19 @@ export class PresentationExecutor {
     this.scheduleReferences()
   }
 
-  private write(element: HTMLElement, property: string, value: string, priority = '') {
+  private write(
+    element: HTMLElement,
+    property: string,
+    value: string,
+    priority = '',
+    scope: 'ordinary' | 'layout' = 'ordinary',
+  ) {
+    if (scope === 'ordinary' && property === 'transform') this.layoutTransform(element, undefined)
+
+    const ownership = scope === 'ordinary' ? this.owned : this.layoutOwned
+
     const before = inlineDeclarations(element.style)
-    let owned = this.owned.find((o) => o.element === element)
+    let owned = ownership.find((o) => o.element === element)
 
     if (!owned) {
       owned = {
@@ -1445,7 +1589,7 @@ export class PresentationExecutor {
         pending: new Map(),
         written: new Map(),
       }
-      this.owned.push(owned)
+      ownership.push(owned)
     }
 
     const beforeCss = element.style.cssText
@@ -1505,6 +1649,8 @@ export class PresentationExecutor {
         }
       }
     }
+    if (scope !== 'ordinary') return
+
     const dirty = this.dirtyProperties.get(element) ?? new Set<string>()
     dirty.add(property)
     this.dirtyProperties.set(element, dirty)
@@ -1544,6 +1690,11 @@ export class PresentationExecutor {
   }
 
   private restore(preserveLifecycle = false, elements?: ReadonlySet<HTMLElement>) {
+    const projections = [...this.layoutTransforms].filter(
+      ([element]) => !elements || elements.has(element),
+    )
+    for (const [element] of projections) this.layoutTransform(element, undefined)
+
     const owned = this.owned.filter((entry) => !elements || elements.has(entry.element))
     const protectedValues = preserveLifecycle
       ? owned.flatMap(({ element, written }) =>
@@ -1575,6 +1726,8 @@ export class PresentationExecutor {
     for (const { element, property, value, priority } of protectedValues) {
       this.write(element, property, value, priority)
     }
+
+    for (const [element, transform] of projections) this.layoutTransform(element, transform)
   }
 
   bind(entries: readonly (readonly [string, HTMLElement])[]) {
@@ -1604,6 +1757,7 @@ export class PresentationExecutor {
 
     if (unchanged) return
 
+    this.releaseLayout()
     this.endCompositionPreview()
     this.environment?.invalidateBinding()
 
@@ -1618,6 +1772,7 @@ export class PresentationExecutor {
     this.replaceReceivers(next)
 
     this.bindingStatus = status
+    this.onLayoutChange?.()
 
     this.environment?.rebound(previousInputs !== JSON.stringify(this.values))
 
@@ -1634,6 +1789,7 @@ export class PresentationExecutor {
   private previewRevision = 0
 
   beginPreview(writes: readonly StyleWrite[]) {
+    this.releaseLayout()
     this.previewRevision++
 
     for (const controller of this.controllers.keys()) controller.setPreview(true)
@@ -1645,6 +1801,7 @@ export class PresentationExecutor {
     this.propertyMotion.reset()
     this.dirtyProperties.clear()
     this.presentationMode = 'preparing-preview'
+    this.onLayoutChange?.()
     this.applyWrites(writes)
   }
 
@@ -1721,9 +1878,16 @@ export class PresentationExecutor {
 
     if (plan.mode === 'live') {
       this.layerResolution = plan.resolution
+      this.layoutGeneration++
 
       if (!this.disposed) this.environment?.acceptPresentation(plan.resolution)
     }
+
+    // Any physical alias, preview, or retained Presence owner can suppress layout.
+    for (const candidate of this.layoutCandidates()) {
+      if (candidate.blocked) this.layoutTransform(candidate.element, undefined)
+    }
+    this.onLayoutChange?.()
 
     const groups = new Set(
       [...replaced, ...prepared].flatMap((entry) => (entry.session ? [entry.session] : [])),
@@ -1853,7 +2017,9 @@ export class PresentationExecutor {
   }
 
   dispose() {
+    this.releaseLayout()
     this.disposed = true
+    this.onLayoutChange?.()
     this.releaseControllers()
     this.cancelEnterSessions('owner-teardown')
     this.disconnectBindings()
