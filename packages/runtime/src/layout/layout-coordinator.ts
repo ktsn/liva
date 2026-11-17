@@ -112,6 +112,14 @@ function tweenSampler(duration: number, easing: string) {
 
 /**
  * One Vue application's mutation transactions and retained full-shape trajectories.
+ * A reproducible transaction needs natural before/after border boxes and renderer
+ * frames for coordinated receiver identities/binding generations. Retained shape
+ * uses physical origin/xEdge/yEdge in scroll-neutral reference CSS px, velocity in
+ * px/ms, and one absolute performance-ms clock. Underlying paint is observed apart
+ * from generated correction; authored effect clocks remain native effect-local.
+ * These browser snapshots are execution state, never serialized Definition IR or
+ * source edits. Ordinary property previews have no such geometry capture.
+ *
  * begin() precedes DOM mutation; finish() follows binding/input reconciliation in
  * the same microtask checkpoint, before paint. Capture includes disabled potential
  * receivers. Only these transactions start motion; shared external observations

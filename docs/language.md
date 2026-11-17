@@ -476,8 +476,13 @@ provenance separately from CSS presentation. The editor preserves layout declara
 and timing expressions as source-owned configuration; ordinary CSS value, timing and
 keyframe edits cannot rewrite them. Ordinary timeline preview has no before/after
 layout capture. Reproducing a layout transition requires before/after geometry,
-coordinated target identities, displayed shape/velocity and the underlying uncorrected
-radius/shadow styles. Generated transforms and captured dimensions must not be saved
+coordinated receiver identities and binding generations, and each displayed physical
+origin and border-edge vector with its velocity in CSS px/ms. Before/after natural
+border boxes and the renderer's containing-block frame must share a scroll-neutral
+reference plane and a common `performance.now()` clock in milliseconds. Capture also
+needs selected axes/timing/provenance and underlying uncorrected radius/shadow styles;
+known authored effects keep their own native clocks. Ordinary preview only seeks
+its property effects; it does not capture or reproduce those geometry transactions. Generated transforms and captured dimensions must not be saved
 as authored CSS tracks. Dedicated captured-layout editing and playback are deferred
 to [#116](https://github.com/ktsn/liva/issues/116).
 
