@@ -419,7 +419,14 @@ transform is a separate browser-owned value. Width, height, translate and scale 
 not participate in this ownership rule.
 
 The runtime exposes effective axes, timing, transform ownership and declaration/timing
-provenance separately from CSS presentation. The editor preserves layout declarations
+provenance separately from CSS presentation. The development editor displays these
+in a read-only Layout configuration view for the selected composition or lifecycle
+baseline: physical axes or `none`, resolved timing, source expressions and declaration
+cascade. Timing provenance distinguishes a selected directional transition from
+persistent declaration timing. Ordinary explicit transform ownership is a logical
+configuration fact; physical aliases and scoped execution owners are separate.
+Configuration is edited in source and does not become an ordinary CSS keyframe track.
+The editor preserves layout declarations
 and timing expressions as source-owned configuration; ordinary CSS value, timing and
 keyframe edits cannot rewrite them. Ordinary timeline preview has no before/after
 layout capture. Reproducing a layout transition requires before/after geometry,

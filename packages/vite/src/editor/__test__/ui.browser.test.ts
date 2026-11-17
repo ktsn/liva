@@ -9,6 +9,7 @@ import type { CDPSession } from '@vitest/browser-playwright'
 import { createApp, nextTick, type App } from 'vue'
 import { decodeBundle, layerTargets, type RuntimeDiagnostic } from '@liva/runtime'
 import fixture from '../../../../../fixtures/toggle.json'
+import layoutFixture from '../../../../../fixtures/layout-config.json'
 import EditorPanel from '../components/EditorPanel.ce.vue'
 import TimingControls from '../components/TimingControls.ce.vue'
 import type { Definition, Timing } from '@liva/runtime'
@@ -1745,3 +1746,86 @@ it.each(['enter', 'leave'] as const)(
     expect(inspector?.textContent?.includes('Completion restores')).toBe(phase === 'enter')
   },
 )
+
+it('inspects layout selection and directional provenance without creating editable tracks', async () => {
+  const definition = decodeBundle(JSON.stringify(layoutFixture)).definitions[0]
+  const fields: EditorReply['fields'] = [
+    {
+      path: 'layoutConfig/layer/base/target/self/property/$layout/value',
+      kind: 'layout-value',
+      value: 'position size',
+    },
+    { path: 'layoutConfig/layer/base/timing', kind: 'value', value: 'timing' },
+  ]
+  const { controller } = await setupEditor(
+    undefined,
+    definition,
+    { active: false, duration: 110 },
+    fields,
+  )
+  const before = structuredClone(runtime!.runtime.composition)
+
+  await click('Motion editor')
+
+  const region = host!.querySelector('[aria-label="Layout configuration"]')!
+  const self = region.querySelector('[aria-label="Layout self"]')!
+  const content = region.querySelector('[aria-label="Layout content"]')!
+  expect(self.textContent).toContain('x, y, width, height')
+  expect(self.textContent).toContain('Tween: 110 ms')
+  expect(self.textContent).toContain('position size')
+  expect(self.textContent).toContain(' · timing')
+  expect(content.textContent).toContain('y, height')
+  expect(region.querySelectorAll('input, select, button')).toHaveLength(0)
+  expect(host!.textContent).not.toContain('Toggle $layout tracks')
+
+  await input('Existing transition', JSON.stringify({ layer: 'phase', index: 0 }))
+
+  expect(content.textContent).toContain('none')
+  expect(content.textContent).toContain('Instant')
+  expect(content.textContent).toContain('Selected directional transition only')
+  expect(content.textContent).toContain(
+    'layoutConfig/layer/phase/transition/0/target/content/timing',
+  )
+
+  await input('Existing transition', '')
+
+  expect(content.textContent).toContain('Spring: stiffness 300')
+  expect(content.textContent).toContain('Persistent declaration timing')
+  expect(content.textContent).toContain('Declaration cascade (earliest first)')
+  expect(runtime!.runtime.composition).toEqual(before)
+  expect(controller.draft).toEqual([])
+})
+
+it('distinguishes ordinary explicit transform ownership in the read-only layout view', async () => {
+  const definition: Definition = {
+    name: 'owned',
+    layers: [
+      {
+        name: 'base',
+        targets: [
+          {
+            name: 'self',
+            properties: [
+              {
+                kind: 'layout',
+                name: '$layout',
+                axes: { x: true, y: false, width: false, height: false },
+              },
+              { name: 'transform', value: { kind: 'literal', value: 'none' } },
+            ],
+          },
+        ],
+      },
+    ],
+  }
+  await setupEditor(undefined, definition)
+
+  await click('Motion editor')
+
+  const region = host!.querySelector('[aria-label="Layout configuration"]')!
+  expect(region.textContent).toContain(
+    'Explicit Liva transform suppresses automatic projection, including transform: none.',
+  )
+  expect(region.textContent).toContain('No timing: settle immediately')
+  expect(region.querySelectorAll('input, select, button')).toHaveLength(0)
+})

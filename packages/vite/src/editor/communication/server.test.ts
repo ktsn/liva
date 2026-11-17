@@ -82,6 +82,69 @@ describe('guarded source transactions', () => {
     expect(await readFile(join(root, 'Toggle.vue'), 'utf8')).toBe(changed)
   })
 
+  it('protects mapped layout configuration while preserving authored CSS edit capabilities', async () => {
+    source = source.replace(
+      'layer toggle {',
+      `layer toggle {
+    // Keep authored configuration and its expression.
+    $layout: position size @tween(duration: 123)
+    self { transform: none; width: 80px; border-radius: 12px }`,
+    )
+    await writeFile(join(root, 'Toggle.vue'), source)
+    const inspection = await service.request({ action: 'inspect', sourceId, definition: 'toggle' })
+    const path = 'toggle/layer/toggle/target/self/property/$layout'
+
+    expect(inspection.fields.find((field) => field.path === `${path}/value`)).toMatchObject({
+      kind: 'layout-value',
+      value: 'position size',
+    })
+
+    for (const edit of [
+      { op: 'set', path: `${path}/value`, value: 'none' },
+      { op: 'timing', path, value: 'instant' },
+      { op: 'addFrame', path, offset: 0.5, value: 'size' },
+      { op: 'set', path: 'toggle/capture/self/width', value: '160px' },
+      { op: 'set', path: 'toggle/generated/self/transform', value: 'matrix(.5,0,0,1,0,0)' },
+    ] as const) {
+      await expect(
+        service.request({
+          action: 'commit',
+          sourceId,
+          definition: 'toggle',
+          baseHash: inspection.hash,
+          requestId: crypto.randomUUID(),
+          edits: [edit],
+        }),
+      ).rejects.toMatchObject({ status: 422 })
+      expect(await readFile(join(root, 'Toggle.vue'), 'utf8')).toBe(source)
+    }
+
+    const edits = [
+      { property: 'transform', value: 'matrix(.5, 0, 0, 1, 0, 0)' },
+      { property: 'width', value: '160px' },
+      { property: 'border-radius', value: '24px' },
+    ].map(({ property, value }) => ({
+      op: 'set' as const,
+      path: `toggle/layer/toggle/target/self/property/${property}/value`,
+      value,
+    }))
+    await service.request({
+      action: 'commit',
+      sourceId,
+      definition: 'toggle',
+      baseHash: inspection.hash,
+      requestId: crypto.randomUUID(),
+      edits,
+    })
+
+    expect(await readFile(join(root, 'Toggle.vue'), 'utf8')).toBe(
+      source.replace(
+        'transform: none; width: 80px; border-radius: 12px',
+        'transform: matrix(.5, 0, 0, 1, 0, 0); width: 160px; border-radius: 24px',
+      ),
+    )
+  })
+
   it('serializes concurrent commits and deduplicates request IDs', async () => {
     const first = await request('commit')
     const second = await request('commit', '600')

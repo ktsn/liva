@@ -11,6 +11,7 @@ import {
 } from 'vue'
 import type { Composition, CompositionTransition, Definition } from '@liva/runtime'
 import CompositionInspector from './CompositionInspector.ce.vue'
+import LayoutInspector from './LayoutInspector.ce.vue'
 import { trackProvenance, lifecycleProvenance } from '../provenance.ts'
 import type { EditorController } from '../controller.ts'
 import type { Edit, Inspection } from '../communication/protocol.ts'
@@ -65,6 +66,7 @@ const timelineResult = computed(() => {
     if (phase.value) {
       const captured = inspection.inspectLifecycle(phase.value, after, model.value)
       return {
+        layout: inspection.inspectComposition(after, undefined, [], model.value).layout,
         tracks: compositionLifecycleTracks(
           model.value.name,
           phase.value,
@@ -74,17 +76,15 @@ const timelineResult = computed(() => {
       }
     }
 
-    return {
-      tracks: compositionTimelineTracks(
-        inspection.inspectComposition(before, undefined, [], model.value),
-        inspection.inspectComposition(
-          after,
-          before,
-          selectedTransition.value ? [selectedTransition.value] : [],
-          model.value,
-        ),
-      ),
-    }
+    const previous = inspection.inspectComposition(before, undefined, [], model.value)
+    const next = inspection.inspectComposition(
+      after,
+      before,
+      selectedTransition.value ? [selectedTransition.value] : [],
+      model.value,
+    )
+
+    return { tracks: compositionTimelineTracks(previous, next), layout: next.layout }
   } catch (error) {
     return { tracks: [], error }
   }
@@ -488,6 +488,11 @@ onScopeDispose(() => {
     @phase="choosePhase"
     @swap="swapCompositions"
     @transition="chooseTransition"
+  />
+  <LayoutInspector
+    v-if="timelineResult.layout?.length"
+    :configurations="timelineResult.layout"
+    :inspection="candidateInspection"
   />
   <p v-if="timelineResult.error" role="alert">{{ String(timelineResult.error) }}</p>
   <div class="toolbar">
