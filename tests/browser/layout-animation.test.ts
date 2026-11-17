@@ -163,4 +163,95 @@ test.describe('layout transitions consumer', () => {
     await settled(page)
     expect(errors).toEqual([])
   })
+
+  test('keeps the last focused reference fully reachable at maximum scroll', async ({
+    page,
+    browserName,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    const errors = await openDemo(page)
+    const last = 'A table for good conversation'
+
+    for (const title of [garden, 'The long way home', last]) {
+      await page.getByRole('button', { name: title, exact: true }).click()
+      await settled(page)
+    }
+
+    const lastMove = page.getByRole('button', { name: `Move ${last} down`, exact: true })
+    const reference = page.locator('#topic-details-table').getByRole('link')
+    await lastMove.focus()
+    // WebKit's native default skips links with plain Tab; Option-Tab includes them.
+    await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab')
+    await expect(reference).toBeFocused()
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+    const maximum = await page.evaluate(() => scrollY)
+    await page.evaluate(() => window.scrollBy(0, 100))
+    expect(await page.evaluate(() => scrollY)).toBe(maximum)
+
+    const launcherBounds = await page
+      .getByRole('button', { name: 'Motion editor', exact: true })
+      .boundingBox()
+    if (!launcherBounds) throw new Error('Expected the development editor launcher')
+    const visibility = await reference.evaluate((link, launcher) => {
+      const style = getComputedStyle(link)
+      const outline = parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset)
+      const fragments = [...link.getClientRects()].map((rect) => {
+        const points = [
+          [rect.left + 1, rect.top + 1],
+          [rect.right - 1, rect.top + 1],
+          [rect.left + 1, rect.bottom - 1],
+          [rect.right - 1, rect.bottom - 1],
+        ]
+        return {
+          bounds: {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+            outline,
+          },
+          visible:
+            rect.left - outline >= 0 &&
+            rect.top - outline >= 0 &&
+            rect.right + outline <= innerWidth &&
+            rect.bottom + outline <= innerHeight,
+          clear:
+            rect.right + outline <= launcher.x ||
+            rect.left - outline >= launcher.x + launcher.width ||
+            rect.bottom + outline <= launcher.y ||
+            rect.top - outline >= launcher.y + launcher.height,
+          hits: points.every(([x, y]) => link.contains(document.elementFromPoint(x, y))),
+        }
+      })
+      const rect = link.getClientRects()[0]
+
+      return { fragments, point: { x: rect.right - 2, y: rect.top + rect.height / 2 } }
+    }, launcherBounds)
+
+    await test.info().attach('reference-visibility.json', {
+      body: JSON.stringify({ maximum, launcher: launcherBounds, ...visibility }, null, 2),
+      contentType: 'application/json',
+    })
+
+    expect(visibility.fragments.length).toBeGreaterThan(0)
+    expect(
+      visibility.fragments.every((fragment) => fragment.visible && fragment.clear && fragment.hits),
+    ).toBe(true)
+    await page.screenshot({
+      path: test.info().outputPath('focused-reference-at-maximum-scroll.png'),
+    })
+    const href = await reference.getAttribute('href')
+    if (!href) throw new Error('Expected an authored reference URL')
+    await page.route(href, (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: '<!doctype html><html lang="en"><title>Reference activated</title><p>Native reference navigation reached.</p></html>',
+      }),
+    )
+
+    await page.mouse.click(visibility.point.x, visibility.point.y)
+    await expect(page).toHaveURL(href)
+    await expect(page).toHaveTitle('Reference activated')
+    expect(errors).toEqual([])
+  })
 })
