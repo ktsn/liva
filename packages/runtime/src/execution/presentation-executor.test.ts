@@ -1,0 +1,37 @@
+import { expect, it, vi } from 'vite-plus/test'
+import { PresentationExecutor } from './presentation-executor.ts'
+import type { ReactiveSubscription } from '../evaluation/reactive-value.ts'
+
+it('releases source adapter resources once across executor and binding cleanup', () => {
+  const executor = new PresentationExecutor(() => {})
+  const cleanup = vi.fn<() => void>()
+  const source: ReactiveSubscription = { value: 1, bind: () => cleanup }
+  const disconnect = executor.connectSource(source, () => {})
+
+  executor.disconnectBindings()
+  disconnect()
+  disconnect()
+
+  expect(cleanup).toHaveBeenCalledTimes(1)
+})
+
+it('retains connections registered while an older binding is disconnecting', () => {
+  const executor = new PresentationExecutor(() => {})
+  const cleanup = vi.fn<() => void>()
+  const next: ReactiveSubscription = { value: 2, bind: () => cleanup }
+  const previous: ReactiveSubscription = {
+    value: 1,
+    bind: () => () => {
+      executor.connectSource(next, () => {})
+    },
+  }
+  executor.connectSource(previous, () => {})
+
+  executor.disconnectBindings()
+
+  expect(cleanup).not.toHaveBeenCalled()
+
+  executor.disconnectBindings()
+
+  expect(cleanup).toHaveBeenCalledTimes(1)
+})

@@ -1,13 +1,10 @@
+import { EvaluationFixture } from '../packages/runtime/src/__test__/helpers/evaluation.ts'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { compile } from '../packages/vite/wasm/liva_wasm.js'
 import type { Compilation } from '../packages/vite/src/compiler.ts'
 import { decodeBundle } from '../packages/runtime/src/model/definition.ts'
-import {
-  LetBindingGraph,
-  parameterValues,
-  targetValues,
-} from '../packages/runtime/src/evaluation/let-bindings.ts'
+import { parameterValues, targetValues } from '../packages/runtime/src/evaluation/let-bindings.ts'
 import {
   renderProperty,
   type VariableValues,
@@ -48,7 +45,7 @@ const constrainedInputs = parameterValues(constrainedParameters, targetValues(co
   position: 'start',
   axis: 'x',
 })
-const constrainedGraph = new LetBindingGraph(constrained.letBindings, constrainedInputs)
+const constrainedGraph = new EvaluationFixture(constrained.letBindings, constrainedInputs)
 const constrainedValues = constrainedGraph.evaluate(constrainedInputs)
 
 assert.equal(constrainedValues.selected, 'start')
@@ -105,7 +102,9 @@ const shadowed = decodeBundle(
 assert(shadowed.parameters && shadowed.letBindings)
 const shadowInputs = parameterValues(shadowed.parameters, targetValues(shadowed), { easeOut: 4 })
 
-const shadowValues = new LetBindingGraph(shadowed.letBindings, shadowInputs).evaluate(shadowInputs)
+const shadowValues = new EvaluationFixture(shadowed.letBindings, shadowInputs).evaluate(
+  shadowInputs,
+)
 
 assert.deepEqual(
   shadowed.layers[0].targets[0].properties.map(
@@ -136,7 +135,7 @@ function controllerValue(values: VariableValues) {
 
 // Direct graph callers bypass host descriptors; invalid components still fail at runtime.
 assert.throws(
-  () => new LetBindingGraph(componentBindings, { axis: 'z', input: 10 }),
+  () => new EvaluationFixture(componentBindings, { axis: 'z', input: 10 }),
   /link component must be x or y/,
 )
 
@@ -145,7 +144,7 @@ for (const sample of [
   { axis: 'y', other: 'x', initial: { x: 0, y: 10, z: 0 }, updated: { x: 0, y: 20, z: 0 } },
 ]) {
   const inputs = { axis: sample.axis, input: 10 }
-  const graph = new LetBindingGraph(componentBindings, inputs)
+  const graph = new EvaluationFixture(componentBindings, inputs)
 
   try {
     assert.deepEqual(controllerValue(graph.evaluate(inputs)), sample.initial)

@@ -3,6 +3,17 @@ import type { ReactiveNotification } from './events.ts'
 export type Scalar = number | boolean | string
 export type RuntimeValue = Scalar | { readonly [name: string]: RuntimeValue }
 
+/**
+ * Connects a source identity through the browser owner, preserving the same object
+ * used by snapshot maps and controller capabilities. Returns an idempotent cleanup;
+ * connection failures throw. Store guards synchronous publications during acceptance,
+ * while the browser owner retains the native adapter resources and their cleanup.
+ */
+export type SourceConnection = (
+  source: ReactiveSubscription,
+  publish: (value: RuntimeValue, notification?: ReactiveNotification) => void,
+) => () => void
+
 export interface ReactiveSubscription {
   readonly value: RuntimeValue
   bind(
@@ -52,5 +63,10 @@ export function isReactiveCall(value: FunctionResult): value is ReactiveCall {
 }
 
 export function isReactiveSubscription(value: FunctionResult): value is ReactiveSubscription {
-  return typeof value === 'object' && 'value' in value && typeof value.bind === 'function'
+  return (
+    typeof value === 'object' &&
+    'value' in value &&
+    'bind' in value &&
+    typeof value.bind === 'function'
+  )
 }

@@ -5,6 +5,7 @@ import {
   isReactiveCall,
   type PreparedUpdate,
   type ReactiveCall,
+  type SourceConnection,
   type FunctionArguments,
   type FunctionResult,
   type ReactiveSubscription,
@@ -21,7 +22,7 @@ type CallSites = Map<string, Map<number, CallSite>>
 
 /** One subscription session; identity separates queued occurrences from later bindings. */
 type SubscriptionBinding = {
-  targets: ReadonlyMap<string, HTMLElement>
+  connect: SourceConnection
   update: (notification?: ReactiveNotification) => void
   cleanups: Map<ReactiveSubscription, () => void>
 }
@@ -31,7 +32,7 @@ type SubscriptionBinding = {
  * indices must identify the same expression across evaluations. Do not retain this
  * reader beyond the evaluation callback.
  */
-interface ReactiveCallEvaluation {
+export interface ReactiveCallEvaluation {
   invoke(binding: string, id: number, name: string, args: FunctionArguments): RuntimeValue
 }
 
@@ -208,7 +209,7 @@ export class ReactiveCallStore {
       for (const subscription of active) {
         if (!binding.cleanups.has(subscription)) {
           let subscribed = true
-          const cleanup = subscription.bind(binding.targets, (value, notification) => {
+          const cleanup = binding.connect(subscription, (value, notification) => {
             // Ignore callbacks retained by a removed subscription or an older binding.
             if (!subscribed || this.binding !== binding) return
 
@@ -257,21 +258,21 @@ export class ReactiveCallStore {
   }
 
   /**
-   * Activates cached subscriptions against targets and delivers later changes to update.
+   * Activates cached sources through connect and delivers later changes to update.
    * Returns cleanup callbacks that stop this binding while retaining cached call values.
    * Synchronous bind-time notifications are deferred; subscription errors propagate.
    */
   bind(
-    targets: ReadonlyMap<string, HTMLElement>,
+    connect: SourceConnection,
     update: (notification?: ReactiveNotification) => void,
   ): (() => void)[] {
     const previous = this.binding
     const pendingEvents = this.eventNotifications.length
     const pendingNotification = this.notificationPending
-    const binding = { targets, update, cleanups: new Map<ReactiveSubscription, () => void>() }
+    const binding = { connect, update, cleanups: new Map<ReactiveSubscription, () => void>() }
     this.binding = binding
 
-    // Initial DOM reads may notify immediately. Use the evaluation guard until every
+    // Initial source connection may notify immediately. Use the evaluation guard until every
     // subscription has bound so the consumer cannot observe a partially bound store.
     this.evaluating = true
     let bound = false

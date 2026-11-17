@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test'
 import { evaluate } from './expression.ts'
 import { sampleSpring } from '../motion/spring.ts'
-import { LetBindingGraph } from './let-bindings.ts'
+import { EvaluationFixture } from '../__test__/helpers/evaluation.ts'
 import { callTiming, builtinConstant, easingCss, timingValue } from './timing-values.ts'
 import type { Expression } from '../model/definition.ts'
 
@@ -31,7 +31,7 @@ describe('typed timing values', () => {
   })
 
   it('replaces parameterized descriptions as whole immutable values', () => {
-    const graph = new LetBindingGraph(
+    const graph = new EvaluationFixture(
       [
         { name: 'curve', initializer: reference('easeOut') },
         {
@@ -71,7 +71,7 @@ describe('typed timing values', () => {
 
     expect(timing.kind).toBe('tween')
     expect(
-      () => new LetBindingGraph([{ name: 'quick', initializer: call('tween') }], {}),
+      () => new EvaluationFixture([{ name: 'quick', initializer: call('tween') }], {}),
     ).not.toThrow()
   })
 
@@ -116,7 +116,7 @@ describe('typed timing values', () => {
   })
 
   it('evaluates dynamic duration springs and preserves requested duration', () => {
-    const graph = new LetBindingGraph(
+    const graph = new EvaluationFixture(
       [
         {
           name: 'motion',
@@ -184,7 +184,7 @@ describe('typed timing values', () => {
   )
 
   it('evaluates dynamic step count and position and validates subsequent updates', () => {
-    const graph = new LetBindingGraph(
+    const graph = new EvaluationFixture(
       [
         {
           name: 'curve',

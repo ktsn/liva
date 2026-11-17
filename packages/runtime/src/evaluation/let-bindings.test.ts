@@ -1,6 +1,7 @@
 import { createEventValue, type ReactiveNotification } from './events.ts'
 import { afterEach, expect, it, vi } from 'vite-plus/test'
 import { LetBindingGraph } from './let-bindings.ts'
+import { EvaluationFixture } from '../__test__/helpers/evaluation.ts'
 import { propertyController } from '../motion/controllers.ts'
 import * as functions from '../builtins/index.ts'
 import type { ReactiveCall, ReactiveSubscription, RuntimeValue } from './reactive-value.ts'
@@ -32,7 +33,7 @@ it('evaluates forward dependencies and keeps failed evaluations out of committed
       initializer: { kind: 'unary', operator: '!', operand: { kind: 'boolean', value: false } },
     },
   ]
-  const graph = new LetBindingGraph(definitions, { progress: 3, divisor: 2 })
+  const graph = new EvaluationFixture(definitions, { progress: 3, divisor: 2 })
   const values = graph.evaluate({ progress: 3, divisor: 2 })
 
   expect(values).toEqual({
@@ -54,7 +55,7 @@ it('detects dependency cycles in externally supplied definitions', () => {
     { name: 'second', initializer: { kind: 'reference', path: ['first'] } },
   ]
 
-  expect(() => new LetBindingGraph(definitions, {})).toThrow('Cyclic let binding dependency')
+  expect(() => new EvaluationFixture(definitions, {})).toThrow('Cyclic let binding dependency')
 })
 
 it('retains call handles for matching arguments and resolves changed target aliases on replacement', () => {
@@ -71,10 +72,10 @@ it('retains call handles for matching arguments and resolves changed target alia
     { name: 'alias', initializer: { kind: 'reference', path: ['movement'] } },
   ]
   const variables = { body: { name: 'body' }, other: { name: 'other' } }
-  const graph = new LetBindingGraph(definitions, variables)
+  const graph = new EvaluationFixture(definitions, variables)
   const first = graph.evaluate(variables)
-  const retained = new LetBindingGraph(definitions, variables, graph).evaluate(variables)
-  const changed = new LetBindingGraph(
+  const retained = new EvaluationFixture(definitions, variables, graph).evaluate(variables)
+  const changed = new EvaluationFixture(
     [
       definitions[0],
       { name: 'selected', initializer: { kind: 'reference', path: ['other'] } },
@@ -137,7 +138,7 @@ it.each([
   ['property', controllerTargets('self', 'height')],
   ['removed binding', []],
 ])('replaces a controller when its %s changes through forward aliases', (_name, targets) => {
-  const graph = new LetBindingGraph(
+  const graph = new EvaluationFixture(
     controllerDefinitions,
     {},
     undefined,
@@ -145,7 +146,7 @@ it.each([
   )
   const initial = propertyController(graph.evaluate({}).movement)
 
-  const replacement = new LetBindingGraph(controllerDefinitions, {}, graph, targets)
+  const replacement = new EvaluationFixture(controllerDefinitions, {}, graph, targets)
   graph.dispose(replacement)
 
   expect(propertyController(replacement.evaluate({}).movement)).not.toBe(initial)
@@ -154,10 +155,10 @@ it.each([
 })
 
 it('replaces an unbound call when it acquires a receiving address', () => {
-  const graph = new LetBindingGraph(controllerDefinitions, {})
+  const graph = new EvaluationFixture(controllerDefinitions, {})
   const initial = propertyController(graph.evaluate({}).movement)
 
-  const replacement = new LetBindingGraph(controllerDefinitions, {}, graph, controllerTargets())
+  const replacement = new EvaluationFixture(controllerDefinitions, {}, graph, controllerTargets())
   graph.dispose(replacement)
 
   expect(propertyController(replacement.evaluate({}).movement)).not.toBe(initial)
@@ -166,7 +167,7 @@ it('replaces an unbound call when it acquires a receiving address', () => {
 })
 
 it('retains a controller when aliases and duplicate bindings still select the same address', () => {
-  const graph = new LetBindingGraph(
+  const graph = new EvaluationFixture(
     controllerDefinitions,
     {},
     undefined,
@@ -175,7 +176,7 @@ it('retains a controller when aliases and duplicate bindings still select the sa
   const initial = propertyController(graph.evaluate({}).movement)
   const targets = [...controllerTargets(), ...controllerTargets('self', 'width', 'middle')]
 
-  const replacement = new LetBindingGraph(controllerDefinitions, {}, graph, targets)
+  const replacement = new EvaluationFixture(controllerDefinitions, {}, graph, targets)
   graph.dispose(replacement)
 
   expect(propertyController(replacement.evaluate({}).movement)).toBe(initial)
@@ -208,7 +209,7 @@ it('recomputes ordinary function results only when their argument values change'
       },
     },
   ]
-  const graph = new LetBindingGraph(definitions, { progress: 3 })
+  const graph = new EvaluationFixture(definitions, { progress: 3 })
 
   expect(graph.evaluate({ progress: 3 }).result).toBe(12)
   expect(graph.evaluate({ progress: 3, unrelated: 9 }).result).toBe(12)
@@ -237,7 +238,7 @@ it('reads retained subscriptions and recomputes dependent ordinary calls', () =>
     .mockImplementation((name, args) =>
       name === 'observe' ? subscription : { value: Number(args.value) * 2 },
     )
-  const graph = new LetBindingGraph(
+  const graph = new EvaluationFixture(
     [
       {
         name: 'result',
@@ -284,7 +285,7 @@ it('switches between ordinary values and subscriptions based on each returned re
   const invoke = vi
     .spyOn(functions, 'callBuiltin')
     .mockImplementation((_name, args) => (args.enabled ? { value: 7, bind } : 2))
-  const graph = new LetBindingGraph(
+  const graph = new EvaluationFixture(
     [
       {
         name: 'result',
@@ -329,7 +330,7 @@ it('keeps subscription call sites distinct as logical branches become inactive',
         }
       : { value: true, bind: secondBind },
   )
-  const graph = new LetBindingGraph(
+  const graph = new EvaluationFixture(
     [
       {
         name: 'result',
@@ -366,7 +367,7 @@ it('keeps subscription call sites distinct as logical branches become inactive',
 
 it('does not commit ordinary call caches when a later initializer fails', () => {
   const invoke = vi.spyOn(functions, 'callBuiltin').mockImplementation((_name, args) => args.value)
-  const graph = new LetBindingGraph(
+  const graph = new EvaluationFixture(
     [
       {
         name: 'value',
@@ -418,7 +419,7 @@ it('rolls back newly bound subscriptions when a later subscription cannot bind',
       right: { kind: 'call', function: name, arguments: [] },
     },
   }))
-  const graph = new LetBindingGraph(definitions, { enabled: false })
+  const graph = new EvaluationFixture(definitions, { enabled: false })
   const cleanups = graph.bind(new Map(), () => {})
 
   expect(() => graph.evaluate({ enabled: true })).toThrow('Binding failed')
@@ -432,7 +433,7 @@ it('rolls back newly bound subscriptions when a later subscription cannot bind',
 })
 
 it('keeps the current binding active when an older binding is disposed twice', () => {
-  const graph = new LetBindingGraph([], {})
+  const graph = new EvaluationFixture([], {})
   const [oldCleanup] = graph.bind(new Map(), () => {})
   const [currentCleanup] = graph.bind(new Map(), () => {})
 
@@ -452,7 +453,7 @@ it('resolves later declarations before invoking a shadowed function name', () =>
     { name: 'drag', initializer: { kind: 'number', value: 1 } },
   ]
 
-  expect(() => new LetBindingGraph(definitions, {})).toThrow('Value is not callable: drag')
+  expect(() => new EvaluationFixture(definitions, {})).toThrow('Value is not callable: drag')
   expect(invoke).not.toHaveBeenCalled()
 })
 
@@ -486,7 +487,7 @@ function eventGraphWithCommitNotifications() {
     dispose() {},
   }
   vi.spyOn(functions, 'callBuiltin').mockReturnValue(source)
-  const graph = new LetBindingGraph(
+  const graph = new EvaluationFixture(
     [
       {
         name: 'source',
@@ -632,7 +633,7 @@ it.each([
       arguments: [{ name: 'revision', value: { kind: 'reference', path: ['revision'] } }],
     },
   }))
-  const graph = new LetBindingGraph(definitions, { revision: phase === 'initial bind' ? 1 : 0 })
+  const graph = new EvaluationFixture(definitions, { revision: phase === 'initial bind' ? 1 : 0 })
   const received: ReactiveNotification[] = []
   let ordinaryUpdates = 0
   const observe = (notification?: ReactiveNotification) => {
@@ -659,4 +660,31 @@ it.each([
   expect(ordinaryUpdates).toBe(phase.includes('pending event') ? 1 : 0)
 
   graph.dispose()
+})
+
+it('analyzes call sites without evaluation and uses only the operations supplied to each evaluation', () => {
+  const builtin = vi.spyOn(functions, 'callBuiltin')
+  const graph = new LetBindingGraph([
+    {
+      name: 'sample',
+      initializer: {
+        kind: 'call',
+        function: 'sampleBuiltin',
+        arguments: [],
+      },
+    },
+  ])
+  const first = { invoke: vi.fn<() => number>(() => 3) }
+  const second = { invoke: vi.fn<() => number>(() => 7) }
+
+  expect(builtin).not.toHaveBeenCalled()
+
+  const value = graph.evaluate({}, first, (values) => Number(values.sample) * 2)
+  const next = graph.evaluate({}, second)
+
+  expect(value).toBe(6)
+  expect(next.sample).toBe(7)
+  expect(first.invoke).toHaveBeenCalledExactlyOnceWith('sample', 0, 'sampleBuiltin', {})
+  expect(second.invoke).toHaveBeenCalledExactlyOnceWith('sample', 0, 'sampleBuiltin', {})
+  expect(builtin).not.toHaveBeenCalled()
 })

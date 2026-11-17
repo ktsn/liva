@@ -1,7 +1,6 @@
 import type { Composition, LayerResolution } from '../composition/layers.ts'
 import type { ResolvedTrack } from '../composition/resolve.ts'
-import type { LetBindingGraph } from '../evaluation/let-bindings.ts'
-import type { ReactiveNotification } from '../evaluation/events.ts'
+import type { SourceConnection } from '../evaluation/reactive-value.ts'
 import type { VariableValues } from '../evaluation/expression.ts'
 import type { Definition } from '../model/definition.ts'
 import type {
@@ -66,7 +65,7 @@ export interface ExecutionEnvironment {
   readonly invalidateBinding: () => void
 
   /**
-   * Asks the executor to disconnect reactive calls, then reevaluates their detached
+   * Disconnects the store through executor-owned cleanups, then reevaluates detached
    * values. Call after releasing controllers that still need their receiving elements.
    * Evaluation failures are reported while retaining the previous accepted values.
    */
@@ -101,8 +100,8 @@ export interface ExecutionEnvironment {
 }
 
 /**
- * Browser services used by Runtime. The graph's existing bind protocol is invoked
- * inside the executor; its elements and controller control results never return here.
+ * Browser services used by Runtime. Source adapters bind inside the executor;
+ * elements and controller control results never return here.
  * Times use the performance clock in milliseconds. Controller resolution runs after
  * terminal writes, independently of notification-time evaluation snapshots.
  */
@@ -133,18 +132,8 @@ export interface ExecutionPort {
    */
   configureControllers(definition: Definition, values: VariableValues): void
 
-  /** Disconnects DOM-bound reactive calls while retaining the graph and its cached call values. */
-  disconnectBindings(): void
-
-  /**
-   * Binds graph subscriptions to current target elements and retains their cleanups.
-   * notify requests subsequent Runtime updates; bind-time notifications are deferred.
-   * Binding failures propagate. Runtime reevaluates the graph after connection.
-   */
-  connectBindings(
-    graph: LetBindingGraph,
-    notify: (notification?: ReactiveNotification) => void,
-  ): void
+  /** Connects source adapters to current receivers. Executor owns native cleanups. */
+  readonly connectSource: SourceConnection
 
   /**
    * Releases current controller owners and hands their final input velocity to
