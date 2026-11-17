@@ -8,3 +8,5 @@ coverage/
 packages/vite/wasm/
 **/.liva-backups/
 **/*.liva.tmp
+
+bundle-size-results/

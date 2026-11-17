@@ -10,7 +10,11 @@
     "test:browser": "playwright test",
     "verify": "sh scripts/verify.sh",
     "build": "pnpm --dir playground build",
-    "typecheck": "tsc --runExternalCode --noEmit && tsc --runExternalCode --noEmit -p playground/tsconfig.json"
+    "typecheck": "tsc --runExternalCode --noEmit && tsc --runExternalCode --noEmit -p playground/tsconfig.json",
+    "size:measure": "node scripts/bundle-size/cli.mjs measure",
+    "size:compare": "node scripts/bundle-size/cli.mjs compare",
+    "test:size": "node --test scripts/bundle-size/*.test.mjs",
+    "test:size:integration": "node scripts/bundle-size/integration.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.65.1",

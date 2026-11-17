@@ -1,0 +1,88 @@
+{
+  "schema": 1,
+  "specification": {
+    "version": 1,
+    "node": "26.13.1",
+    "format": "es",
+    "target": "es2023",
+    "minifier": "oxc",
+    "sourcemap": false,
+    "gzipLevel": 9,
+    "brotliQuality": 11,
+    "external": ["vue"],
+    "fixture": "29c173ebe321e3441462c34457b04c3348f4c136c42fc191228d1baf1c64bd94",
+    "harness": "18512dbaee9ab6bf97583d925a1aefbc5efeecea1d7be9c5e4b11e82f15e990b"
+  },
+  "context": null,
+  "base": {
+    "sha": "99138c83be315420cf29b17accf6d2911e2027c0",
+    "bytes": {
+      "minified": 105840,
+      "gzip": 30854,
+      "brotli": 27604,
+      "definitions": 591
+    },
+    "bundle": "532d6c9d29c2631e839ee4fd5242b36dcfdbd4b5513d0ada7fe41627389c90f0",
+    "metadata": {
+      "node": "26.13.1",
+      "rustc": "rustc 1.100.0 (0ef1bc386 2026-11-09)",
+      "wasmBindgen": "0.2.130",
+      "packageManager": "pnpm@12.21.0",
+      "zlib": "1.3.2.1-motley-456ae73",
+      "brotli": "1.2.1",
+      "vite": "8.3.7",
+      "rolldown": "1.2.18",
+      "oxc": "0.157.0",
+      "dependencies": {
+        "@playwright/test": "1.65.1",
+        "@types/node": "26.6.6",
+        "@vitest/browser-playwright": "5.1.0",
+        "@vitest/coverage-v8": "5.1.0",
+        "@vizejs/vite-plugin": "0.751.0",
+        "typescript": "7.1.0-dev.20261113.1",
+        "vite-plus": "1.6.0",
+        "vize": "0.751.0",
+        "vue": "3.5.45"
+      },
+      "lockfile": "2ec9de74bcc23e9abf68fb970fbed1e8cb0cb98d82a199273421a02d5cfa7bc9",
+      "cargoLockfile": "6885e02667d189d43f05bbdca193e42cc78a5028e55629276704f763d1d9d620",
+      "wasm": "b1dbcf75a10d143fc35674438e032abee7699b091f62186d0747a63bbea16af4"
+    }
+  },
+  "head": {
+    "sha": "99138c83be315420cf29b17accf6d2911e2027c0",
+    "bytes": {
+      "minified": 105840,
+      "gzip": 30854,
+      "brotli": 27604,
+      "definitions": 591
+    },
+    "bundle": "532d6c9d29c2631e839ee4fd5242b36dcfdbd4b5513d0ada7fe41627389c90f0",
+    "metadata": {
+      "node": "26.13.1",
+      "rustc": "rustc 1.100.0 (0ef1bc386 2026-11-09)",
+      "wasmBindgen": "0.2.130",
+      "packageManager": "pnpm@12.21.0",
+      "zlib": "1.3.2.1-motley-456ae73",
+      "brotli": "1.2.1",
+      "vite": "8.3.7",
+      "rolldown": "1.2.18",
+      "oxc": "0.157.0",
+      "dependencies": {
+        "@playwright/test": "1.65.1",
+        "@types/node": "26.6.6",
+        "@vitest/browser-playwright": "5.1.0",
+        "@vitest/coverage-v8": "5.1.0",
+        "@vizejs/vite-plugin": "0.751.0",
+        "typescript": "7.1.0-dev.20261113.1",
+        "vite-plus": "1.6.0",
+        "vize": "0.751.0",
+        "vue": "3.5.45"
+      },
+      "lockfile": "2ec9de74bcc23e9abf68fb970fbed1e8cb0cb98d82a199273421a02d5cfa7bc9",
+      "cargoLockfile": "6885e02667d189d43f05bbdca193e42cc78a5028e55629276704f763d1d9d620",
+      "wasm": "b1dbcf75a10d143fc35674438e032abee7699b091f62186d0747a63bbea16af4"
+    }
+  },
+  "status": "success"
+}
