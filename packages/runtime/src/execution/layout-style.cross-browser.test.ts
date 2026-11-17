@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { createBrowserRuntimeHarness } from '../__test__/helpers/browser-runtime.ts'
 import { nativeEffects, type RuntimeAssembly } from '../__test__/helpers/assembly.ts'
 import type { Definition } from '../model/definition.ts'
-import { observeLayoutStyles } from '../layout/style-observation.ts'
+import { observeLayoutStyles, layoutStyleSourceTimes } from '../layout/style-observation.ts'
 import { layoutRadiusProperties } from '../layout/style-properties.ts'
 import type { ProjectionMatrix } from '../layout/projection.ts'
 
@@ -121,6 +121,108 @@ afterEach(() => {
 })
 
 describe('Executor layout paint correction', () => {
+  it('refreshes inherited paint when a separate parent preview seeks and ends', () => {
+    const parent = setup()
+    const child = setup()
+    child.root.style.borderRadius = 'inherit'
+    child.root.style.boxShadow = 'inherit'
+    parent.root.append(child.root)
+    project(child.assembly, child.root)
+
+    expect(values(child.root)[0]).toBe('16px 32px')
+
+    const from = { layers: { base: true, active: false }, states: {} }
+    const to = { layers: { base: true, active: true }, states: {} }
+    const preview = parent.assembly.inspection.previewComposition(from, to)
+    preview.seek(250)
+    project(child.assembly, child.root)
+
+    expect(values(child.root)[0]).toBe('24px 48px')
+    expect(
+      nativeEffects(parent.assembly.executor).every((effect) => effect.currentTime === 250),
+    ).toBe(true)
+
+    preview.seek(750)
+    project(child.assembly, child.root)
+
+    expect(values(child.root)[0]).toBe('40px 80px')
+
+    preview.end()
+    project(child.assembly, child.root)
+    preview.seek(500)
+
+    expect(values(child.root)[0]).toBe('16px 32px')
+    expect(nativeEffects(parent.assembly.executor)).toEqual([])
+    expect([...parent.errors, ...child.errors]).toEqual([])
+  })
+
+  it('releases preview source clocks on replacement and disposal without stale-handle writes', () => {
+    const parent = setup()
+    const child = setup()
+    parent.root.append(child.root)
+    child.root.style.borderRadius = 'inherit'
+    const from = { layers: { base: true, active: false }, states: {} }
+    const to = { layers: { base: true, active: true }, states: {} }
+    const obsolete = parent.assembly.inspection.previewComposition(from, to)
+    const previous = nativeEffects(parent.assembly.executor)
+    const current = parent.assembly.inspection.previewComposition(from, to)
+    current.seek(750)
+    project(child.assembly, child.root)
+
+    obsolete.seek(100)
+    obsolete.end()
+
+    expect(previous.every((effect) => effect.playState === 'idle')).toBe(true)
+    expect(layoutStyleSourceTimes(child.root).map(({ time }) => time)).toEqual([750, 750])
+    expect(values(child.root)[0]).toBe('40px 80px')
+    const read = vi.spyOn(window, 'getComputedStyle')
+
+    project(child.assembly, child.root)
+
+    expect(read).not.toHaveBeenCalled()
+    read.mockRestore()
+    parent.assembly.runtime.dispose()
+    current.seek(250)
+    current.end()
+    project(child.assembly, child.root)
+
+    expect(layoutStyleSourceTimes(child.root)).toEqual([])
+    expect(values(child.root)[0]).toBe('16px 32px')
+    expect(parent.root.getAnimations()).toEqual([])
+  })
+
+  it('cleans partial preview paint registration and preserves the original cause for retry', () => {
+    const { assembly, root, errors } = setup()
+    const cause = new Error('Preview source listener failed')
+    const listener = vi.spyOn(Animation.prototype, 'addEventListener').mockImplementation(function (
+      this: Animation,
+      type,
+      callback,
+      options,
+    ) {
+      if (type === 'cancel') throw cause
+      return EventTarget.prototype.addEventListener.call(this, type, callback, options)
+    })
+    const from = { layers: { base: true, active: false }, states: {} }
+    const to = { layers: { base: true, active: true }, states: {} }
+
+    expect(() => assembly.inspection.previewComposition(from, to)).toThrow(
+      new Error('Could not prepare composition preview', { cause }),
+    )
+
+    expect(layoutStyleSourceTimes(root)).toEqual([])
+    expect(root.getAnimations()).toEqual([])
+    expect(errors.at(-1)?.error).toMatchObject({ cause })
+    listener.mockRestore()
+    const preview = assembly.inspection.previewComposition(from, to)
+    preview.seek(500)
+
+    expect(layoutStyleSourceTimes(root).map(({ time }) => time)).toEqual([500, 500])
+    expect(getComputedStyle(root).borderTopLeftRadius).toBe('16px')
+    preview.end()
+    expect(layoutStyleSourceTimes(root)).toEqual([])
+  })
+
   it('corrects unequal-axis CSS corners and shadows once from the retained source', () => {
     const { assembly, root, errors } = setup()
     root.style.borderRadius = '12px 18px 24px 30px / 16px 20px 26px 32px'

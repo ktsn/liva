@@ -2,6 +2,7 @@ import { LayoutStyleBaseline } from './layout-style-baseline.ts'
 import { isLayoutStyleProperty } from '../layout/style-properties.ts'
 import {
   observeLayoutStyles,
+  trackLayoutStyleSource,
   ownLayoutStyleSource,
   layoutStyleSourceTimes,
   changeLayoutStyleSource,
@@ -2314,9 +2315,15 @@ export class PresentationExecutor {
       this.active.push(...prepared)
       this.presentationMode = 'preview'
 
-      for (const { animation } of prepared) {
-        animation.pause()
-        animation.currentTime = 0
+      for (const entry of prepared) {
+        entry.animation.pause()
+        entry.animation.currentTime = 0
+
+        // A paused preview remains an ordinary paint source for opted-in
+        // descendants in other Motion roots. Its native clock changes on seek;
+        // registering that clock avoids caching an inherited intermediate value.
+        if (isLayoutStyleProperty(entry.track.property))
+          trackLayoutStyleSource(entry.receiver.element, entry.animation)
       }
 
       return
