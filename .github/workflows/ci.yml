@@ -150,3 +150,22 @@ jobs:
         env:
           PLAYWRIGHT_BROWSER: ${{ matrix.browser }}
         run: vp test --run --project="cross-browser-$PLAYWRIGHT_BROWSER" --coverage.enabled=false
+
+  ci-gate:
+    name: CI Gate
+    needs: [checks, browser]
+    # Evaluate failed and skipped dependencies so the required check cannot pass by being skipped.
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Require all CI jobs to succeed
+        env:
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          BROWSER_RESULT: ${{ needs.browser.result }}
+        run: |
+          if [[ "$CHECKS_RESULT" != success || "$BROWSER_RESULT" != success ]]; then
+            echo "::error::CI jobs did not all succeed (Checks: $CHECKS_RESULT, Browser: $BROWSER_RESULT)."
+            exit 1
+          fi
