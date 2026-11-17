@@ -527,6 +527,19 @@ test.describe('bottom sheet', () => {
     expect(await page.evaluate(() => getSelection()?.toString().length)).toBeGreaterThan(0)
   })
 
+  test('keeps the handle focused for keyboard control after a pointer drag', async ({ page }) => {
+    await openSheet(page)
+
+    await dragTo(page, 180)
+    await expectSnap(page, 2)
+
+    await expect(page.getByRole('slider')).toBeFocused()
+
+    await page.keyboard.press('ArrowDown')
+
+    await expectSnap(page, 1)
+  })
+
   test('supports touch header dragging and native touch content scrolling', async ({
     page,
     context,
