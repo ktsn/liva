@@ -1432,6 +1432,115 @@ describe('Vue coordinated layout projection', () => {
     },
   )
 
+  it.each([
+    { interleave: false, resizeChild: false },
+    { interleave: true, resizeChild: false },
+    { interleave: false, resizeChild: true },
+    { interleave: true, resizeChild: true },
+  ])(
+    'orders separate roots globally before child compensation: %j',
+    async ({ interleave, resizeChild }) => {
+      const expanded = ref(false)
+      const remote = document.createElement('div')
+      document.body.append(remote)
+      hosts.push(remote)
+      const childSource: Definition = {
+        ...definition(),
+        name: 'inner',
+        layers: [
+          {
+            name: 'base',
+            targets: [
+              {
+                name: 'self',
+                properties: [
+                  {
+                    kind: 'layout',
+                    name: '$layout',
+                    axes: all,
+                    timing: { kind: 'tween', durationMs: 200, easing: 'linear' },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }
+      const child = motionComponent(childSource, ({ root }) =>
+        root(
+          h(
+            'div',
+            {
+              'data-child': '',
+              style: {
+                position: 'relative',
+                width: expanded.value && resizeChild ? '80px' : '40px',
+                height: '20px',
+                transformOrigin: '0 0',
+              },
+            },
+            markers(),
+          ),
+        ),
+      )
+      const noise = motionComponent({ ...definition(), name: 'unrelated' }, ({ root }) =>
+        root(h('aside', { style: { width: '10px', height: '10px' } })),
+      )
+      const component = motionComponent({ ...definition(), name: 'outer' }, ({ root }) =>
+        root(
+          h(
+            'div',
+            {
+              'data-item': '',
+              style: {
+                position: 'relative',
+                width: expanded.value ? '200px' : '100px',
+                height: expanded.value ? '160px' : '80px',
+                transformOrigin: '0 0',
+              },
+            },
+            [h(child), ...(interleave ? [h(Teleport, { to: remote }, [h(noise)])] : [])],
+          ),
+        ),
+      )
+      const registrations: string[] = []
+      const { host, errors } = await mount(component, {
+        observe: (event, binding) => {
+          if (event === 'mount') registrations.push(binding.label.trim())
+        },
+      })
+      const target = element(host, '[data-child]')
+      const original = corners(target)
+      expect(registrations).toEqual(
+        interleave ? ['inner', 'unrelated', 'outer'] : ['inner', 'outer'],
+      )
+
+      expanded.value = true
+      await flush()
+
+      for (const elapsed of [0, 100, 200, 500, 1000]) {
+        frame(elapsed - (time - 1000))
+        const width = resizeChild ? 40 + 40 * Math.min(1, elapsed / 200) : 40
+        const expected = [
+          original[0],
+          { x: original[0].x + width, y: original[0].y },
+          { x: original[0].x + width, y: original[0].y + 20 },
+          { x: original[0].x, y: original[0].y + 20 },
+        ]
+        const actual = corners(target)
+
+        for (let index = 0; index < actual.length; index++) {
+          expect(Math.abs(actual[index].x - expected[index].x)).toBeLessThan(0.0005)
+          expect(Math.abs(actual[index].y - expected[index].y)).toBeLessThan(0.0005)
+        }
+      }
+
+      expect(target.style.transform).toBe('')
+      expect(frames.size).toBe(0)
+      expect(errors).toEqual([])
+    },
+  )
+
   it('uses browser easing and carries displayed edge velocity into a spring retarget', async () => {
     const width = ref(100)
     const spring = ref(false)

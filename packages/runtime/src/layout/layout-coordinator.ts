@@ -167,11 +167,36 @@ export class LayoutCoordinator {
       }
     }
 
-    return [...candidates.values()].toSorted((a, b) => {
-      if (a.element.contains(b.element)) return -1
-      if (b.element.contains(a.element)) return 1
-      return 0
-    })
+    // Ancestor-only comparisons are not transitive when an unrelated root lies
+    // between child and parent registrations. A shared depth rank gives every
+    // ancestor precedence, independently of participant/Teleport registration order.
+    const depths = new Map<HTMLElement, number>()
+    const depth = (element: HTMLElement) => {
+      const path: HTMLElement[] = []
+      let current: HTMLElement | null = element
+      let value = 0
+
+      while (current) {
+        const known = depths.get(current)
+
+        if (known !== undefined) {
+          value = known
+          break
+        }
+
+        path.push(current)
+        current = current.parentElement
+      }
+
+      for (const ancestor of path.toReversed()) depths.set(ancestor, ++value)
+
+      return value
+    }
+
+    return [...candidates.values()]
+      .map((candidate) => ({ candidate, depth: depth(candidate.element) }))
+      .toSorted((a, b) => a.depth - b.depth)
+      .map(({ candidate }) => candidate)
   }
 
   private release() {
