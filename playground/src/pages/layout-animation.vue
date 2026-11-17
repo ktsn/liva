@@ -90,7 +90,8 @@ function reverse() {
   gap: 8px 16px;
 }
 .layout-reverse {
-  padding: 10px 16px;
+  padding-block: 10px;
+  padding-inline: 16px;
   border: 1px solid #c7d6bd;
   border-radius: 10px;
   background: #dce6d5;

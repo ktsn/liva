@@ -96,7 +96,8 @@ async function move(direction: -1 | 1, event: MouseEvent) {
   flex: 1;
 }
 .topic-category {
-  margin: 0 0 8px;
+  margin-block: 0 8px;
+  margin-inline: 0;
   color: #64766f;
   font-size: 12px;
   letter-spacing: .08em;
@@ -125,7 +126,8 @@ async function move(direction: -1 | 1, event: MouseEvent) {
   color: #487857;
 }
 .topic-summary {
-  margin: 10px 0 0;
+  margin-block: 10px 0;
+  margin-inline: 0;
   color: #64766f;
   font-size: 14px;
   line-height: 1.5;
