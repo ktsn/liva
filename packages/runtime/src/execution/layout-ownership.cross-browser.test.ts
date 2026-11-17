@@ -50,6 +50,11 @@ function layoutDefinition(): PropertyIRDefinition {
   }
 }
 
+function computedProperties(element: HTMLElement, properties: readonly string[]) {
+  const style = getComputedStyle(element)
+  return properties.map((property) => style.getPropertyValue(property))
+}
+
 describe('Executor temporary layout ownership', () => {
   it('rebases temporary important output through the ordinary style writer and preserves current inline CSS', () => {
     const { assembly, targets, errors } = setup(layoutDefinition(), { active: true })
@@ -266,6 +271,268 @@ describe('Executor temporary layout ownership', () => {
     expect(root.style.paddingBlockStart).toBe('')
     expect(root.style.paddingBlockEnd).toBe('')
     expect(root.getAnimations()).toEqual([])
+  })
+
+  it.each(
+    [false, true].flatMap((logicalFirst) =>
+      ['horizontal-tb', 'vertical-rl'].flatMap((writingMode) =>
+        [false, true].map((variable) => ({ logicalFirst, writingMode, variable })),
+      ),
+    ),
+  )(
+    'preserves the native order of external shorthand and logical declarations: %j',
+    ({ logicalFirst, writingMode, variable }) => {
+      const { assembly, targets } = setup(layoutDefinition(), { active: false })
+      const root = targets.get('self')!
+      root.style.cssText = 'width:200px;height:100px;writing-mode:horizontal-tb;--padding:9% 4%;'
+      const native = document.createElement('div')
+      native.style.cssText = root.style.cssText
+      harness.append(native)
+      const constraints = new Map([
+        ['padding-inline-start', '20px'],
+        ['padding-inline-end', '20px'],
+        ['padding-block-start', '20px'],
+        ['padding-block-end', '20px'],
+      ] as const)
+      assembly.executor.layoutTransform(root, 'scale(.5)', constraints)
+      const apply = (element: HTMLElement) => {
+        element.style.writingMode = writingMode
+        const shorthand = () =>
+          element.style.setProperty('padding', variable ? 'var(--padding)' : '9% 4%', 'important')
+        const logical = () => element.style.setProperty('padding-inline-end', '7%', 'important')
+        for (const write of logicalFirst ? [logical, shorthand] : [shorthand, logical]) write()
+        element.style.setProperty('min-width', '160px', 'important')
+        element.style.setProperty(
+          '--opaque',
+          `[one;two] {a:b;c:d} "quoted;colon:!important" 'single;quote' a/* s*e;: */b / c`,
+        )
+        element.style.setProperty('--escaped', '"quote\\\";colon:"')
+      }
+
+      apply(root)
+      apply(native)
+      assembly.executor.layoutCleanup()
+
+      const properties = [
+        'padding-top',
+        'padding-right',
+        'padding-bottom',
+        'padding-left',
+        'min-width',
+      ]
+      expect(computedProperties(root, properties)).toEqual(computedProperties(native, properties))
+      expect(root.style.paddingInlineEnd).toBe(native.style.paddingInlineEnd)
+      expect(root.style.getPropertyValue('--opaque')).toBe(
+        native.style.getPropertyValue('--opaque'),
+      )
+      expect(root.style.getPropertyValue('--escaped')).toBe(
+        native.style.getPropertyValue('--escaped'),
+      )
+      expect(root.style.getPropertyPriority('padding-inline-end')).toBe('important')
+      expect(root.getAnimations()).toEqual([])
+    },
+  )
+
+  it.each(['remove', 'attribute', 'clear', 'remove-attribute'] as const)(
+    'retains authored deletion and explicit declaration order during %s updates',
+    (mode) => {
+      const { assembly, targets } = setup(layoutDefinition(), { active: false })
+      const root = targets.get('self')!
+      root.style.cssText =
+        'width:200px;height:100px;color:red;padding:5%;padding-inline-end:8%!important;'
+      const native = document.createElement('div')
+      native.style.cssText = root.style.cssText
+      harness.append(native)
+      assembly.executor.layoutTransform(
+        root,
+        'scale(.5)',
+        new Map([['padding-inline-end', '20px']]),
+      )
+      const apply = (element: HTMLElement) => {
+        if (mode === 'remove') element.style.removeProperty('padding-inline-end')
+        else if (mode === 'attribute')
+          element.setAttribute(
+            'style',
+            'padding-inline-end:7%!important;padding:9% 4%!important;color:blue;width:200px;height:100px;',
+          )
+        else if (mode === 'clear') element.style.cssText = ''
+        else element.removeAttribute('style')
+      }
+
+      apply(root)
+      apply(native)
+      assembly.executor.layoutCleanup()
+
+      const properties = ['padding-top', 'padding-right', 'padding-bottom', 'padding-left', 'color']
+      expect(computedProperties(root, properties)).toEqual(computedProperties(native, properties))
+      expect(root.style.paddingInlineEnd).toBe(native.style.paddingInlineEnd)
+      expect(root.getAnimations()).toEqual([])
+    },
+  )
+
+  it('keeps unchanged hidden declarations anchored when cssText moves an unrelated property', () => {
+    const { assembly, targets } = setup(layoutDefinition(), { active: false })
+    const root = targets.get('self')!
+    root.style.cssText =
+      'color:red!important;padding-inline-end:8%!important;all:initial!important;display:block!important;width:200px!important;height:100px!important;'
+    const native = document.createElement('div')
+    native.style.cssText = root.style.cssText
+    harness.append(native)
+    assembly.executor.layoutTransform(root, 'scale(.5)', new Map([['padding-inline-end', '20px']]))
+
+    root.style.cssText += ';color:green!important;'
+    native.style.cssText += ';color:green!important;'
+    assembly.executor.layoutCleanup()
+
+    const properties = ['padding-right', 'color', 'width', 'height']
+    expect(computedProperties(root, properties)).toEqual(computedProperties(native, properties))
+    expect(root.getAnimations()).toEqual([])
+  })
+
+  it('retains a logical var shorthand through an unrelated serialized style update', () => {
+    const { assembly, targets } = setup(layoutDefinition(), { active: false })
+    const root = targets.get('self')!
+    root.style.cssText =
+      'color:red;--pair:8% 6%;padding-inline:var(--pair)!important;width:200px;height:100px;'
+    const native = document.createElement('div')
+    native.style.cssText = root.style.cssText
+    harness.append(native)
+    assembly.executor.layoutTransform(
+      root,
+      'scale(.5)',
+      new Map([
+        ['padding-inline-start', '20px'],
+        ['padding-inline-end', '20px'],
+      ]),
+    )
+
+    for (const element of [root, native]) {
+      element.style.setProperty('padding-inline-end', '7%', 'important')
+      element.style.cssText += ';color:green;'
+    }
+    assembly.executor.layoutCleanup()
+
+    const properties = ['padding-left', 'padding-right', 'color']
+    expect(computedProperties(root, properties)).toEqual(computedProperties(native, properties))
+    expect(root.style.getPropertyValue('--pair')).toBe(native.style.getPropertyValue('--pair'))
+    expect(root.getAnimations()).toEqual([])
+  })
+
+  it('retries an ordered source replay after a native metadata failure without losing edits', () => {
+    const { assembly, targets } = setup(layoutDefinition(), { active: false })
+    const root = targets.get('self')!
+    root.style.cssText = 'width:200px;height:100px;'
+    const native = document.createElement('div')
+    native.style.cssText = root.style.cssText
+    harness.append(native)
+    assembly.executor.layoutTransform(root, 'scale(.5)', new Map([['padding-inline-end', '20px']]))
+    for (const element of [root, native]) {
+      element.style.setProperty('padding', '9% 4%', 'important')
+      element.style.setProperty('padding-inline-end', '7%', 'important')
+    }
+    const cause = new Error('Native source replay failed once')
+    // Retain the native method only for explicit .call(this) below.
+    // eslint-disable-next-line typescript/unbound-method
+    const set = CSSStyleDeclaration.prototype.setProperty
+    let failed = false
+    const fail = vi
+      .spyOn(CSSStyleDeclaration.prototype, 'setProperty')
+      .mockImplementation(function (this: CSSStyleDeclaration, property, value, priority) {
+        if (
+          !failed &&
+          this !== root.style &&
+          this !== native.style &&
+          property === 'padding-inline-end' &&
+          value === '7%'
+        ) {
+          failed = true
+          throw cause
+        }
+        set.call(this, property, value, priority)
+      })
+
+    expect(() => assembly.executor.layoutCleanup()).toThrow(cause)
+    assembly.executor.layoutCleanup()
+
+    expect(failed).toBe(true)
+    expect(computedProperties(root, ['padding-left', 'padding-right'])).toEqual(
+      computedProperties(native, ['padding-left', 'padding-right']),
+    )
+    expect(root.getAnimations()).toEqual([])
+    fail.mockRestore()
+  })
+
+  it('keeps a fresh style owner after batched release, constraint change and another release', () => {
+    const { assembly, targets } = setup(layoutDefinition(), { active: false })
+    const root = targets.get('self')!
+    root.style.cssText = 'width:200px;height:100px;'
+    const native = document.createElement('div')
+    native.style.cssText = root.style.cssText
+    harness.append(native)
+    batchLayoutWrites(() => {
+      assembly.executor.layoutTransform(
+        root,
+        'scale(.5)',
+        new Map([['padding-inline-end', '20px']]),
+      )
+      assembly.executor.layoutTransform(root, undefined)
+      assembly.executor.layoutTransform(
+        root,
+        'scale(.75)',
+        new Map([['padding-inline-end', '30px']]),
+      )
+      assembly.executor.layoutTransform(root, undefined)
+    })
+    assembly.executor.layoutTransform(root, 'scale(.5)', new Map([['padding-inline-end', '20px']]))
+
+    for (const element of [root, native]) {
+      element.style.setProperty('padding', '9% 4%', 'important')
+      element.style.setProperty('padding-inline-end', '7%', 'important')
+    }
+    assembly.executor.layoutCleanup()
+
+    expect(computedProperties(root, ['padding-left', 'padding-right'])).toEqual(
+      computedProperties(native, ['padding-left', 'padding-right']),
+    )
+    expect(root.style.transform).toBe('')
+    expect(root.getAnimations()).toEqual([])
+  })
+
+  it('retains detached external edits when a remaining native owner is released', async () => {
+    const { assembly, targets } = setup(layoutDefinition(), { active: false })
+    const root = targets.get('self')!
+    root.style.cssText = 'width:200px;height:100px;color:red;'
+    assembly.executor.layoutTransform(root, 'scale(.5)')
+    const output = root.getAnimations()[0]
+    root.remove()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    root.style.color = 'purple'
+    assembly.executor.layoutCleanup()
+
+    expect(root.style.color).toBe('purple')
+    expect(root.style.transform).toBe('')
+    expect(output.playState).toBe('idle')
+  })
+
+  it('does not adopt a generated declaration when its native setter throws after writing', () => {
+    const { assembly, targets } = setup(layoutDefinition(), { active: false })
+    const root = targets.get('self')!
+    root.style.transform = 'rotate(20deg)'
+    const cause = new Error('Native generated write failed after applying')
+    const set = root.style.setProperty.bind(root.style)
+    const fail = vi.spyOn(root.style, 'setProperty').mockImplementationOnce((...args) => {
+      set(...args)
+      throw cause
+    })
+
+    expect(() => assembly.executor.layoutTransform(root, 'scale(.5)')).toThrow(cause)
+    assembly.executor.layoutCleanup()
+
+    expect(root.style.transform).toBe('rotate(20deg)')
+    expect(root.getAnimations()).toEqual([])
+    fail.mockRestore()
   })
 
   it('suppresses automatic output on every physical alias when another alias owns explicit none', () => {

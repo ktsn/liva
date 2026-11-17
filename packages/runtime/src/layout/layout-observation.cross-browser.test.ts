@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { LayoutReadBatch, missingBounds } from './layout-bounds.ts'
-import { registerLayoutRead, writeLayoutStyle } from './layout-scheduler.ts'
+import { observeLayoutInline, registerLayoutRead, writeLayoutStyle } from './layout-scheduler.ts'
 
 const cleanups: (() => void)[] = []
 
@@ -43,6 +43,78 @@ function fixture() {
 }
 
 describe('geometry read phases', () => {
+  it('applies startup writes before a fresh document acquires its first geometry owner', () => {
+    const iframe = document.createElement('iframe')
+    document.body.append(iframe)
+    cleanups.push(() => iframe.remove())
+    // Appended same-origin about:blank has an initialized document synchronously.
+    const childDocument = iframe.contentDocument!
+    const root = childDocument.createElement('div')
+    childDocument.body.append(root)
+    writeLayoutStyle(root, () => {
+      root.style.cssText = 'width:200px;height:30px;'
+    })
+    let width = 0
+
+    cleanups.push(
+      registerLayoutRead(
+        childDocument,
+        (batch) => {
+          const next = batch.bounds(root, root)
+          return () => {
+            width = next.width
+          }
+        },
+        [root],
+      ),
+    )
+
+    expect(width).toBe(200)
+  })
+
+  it('keeps a shared element subscription until its last reader releases it', () => {
+    const { root } = fixture()
+    const firstChange = vi.fn<(change: unknown) => void>()
+    const nextChange = vi.fn<(change: unknown) => void>()
+    const first = observeLayoutInline(root, firstChange)
+    const next = observeLayoutInline(root, nextChange)
+    cleanups.push(next.dispose)
+
+    root.style.color = 'red'
+    next.flush()
+
+    expect(firstChange).toHaveBeenCalledTimes(1)
+    expect(nextChange).toHaveBeenCalledTimes(1)
+
+    first.dispose()
+    root.style.color = 'blue'
+    next.flush()
+
+    expect(firstChange).toHaveBeenCalledTimes(1)
+    expect(nextChange).toHaveBeenCalledTimes(2)
+    expect(nextChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ after: root.getAttribute('style'), generated: false }),
+    )
+  })
+
+  it('keeps replacement inline observation alive after an obsolete cleanup repeats', () => {
+    const { root } = fixture()
+    const old = vi.fn<(change: unknown) => void>()
+    const current = vi.fn<(change: unknown) => void>()
+    const first = observeLayoutInline(root, old)
+    first.dispose()
+    const second = observeLayoutInline(root, current)
+    cleanups.push(second.dispose)
+
+    first.dispose()
+    root.style.color = 'red'
+    second.flush()
+
+    expect(old).not.toHaveBeenCalled()
+    expect(current).toHaveBeenCalledTimes(1)
+    expect(current).toHaveBeenCalledWith(expect.objectContaining({ generated: false }))
+  })
+
   it('shares ancestor reads and retains numeric frames independently of later DOM mutations', () => {
     const { root, target } = fixture()
     root.style.transform = 'rotate(25deg)'

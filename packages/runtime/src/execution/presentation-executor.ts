@@ -1,3 +1,4 @@
+import { InlineStyleHistory, inlineDeclarations, type InlineValue } from './inline-style-history.ts'
 import type { LayoutBoxConstraints } from '../layout/layout-constraints.ts'
 import { batchLayoutWrites } from '../layout/layout-write-phase.ts'
 import { waapiProperty } from '../motion/animation.ts'
@@ -72,32 +73,22 @@ import {
 import { trackLayoutAnimation, writeLayoutStyle } from '../layout/layout-scheduler.ts'
 import { PropertyMotion, type MotionSample } from '../motion/property-motion.ts'
 
-type InlineValue = { value: string; priority: string }
 type OwnedElement = {
   element: HTMLElement
   original: Map<string, InlineValue>
   originalCss: string
   pending: Map<string, { property: string; value: string; priority: string }>
   written: Map<string, InlineValue>
-}
-
-function inlineDeclarations(style: CSSStyleDeclaration): Map<string, InlineValue> {
-  return new Map(
-    Array.from(style).map((property) => [
-      property,
-      {
-        value: style.getPropertyValue(property),
-        priority: style.getPropertyPriority(property),
-      },
-    ]),
-  )
+  history?: InlineStyleHistory
 }
 
 /** Calculates the released baseline while preserving external CSS edits and serialization. */
 function restoredStyle(
-  { original, originalCss, pending, written }: OwnedElement,
+  { original, originalCss, pending, written, history }: OwnedElement,
   cssText: string,
 ): CSSStyleDeclaration {
+  if (history) return history.current()
+
   const baseline = document.createElement('div')
   const external = document.createElement('div')
 
@@ -332,8 +323,10 @@ export class PresentationExecutor {
                 this.layoutEffects.get(element) === output &&
                 !this.layoutTransforms.has(element)
               ) {
+                const current = this.layoutOwned.find((entry) => entry.element === element)
+                current?.history?.dispose()
                 this.layoutEffects.delete(element)
-                this.layoutOwned = this.layoutOwned.filter((entry) => entry !== owned)
+                this.layoutOwned = this.layoutOwned.filter((entry) => entry !== current)
               }
             },
           )
@@ -358,6 +351,7 @@ export class PresentationExecutor {
           writeLayoutStyle(element, () => {
             element.style.cssText = restoredStyle(owned, element.style.cssText).cssText
           })
+          owned.history?.dispose()
           this.layoutOwned = this.layoutOwned.filter((entry) => entry !== owned)
         }
         finishLayoutWrites(element, [
@@ -1725,8 +1719,9 @@ export class PresentationExecutor {
 
     const ownership = scope === 'ordinary' ? this.owned : this.layoutOwned
 
-    const before = inlineDeclarations(element.style)
     let owned = ownership.find((o) => o.element === element)
+    owned?.history?.current()
+    const before = inlineDeclarations(element.style)
 
     if (!owned) {
       owned = {
@@ -1736,6 +1731,7 @@ export class PresentationExecutor {
         pending: new Map(),
         written: new Map(),
       }
+      if (scope === 'layout') owned.history = new InlineStyleHistory(element, owned.written)
       ownership.push(owned)
     }
 
