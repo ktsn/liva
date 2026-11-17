@@ -94,9 +94,6 @@ export interface ExecutionEnvironment {
 
   /** Recomputes controller ownership from accepted inputs, without sampling calls or advancing events/states. */
   readonly refreshOwnership: () => void
-
-  /** Reports a registered session settling; Runtime/planner decide releases and presentation recovery. */
-  readonly lifecycleSettled: () => void
 }
 
 /**
@@ -159,7 +156,7 @@ export interface ExecutionPort {
   refreshSuspension(definition: Definition): void
 
   /** Current receiver/effect metadata and playback policy; performs no CSSOM reads. */
-  presentationFacts(resolution: LayerResolution): PresentationFacts
+  presentationFacts(): PresentationFacts
 
   /**
    * Captures canonical addresses for selected targets, in declaration order.

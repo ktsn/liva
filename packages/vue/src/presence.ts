@@ -6,24 +6,27 @@ import {
   Transition,
   TransitionGroup,
 } from 'vue'
-import { LifecycleSession, type LifecycleWork } from '@liva/runtime'
+import { PresenceOperation, type PresenceCapture } from '@liva/runtime'
 
 export interface PresenceTarget {
-  capture(phase: 'enter' | 'leave'): LifecycleWork[]
-  retainLifecycle(phase: 'enter' | 'leave', session: LifecycleSession): void
-  release(work: readonly LifecycleWork[]): void
+  capture(phase: 'enter' | 'leave', interrupted: boolean): PresenceCapture | undefined
 }
 
 export class PresenceEntry {
   element?: HTMLElement
   readonly targets = new Set<PresenceTarget>()
-  readonly snapshots = new Map<PresenceTarget, LifecycleWork[]>()
-  session?: LifecycleSession
+  readonly snapshots = new Map<PresenceTarget, PresenceCapture>()
+  session?: PresenceOperation
   leaving = false
 
   capture(phase: 'enter' | 'leave') {
-    const work = [...this.targets].flatMap((target) => target.capture(phase))
-    if (phase === 'leave') work.push(...[...this.snapshots.values()].flat())
+    const work = [...this.targets].flatMap((target) => {
+      const capture = target.capture(phase, this.session !== undefined)
+
+      return capture ? [capture] : []
+    })
+
+    if (phase === 'leave') work.push(...this.snapshots.values())
     this.snapshots.clear()
     return work
   }
@@ -61,33 +64,13 @@ export const LivaPresenceBoundary = defineComponent({
       const entry = find(element)
       if (!entry) return
 
-      let work = entry.capture(phase)
-      if (entry.session) {
-        work = work.map((captured) => ({
-          ...captured,
-          track: {
-            ...captured.track,
-            keyframes: captured.track.keyframes.map((frame, index) =>
-              index === 0
-                ? {
-                    ...frame,
-                    value: getComputedStyle(captured.element).getPropertyValue(
-                      captured.track.property,
-                    ),
-                  }
-                : frame,
-            ),
-          },
-        }))
-      }
-
-      for (const target of entry.targets) target.release(work)
+      const captures = entry.capture(phase)
+      const previous = entry.session
+      const operation = new PresenceOperation(captures, phase)
 
       entry.leaving = phase === 'leave'
-      entry.cancel('superseded')
-      entry.session = new LifecycleSession(work, phase)
-      entry.session.initialize()
-      for (const target of entry.targets) target.retainLifecycle(phase, entry.session)
+      entry.session = operation
+      operation.initialize(previous)
     }
     const run = (element: Element, done: () => void) => {
       const entry = find(element)
@@ -97,7 +80,7 @@ export const LivaPresenceBoundary = defineComponent({
         return
       }
 
-      const complete = (result: import('@liva/runtime').LifecycleResult) => {
+      const complete = (result: import('@liva/runtime').PresenceResult) => {
         if (entry.session !== session) return
         entry.session = undefined
         if (

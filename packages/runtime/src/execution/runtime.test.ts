@@ -51,7 +51,7 @@ function setup(
 
     present(_previous, next) {
       observations.push({ displayed, velocity })
-      execution.applyPlan(planReconciliation(next, execution.presentationFacts(next).receivers))
+      execution.applyPlan(planReconciliation(next, execution.presentationFacts().receivers))
     },
 
     initialize() {},
@@ -74,18 +74,17 @@ function setup(
     applyControllers: () => new Map(),
     presentationFacts: () => ({
       mode: 'live',
-      lifecycle: [],
       suspended: false,
       reduced: false,
       preserveLifecycle: false,
-      receivers: [{ id: 3, target: 'box', protected: [] }],
+      receivers: [{ id: 3, target: 'box' }],
       active: [],
     }),
     observeReceivers: () => [
       {
         id: 3,
         target: 'box',
-        protected: [],
+
         fallbacks: [],
         addresses: [{ name: 'opacity', addresses: ['opacity'] }],
       },
@@ -219,4 +218,50 @@ describe('Runtime presentation coordination', () => {
     runtime.dispose()
     factory.mockRestore()
   })
+
+  it.each([false, true])(
+    'releases initialized calls and preserves the startup failure when cleanup fails=%s',
+    (cleanupFails) => {
+      const { runtime: previous, execution, errors } = setup()
+      previous.dispose()
+
+      const failure = new Error('Controller configuration failed')
+      const cleanupFailure = new Error('Call cleanup failed')
+      const dispose = vi.fn<() => void>(() => {
+        if (cleanupFails) throw cleanupFailure
+      })
+      const factory = vi.spyOn(functions, 'callBuiltin').mockReturnValue({
+        value: 1,
+        bind: () => () => {},
+        prepareUpdate: () => {
+          throw new Error('No updates during initialization')
+        },
+        dispose,
+      })
+      execution.configureControllers = () => {
+        throw failure
+      }
+      const source: Definition = {
+        name: 'startup-failure',
+        layers: [],
+        letBindings: [
+          { name: 'value', initializer: { kind: 'call', function: 'source', arguments: [] } },
+        ],
+      }
+
+      try {
+        expect(
+          () => new Runtime(execution, source, {}, (diagnostic) => errors.push(diagnostic)),
+        ).toThrow(failure)
+        expect(dispose).toHaveBeenCalledTimes(1)
+        const expectedErrors = cleanupFails
+          ? [{ code: 'runtime.initialization-cleanup', error: cleanupFailure }]
+          : []
+
+        expect(errors.map(({ code, error }) => ({ code, error }))).toEqual(expectedErrors)
+      } finally {
+        factory.mockRestore()
+      }
+    },
+  )
 })

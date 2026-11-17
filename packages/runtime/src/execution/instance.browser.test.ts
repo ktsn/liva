@@ -1,3 +1,4 @@
+import { capturePresence } from '../__test__/helpers/presence.ts'
 import type { Definition as PropertyIRDefinition } from '../model/definition.ts'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { cdp, userEvent } from 'vite-plus/test/browser'
@@ -10,7 +11,7 @@ import cardFixture from '../../../../fixtures/card.json'
 import { layerTargets } from '../composition/layers.ts'
 import { decodeBundle } from '../model/definition.ts'
 import { LivaInstance, type RuntimeDiagnostic } from './instance.ts'
-import { LifecycleSession } from './lifecycle.ts'
+import { PresenceOperation } from './presence-operation.ts'
 
 const definition = decodeBundle(JSON.stringify(fixture)).definitions[0]
 const instances: LivaInstance[] = []
@@ -123,12 +124,29 @@ function startRegisteredLifecycle(
   phase: 'enter' | 'leave',
   target: string,
 ) {
-  const session = new LifecycleSession(instance.captureLifecycle(phase, [target]), phase)
-  instance.retainLifecycle(phase, session)
+  const session = new PresenceOperation(capturePresence(instance, phase, [target]), phase)
+  session.initialize()
   session.initialize()
   session.play()
 
   return session
+}
+
+function capturedLeaveEffect(instance: LivaInstance) {
+  const previous = new Set(instance.animations)
+  const operation = new PresenceOperation(capturePresence(instance, 'leave', ['thumb']), 'leave')
+
+  try {
+    operation.play()
+
+    const effect = instance.animations.find((animation) => !previous.has(animation))?.effect
+
+    if (!(effect instanceof KeyframeEffect)) throw new Error('Expected captured native effect')
+
+    return effect
+  } finally {
+    operation.cancel('owner-teardown')
+  }
 }
 
 function setupRepeatedThumb() {
@@ -328,11 +346,10 @@ describe('browser animation execution', () => {
   it('captures a repeated target from its last accepted receiver', () => {
     const { instance, second, errors } = setupRepeatedThumb()
 
-    const work = instance.captureLifecycle('leave', ['thumb'])
+    const effect = capturedLeaveEffect(instance)
 
-    expect(work).toHaveLength(1)
-    expect(work[0].element).toBe(second)
-    expect(work[0].track.keyframes[0].value).toBe('0.8')
+    expect(effect.target).toBe(second)
+    expect(effect.getKeyframes()[0].opacity).toBe('0.8')
     expect(errors).toEqual([])
   })
 
@@ -352,7 +369,7 @@ describe('browser animation execution', () => {
       instance.bind(entries)
 
       expect(instance.animations).toEqual(animations)
-      expect(instance.captureLifecycle('leave', ['thumb'])[0].element).toBe(second)
+      expect(capturedLeaveEffect(instance).target).toBe(second)
       expect(first.style.translate).toBe('24px')
       expect(second.style.translate).toBe('24px')
       expect(errors).toEqual([])
@@ -918,9 +935,9 @@ it('updates template values in place and recovers from non-finite expressions', 
 
   expect(errors.at(-1)?.code).toBe('runtime.expression')
 
-  const enter = new LifecycleSession([], 'enter')
+  const enter = new PresenceOperation(capturePresence(instance, 'enter', []), 'enter')
 
-  instance.retainLifecycle('enter', enter)
+  enter.initialize()
   instance.updateParameters({ x: 2 })
 
   expect(enter.isFinished).toBe(false)
@@ -1040,7 +1057,6 @@ it('settles enter and leave together when reduced motion becomes active', async 
 
     expect(await enter.finished).toBe('completed')
     expect(await leave.finished).toBe('completed')
-    expect(leave.owns(targets.get('exit')!, 'opacity')).toBe(false)
     expect(targets.get('exit')!.getAnimations()).toHaveLength(0)
     expect(targets.get('box')!.style.opacity).toBe('1')
     expect(targets.get('box')!.style.width).toBe('50px')
@@ -1056,15 +1072,21 @@ it('settles enter and leave together when reduced motion becomes active', async 
 
 it('reports asynchronous enter settlement failures after the native session completes', async () => {
   const { instance, targets, errors } = setup(lifecyclePolicyDefinition, { enabled: true })
-  const enter = new LifecycleSession([], 'enter')
-  instance.retainLifecycle('enter', enter)
+  const enter = new PresenceOperation(
+    capturePresence(instance, 'enter', ['box']),
+    'enter',
+    () => {},
+  )
+  enter.initialize()
+  enter.play()
+
   const failure = new Error('Failed to apply lifecycle settlement')
   const write = vi.spyOn(targets.get('box')!.style, 'setProperty').mockImplementationOnce(() => {
     throw failure
   })
 
   try {
-    enter.play()
+    for (const animation of targets.get('box')!.getAnimations()) animation.finish()
 
     expect(await enter.finished).toBe('completed')
 
@@ -1091,7 +1113,6 @@ it('plans enter completion restoration of removed declarations without cancellin
     expect(box.style.width).toBe('')
     expect(box.style.opacity).toBe('1')
     expect(leave.isFinished).toBe(false)
-    expect(leave.owns(targets.get('exit')!, 'opacity')).toBe(true)
     expect(errors).toEqual([])
   } finally {
     leave.cancel('owner-teardown')
@@ -1145,54 +1166,55 @@ it('settles active effects when reduced motion is enabled but preserves manual p
   }
 })
 
-it('releases only matching lifecycle effects and protects leave-owned properties', async () => {
-  const { instance, targets } = setup()
+it('releases only captured effects and keeps leave ownership through ordinary updates', async () => {
+  const source = {
+    ...definition,
+    leave: {
+      timing: { kind: 'tween' as const, durationMs: 1000, easing: 'linear' },
+      targets: [
+        {
+          name: 'thumb',
+          properties: [
+            {
+              name: 'translate',
+              keyframes: [{ offset: 1, value: { kind: 'literal' as const, value: '0px' } }],
+            },
+          ],
+        },
+      ],
+    },
+  }
+  const { instance, targets } = setup(source)
 
   updateMode(instance, 'on', { paused: true })
 
-  const before = instance.animations.length
-
-  instance.releaseLifecycle(['thumb'], targets.get('track')!)
-
-  expect(instance.animations).toHaveLength(before)
-
-  instance.releaseLifecycle(['thumb'], targets.get('thumb')!)
-
-  expect(instance.animations.length).toBeLessThan(before)
-
-  const session = new LifecycleSession(
-    [
-      {
-        element: targets.get('track')!,
-        track: {
-          target: 'track',
-          property: 'background-color',
-          timing: { kind: 'tween', durationMs: 100, easing: 'linear' },
-          keyframes: [
-            { offset: 0, value: 'red' },
-            { offset: 1, value: 'blue' },
-          ],
-          destinationValue: 'blue',
-        },
-      },
-    ],
-    'leave',
+  const before = [...instance.animations]
+  const unrelated = before.find(
+    (animation) =>
+      animation.effect instanceof KeyframeEffect &&
+      animation.effect.target === targets.get('track'),
   )
+  const session = new PresenceOperation(capturePresence(instance, 'leave', ['thumb']), 'leave')
 
-  instance.retainLifecycle('leave', session)
-  updateMode(instance, 'off', { paused: true })
+  try {
+    session.initialize()
 
-  expect(
-    instance.animations.every(
-      (animation) =>
-        animation.effect instanceof KeyframeEffect &&
-        animation.effect.target !== targets.get('track'),
-    ),
-  ).toBe(true)
+    expect(instance.animations).toContain(unrelated)
+    expect(instance.animations.length).toBeLessThan(before.length)
 
-  session.cancel('owner-teardown')
+    session.play()
 
-  await session.finished
+    const leave = instance.animations.find((animation) => !before.includes(animation))
+
+    updateMode(instance, 'off', { paused: true })
+
+    expect(instance.animations).toContain(leave)
+    expect(session.isFinished).toBe(false)
+  } finally {
+    session.cancel('owner-teardown')
+  }
+
+  expect(await session.finished).toBe('owner-teardown')
 })
 
 it('restores parameter snapshots when a reactive transition cannot be prepared', () => {
@@ -1233,10 +1255,27 @@ it('stops a reactive update when an event listener disposes its owner', () => {
   updateMode(instance, 'on')
 })
 
-it.each(['dispose', 'replace', 'release'] as const)(
+it.each(['dispose', 'replace', 'presence'] as const)(
   'ignores a queued animation completion after %s',
   async (operation) => {
-    const { instance, targets } = setup()
+    const { instance, targets } = setup({
+      ...definition,
+      leave: {
+        timing: { kind: 'tween', durationMs: 100, easing: 'linear' },
+        targets: [
+          {
+            name: 'track',
+            properties: [
+              {
+                name: 'background-color',
+                keyframes: [{ offset: 1, value: { kind: 'literal', value: 'blue' } }],
+              },
+            ],
+          },
+        ],
+      },
+    })
+    let presence: PresenceOperation | undefined
 
     updateMode(instance, 'on')
 
@@ -1249,7 +1288,10 @@ it.each(['dispose', 'replace', 'release'] as const)(
 
     if (operation === 'dispose') instance.dispose()
     else if (operation === 'replace') instance.replaceDefinition(definition)
-    else instance.releaseLifecycle(['track'], targets.get('track')!)
+    else {
+      presence = new PresenceOperation(capturePresence(instance, 'leave', ['track']), 'leave')
+      presence.initialize()
+    }
 
     targets.get('track')!.style.backgroundColor = 'blue'
 
@@ -1259,6 +1301,8 @@ it.each(['dispose', 'replace', 'release'] as const)(
 
     expect(instance.animations).not.toContain(animation)
     expect(targets.get('track')!.style.backgroundColor).toBe('blue')
+
+    presence?.cancel('owner-teardown')
   },
 )
 
@@ -1394,7 +1438,11 @@ it('replaces only an animated template property when its value changes within a 
   } satisfies PropertyIRDefinition
   const { instance, targets } = setup(def, { checked: false, x: 10 })
 
-  expect(instance.captureLifecycle('enter', ['box'])).toEqual([])
+  const empty = new PresenceOperation(capturePresence(instance, 'enter', ['box']), 'enter')
+
+  empty.play()
+
+  expect(instance.animations).toEqual([])
 
   instance.updateParameters({ checked: true, x: 10 })
 
@@ -1461,9 +1509,9 @@ it('restores removed owned declarations but preserves external removals', () => 
 
 it('retains enter snapshots on input changes and cancels them on owner disposal', async () => {
   const { instance } = setup()
-  const interrupted = new LifecycleSession([], 'enter')
+  const interrupted = new PresenceOperation(capturePresence(instance, 'enter', []), 'enter')
 
-  instance.retainLifecycle('enter', interrupted)
+  interrupted.initialize()
   instance.updateParameters({ mode: 'on' })
 
   expect(instance.composition.states.toggle).toBe('on')
@@ -1473,9 +1521,9 @@ it('retains enter snapshots on input changes and cancels them on owner disposal'
 
   expect(await interrupted.finished).toBe('completed')
 
-  const disposed = new LifecycleSession([], 'enter')
+  const disposed = new PresenceOperation(capturePresence(instance, 'enter', []), 'enter')
 
-  instance.retainLifecycle('enter', disposed)
+  disposed.initialize()
   instance.dispose()
 
   expect(await disposed.finished).toBe('owner-teardown')

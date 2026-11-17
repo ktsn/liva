@@ -1,13 +1,12 @@
 import { LivaPresenceBoundary, type PresenceEntry, type PresenceTarget } from './presence.ts'
 import type { App, ComponentCustomOptions, DirectiveBinding, ObjectDirective, Plugin } from 'vue'
 import {
-  LivaInstance,
+  Runtime,
+  PresentationExecutor,
   ROOT_TARGET,
   rootTargetBindings,
   type Definition,
   type RuntimeDiagnostic,
-  type LifecycleSession,
-  type LifecycleWork,
 } from '@liva/runtime'
 
 declare module 'vue' {
@@ -19,7 +18,8 @@ declare module 'vue' {
 export interface InstanceBinding {
   readonly root: HTMLElement
   readonly component: ComponentCustomOptions
-  readonly runtime: LivaInstance
+  readonly runtime: Runtime
+  readonly executor: PresentationExecutor
   readonly definition: Definition
 }
 
@@ -103,7 +103,7 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
         }
 
         for (const [root, entries] of bindings) {
-          root.runtime.bind(rootTargetBindings(root.root, entries))
+          root.executor.bind(rootTargetBindings(root.root, entries))
         }
       }
 
@@ -120,11 +120,14 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
       const snapshotTarget = (element: HTMLElement) => {
         const target = lifecycleTargets.get(element)
         if (!target) return
-        const work = target.registration.capture('leave')
+        const work = target.registration.capture(
+          'leave',
+          target.entries.some((entry) => entry.session !== undefined),
+        )
 
         for (const entry of target.entries) {
           /* v8 ignore else -- @preserve: Vue tears down each target once; this guard only preserves an earlier snapshot if teardown hooks overlap. */
-          if (!entry.snapshots.has(target.registration))
+          if (work && !entry.snapshots.has(target.registration))
             entry.snapshots.set(target.registration, work)
           entry.targets.delete(target.registration)
           queueMicrotask(() => entry.snapshots.delete(target.registration))
@@ -145,13 +148,33 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
 
         try {
           const value = motionValue(binding)
-          const runtime = new LivaInstance(definition, value, report)
+          const executor = new PresentationExecutor(report)
+          let runtime: Runtime | undefined
+
+          try {
+            runtime = new Runtime(executor, definition, value === undefined ? {} : value, report)
+            executor.attach(runtime.environment)
+          } catch (error) {
+            try {
+              if (runtime) runtime.dispose()
+              else executor.dispose()
+            } catch (cleanupError) {
+              report({
+                code: 'vue.initialization-cleanup',
+                message: String(cleanupError),
+                error: cleanupError,
+              })
+            }
+
+            throw error
+          }
           runtime.onEvent = (name) =>
             element.dispatchEvent(new CustomEvent(`liva-${name}`, { bubbles: true }))
           const record = {
             root: element,
             component,
             runtime,
+            executor,
             definition,
           }
           runtime.onUpdate = () => options.observe?.('update', record)
@@ -249,24 +272,13 @@ export function createLivaPlugin(options: LivaOptions = {}): Plugin {
           key: value.owner,
           entries,
           registration: {
-            release(work: readonly LifecycleWork[]) {
-              explicitRoot(target)?.runtime.releaseLifecycle(
-                [...target.names],
-                element,
-                work
-                  .filter((item) => item.element === element && target.names.has(item.track.target))
-                  .map((item) => item.track.property),
-              )
-            },
-            retainLifecycle(phase: 'enter' | 'leave', session: LifecycleSession) {
-              explicitRoot(target)?.runtime.retainLifecycle(phase, session)
-            },
-            capture(phase: 'enter' | 'leave') {
+            capture(phase: 'enter' | 'leave', interrupted: boolean) {
               reconcileNow()
-              return (
-                explicitRoot(target)?.runtime.captureLifecycle(phase, [...target.names], element) ??
-                []
-              )
+
+              return explicitRoot(target)?.executor.capturePresence(phase, [...target.names], {
+                element,
+                interrupted,
+              })
             },
           },
         }

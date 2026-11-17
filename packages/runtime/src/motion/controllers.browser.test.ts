@@ -1,6 +1,7 @@
+import { capturePresence } from '../__test__/helpers/presence.ts'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { Definition, Expression } from '../model/definition.ts'
-import { LifecycleSession } from '../execution/lifecycle.ts'
+import { PresenceOperation } from '../execution/presence-operation.ts'
 import { LivaInstance, type RuntimeDiagnostic } from '../execution/instance.ts'
 import { decodeProperty } from './property-codec.ts'
 import { PropertyMotion, springMotion } from './property-motion.ts'
@@ -497,7 +498,7 @@ describe('relative property controllers', () => {
       instance.bind([['self', element]])
       instance.updateParameters({ input: 10 })
 
-      const session = new LifecycleSession(instance.captureLifecycle('leave', ['self']), 'leave')
+      const session = new PresenceOperation(capturePresence(instance, 'leave', ['self']), 'leave')
 
       try {
         session.initialize()
@@ -548,11 +549,9 @@ describe('relative property controllers', () => {
         instance.updateParameters({ ...inputs, phase: 1 })
       }
 
-      const work = instance.captureLifecycle('enter', ['self'])
+      const work = capturePresence(instance, 'enter', ['self'])
 
-      instance.releaseLifecycle(['self'], element)
-
-      const session = new LifecycleSession(work, 'enter')
+      const session = new PresenceOperation(work, 'enter')
       const events: string[] = []
 
       instance.onEvent = (event) => events.push(event)
@@ -641,7 +640,7 @@ describe('relative property controllers', () => {
     element.style.display = 'none'
     instance.updateParameters({ ...inputs, phase: 1, covered: false })
 
-    const session = new LifecycleSession(instance.captureLifecycle('enter', ['self']), 'enter')
+    const session = new PresenceOperation(capturePresence(instance, 'enter', ['self']), 'enter')
     const events: string[] = []
 
     instance.onEvent = (event) => events.push(event)
@@ -693,8 +692,8 @@ describe('relative property controllers', () => {
     ])
     instance.updateParameters({ ...inputs, input: 10 })
 
-    const session = new LifecycleSession(
-      instance.captureLifecycle('leave', ['self'], element),
+    const session = new PresenceOperation(
+      capturePresence(instance, 'leave', ['self'], { element: element }),
       'leave',
     )
 
@@ -762,14 +761,14 @@ describe('relative property controllers', () => {
         now = 1020
         instance.updateParameters({ ...inputs, input: 20 })
 
-        const work = instance.captureLifecycle('leave', ['self'])
+        const work = capturePresence(instance, 'leave', ['self'])
 
         now = numeric ? 1040 : 1080
         instance.updateParameters({ ...inputs, input: 20 })
         instance.dispose()
         now = start
 
-        const session = new LifecycleSession(work, 'leave')
+        const session = new PresenceOperation(work, 'leave')
 
         try {
           session.initialize()
@@ -1065,7 +1064,7 @@ describe('relative property controllers', () => {
       instance.updateParameters({ ...inputs, input: 20 })
 
       const before = inspect()
-      const session = new LifecycleSession(instance.captureLifecycle(phase, ['self']), phase)
+      const session = new PresenceOperation(capturePresence(instance, phase, ['self']), phase)
 
       expect(before).toBe('120px 20px 3px')
 
@@ -1096,7 +1095,7 @@ describe('relative property controllers', () => {
 
     instance.updateParameters({ ...inputs, input: 20 })
 
-    const session = new LifecycleSession(instance.captureLifecycle('leave', ['self']), 'leave')
+    const session = new PresenceOperation(capturePresence(instance, 'leave', ['self']), 'leave')
 
     try {
       session.play()
@@ -1149,7 +1148,7 @@ describe('relative property controllers', () => {
 
       instance.updateParameters({ ...inputs, input: 20 })
 
-      const session = new LifecycleSession(instance.captureLifecycle('leave', ['self']), 'leave')
+      const session = new PresenceOperation(capturePresence(instance, 'leave', ['self']), 'leave')
 
       try {
         session.play()

@@ -7,15 +7,14 @@ export type EditorBinding = Pick<InstanceBinding, 'component' | 'definition'> & 
   readonly runtime: Pick<
     InstanceBinding['runtime'],
     | 'definition'
-    | 'animations'
     | 'replaceDefinition'
     | 'previewLifecycle'
     | 'composition'
     | 'previewComposition'
-    | 'endCompositionPreview'
     | 'inspectComposition'
     | 'inspectLifecycle'
   >
+  readonly executor: Pick<InstanceBinding['executor'], 'animations' | 'endCompositionPreview'>
 }
 
 export interface Entry {
@@ -108,7 +107,7 @@ export class EditorController {
           this.previewActive = false
         }
       } else if (this.selected === entry) {
-        binding.runtime.endCompositionPreview()
+        binding.executor.endCompositionPreview()
         this.previewActive = false
         this.sequence++
         this.message = 'Application state superseded the preview. Your draft is retained.'
@@ -158,7 +157,7 @@ export class EditorController {
     if (!this.previewActive || !Number.isFinite(time)) return
 
     /* v8 ignore start -- @preserve: A successful preview retains its selected mounted entry; selection changes clear previewActive. */
-    for (const animation of this.selected?.binding.runtime.animations ??
+    for (const animation of this.selected?.binding.executor.animations ??
       []
     /* v8 ignore stop -- @preserve */
     ) {
@@ -218,7 +217,7 @@ export class EditorController {
   private restoreSelected() {
     this.previewActive = false
     const selected = this.selected
-    selected?.binding.runtime.endCompositionPreview()
+    selected?.binding.executor.endCompositionPreview()
   }
 
   async cancel() {

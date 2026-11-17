@@ -288,12 +288,10 @@ export interface ActiveEffectMetadata {
   readonly property: string
 }
 
-/** Receiver identities and lifecycle protection; no browser objects cross this boundary. */
+/** Receiver identities; no browser objects cross this boundary. */
 export interface ReceiverFacts {
   readonly id: number
   readonly target: string
-  /** Authored declarations protected by live lifecycle sessions on this receiver. */
-  readonly protected: readonly string[]
 }
 
 export interface ReceiverAddresses extends ReceiverFacts {
@@ -304,17 +302,8 @@ export interface ReceiverAddresses extends ReceiverFacts {
   readonly fallbacks: readonly string[]
 }
 
-/** Lifecycle resource identities and observed ownership; native sessions stay in the executor. */
-export interface LifecycleFacts {
-  readonly id: number
-  readonly phase: 'enter' | 'leave'
-  readonly finished: boolean
-  readonly protected: readonly { readonly receiver: number; readonly property: string }[]
-}
-
 export interface PresentationFacts {
   readonly mode: 'live' | 'preparing-preview' | 'preview'
-  readonly lifecycle: readonly LifecycleFacts[]
   readonly suspended: boolean
   readonly reduced: boolean
   readonly preserveLifecycle: boolean
@@ -406,8 +395,6 @@ export interface TrackCandidate {
   readonly source: ResolvedTrack
   readonly track: ResolvedTrack
   readonly declarations: DeclarationAddresses
-  /** Whether a live lifecycle session owns this canonical property. */
-  readonly protected: boolean
 }
 
 export interface TrackObservationRequest extends TrackCandidate {
@@ -431,8 +418,6 @@ export function planTrackObservations(
     if (!ownsCanonicalProperty(declarations, source.property, track.property)) continue
 
     changed.add(layerPropertyKey(track.target, track.property))
-
-    if (live && candidate.protected) continue
 
     const interrupted =
       live &&
@@ -460,18 +445,13 @@ export function presentationWrites(
   resolution: LayerResolution,
   receivers: readonly ReceiverFacts[],
   changed?: ReadonlySet<string>,
-  protectLifecycle = true,
 ): StyleWrite[] {
   return resolution.presentation.targets.flatMap((target) =>
     target.properties.flatMap((property) => {
       if (changed && !changed.has(layerPropertyKey(target.name, property.name))) return []
 
       return receivers
-        .filter(
-          (receiver) =>
-            receiver.target === target.name &&
-            (!protectLifecycle || !receiver.protected.includes(property.name)),
-        )
+        .filter((receiver) => receiver.target === target.name)
         .map((receiver) => ({
           receiver: receiver.id,
           property: property.name,
@@ -491,8 +471,6 @@ export interface PresentationPlan {
   readonly preserveLifecycle: boolean
   readonly writes: readonly StyleWrite[]
   readonly start: readonly TrackPlan[]
-  /** Release settled compatibility registrations; effect membership owns live completion. */
-  readonly lifecycle?: { readonly release: readonly number[] }
   /** Clear motion/reference history and frozen controller state before applying planned writes. */
   readonly resetMotion?: boolean
 }
@@ -536,7 +514,7 @@ export function planPreviewPresentation(
     cancel: [],
     restore: true,
     preserveLifecycle: false,
-    writes: presentationWrites(resolution, receivers, undefined, false),
+    writes: presentationWrites(resolution, receivers),
     start,
   }
 }
@@ -588,23 +566,6 @@ export function planReconciliation(
   }
 }
 
-/** Ownership after lifecycle cleanup, including aliases of the same physical receiver. */
-function remainingLifecycleReceivers(
-  facts: PresentationFacts,
-  sessions: readonly LifecycleFacts[],
-): ReceiverFacts[] {
-  return facts.receivers.map((receiver) => ({
-    ...receiver,
-    protected: receiver.protected.filter((property) =>
-      sessions.some((session) =>
-        session.protected.some(
-          (address) => address.receiver === receiver.id && address.property === property,
-        ),
-      ),
-    ),
-  }))
-}
-
 /**
  * Settles live playback when reduced motion becomes active. Manual previews remain
  * seekable; live ordinary and grouped effects settle through their current membership.
@@ -627,46 +588,9 @@ export function planMotionChange(
     cancel,
     restore: !preview,
     preserveLifecycle: preview,
-    writes:
-      preview || facts.suspended
-        ? []
-        : presentationWrites(resolution, facts.receivers, undefined, false),
+    writes: preview || facts.suspended ? [] : presentationWrites(resolution, facts.receivers),
     start: [],
     resetMotion: !preview,
-    lifecycle: {
-      release: facts.lifecycle.filter((session) => session.finished).map((session) => session.id),
-    },
-  }
-}
-
-/**
- * Releases all settled registrations together. A finished enter restores the current
- * application cascade only during live playback; other active sessions stay protected.
- * Cleanup during a manual preview leaves its presentation and native seeking untouched.
- */
-export function planLifecycleSettlement(
-  resolution: LayerResolution,
-  facts: PresentationFacts,
-): PresentationPlan | undefined {
-  const finished = facts.lifecycle.filter((session) => session.finished)
-
-  if (finished.length === 0) return undefined
-
-  const remaining = facts.lifecycle.filter((session) => !session.finished)
-  const restore = facts.mode === 'live' && finished.some((session) => session.phase === 'enter')
-
-  return {
-    resolution,
-    mode: restore ? 'live' : 'maintenance',
-    cancel: [],
-    restore,
-    preserveLifecycle: remaining.length > 0,
-    writes:
-      restore && !facts.suspended
-        ? presentationWrites(resolution, remainingLifecycleReceivers(facts, remaining))
-        : [],
-    start: [],
-    lifecycle: { release: finished.map((session) => session.id) },
   }
 }
 

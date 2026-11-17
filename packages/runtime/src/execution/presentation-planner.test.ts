@@ -11,7 +11,6 @@ import {
   planEffectCompletion,
   planPreviewPresentation,
   planMotionChange,
-  planLifecycleSettlement,
   type PresentationFacts,
   trackTiming,
   trackObservationNeeds,
@@ -382,7 +381,7 @@ describe('canonical declaration ownership', () => {
     const receiver = {
       id: 1,
       target: 'box',
-      protected: [],
+
       fallbacks: [],
       addresses: [
         { name: 'margin-inline', addresses: ['margin-right'] },
@@ -713,42 +712,28 @@ describe('final pure track planning', () => {
     expect(plan?.frames.map((frame) => frame.value)).toEqual(['1', '1'])
     expect(plan?.fill).toBe('backwards')
   })
-  it('requests interruption observations only for the receiving element with an active effect', () => {
-    const snapshot = receiverSnapshot()
-    const track = { ...snapshot.track, implicitStart: false }
-    const candidates = [1, 2].map((receiver) => ({
-      receiver,
-      source: track,
-      track,
-      declarations: snapshot.declarations,
-      protected: false,
-    }))
+  it.each([true, false])(
+    'requests receiving-element interruption observations during live=%s',
+    (live) => {
+      const snapshot = receiverSnapshot()
+      const track = { ...snapshot.track, implicitStart: false }
+      const candidates = [1, 2].map((receiver) => ({
+        receiver,
+        source: track,
+        track,
+        declarations: snapshot.declarations,
+      }))
 
-    const plan = planTrackObservations(candidates, executionFacts().active, true)
+      const plan = planTrackObservations(candidates, executionFacts().active, live)
 
-    expect(plan.requests.map((request) => request.needs.displayed)).toEqual([true, false])
-    expect(plan.requests.map((request) => request.interrupted)).toEqual([true, false])
-  })
-
-  it('omits lifecycle-protected live tracks while retaining their replacement addresses', () => {
-    const snapshot = receiverSnapshot()
-    const candidate = {
-      receiver: 1,
-      source: snapshot.source,
-      track: snapshot.track,
-      declarations: snapshot.declarations,
-      protected: true,
-    }
-
-    const live = planTrackObservations([candidate], [], true)
-    const preview = planTrackObservations([candidate], executionFacts().active, false)
-
-    expect(live.requests).toEqual([])
-    expect([...live.changed]).toEqual(['box\0opacity'])
-    expect(preview.requests).toHaveLength(1)
-    expect(preview.requests[0].interrupted).toBe(false)
-    expect(preview.requests[0].reference).toBe(false)
-  })
+      expect(plan.requests.map((request) => request.needs.displayed)).toEqual(
+        live ? [true, false] : [false, false],
+      )
+      expect(plan.requests.map((request) => request.interrupted)).toEqual([live, false])
+      expect(plan.requests.map((request) => request.reference)).toEqual([live, live])
+      expect([...plan.changed]).toEqual(['box\0opacity'])
+    },
+  )
 })
 
 function executionFacts(): PresentationFacts {
@@ -756,13 +741,12 @@ function executionFacts(): PresentationFacts {
 
   return {
     mode: 'live',
-    lifecycle: [],
     suspended: false,
     reduced: false,
     preserveLifecycle: true,
     receivers: [
-      { id: 1, target: 'box', protected: ['opacity'] },
-      { id: 2, target: 'box', protected: [] },
+      { id: 1, target: 'box' },
+      { id: 2, target: 'box' },
     ],
     active: [
       {
@@ -815,25 +799,14 @@ describe('complete presentation planning', () => {
       ...executionFacts(),
       reduced: true,
       receivers: [
-        { id: 1, target: 'box', protected: ['opacity'] },
-        { id: 2, target: 'box', protected: ['color'] },
-      ],
-      lifecycle: [
-        {
-          id: 1,
-          phase: 'enter',
-          finished: false,
-          protected: [{ receiver: 1, property: 'opacity' }],
-        },
-        { id: 2, phase: 'leave', finished: false, protected: [{ receiver: 2, property: 'color' }] },
-        { id: 3, phase: 'leave', finished: true, protected: [] },
+        { id: 1, target: 'box' },
+        { id: 2, target: 'box' },
       ],
     }
 
     const plan = planMotionChange(next, facts)
 
     expect(plan?.cancel).toEqual([9, 10])
-    expect(plan?.lifecycle).toEqual({ release: [3] })
     expect(plan?.restore).toBe(true)
     expect(plan?.preserveLifecycle).toBe(false)
     expect(plan?.resetMotion).toBe(true)
@@ -871,87 +844,22 @@ describe('complete presentation planning', () => {
     },
   )
 
-  it('releases all settled registrations and restores a finished enter around other live sessions', () => {
-    const next = resolution([
-      ['opacity', '1'],
-      ['color', 'red'],
-    ])
+  it('restores suspended playback without writing unavailable targets', () => {
+    const next = resolution([['opacity', '1']])
     const facts: PresentationFacts = {
       ...executionFacts(),
-      lifecycle: [
-        { id: 1, phase: 'enter', finished: true, protected: [] },
-        { id: 2, phase: 'enter', finished: true, protected: [] },
-        {
-          id: 3,
-          phase: 'leave',
-          finished: false,
-          protected: [{ receiver: 1, property: 'opacity' }],
-        },
-      ],
+      reduced: true,
+      suspended: true,
     }
 
-    const plan = planLifecycleSettlement(next, facts)
+    const plan = planMotionChange(next, facts)
 
-    expect(plan?.lifecycle).toEqual({ release: [1, 2] })
     expect(plan?.restore).toBe(true)
-    expect(plan?.preserveLifecycle).toBe(true)
-    expect(plan?.writes).toEqual([
-      { receiver: 2, property: 'opacity', value: '1' },
-      { receiver: 1, property: 'color', value: 'red' },
-      { receiver: 2, property: 'color', value: 'red' },
-    ])
+    expect(plan?.preserveLifecycle).toBe(false)
+    expect(plan?.writes).toEqual([])
   })
 
-  it.each([
-    { mode: 'preview' as const, phase: 'enter' as const },
-    { mode: 'preparing-preview' as const, phase: 'enter' as const },
-    { mode: 'live' as const, phase: 'leave' as const },
-  ])(
-    'releases a finished $phase during $mode without changing its presentation',
-    ({ mode, phase }) => {
-      const next = resolution([['opacity', '1']])
-      const facts: PresentationFacts = {
-        ...executionFacts(),
-        mode,
-        lifecycle: [{ id: 1, phase, finished: true, protected: [] }],
-      }
-
-      const plan = planLifecycleSettlement(next, facts)
-
-      expect(plan?.mode).toBe('maintenance')
-      expect(plan?.lifecycle).toEqual({ release: [1] })
-      expect(plan?.restore).toBe(false)
-      expect(plan?.writes).toEqual([])
-      expect(plan?.cancel).toEqual([])
-    },
-  )
-
-  it.each([planMotionChange, planLifecycleSettlement])(
-    'restores suspended playback without writing unavailable targets',
-    (planner) => {
-      const next = resolution([['opacity', '1']])
-      const facts: PresentationFacts = {
-        ...executionFacts(),
-        reduced: true,
-        suspended: true,
-        lifecycle: [{ id: 1, phase: 'enter', finished: true, protected: [] }],
-      }
-
-      const plan = planner(next, facts)
-
-      expect(plan?.restore).toBe(true)
-      expect(plan?.preserveLifecycle).toBe(false)
-      expect(plan?.writes).toEqual([])
-    },
-  )
-
-  it('ignores lifecycle notifications with no settled registration', () => {
-    const next = resolution([['opacity', '1']])
-
-    expect(planLifecycleSettlement(next, executionFacts())).toBeUndefined()
-  })
-
-  it('restores removed declarations and reapplies the cascade without writing lifecycle-owned properties', () => {
+  it('restores removed declarations and reapplies the ordered cascade', () => {
     const next = resolution([
       ['opacity', '1'],
       ['color', 'red'],
@@ -969,6 +877,7 @@ describe('complete presentation planning', () => {
     expect(plan.restore).toBe(true)
     expect(plan.preserveLifecycle).toBe(true)
     expect(plan.writes).toEqual([
+      { receiver: 1, property: 'opacity', value: '1' },
       { receiver: 2, property: 'opacity', value: '1' },
       { receiver: 1, property: 'color', value: 'red' },
       { receiver: 2, property: 'color', value: 'red' },
@@ -1010,7 +919,7 @@ describe('complete presentation planning', () => {
     expect(planEffectCompletion(next, facts, 11)).toBeUndefined()
   })
 
-  it('plans a preview baseline independently of live lifecycle protection', () => {
+  it('plans an isolated preview baseline for every current receiver', () => {
     const next = resolution([['opacity', '1']])
 
     const plan = planPreviewPresentation(next, executionFacts().receivers, [])

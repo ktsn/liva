@@ -1,49 +1,87 @@
+import { capturePresence } from '../__test__/helpers/presence.ts'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
-import { LifecycleSession, resolveLifecycle, type LifecycleWork } from './lifecycle.ts'
+import { PresenceOperation, createPresenceCapture } from './presence-operation.ts'
 import { evaluate } from '../evaluation/expression.ts'
 import { PropertyMotion } from '../motion/property-motion.ts'
 import { timingValue } from '../evaluation/timing-values.ts'
 import { LivaInstance } from './instance.ts'
-import type { Definition, Timing } from '../model/definition.ts'
+import { Runtime } from './runtime.ts'
+import { PresentationExecutor } from './presentation-executor.ts'
+import type { Definition, Timing, Frame } from '../model/definition.ts'
 
 const elements: HTMLElement[] = []
-const sessions: LifecycleSession[] = []
+const sessions: PresenceOperation[] = []
+const instances: LivaInstance[] = []
 
 function setup(
   phase: 'enter' | 'leave',
   timing: Timing = { kind: 'tween', durationMs: 30, easing: 'linear' },
+  options: {
+    property?: string
+    start?: string
+    end?: string
+    baseline?: string
+    style?: string
+    frames?: readonly Frame[]
+  } = {},
 ) {
   const element = document.createElement('div')
+  const property = options.property ?? 'opacity'
+  const baseline = options.baseline ?? (phase === 'enter' ? '1' : '0.7')
 
-  element.style.opacity = '0.7'
+  element.style.cssText = options.style ?? 'opacity:0.7'
   document.body.append(element)
   elements.push(element)
 
-  const work: LifecycleWork[] = [
-    {
-      element,
-      track: {
-        target: 'box',
-        property: 'opacity',
-        timing,
-        keyframes: [
-          { offset: 0, value: '0' },
-          { offset: 1, value: '1' },
+  const definition: Definition = {
+    name: 'captured-effects',
+    layers: [
+      {
+        name: 'base',
+        targets: [
+          {
+            name: 'box',
+            properties: [{ name: property, value: { kind: 'literal', value: baseline } }],
+          },
         ],
-        destinationValue: '1',
       },
+    ],
+    [phase]: {
+      timing,
+      targets: [
+        {
+          name: 'box',
+          properties: [
+            {
+              name: property,
+              keyframes: options.frames ?? [
+                { offset: 0, value: { kind: 'literal', value: options.start ?? '0' } },
+                { offset: 1, value: { kind: 'literal', value: options.end ?? '1' } },
+              ],
+            },
+          ],
+        },
+      ],
     },
-  ]
+  }
+  const instance = new LivaInstance(definition)
+
+  instances.push(instance)
+  instance.bind([['box', element]])
+
+  const captures = capturePresence(instance, phase, ['box'])
   const errors: unknown[] = []
-  const session = new LifecycleSession(work, phase, (error) => errors.push(error))
+  const session = new PresenceOperation(captures, phase, (error) => errors.push(error))
 
   sessions.push(session)
 
-  return { element, session, errors, work }
+  return { element, instance, session, errors }
 }
 
 afterEach(() => {
   for (const session of sessions.splice(0)) session.cancel('owner-teardown')
+
+  for (const instance of instances.splice(0)) instance.dispose()
 
   for (const element of elements.splice(0)) element.remove()
 })
@@ -57,10 +95,10 @@ describe('lifecycle effects', () => {
       const added = vi.spyOn(media, 'addEventListener')
       const removed = vi.spyOn(media, 'removeEventListener')
       const instance = new LivaInstance({ name: 'empty', layers: [] })
-      const session = new LifecycleSession(instance.captureLifecycle('leave', []), 'leave')
+      const session = new PresenceOperation(capturePresence(instance, 'leave', []), 'leave')
 
       sessions.push(session)
-      instance.retainLifecycle('leave', session)
+      session.initialize()
 
       try {
         if (ending === 'completed') session.play()
@@ -85,19 +123,25 @@ describe('lifecycle effects', () => {
     },
   )
 
-  it('releases disposed retain registrations when externally owned leave work completes', async () => {
+  it('releases a disposed empty participant when a sibling leave completes', async () => {
     const media = matchMedia('(prefers-reduced-motion: reduce)')
     const factory = vi.spyOn(window, 'matchMedia').mockReturnValue(media)
     const added = vi.spyOn(media, 'addEventListener')
     const removed = vi.spyOn(media, 'removeEventListener')
     const instance = new LivaInstance({ name: 'external', layers: [] })
-    const { element, session, errors } = setup('leave', {
-      kind: 'tween',
-      durationMs: 1000,
-      easing: 'linear',
-    })
+    const owner = setup('leave', { kind: 'tween', durationMs: 1000, easing: 'linear' })
+    const { element, errors } = owner
+    const session = new PresenceOperation(
+      [
+        ...capturePresence(instance, 'leave', []),
+        ...capturePresence(owner.instance, 'leave', ['box']),
+      ],
+      'leave',
+      (error) => errors.push(error),
+    )
 
-    instance.retainLifecycle('leave', session)
+    sessions.push(session)
+    session.initialize()
 
     try {
       session.play()
@@ -109,6 +153,8 @@ describe('lifecycle effects', () => {
       element.getAnimations()[0].finish()
 
       expect(await session.finished).toBe('completed')
+
+      owner.instance.dispose()
 
       for (const registration of added.mock.calls)
         expect(removed).toHaveBeenCalledWith(...registration)
@@ -135,39 +181,12 @@ describe('lifecycle effects', () => {
 
       expect(await session.finished).toBe('completed')
       expect(element.getAnimations()).toEqual([])
-      expect(session.owns(element, 'opacity')).toBe(false)
       expect(element.style.opacity).toBe(phase === 'enter' ? '1' : '0.7')
-    },
-  )
-
-  it.each([true, false])(
-    'honors standalone restoreOnCompletion=%s',
-    async (restoreOnCompletion) => {
-      const { element, work } = setup('enter', {
-        kind: 'tween',
-        durationMs: 0,
-        easing: 'linear',
-      })
-      const session = new LifecycleSession(
-        work.map((item) => ({ ...item, restoreOnCompletion })),
-        'enter',
-      )
-
-      sessions.push(session)
-
-      session.play()
-
-      expect(await session.finished).toBe('completed')
-      expect(element.style.opacity).toBe(restoreOnCompletion ? '0.7' : '1')
-      expect(element.getAnimations()).toEqual([])
     },
   )
 
   it.each(['enter', 'leave'] as const)('completes %s and releases effects', async (phase) => {
     const { element, session } = setup(phase)
-
-    expect(session.owns(element, 'opacity')).toBe(true)
-    expect(session.owns(element, 'scale')).toBe(false)
 
     session.initialize()
     session.initialize()
@@ -180,22 +199,25 @@ describe('lifecycle effects', () => {
     expect(await session.finished).toBe('completed')
     expect(element.style.opacity).toBe(phase === 'enter' ? '1' : '0.7')
     expect(element.getAnimations()).toEqual([])
-    expect(session.owns(element, 'opacity')).toBe(false)
 
     session.initialize()
     session.play()
   })
 
   it.each(['superseded', 'owner-teardown'] as const)('restores styles when %s', async (reason) => {
-    const { element, session } = setup('enter')
+    const { element, session, instance } = setup('enter')
 
     session.initialize()
     session.play()
     session.cancel(reason)
 
     expect(await session.finished).toBe(reason)
-    expect(element.style.opacity).toBe('0.7')
+    expect(element.style.opacity).toBe('1')
     expect(element.getAnimations()).toEqual([])
+
+    instance.dispose()
+
+    expect(element.style.opacity).toBe('0.7')
   })
 
   it('reports cancelled browser effects as failed', async () => {
@@ -224,7 +246,7 @@ describe('lifecycle effects', () => {
     invalid.session.play()
 
     expect(await invalid.session.finished).toBe('failed')
-    expect(invalid.element.style.opacity).toBe('0.7')
+    expect(invalid.element.style.opacity).toBe('1')
     expect(invalid.errors[0]).toBeInstanceOf(Error)
   })
 
@@ -305,8 +327,8 @@ describe('lifecycle effects', () => {
         return { instance, element }
       })
       const failures: unknown[] = []
-      const session = new LifecycleSession(
-        owners.flatMap(({ instance }) => instance.captureLifecycle('enter', ['box'])),
+      const session = new PresenceOperation(
+        owners.flatMap(({ instance }) => capturePresence(instance, 'enter', ['box'])),
         'enter',
         (error) => failures.push(error),
       )
@@ -367,6 +389,190 @@ describe('lifecycle effects', () => {
     },
   )
 
+  it('keeps multiple targets of one capture in the boundary until every effect completes', async () => {
+    const cases = [
+      { name: 'box', baseline: '1', start: '0' },
+      { name: 'badge', baseline: '0.8', start: '0.2' },
+    ]
+    const source: Definition = {
+      name: 'multiple-receivers',
+      layers: [
+        {
+          name: 'base',
+          targets: cases.map(({ name, baseline }) => ({
+            name,
+            properties: [{ name: 'opacity', value: { kind: 'literal', value: baseline } }],
+          })),
+        },
+      ],
+      enter: {
+        timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
+        targets: cases.map(({ name, start }) => ({
+          name,
+          properties: [
+            {
+              name: 'opacity',
+              keyframes: [{ offset: 0, value: { kind: 'literal', value: start } }],
+            },
+          ],
+        })),
+      },
+    }
+    const receivers = cases.map(() => document.createElement('div'))
+
+    for (const element of receivers) {
+      document.body.append(element)
+      elements.push(element)
+    }
+
+    const instance = new LivaInstance(source)
+    instances.push(instance)
+    instance.bind(cases.map(({ name }, index) => [name, receivers[index]] as const))
+    const operation = new PresenceOperation(
+      capturePresence(
+        instance,
+        'enter',
+        cases.map(({ name }) => name),
+      ),
+      'enter',
+    )
+    sessions.push(operation)
+
+    operation.play()
+
+    const effects = receivers.map((element) => element.getAnimations()[0])
+    effects[0].finish()
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(operation.isFinished).toBe(false)
+
+    effects[1].finish()
+
+    expect(await operation.finished).toBe('completed')
+    expect(receivers.map((element) => element.style.opacity)).toEqual(
+      cases.map(({ baseline }) => baseline),
+    )
+  })
+
+  it('stops initialization writes when ownership refresh tears down the operation', async () => {
+    const source: Definition = {
+      name: 'startup-cancellation',
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'box',
+              properties: [{ name: 'opacity', value: { kind: 'literal', value: '1' } }],
+            },
+          ],
+        },
+      ],
+      enter: {
+        timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
+        targets: [
+          {
+            name: 'box',
+            properties: [
+              {
+                name: 'opacity',
+                keyframes: [{ offset: 0, value: { kind: 'literal', value: '0' } }],
+              },
+            ],
+          },
+        ],
+      },
+    }
+    const element = document.createElement('div')
+    document.body.append(element)
+    elements.push(element)
+    const executor = new PresentationExecutor(() => {})
+    const runtime = new Runtime(executor, source, {}, () => {})
+    executor.attach(runtime.environment)
+    executor.bind([['box', element]])
+    const operation = new PresenceOperation([executor.capturePresence('enter', ['box'])], 'enter')
+    const refresh = vi
+      .spyOn(runtime.environment, 'refreshOwnership')
+      .mockImplementationOnce(() => operation.cancel('owner-teardown'))
+
+    try {
+      operation.initialize()
+      operation.play()
+
+      expect(await operation.finished).toBe('owner-teardown')
+      expect(element.style.opacity).toBe('1')
+      expect(element.getAnimations()).toEqual([])
+    } finally {
+      refresh.mockRestore()
+      runtime.dispose()
+    }
+  })
+
+  it('uses the captured definition final accepted baseline after replacement', async () => {
+    const source: Definition = {
+      name: 'retained-baseline',
+      parameters: [{ name: 'amount', type: 'number' }],
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'box',
+              properties: [
+                {
+                  name: 'opacity',
+                  value: { kind: 'template', parts: [{ kind: 'reference', path: ['amount'] }] },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      leave: {
+        timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
+        targets: [{ name: 'box', properties: [{ name: 'opacity' }] }],
+      },
+    }
+    const instance = new LivaInstance(source, { amount: 0.5 })
+    const element = document.createElement('div')
+    document.body.append(element)
+    elements.push(element)
+    instances.push(instance)
+    instance.bind([['box', element]])
+    const captures = capturePresence(instance, 'leave', ['box'])
+
+    instance.updateParameters({ amount: 0.8 })
+    instance.replaceDefinition({
+      ...source,
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'box',
+              properties: [{ name: 'opacity', value: { kind: 'literal', value: '0.2' } }],
+            },
+          ],
+        },
+      ],
+    })
+    const operation = new PresenceOperation(captures, 'leave')
+    sessions.push(operation)
+    operation.play()
+    const effect = element.getAnimations()[0].effect
+
+    if (!(effect instanceof KeyframeEffect)) throw new Error('Expected retained leave effect')
+
+    expect(effect.getKeyframes().at(-1)?.opacity).toBe('0.8')
+
+    operation.cancel('owner-teardown')
+
+    expect(await operation.finished).toBe('owner-teardown')
+    expect(element.style.opacity).toBe('0.2')
+  })
+
   it('reports restoration failures while releasing effects and the boundary result', async () => {
     const { element, session, errors } = setup('leave')
 
@@ -390,25 +596,21 @@ describe('lifecycle effects', () => {
   })
 
   it('stops participant startup if initialization cancels the operation', async () => {
-    const { work } = setup('enter')
     let played = false
-    const session = new LifecycleSession(
-      work.map((item) => ({
-        ...item,
-        playback: {
-          initializeLifecycle(owner) {
-            owner.cancel('owner-teardown')
-          },
-
-          playLifecycle() {
-            played = true
-          },
-
-          endLifecycle() {},
+    const capture = createPresenceCapture(
+      {
+        release() {},
+        initialize(owner) {
+          owner.cancel('owner-teardown')
         },
-      })),
+        play() {
+          played = true
+        },
+        end() {},
+      },
       'enter',
     )
+    const session = new PresenceOperation([capture], 'enter')
 
     sessions.push(session)
 
@@ -418,22 +620,11 @@ describe('lifecycle effects', () => {
     expect(played).toBe(false)
   })
 
-  it('keeps allowed authored standalone endpoints distinct from their completion value', async () => {
-    const { work, element } = setup('enter')
-    const errors: unknown[] = []
-    const session = new LifecycleSession(
-      work.map((item) => ({
-        ...item,
-        track: {
-          ...item.track,
-          keyframes: [
-            { offset: 0, value: '0' },
-            { offset: 1, value: '0.6' },
-          ],
-        },
-      })),
+  it('keeps authored endpoints distinct from the application completion value', async () => {
+    const { session, element, errors } = setup(
       'enter',
-      (error) => errors.push(error),
+      { kind: 'tween', durationMs: 30, easing: 'linear' },
+      { end: '0.6' },
     )
 
     sessions.push(session)
@@ -447,34 +638,24 @@ describe('lifecycle effects', () => {
     expect(errors).toEqual([])
   })
 
-  it('fails standalone relative playback if reference retarget observation fails', async () => {
-    const { work, element } = setup('leave', {
-      kind: 'spring-duration',
-      durationMs: 1000,
-      bounce: 0.1,
-    })
-
-    element.style.cssText = 'width:100px;translate:0px;'
-
-    const errors: unknown[] = []
-    const session = new LifecycleSession(
-      work.map((item) => ({
-        ...item,
-        track: {
-          ...item.track,
-          property: 'translate',
-          destinationValue: '100%',
-          keyframes: [
-            { offset: 0, value: '0px' },
-            { offset: 1, value: '100%' },
-          ],
-        },
-      })),
+  it('fails detached relative playback if reference retarget observation fails', async () => {
+    const { session, element, errors, instance } = setup(
       'leave',
-      (error) => errors.push(error),
+      {
+        kind: 'spring-duration',
+        durationMs: 1000,
+        bounce: 0.1,
+      },
+      {
+        property: 'translate',
+        start: '0px',
+        end: '100%',
+        baseline: '0px',
+        style: 'width:100px;translate:0px;',
+      },
     )
 
-    sessions.push(session)
+    instance.dispose()
     session.initialize()
     session.play()
 
@@ -494,14 +675,16 @@ describe('lifecycle effects', () => {
     }
   })
 
-  it('settles standalone leave on media changes without restarting on a non-reduced notification', async () => {
+  it('settles detached leave on media changes without restarting on a non-reduced notification', async () => {
     const media = matchMedia('(prefers-reduced-motion: reduce)')
     const query = vi.spyOn(window, 'matchMedia').mockReturnValue(media)
-    const { element, session } = setup('leave', {
+    const { element, session, instance } = setup('leave', {
       kind: 'tween',
       durationMs: 1000,
       easing: 'linear',
     })
+
+    instance.dispose()
 
     try {
       session.initialize()
@@ -542,25 +725,52 @@ describe('lifecycle effects', () => {
     expect(element.style.opacity).toBe('1')
   })
 
-  it('captures connected and detached presentation while skipping absent targets', () => {
-    const { element } = setup('leave')
-    const transition = {
-      timing: { kind: 'tween', durationMs: 20, easing: 'linear' } as const,
-      targets: [{ name: 'box', properties: [{ name: 'opacity' }] }],
-    }
-    const state = { name: 'on', targets: [] }
+  it('completes empty capture selection without touching receiver presentation', async () => {
+    const { element, instance } = setup('leave')
+    const absent = new PresenceOperation(capturePresence(instance, 'leave', ['absent']), 'leave')
 
-    expect(resolveLifecycle('leave', transition, state, new Map())).toEqual([])
-    expect(
-      resolveLifecycle('leave', transition, state, new Map([['box', element]]))[0].track
-        .keyframes[0].value,
-    ).toBe('0.7')
+    absent.play()
 
-    element.remove()
+    expect(await absent.finished).toBe('completed')
+    expect(instance.animations).toEqual([])
+    expect(element.style.opacity).toBe('0.7')
+  })
 
-    expect(
-      resolveLifecycle('leave', transition, state, new Map([['box', element]]))[0].track
-        .keyframes[0].value,
-    ).toBe('0.7')
+  it.each([
+    { mode: 'connected', connected: true, captured: '0.4' },
+    { mode: 'detached', connected: false, captured: '0.7' },
+  ])('captures $mode presentation before later CSS changes', async ({ connected, captured }) => {
+    const { element, instance } = setup(
+      'leave',
+      { kind: 'tween', durationMs: 100, easing: 'linear' },
+      {
+        frames: [{ offset: 1, value: { kind: 'literal', value: '0' } }],
+      },
+    )
+    const stylesheet = document.createElement('style')
+
+    stylesheet.textContent = '.capture-observation { opacity: 0.4 !important }'
+    document.head.append(stylesheet)
+    elements.push(stylesheet)
+    element.className = 'capture-observation'
+
+    if (!connected) element.remove()
+
+    const operation = new PresenceOperation(capturePresence(instance, 'leave', ['box']), 'leave')
+    sessions.push(operation)
+
+    // Connected CSS differs from inline CSS. Change both after capture to expose
+    // any accidental sampling during initialization instead of using the capture.
+    element.className = ''
+    element.style.opacity = '0.1'
+    operation.initialize()
+
+    expect(element.style.opacity).toBe(captured)
+    expect(instance.animations).toEqual([])
+
+    operation.cancel('owner-teardown')
+
+    expect(await operation.finished).toBe('owner-teardown')
+    expect(element.style.opacity).toBe('0.7')
   })
 })

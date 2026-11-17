@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vite-plus/test'
+import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import {
   createApp,
   defineComponent,
@@ -13,7 +13,10 @@ import constrainedFixture from '../../../fixtures/constrained.json'
 import fixture from '../../../fixtures/toggle.json'
 import reactiveFixture from '../../../fixtures/reactive-toggle.json'
 import { decodeBundle, type Definition, type RuntimeDiagnostic } from '@liva/runtime'
+import * as functions from '../../runtime/src/builtins/index.ts'
 import { createLivaPlugin, type InstanceBinding } from './runtime.ts'
+
+vi.mock('../../runtime/src/builtins/index.ts', { spy: true })
 
 const definition = decodeBundle(JSON.stringify(fixture)).definitions[0]
 const apps: App[] = []
@@ -27,11 +30,11 @@ afterEach(() => {
 
 async function mount(
   reactive = false,
-  initial?: string | Record<string, unknown>,
+  initial?: string | Record<string, unknown> | null,
   override?: Definition,
 ) {
-  const value = ref<string | Record<string, unknown> | undefined>(
-    reactive ? { checked: false } : (initial ?? { mode: 'off' }),
+  const value = ref<string | Record<string, unknown> | null | undefined>(
+    reactive ? { checked: false } : initial === undefined ? { mode: 'off' } : initial,
   )
   const name = ref(override?.name ?? 'toggle')
   const shown = ref(true)
@@ -113,9 +116,53 @@ describe('Vue motion directives', () => {
     await nextTick()
 
     expect(records.at(-1)?.event).toBe('unmount')
-    expect(runtime.animations).toEqual([])
+    expect(records[0].binding.executor.animations).toEqual([])
     expect(host.querySelector('[data-target]')).toBeNull()
   })
+
+  it.each([false, true])(
+    'cleans assembled runtime calls after attachment failure with cleanup failure=%s',
+    async (cleanupFails) => {
+      const failure = new Error('Media query setup failed')
+      const cleanupFailure = new Error('Call cleanup failed')
+      const dispose = vi.fn<() => void>(() => {
+        if (cleanupFails) throw cleanupFailure
+      })
+      const factory = vi.spyOn(functions, 'callBuiltin').mockReturnValue({
+        value: 1,
+        bind: () => () => {},
+        prepareUpdate: () => {
+          throw new Error('No updates in this scenario')
+        },
+        dispose,
+      })
+      const media = vi.spyOn(window, 'matchMedia').mockImplementationOnce(() => {
+        throw failure
+      })
+      const source: Definition = {
+        name: 'initialization',
+        layers: [],
+        letBindings: [
+          { name: 'value', initializer: { kind: 'call', function: 'source', arguments: [] } },
+        ],
+      }
+
+      try {
+        const { records, errors } = await mount(false, {}, source)
+        const expected = [
+          ...(cleanupFails ? [{ code: 'vue.initialization-cleanup', error: cleanupFailure }] : []),
+          { code: 'vue.initialization', error: failure },
+        ]
+
+        expect(records).toEqual([])
+        expect(dispose).toHaveBeenCalledTimes(1)
+        expect(errors.map(({ code, error }) => ({ code, error }))).toEqual(expected)
+      } finally {
+        media.mockRestore()
+        factory.mockRestore()
+      }
+    },
+  )
 
   it('drives compiler-declared string choices through Vue and preserves the last valid state', async () => {
     const source = decodeBundle(JSON.stringify(constrainedFixture)).definitions[0]
@@ -169,6 +216,21 @@ describe('Vue motion directives', () => {
     expect(errors.at(-1)?.code).toBe('runtime.parameter')
   })
 
+  it.each(['missing', null])(
+    'reports invalid initialization inputs without registering a runtime: %j',
+    async (inputs) => {
+      const { errors, records } = await mount(false, inputs)
+
+      expect(errors).toContainEqual(
+        expect.objectContaining({
+          code: 'vue.initialization',
+          error: expect.objectContaining({ message: 'Motion inputs must be a parameter object' }),
+        }),
+      )
+      expect(records).toEqual([])
+    },
+  )
+
   it('reports missing definitions, recovers on updates and reconciles removed target names', async () => {
     const { name, target, records, errors } = await mount()
 
@@ -191,13 +253,6 @@ describe('Vue motion directives', () => {
 
     expect(errors.at(-1)?.code).toBe('runtime.targets')
   })
-})
-
-it('rejects removed string-state bindings without registering a runtime', async () => {
-  const { errors, records } = await mount(false, 'missing')
-
-  expect(errors).toContainEqual(expect.objectContaining({ code: 'vue.initialization' }))
-  expect(records).toEqual([])
 })
 
 describe('built-in self target', () => {

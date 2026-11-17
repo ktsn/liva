@@ -1,7 +1,8 @@
+import { capturePresence } from '../__test__/helpers/presence.ts'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { LivaInstance, type RuntimeDiagnostic } from '../execution/instance.ts'
 import type { Definition, Timing } from '../model/definition.ts'
-import { LifecycleSession } from '../execution/lifecycle.ts'
+import { PresenceOperation } from '../execution/presence-operation.ts'
 import { PropertyMotion, springMotion } from './property-motion.ts'
 import { decodeProperty } from './property-codec.ts'
 
@@ -134,11 +135,10 @@ describe('displayed momentum integration', () => {
     ordinary.currentTime = 250
 
     const observations = vi.spyOn(PropertyMotion.prototype, 'observeSpring')
-    const leave = new LifecycleSession(instance.captureLifecycle('leave', ['self']), 'leave')
-    let enter: LifecycleSession | undefined
+    const leave = new PresenceOperation(capturePresence(instance, 'leave', ['self']), 'leave')
+    let enter: PresenceOperation | undefined
 
     try {
-      instance.releaseLifecycle(['self'], element)
       leave.initialize()
       leave.play()
 
@@ -148,28 +148,17 @@ describe('displayed momentum integration', () => {
       outgoing.currentTime = 250
 
       const observation = observations.mock.results[0].value
-      const displayed = getComputedStyle(element).translate
       const displayedValue = decodeProperty(element, 'translate')?.values[0]
       const expected = springMotion(timing, [25, 0, 0], [200, 0, 0], [0.1, 0, 0]).sample(250)
 
       expect(observation.start?.value[0]).toBeCloseTo(25, 5)
       expect(observation.start?.velocity[0]).toBeCloseTo(0.1, 5)
 
-      const work = instance.captureLifecycle('enter', ['self']).map((item) => ({
-        ...item,
-        track: {
-          ...item.track,
-          keyframes: item.track.keyframes.map((frame, index) =>
-            index === 0 ? { ...frame, value: displayed } : frame,
-          ),
-        },
-      }))
+      const work = capturePresence(instance, 'enter', ['self'], { interrupted: true })
 
-      instance.releaseLifecycle(['self'], element)
-      leave.cancel('superseded')
       observations.mockClear()
-      enter = new LifecycleSession(work, 'enter')
-      enter.initialize()
+      enter = new PresenceOperation(work, 'enter')
+      enter.initialize(leave)
       enter.play()
 
       const incoming = element.getAnimations()[0]
