@@ -34,6 +34,25 @@ type Box = {
   center: DOMPoint
 }
 
+/** Child links whose parent's scrolling displaces this target's layout box. */
+function effectiveScrollLinks(boxes: readonly Box[]): ReadonlySet<Box> {
+  const links = new Set<Box>()
+  let containing: Element | null = null
+
+  // Absolute descendants can skip intermediate DOM scrollers until their real
+  // containing block. Both local bounds and global projection use this same rule.
+  for (let index = boxes.length - 1; index > 0; index--) {
+    const child = boxes[index]
+    const parent = boxes[index - 1]
+
+    if (child.position === 'absolute') containing = child.offsetParent
+    if (containing === null || containing === parent.element) links.add(child)
+    if (containing === parent.element) containing = null
+  }
+
+  return links
+}
+
 function length(value: string, reference: number): number {
   if (value.endsWith('%')) return (parseFloat(value) * reference) / 100
   // CSSOM serializes supported computed lengths as pixels or percentages.
@@ -330,18 +349,11 @@ export class LayoutReadBatch {
     const referenceIndex = boxes.findIndex((entry) => entry.element === reference)
     let x = 0
     let y = 0
-    let escapedUntil: Element | null = null
+    const scrolling = effectiveScrollLinks(boxes)
 
     for (let index = boxes.length - 1; index > referenceIndex; index--) {
       const child = boxes[index]
       const parent = boxes[index - 1]
-
-      // An absolute box can use a containing block above its DOM parent. Ignore
-      // intermediate scrolling until that containing block is reached, then resume
-      // the usual scroll correction for its ancestors.
-      if (child.position === 'absolute') escapedUntil = child.offsetParent
-      const scrollAffectsTarget = escapedUntil === null || escapedUntil === parent.element
-      if (escapedUntil === parent.element) escapedUntil = null
 
       const offset = this.offset(child, parent)
       x += offset.x
@@ -349,7 +361,7 @@ export class LayoutReadBatch {
 
       // Scrolling displaced the viewport geometry but not the layout position.
       // Restore only the scroll offsets selected by the containing-block check above.
-      if (scrollAffectsTarget) {
+      if (scrolling.has(child)) {
         x += parent.scrollX
         y += parent.scrollY
       }
@@ -385,6 +397,7 @@ export class LayoutReadBatch {
     const boxes = this.chain(target)
     if (!boxes) return undefined
 
+    const scrolling = effectiveScrollLinks(boxes)
     const links = boxes.slice(1).map((child, offset) => {
       const index = offset + 1
       const parent = boxes[index - 1]
@@ -395,9 +408,9 @@ export class LayoutReadBatch {
       // adding it again would shift retained trajectories on an unrelated update.
       // Nested scrolling still displaces only the child and must be restored.
       const scroll =
-        parent.element === target.ownerDocument.scrollingElement
-          ? { x: 0, y: 0 }
-          : this.scroll(boxes, index)
+        parent.element !== target.ownerDocument.scrollingElement && scrolling.has(child)
+          ? { x: parent.scrollX, y: parent.scrollY }
+          : { x: 0, y: 0 }
 
       return {
         element: parent.element,
@@ -463,19 +476,6 @@ export class LayoutReadBatch {
     }
 
     return snapshot(new Set())
-  }
-
-  private scroll(boxes: readonly Box[], index: number): { x: number; y: number } {
-    let containing: Element | null = null
-
-    for (let child = boxes.length - 1; child >= index; child--) {
-      if (boxes[child].position === 'absolute') containing = boxes[child].offsetParent
-      if (containing === boxes[child - 1].element) containing = null
-    }
-
-    return containing === null
-      ? { x: boxes[index - 1].scrollX, y: boxes[index - 1].scrollY }
-      : { x: 0, y: 0 }
   }
 }
 
