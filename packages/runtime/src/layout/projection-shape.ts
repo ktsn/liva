@@ -28,6 +28,13 @@ export interface ProjectionShape {
   readonly origin: ProjectionPoint
   readonly xEdge: ProjectionPoint
   readonly yEdge: ProjectionPoint
+  /**
+   * A fixed-direction size trajectory crossed zero. Raw sampled vectors remain
+   * available for inspection, but this shape is not drawable. Preserve this marker
+   * when forwarding a sampled shape to projectionShapeTransform or retargeting.
+   * Ordinary reflected coordinate frames do not acquire this marker.
+   */
+  readonly invalidSize?: true
 }
 
 /** Displayed shape and corresponding six-component CSS-px/ms derivatives in the same plane. */
@@ -60,7 +67,7 @@ function finiteShape(value: ProjectionShape): boolean {
 }
 
 function usableShape(value: ProjectionShape): boolean {
-  if (!finiteShape(value)) return false
+  if (value.invalidSize || !finiteShape(value)) return false
 
   const { xEdge, yEdge } = value
 
@@ -131,6 +138,53 @@ function usableEdge(
   )
 }
 
+type FixedEdge = { readonly component: number; readonly sign: number }
+
+/**
+ * Tests only numerical collinearity; it never adjusts a coordinate. Normalize
+ * before evaluating the determinant to avoid overflow/underflow from units.
+ * For scalar-multiple edges assembled as frame*extent, two component products,
+ * four normalizations, two determinant products and subtraction contribute at
+ * most gamma(9) roundoff: gamma(n)=n*u/(1-n*u), u=Number.EPSILON/2. This is an
+ * operation-error bound, not a geometric epsilon or a replacement scale ratio.
+ */
+function collinear(value: readonly number[], reference: readonly number[], index: number): boolean {
+  const magnitude = Math.max(Math.abs(value[index]), Math.abs(value[index + 1]))
+
+  if (magnitude === 0) return true
+
+  // fixedEdge established that the reference edge is nonzero.
+  const basis = Math.max(Math.abs(reference[index]), Math.abs(reference[index + 1]))
+  const left = (value[index] / magnitude) * (reference[index + 1] / basis)
+  const right = (value[index + 1] / magnitude) * (reference[index] / basis)
+  const unitRoundoff = Number.EPSILON / 2
+  const roundoff = (9 * unitRoundoff) / (1 - 9 * unitRoundoff)
+
+  return Math.abs(left - right) <= roundoff * (Math.abs(left) + Math.abs(right))
+}
+
+/** A fixed directed basis gives an unambiguous signed size, even when reflected. */
+function fixedEdge(
+  initial: readonly number[],
+  end: readonly number[],
+  velocity: readonly number[],
+  index: number,
+): FixedEdge | undefined {
+  if (end[index] === 0 && end[index + 1] === 0) return undefined
+
+  const component = Math.abs(end[index]) >= Math.abs(end[index + 1]) ? index : index + 1
+  const sign = Math.sign(end[component])
+
+  if (
+    Math.sign(initial[component]) !== sign ||
+    !collinear(initial, end, index) ||
+    !collinear(velocity, end, index)
+  )
+    return undefined
+
+  return { component, sign }
+}
+
 /**
  * Plans physical origin/edge-vector motion without DOM reads or writes. x/y select
  * reference-plane origin components; width selects both xEdge components and height
@@ -140,8 +194,12 @@ function usableEdge(
  * supplied-browser-easing policy as box motion. Inputs are copied. Missing/invalid
  * shapes and required zero-to-nonzero/nonzero-to-zero edges settle explicitly;
  * unchanged zero edges can move. Timing, solver and sample errors propagate.
- * Caller owns cancellation, reduced motion, the common clock and intermediate
- * singular-shape settlement reported by projectionShapeTransform.
+ * For an edge whose endpoints and incoming velocity share one directed basis,
+ * zero/negative sampled extent is marked invalidSize and settles at rendering,
+ * matching box motion. Direction-changing affine edges keep their six-component
+ * trajectory; no independent spring of magnitudes or determinant-sign restriction
+ * is imposed. Static reflected frames remain supported. Caller owns cancellation,
+ * reduced motion, the common clock and intermediate singular-shape settlement.
  */
 export function projectionShapeMotion(
   start: ProjectionShapeState | undefined,
@@ -174,6 +232,7 @@ export function projectionShapeMotion(
   if (!usableEdge(initial, end, velocity, 0) || !usableEdge(initial, end, velocity, 2))
     return { kind: 'settle', reason: 'geometry' }
 
+  const fixed = [fixedEdge(initial, end, velocity, 0), fixedEdge(initial, end, velocity, 2)]
   const trajectory = projectionTrajectory(initial, end, velocity, timing, tween)
 
   if (!trajectory) return { kind: 'settle', reason: 'inactive' }
@@ -184,7 +243,15 @@ export function projectionShapeMotion(
     sample(elapsedMs) {
       const current = trajectory.sample(elapsedMs)
 
-      return { shape: shape(current.value), velocity: shape(current.velocity) }
+      const invalidSize = fixed.some(
+        (edge) => edge !== undefined && Math.sign(current.value[edge.component]) !== edge.sign,
+      )
+      const sampled = shape(current.value)
+
+      return {
+        shape: invalidSize ? { ...sampled, invalidSize: true } : sampled,
+        velocity: shape(current.velocity),
+      }
     },
   }
 }
@@ -200,7 +267,7 @@ export function projectionShapeMotion(
  * edge with zero dimension uses its natural frame column as an unobservable identity;
  * if parallel to the visible edge, a perpendicular canonical column avoids singular
  * output while preserving that line. Required undefined scaling, singular visible
- * shapes, negative/nonfinite dimensions/origin or unrepresentable output settle
+ * shapes, invalidSize samples, negative/nonfinite dimensions/origin or unrepresentable output settle
  * explicitly. The caller owns styles, explicit-transform suppression and cleanup.
  */
 export function projectionShapeTransform(
@@ -215,6 +282,7 @@ export function projectionShapeTransform(
   origin: Readonly<{ x: number; y: number }> = { x: 0, y: 0 },
 ): ProjectionTransformResult {
   if (
+    displayed.invalidSize ||
     !finiteShape(displayed) ||
     ![
       destination.x,
