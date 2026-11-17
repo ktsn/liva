@@ -68,11 +68,10 @@ async function expectSnap(page: Page, snap: number) {
 async function grab(page: Page) {
   const handle = page.getByRole('slider', { name: 'Sheet position' })
 
-  await handle.scrollIntoViewIfNeeded()
-
-  const box = (await handle.boundingBox())!
-
   await handle.evaluate((element) => {
+    element.removeAttribute('data-before-grab')
+    element.removeAttribute('data-after-grab')
+
     element.addEventListener(
       'pointerdown',
       (event) => {
@@ -84,6 +83,10 @@ async function grab(page: Page) {
         element.setAttribute('data-pointer-x', String(event.clientX))
         element.setAttribute('data-pointer-y', String(event.clientY))
         element.setAttribute('data-before-grab', getComputedStyle(sheet).insetBlockStart)
+        element.setAttribute(
+          'data-motion-active',
+          String(sheet.getAnimations().some((animation) => animation.playState === 'running')),
+        )
 
         queueMicrotask(() => {
           element.setAttribute('data-after-grab', getComputedStyle(sheet).insetBlockStart)
@@ -93,16 +96,29 @@ async function grab(page: Page) {
     )
   })
 
+  // The demo fits in this viewport. Reading its current box must not wait for
+  // stability: this helper also acquires a handle while its spring is running.
+  const box = (await handle.boundingBox())!
+
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
   await page.mouse.down()
 
-  return handle.evaluate((element) => ({
-    x: Number(element.getAttribute('data-pointer-x')),
-    y: Number(element.getAttribute('data-pointer-y')),
-    id: Number(element.getAttribute('data-pointer-id')),
-    before: parseFloat(element.getAttribute('data-before-grab')!),
-    after: parseFloat(element.getAttribute('data-after-grab')!),
-  }))
+  return handle.evaluate((element) => {
+    const before = element.getAttribute('data-before-grab')
+    const after = element.getAttribute('data-after-grab')
+
+    if (before === null || after === null)
+      throw new Error('Pointer did not acquire the moving handle')
+
+    return {
+      x: Number(element.getAttribute('data-pointer-x')),
+      y: Number(element.getAttribute('data-pointer-y')),
+      id: Number(element.getAttribute('data-pointer-id')),
+      before: parseFloat(before),
+      after: parseFloat(after),
+      animating: element.getAttribute('data-motion-active') === 'true',
+    }
+  })
 }
 
 async function dragTo(page: Page, sheetY: number, hold = true) {
@@ -157,7 +173,7 @@ test.describe('bottom sheet', () => {
     }
 
     await handle.press('End')
-    await expect(handle).toHaveAttribute('aria-valuenow', '2')
+    await expectSnap(page, 2)
     await dragTo(page, 750)
     await expectSnap(page, 0)
     await page.waitForTimeout(150)
@@ -323,11 +339,16 @@ test.describe('bottom sheet', () => {
     await page.getByRole('slider').press('Home')
     await expectSnap(page, 0)
     await page.getByRole('slider').press('End')
-    await page.waitForTimeout(70)
+
+    // Acquire after peak speed so the native mouse can reach this 56px target
+    // across protocol tasks; pointerdown must still observe a running spring.
+    await page.waitForTimeout(300)
 
     for (let attempt = 0; attempt < 2; attempt++) {
       const point = await grab(page)
       const before = (await geometry(page)).sheetY
+
+      expect(point.animating).toBe(true)
 
       // Both reads surround pointerdown within one task: spring progress cannot
       // account for a discontinuity. Only computed-style serialization may round.
@@ -339,7 +360,7 @@ test.describe('bottom sheet', () => {
 
       await page.waitForTimeout(150)
       await page.mouse.up()
-      await page.waitForTimeout(60)
+      await page.waitForTimeout(300)
     }
 
     await dragTo(page, 760)
@@ -355,8 +376,15 @@ test.describe('bottom sheet', () => {
       await handle.press('Home')
       await expectSnap(page, 0)
       await handle.press('End')
-      await page.waitForTimeout(70)
+
+      // Keep a running spring while avoiding a moving-target hit-test race
+      // between the native mouse move and down protocol messages.
+      await page.waitForTimeout(300)
+
       const point = await grab(page)
+
+      expect(point.animating).toBe(true)
+      expect(Math.abs(point.after - point.before)).toBeLessThan(0.01)
 
       await page.mouse.move(point.x, point.y + 250)
 
