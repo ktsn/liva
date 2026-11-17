@@ -217,6 +217,88 @@ describe('layout declaration cascade', () => {
     expect(composition).toEqual({ layers: { base: true }, states: {} })
   })
 
+  it.each([false, true])(
+    'evaluates declaration timing once for an explicit composition (directional: %s)',
+    (directional) => {
+      const source = definition({
+        ...layer('phase'),
+        initialState: 'off',
+        targets: [
+          {
+            name: 'self',
+            properties: [
+              { ...declaration(), timingExpression: { kind: 'reference', path: ['layoutTiming'] } },
+            ],
+          },
+        ],
+        states: [
+          { name: 'off', targets: [] },
+          { name: 'on', targets: [] },
+        ],
+        transitions: [
+          {
+            from: 'off',
+            to: 'on',
+            when: { kind: 'boolean', value: true },
+            transition: { timing: instant, targets: [] },
+          },
+        ],
+      })
+      const from = { layers: {}, states: { phase: 'off' } }
+      const to = { layers: {}, states: { phase: 'on' } }
+      let timingReads = 0
+      const values = {
+        get layoutTiming() {
+          timingReads++
+
+          return spring
+        },
+      }
+
+      const result = resolveComposition(
+        source,
+        values,
+        to,
+        from,
+        directional ? [{ layer: 'phase', index: 0 }] : [],
+      )
+
+      expect(timingReads).toBe(1)
+      expect(result.layout?.[0].timing).toEqual(directional ? instant : spring)
+      expect(result.composition).toEqual(to)
+    },
+  )
+
+  it('validates explicit transition identities before evaluating declarations', () => {
+    const source = definition({
+      ...layer('phase'),
+      initialState: 'off',
+      targets: [
+        {
+          name: 'self',
+          properties: [
+            { ...declaration(), timingExpression: { kind: 'reference', path: ['layoutTiming'] } },
+          ],
+        },
+      ],
+      states: [{ name: 'off', targets: [] }],
+    })
+    const composition = { layers: {}, states: { phase: 'off' } }
+    let timingReads = 0
+    const values = {
+      get layoutTiming() {
+        timingReads++
+
+        return spring
+      },
+    }
+
+    expect(() =>
+      resolveComposition(source, values, composition, composition, [{ layer: 'phase', index: 0 }]),
+    ).toThrow('Invalid composition transition')
+    expect(timingReads).toBe(0)
+  })
+
   it('applies directional timing for this transition and returns declaration timing for a later geometry transaction', () => {
     const source = definition({
       ...layer('phase', full, spring),

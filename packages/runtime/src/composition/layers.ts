@@ -1,4 +1,4 @@
-import { resolveLayoutConfigurations, resolveSelectedLayout } from './layout.ts'
+import { resolveSelectedLayout } from './layout.ts'
 import type { ResolvedLayoutConfiguration } from '../model/layout.ts'
 import type { RuntimeValue } from '../evaluation/reactive-value.ts'
 import {
@@ -120,26 +120,39 @@ export function resolveLayers(
   advance = true,
   event?: RuntimeValue,
 ): LayerResolution {
-  return resolveLayerSelection(definition, values, previous, advance, undefined, event)
+  return resolveLayerSelection(definition, values, { kind: 'live', previous, advance, event })
 }
+
+/** Explicit selections carry their validated transient timing into the same resolution pass. */
+type LayerSelectionMode =
+  | {
+      readonly kind: 'live'
+      readonly previous: ReadonlyMap<string, string>
+      readonly advance: boolean
+      readonly event?: RuntimeValue
+    }
+  | {
+      readonly kind: 'composition'
+      readonly composition: Composition
+      readonly transitions: ReadonlyMap<string, GuardedTransition>
+    }
 
 function resolveLayerSelection(
   definition: Definition,
   values: VariableValues,
-  previous: ReadonlyMap<string, string>,
-  advance: boolean,
-  selection?: Composition,
-  event?: RuntimeValue,
+  mode: LayerSelectionMode,
 ): LayerResolution {
   const activeLayers: Record<string, boolean> = Object.create(null)
   const states = new Map<string, string>()
-  const transitions = new Map<string, GuardedTransition>()
+  const transitions = new Map<string, GuardedTransition>(
+    mode.kind === 'composition' ? mode.transitions : undefined,
+  )
 
   function* selectLayers(): Generator<LayerSelection> {
-    if (selection) {
-      Object.assign(activeLayers, selection.layers)
+    if (mode.kind === 'composition') {
+      Object.assign(activeLayers, mode.composition.layers)
 
-      for (const selected of compositionLayerSelection(definition, selection)) {
+      for (const selected of compositionLayerSelection(definition, mode.composition)) {
         if (selected.state) states.set(selected.layer.name, selected.state.name)
 
         yield selected
@@ -161,13 +174,13 @@ function resolveLayerSelection(
         continue
       }
 
-      const current = previous.get(layer.name) ?? layer.initialState
-      const selected = advance
+      const current = mode.previous.get(layer.name) ?? layer.initialState
+      const selected = mode.advance
         ? layer.transitions?.findLast(
             (transition) =>
               transition.from === current &&
               (!transition.event ||
-                (event !== undefined && evaluate(transition.event, values) === event)) &&
+                (mode.event !== undefined && evaluate(transition.event, values) === mode.event)) &&
               evaluate(transition.when, values) === true,
           )
         : undefined
@@ -227,21 +240,13 @@ export function resolveComposition(
 
   if (from) validateComposition(definition, from)
 
-  const result = resolveLayerSelection(
-    definition,
-    values,
-    new Map(Object.entries(composition.states)),
-    false,
-    composition,
-  )
-
   const transitions = compositionTransitions(definition, composition, from, selected)
 
-  return {
-    ...result,
+  return resolveLayerSelection(definition, values, {
+    kind: 'composition',
+    composition,
     transitions,
-    layout: resolveLayoutConfigurations(definition, values, composition, transitions),
-  }
+  })
 }
 
 export function compositionTransitions(
