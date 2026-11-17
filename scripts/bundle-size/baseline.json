@@ -11,7 +11,7 @@
     "brotliQuality": 11,
     "external": ["vue"],
     "fixture": "29c173ebe321e3441462c34457b04c3348f4c136c42fc191228d1baf1c64bd94",
-    "harness": "18512dbaee9ab6bf97583d925a1aefbc5efeecea1d7be9c5e4b11e82f15e990b"
+    "harness": "3407a1cc4ff5bbbb95b31b0f097332b2f3d0b5c79a4b155a3fa8d8ac88452b05"
   },
   "context": null,
   "base": {

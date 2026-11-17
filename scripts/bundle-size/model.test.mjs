@@ -118,6 +118,30 @@ test('schema rejects unsafe numbers, metadata injection, unsupported settings an
   }
 })
 
+function stringFields(value, path = []) {
+  return Object.entries(value).flatMap(([name, item]) => {
+    const field = [...path, name]
+
+    if (typeof item === 'string') return [field]
+
+    return item && typeof item === 'object' ? stringFields(item, field) : []
+  })
+}
+
+test('all artifact string fields reject coercible arrays and other JSON types', () => {
+  for (const field of stringFields(example())) {
+    for (const invalid of [null, true, 123, {}, 'array']) {
+      const result = example()
+      const parent = field.slice(0, -1).reduce((value, key) => value[key], result)
+      const name = field.at(-1)
+
+      parent[name] = invalid === 'array' ? [parent[name]] : invalid
+
+      assert.throws(() => validateResult(result), `Accepted invalid type at ${field.join('.')}`)
+    }
+  }
+})
+
 test('comment includes signed byte/percentage deltas, definitions, SHAs, logs and collapsed metadata', () => {
   const result = example()
 

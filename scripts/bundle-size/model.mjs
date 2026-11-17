@@ -21,6 +21,7 @@ export const metrics = {
 const sha = /^[a-f0-9]{40}$/
 const hash = /^[a-f0-9]{64}$/
 const safe = /^[A-Za-z0-9@._+/-]{1,200}$/
+const matchesString = (value, pattern) => typeof value === 'string' && pattern.test(value)
 const integer = (value) => Number.isSafeInteger(value) && value > 0 && value <= 1_000_000_000
 
 function keys(value, names) {
@@ -41,7 +42,10 @@ export function validateResult(value) {
 
   for (const [name, expected] of Object.entries(settings))
     assert.deepEqual(value.specification[name], expected)
-  assert(hash.test(value.specification.fixture) && hash.test(value.specification.harness))
+  assert(
+    matchesString(value.specification.fixture, hash) &&
+      matchesString(value.specification.harness, hash),
+  )
 
   if (value.context !== null) {
     keys(value.context, [
@@ -73,7 +77,7 @@ export function validateResult(value) {
   for (const side of ['base', 'head']) {
     const result = value[side]
 
-    assert(sha.test(result?.sha))
+    assert(matchesString(result?.sha, sha))
 
     if ('error' in result) {
       keys(result, ['sha', 'error'])
@@ -87,7 +91,7 @@ export function validateResult(value) {
 
     for (const bytes of Object.values(result.bytes)) assert(integer(bytes))
 
-    assert(hash.test(result.bundle))
+    assert(matchesString(result.bundle, hash))
     keys(result.metadata, [
       'node',
       'rustc',
@@ -104,19 +108,19 @@ export function validateResult(value) {
       'wasm',
     ])
     assert.equal(result.metadata.node, settings.node)
-    assert(/^rustc [A-Za-z0-9 .()+-]{1,150}$/.test(result.metadata.rustc))
-    assert(
-      typeof result.metadata.wasmBindgen === 'string' && safe.test(result.metadata.wasmBindgen),
-    )
-    assert(
-      typeof result.metadata.packageManager === 'string' &&
-        safe.test(result.metadata.packageManager),
-    )
-
-    for (const name of ['zlib', 'brotli', 'vite', 'rolldown', 'oxc'])
-      assert(typeof result.metadata[name] === 'string' && safe.test(result.metadata[name]))
+    assert(matchesString(result.metadata.rustc, /^rustc [A-Za-z0-9 .()+-]{1,150}$/))
+    for (const name of [
+      'wasmBindgen',
+      'packageManager',
+      'zlib',
+      'brotli',
+      'vite',
+      'rolldown',
+      'oxc',
+    ])
+      assert(matchesString(result.metadata[name], safe))
     for (const name of ['lockfile', 'cargoLockfile', 'wasm'])
-      assert(hash.test(result.metadata[name]))
+      assert(matchesString(result.metadata[name], hash))
 
     const dependencies = result.metadata.dependencies
 
@@ -124,7 +128,7 @@ export function validateResult(value) {
     assert(Object.keys(dependencies).length > 0 && Object.keys(dependencies).length <= 100)
 
     for (const [name, version] of Object.entries(dependencies))
-      assert(safe.test(name) && typeof version === 'string' && safe.test(version))
+      assert(safe.test(name) && matchesString(version, safe))
   }
 
   assert.equal(value.status === 'failure', failures > 0)

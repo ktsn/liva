@@ -199,6 +199,32 @@ test('invalid artifact and wrong PR are rejected and reporting fails after trust
   }
 })
 
+test('coercible string arrays are rejected at the comment publication boundary', async () => {
+  for (const path of [
+    ['specification', 'fixture'],
+    ['specification', 'harness'],
+    ['base', 'sha'],
+    ['head', 'bundle'],
+    ['head', 'metadata', 'rustc'],
+    ['head', 'metadata', 'lockfile'],
+    ['head', 'metadata', 'cargoLockfile'],
+    ['head', 'metadata', 'wasm'],
+  ]) {
+    const artifact = example()
+    const parent = path.slice(0, -1).reduce((value, key) => value[key], artifact)
+    const name = path.at(-1)
+
+    parent[name] = [parent[name]]
+
+    const { api, event, calls } = github({ artifact })
+
+    await assert.rejects(report(api, event, 'ktsn/liva'), /artifact rejected/)
+    assert.equal(writes(calls).length, 1)
+    assert.match(writes(calls)[0].body.body, /Measurement failed/)
+    assert.doesNotMatch(writes(calls)[0].body.body, /Minified JS/)
+  }
+})
+
 test('older runs, old attempts, changed heads and retargets cannot overwrite current comments', async () => {
   for (const options of [
     { newer: true },
