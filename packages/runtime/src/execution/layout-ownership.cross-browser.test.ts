@@ -760,6 +760,171 @@ describe('Executor temporary layout ownership', () => {
     },
   )
 
+  it.each([
+    'layout cancel',
+    'inline restore',
+    'ordinary restore',
+    'notification',
+    'combined',
+  ] as const)('finishes independent final Runtime cleanup after a %s failure', (failure) => {
+    const media = matchMedia('(prefers-reduced-motion: reduce)')
+    const factory = vi.spyOn(window, 'matchMedia').mockReturnValue(media)
+    const removed = vi.spyOn(media, 'removeEventListener')
+    const cancelledFrame = vi.spyOn(window, 'cancelAnimationFrame')
+    const definition = layoutDefinition()
+    const source: PropertyIRDefinition = {
+      ...definition,
+      layers: definition.layers.map((layer) => ({
+        ...layer,
+        targets: layer.targets.map((target) => ({
+          ...target,
+          properties: [
+            ...target.properties,
+            {
+              name: 'left',
+              value: { kind: 'literal', value: layer.name === 'base' ? '0%' : '50%' },
+              timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
+            },
+          ],
+        })),
+      })),
+    }
+    const { assembly, targets } = setup(source, { active: false })
+    const root = targets.get('self')!
+    root.style.cssText += 'inline-size:100px;block-size:80px;position:relative;'
+    const independent = new Animation(
+      new KeyframeEffect(root, [{ color: 'red' }, { color: 'blue' }], 1000),
+      document.timeline,
+    )
+    independent.pause()
+    independent.currentTime = 333
+    assembly.runtime.updateParameters({ active: true })
+    const ordinary = [...nativeEffects(assembly.executor)]
+    const frame: unknown = Reflect.get(assembly.executor, 'referenceFrame')
+    assembly.executor.layoutTransform(root, 'scale(.5)')
+    const output = root
+      .getAnimations()
+      .find(
+        (animation) =>
+          animation.effect instanceof KeyframeEffect &&
+          animation.effect.getKeyframes().some((keyframe) => 'transform' in keyframe),
+      )
+    if (!output) throw new Error('Expected native layout output')
+    const cause = new Error('Final layout cleanup failed')
+    const notificationCause = new Error('Final ownership notification failed')
+    const cancel = vi.spyOn(output, 'cancel')
+    const restore = vi.spyOn(root.style, 'cssText', 'set')
+    const notification = vi.fn<() => void>(() => {
+      expect(assembly.executor.layoutCandidates()).toEqual([])
+      if (failure === 'notification' || failure === 'combined') throw notificationCause
+    })
+    assembly.executor.onLayoutChange = notification
+
+    if (failure === 'layout cancel' || failure === 'combined')
+      cancel.mockImplementationOnce(() => {
+        throw cause
+      })
+    if (failure === 'inline restore')
+      restore.mockImplementationOnce(() => {
+        throw cause
+      })
+    if (failure === 'ordinary restore') {
+      const set = Object.getOwnPropertyDescriptor(
+        CSSStyleDeclaration.prototype,
+        'cssText',
+      )?.set?.bind(root.style)
+      if (!set) throw new Error('Expected native CSSOM setter')
+      restore
+        .mockImplementationOnce((value: string) => {
+          set(value)
+        })
+        .mockImplementationOnce(() => {
+          throw cause
+        })
+    }
+
+    try {
+      expect(ordinary.length).toBeGreaterThan(0)
+      expect(root.getBoundingClientRect().width).toBeCloseTo(50, 4)
+      expect(typeof frame).toBe('number')
+
+      let caught: unknown
+      try {
+        assembly.runtime.dispose()
+      } catch (error) {
+        caught = error
+      }
+
+      const primary = failure === 'notification' ? notificationCause : cause
+      const failures: unknown[] = caught instanceof AggregateError ? caught.errors : [caught]
+      expect(failures).toHaveLength(failure === 'combined' ? 2 : 1)
+      expect(failures[0]).toBe(primary)
+      expect(failures.at(-1)).toBe(failure === 'combined' ? notificationCause : primary)
+      expect(caught instanceof AggregateError ? caught.cause : caught).toBe(primary)
+      expect(assembly.runtime.isDisposed).toBe(true)
+      expect(notification).toHaveBeenCalledOnce()
+      expect(ordinary.every((animation) => animation.playState === 'idle')).toBe(true)
+      expect(assembly.executor.presentationFacts().receivers).toEqual([])
+      expect(Reflect.get(assembly.executor, 'environment')).toBeUndefined()
+      expect(cancelledFrame).toHaveBeenCalledWith(frame)
+      expect(removed).toHaveBeenCalledWith('change', expect.any(Function))
+      expect(independent.playState).toBe('paused')
+      expect(independent.currentTime).toBe(333)
+
+      assembly.executor.bind([...targets])
+      expect(assembly.executor.presentationFacts().receivers).toEqual([])
+      assembly.executor.layoutCleanup()
+      assembly.executor.onLayoutChange = undefined
+      assembly.executor.dispose()
+      expect(output.playState).toBe('idle')
+      expect(root.style.transform).toBe('')
+      expect(root.getAnimations()).toEqual([independent])
+    } finally {
+      assembly.executor.onLayoutChange = undefined
+      cancel.mockRestore()
+      restore.mockRestore()
+      assembly.executor.layoutCleanup()
+      independent.cancel()
+      removed.mockRestore()
+      cancelledFrame.mockRestore()
+      factory.mockRestore()
+    }
+  })
+
+  it('retains a failed ordinary final cancellation without leaving live execution callbacks', () => {
+    const source = layoutDefinition()
+    const timed: PropertyIRDefinition = {
+      ...source,
+      layers: source.layers.map((layer) => ({
+        ...layer,
+        timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
+      })),
+    }
+    const { assembly } = setup(timed, { active: false })
+    assembly.runtime.updateParameters({ active: true })
+    const effect = nativeEffects(assembly.executor)[0]
+    if (!effect) throw new Error('Expected ordinary animated ownership')
+    const cause = new Error('Ordinary native cancel failed once')
+    const cancel = vi.spyOn(effect, 'cancel').mockImplementationOnce(() => {
+      throw cause
+    })
+
+    try {
+      expect(() => assembly.runtime.dispose()).toThrow(cause)
+      expect(nativeEffects(assembly.executor)).toEqual([])
+      expect(assembly.executor.presentationFacts().receivers).toEqual([])
+      expect(Reflect.get(assembly.executor, 'environment')).toBeUndefined()
+
+      assembly.executor.dispose()
+
+      expect(effect.playState).toBe('idle')
+      expect(cancel).toHaveBeenCalledTimes(2)
+    } finally {
+      cancel.mockRestore()
+      assembly.executor.dispose()
+    }
+  })
+
   it('preserves startup and cancellation causes while retaining failed native cleanup', () => {
     const { assembly, targets } = setup(layoutDefinition(), { active: false })
     const root = targets.get('self')!

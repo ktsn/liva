@@ -610,8 +610,9 @@ export class PresentationExecutor {
       this.receivers.delete(id)
 
       // Preview restoration still owns its saved inline baseline until preview
-      // teardown. Live terminal failures have no later owner to retry that work.
-      if (this.presentationMode === 'live') {
+      // teardown. Final disposal also retains failed restoration for an explicit
+      // Executor retry; other live terminal failures have no later owner.
+      if (this.presentationMode === 'live' && !this.disposed) {
         this.owned = this.owned.filter((entry) => entry.element !== receiver.element)
         this.dirtyProperties.delete(receiver.element)
       }
@@ -638,6 +639,8 @@ export class PresentationExecutor {
 
   private readonly targetReceivers = new Map<string, TargetReceivers>()
   private active: ActiveTrack[] = []
+  /** Failed final cancellations stay owned without remaining live execution entries. */
+  private readonly disposalAnimations = new Set<Animation>()
   private readonly propertyMotion = new PropertyMotion()
   private readonly dirtyProperties = new Map<HTMLElement, Set<string>>()
   private referenceFrame?: number
@@ -1843,7 +1846,7 @@ export class PresentationExecutor {
   }
 
   private restore(preserveLifecycle = false, elements?: ReadonlySet<HTMLElement>) {
-    const projections = [...this.layoutTransforms]
+    const projections = (this.disposed ? [] : [...this.layoutTransforms])
       .filter(([element]) => !elements || elements.has(element))
       .map(([element, transform]) => ({
         element,
@@ -2175,39 +2178,70 @@ export class PresentationExecutor {
   }
 
   dispose() {
-    this.releaseLayout()
+    // Runtime disposal is terminal even if a browser cleanup fails. Invalidate
+    // callbacks first; detached leave retains its accepted data and normal lifetime.
     this.disposed = true
-    this.onLayoutChange?.()
-    this.releaseControllers()
-    this.cancelEnterSessions('owner-teardown')
-    this.disconnectBindings()
 
-    const leave = this.active.filter(
-      (entry) => entry.session && this.operations.get(entry.session)?.phase === 'leave',
-    )
+    releaseResources([
+      () => this.releaseLayout(),
+      () => this.onLayoutChange?.(),
+      () => this.releaseControllers(),
+      () => this.cancelEnterSessions('owner-teardown'),
+      () => this.disconnectBindings(),
+      () => {
+        const leave = this.active.filter(
+          (entry) => entry.session && this.operations.get(entry.session)?.phase === 'leave',
+        )
+        const ending = this.active.filter((entry) => !leave.includes(entry))
 
-    for (const entry of this.active) {
-      if (!leave.includes(entry)) {
-        this.retainMotion(entry)
-        entry.animation.cancel()
-      }
-    }
+        // Native cancellation may notify synchronously. Retire live entries before
+        // attempting it, while retaining failed handles for a later Executor retry.
+        this.active = leave
+        const pending = [...this.disposalAnimations]
+        for (const entry of ending) this.disposalAnimations.add(entry.animation)
 
-    this.active = leave
-    this.presentationMode = 'live'
-    this.restore(this.operations.size > 0)
-    this.controllers.clear()
-    this.dirtyProperties.clear()
-    this.targetReceivers.clear()
-    this.pruneReceivers()
-    // Detached execution keeps accepted values and pure completion data, never Runtime callbacks.
-    this.environment = undefined
+        const cancel = (animation: Animation) => () => {
+          animation.cancel()
+          this.disposalAnimations.delete(animation)
+        }
 
-    if (this.operations.size === 0) {
-      this.clearReferenceFrame()
-      if (this.attached) this.motion.removeEventListener('change', this.motionChanged)
-
-      this.receivers.clear()
-    }
+        releaseResources([
+          ...ending.flatMap((entry) => [() => this.retainMotion(entry), cancel(entry.animation)]),
+          ...pending.map(cancel),
+        ])
+      },
+      () => {
+        this.presentationMode = 'live'
+        // Final restoration must not replay a projection whose release failed.
+        // Each inline owner is independent, so one CSSOM failure cannot skip the
+        // remaining receivers. Failed entries stay retained for an Executor retry.
+        releaseResources(
+          this.owned.map(
+            ({ element }) =>
+              () =>
+                this.restore(this.operations.size > 0, new Set([element])),
+          ),
+        )
+      },
+      () => {
+        this.controllers.clear()
+        this.dirtyProperties.clear()
+        this.targetReceivers.clear()
+        this.pruneReceivers()
+        // Detached execution retains accepted data, never Runtime callbacks.
+        this.environment = undefined
+      },
+      () => {
+        if (this.operations.size === 0) {
+          releaseResources([
+            () => this.clearReferenceFrame(),
+            () => {
+              if (this.attached) this.motion.removeEventListener('change', this.motionChanged)
+            },
+            () => this.receivers.clear(),
+          ])
+        }
+      },
+    ])
   }
 }
