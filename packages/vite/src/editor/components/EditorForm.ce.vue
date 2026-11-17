@@ -485,9 +485,9 @@ onScopeDispose(() => {
     :transition="selectedTransition"
     :phase="phase"
     @change="changeComposition"
+    @phase="choosePhase"
     @swap="swapCompositions"
     @transition="chooseTransition"
-    @phase="choosePhase"
   />
   <p v-if="timelineResult.error" role="alert">{{ String(timelineResult.error) }}</p>
   <div class="toolbar">
@@ -549,12 +549,12 @@ onScopeDispose(() => {
         '--playhead': `${(time / extent) * 100}%`,
         '--grid-step': `${(tickInterval / extent) * 100}%`,
       }"
+      @lostpointercapture="endPan"
+      @pointercancel="endPan"
       @pointerdown="beginPan"
+      @pointerleave="endPan"
       @pointermove="movePan"
       @pointerup="endPan"
-      @pointercancel="endPan"
-      @pointerleave="endPan"
-      @lostpointercapture="endPan"
       @scroll="horizontalScroll = ($event.target as HTMLElement).scrollLeft"
     >
       <div
@@ -627,8 +627,8 @@ onScopeDispose(() => {
       :provenance="selectionProvenance!"
       :offset="selected?.offset"
       :pending="selected?.pending"
-      @edit="editComposition"
       @add="add(selection!, time / selection!.duration)"
+      @edit="editComposition"
       @error="report"
     />
     <aside v-else class="empty">Select a property or keyframe to edit its settings.</aside>

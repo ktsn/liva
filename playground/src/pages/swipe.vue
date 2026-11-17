@@ -55,7 +55,7 @@ function removeItem(id: number) {
 
         <div v-liva-target:body class="swipe-face">
           {{ item.title }}
-          <button @pointerdown.stop @click="removeItem(item.id)">Dismiss</button>
+          <button @click="removeItem(item.id)" @pointerdown.stop>Dismiss</button>
         </div>
       </li>
     </ul>
