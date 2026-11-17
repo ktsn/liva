@@ -1,8 +1,7 @@
 # Language specification
 
-A motion declares layers, lifecycle animations, let bindings, and host parameters. Rust
-compiles lossless CST into serializable Definition IR; the browser interpolates
-CSS through WAAPI.
+A motion declares layers, lifecycle animations, let bindings, and host parameters.
+CSS interpolation follows the browser's Web Animations behavior.
 
 ## Motion declarations and types
 
@@ -67,9 +66,8 @@ member must be a quoted string: mixed unions such as `string | "x"` and missing
 members are errors. A singleton parameter keeps its literal type; a multi-member
 parameter keeps its declared finite set through aliases and derived bindings.
 
-Type references
-are declaration-time metadata, separate from runtime expression nodes. Annotations
-are never function arguments or runtime values. User-defined functions and other parameter type forms are outside scope.
+Type annotations are declaration-time metadata, not function arguments or runtime
+values. User-defined functions and other parameter type forms are outside scope.
 
 Parameters, let bindings, and targets share one variable namespace throughout their
 motion, regardless of declaration order. Each target declared in a layer or local state
@@ -82,8 +80,8 @@ parameter declarations, unresolved references, and primitive member access are e
 
 Motion parameters receive host application values. The object in
 `v-liva:toggle="{ checked }"` supplies the named parameter of
-`motion toggle(checked: boolean)`. Each instance retains its own values, separate
-from the immutable Definition IR. Updates reevaluate conditions and CSS templates.
+`motion toggle(checked: boolean)`. Each instance retains its own values.
+Updates reevaluate conditions and CSS templates.
 Every declared parameter is required; the object is a full parameter snapshot.
 Missing parameters are errors, including on updates; no implicit defaults are used.
 Explicit `0`, `false`, and `""` are valid when permitted by the declared type. Unknown names, wrong types, and
@@ -92,13 +90,6 @@ valid parameters, derived values, and presentation together; invalid initial inp
 reject instance creation. Constrained string inputs must belong to their declared
 candidate set on creation, every update, and definition replacement. A valid value
 remains an ordinary JavaScript string.
-
-Serialized parameter metadata keeps the primitive descriptors (`"number"`,
-`"boolean"`, `"string"`). Literal and union annotations use
-`{ "kind": "stringUnion", "values": ["end", "start"] }` as the parameter's `type`;
-a singleton has one member. Compiler output sorts and deduplicates decoded members.
-Definition decoding requires a nonempty string array and preserves the set's exact
-values. Older runtimes reject this descriptor rather than treating it as broad string.
 
 A `let` declaration binds the value of an expression:
 
@@ -116,9 +107,9 @@ expressions before conditions and CSS templates. Evaluation errors retain the la
 valid values and rendered state, and report a runtime diagnostic.
 
 Calls use `functionName(argumentName: expression, ...)`, with named arguments and
-an optional trailing comma. The parser represents calls independently of function
-names. The compiler resolves names against its built-in function signatures and
-checks required arguments, duplicate/unknown arguments, and argument types.
+an optional trailing comma. Calls must match a built-in function signature;
+missing required arguments, duplicate or unknown arguments, and incompatible
+argument types are compile errors.
 
 The built-in `drag` function accepts one required `target` argument of target type.
 In `drag(target: body)`, `body` is an ordinary variable reference resolved in the
@@ -128,15 +119,10 @@ other expressions. A string-valued variable does not satisfy a target parameter.
 The return value has
 `active: boolean`, `released: boolean`, and `offset: { x: number, y: number }`. These fields belong to
 the built-in return type; object-valued motion parameters are outside scope.
-Function implementations return either an ordinary value or a reactive subscription.
-The runtime classifies each result by its value, not by the function's name.
-Ordinary results are reused while argument values are unchanged and recomputed when
-arguments change. A subscription exposes a current value and a binding operation;
-its current value is read on updates without calling the function again. Changed
-arguments invoke the function again and replace any active subscription. Each
-instance creates target values and receives host parameters before evaluating
-`let` initializers. These values belong to the instance, while the Definition IR
-contains variable references.
+Ordinary function results are reused while argument values are unchanged and
+recomputed when arguments change. Reactive built-ins expose current values that
+update independently of their arguments. Each instance has its own target values
+and host parameters before evaluating `let` initializers.
 
 Drag values expose `active`, `offset.x`, and `offset.y`. Offsets are pixel
 displacements from the current pointer-down, reset on each new gesture and retained
@@ -201,7 +187,7 @@ continue. Timing and value ownership follow the layer cascade described below.
 
 ## Property controller option types
 
-The compiler registers these `link` signatures:
+The `link` function has these signatures:
 
 - `link(input: number, sensitivity: number = 1)` returns a scalar controller.
 - `link(input: number, component: "x" | "y", sensitivity: number = 1)` returns an
@@ -226,15 +212,8 @@ motion mapped(axis: "x" | "y", input: number) {
 
 A controller must attach to one target/property address with `:=`; repeating the
 same address is allowed. Permitted components do not relax input-shape or attachment
-checks. These signatures describe the compiler contract; runtime attachment
-integration is tracked separately in [PR #131](https://github.com/ktsn/liva/pull/131).
-The runtime retains argument and fixed-component validation, including
-rollback when an update attempts to change a call's component.
-
-The component constraint tightens the previous broad-string contract. Replace a
-host `axis: string` parameter with the choices the application supplies, such as
-`axis: "x" | "y"`. Either value can initialize the call, but changing the selected
-axis during that call remains unsupported and causes a runtime error.
+checks. Either component can initialize the call, but changing the selected axis
+during that call causes a runtime error and retains the last committed state.
 
 ## Expressions and CSS templates
 
@@ -344,10 +323,6 @@ Self-block timing remains local to the properties declared inside that block whi
 participating in the normal cross-layer, state, transition, and lifecycle timing
 cascade. Root shorthand continues to work without any explicit block.
 
-Editor highlighting identifies `self` as a theme-controlled built-in target, both
-in block names and expression references such as `drag(target: self)`. Named
-targets retain their ordinary target highlight.
-
 The delimiter determines the meaning without consulting CSS property names:
 `property: value` is a value, `property ~> { ... }` is a track, and `target { ... }`
 is a target block. Future CSS properties and custom properties use the same forms.
@@ -355,6 +330,29 @@ For example, `opacity { opacity: 1 }` names a target called `opacity`, while
 `--progress ~> { 0%: 0; 100%: 1 }` animates a custom property on `self`.
 Structural timing decorators precede blocks and tracks; ordinary property timing
 and individual frame easing follow their values.
+
+### Target binding and CSS behavior
+
+Targets bind within their declaring Vue component to the nearest Motion root;
+ownership does not cross nested Motion roots. Ordinary targets bind one element,
+while lifecycle targets can bind multiple keyed elements. Missing or duplicate
+required targets suspend the affected instance with diagnostics; read-only
+measurement targets may be absent. Removing a target cancels its animations.
+Rebinding settles the current composition without replaying old animations.
+
+Liva passes CSS properties and values to the browser without an allowlist or
+support checks. Unsupported CSS may produce no visible change without a diagnostic.
+Overlapping shorthands/longhands and transform combinations follow browser behavior.
+Animated properties require exclusive ownership: competing Vue style bindings,
+CSS transitions, and external animations on those properties are unsupported.
+When Liva releases a property, it restores the original inline value where it still
+owns that property, preserving external edits.
+
+Actual Web Animations construction or playback exceptions report a diagnostic for
+the affected track; subsequent input updates can still be processed.
+
+When `prefers-reduced-motion: reduce` is active, animations settle immediately;
+direct control and application state remain responsive.
 
 ## Immediate timing
 
@@ -397,8 +395,8 @@ scale ~> {
 }
 ```
 
-Offsets are unique finite percentages in `[0, 100]`; IR sorts keyframes while
-preserving layer and state declaration order. A top-level `@expression` supplies
+Offsets are unique finite percentages in `[0, 100]`; keyframes run in offset order.
+A top-level `@expression` supplies
 typed interval easing; quoted or grouped `@` characters remain CSS text. Style tracks
 require an explicit 100% destination. Transition endpoints may be omitted and use
 the displayed start and resolved destination. Tween easing is the default per
@@ -455,11 +453,11 @@ retargeting rules without requiring input notifications.
 While Motion remains connected, applicable lifecycle expressions follow accepted
 input updates. Leave keeps precedence only for its own declarations, so unrelated
 properties continue following ordinary layers. On Motion disposal, subscriptions
-are released and ongoing or captured leave work retains the final accepted input
-environment. Necessary DOM-relative observations continue until its effects end.
+are released. Ongoing or captured leave work retains its source definition's final
+accepted inputs and ordinary presentation across disposal or definition replacement.
+Necessary DOM-relative observations continue until its effects end.
 Vue waits for the currently applicable effects, including replacements, before
-removing or hiding the boundary. Reduced motion settles live playback immediately;
-editor previews remain frozen and manually seekable.
+removing or hiding the boundary. Reduced motion settles live playback immediately.
 
 A conditional event is independent of state selection and animation completion:
 
@@ -475,18 +473,11 @@ named `liva-dismiss` from the Motion root; no payload expression is supported.
 Use ordinary DOM listeners such as `@liva-dismiss="removeItem(item.id)"`.
 Application state changes immediately; it never waits for the leave animation.
 
-The [swipe playground](../playground/src/pages/swipe.vue) combines drag,
-events, velocity-aware release projection, a return spring, and leave animation.
-Each draggable list item has its own Motion instance. Projection selects the snap
-destination; the return spring inherits the mapped-input release velocity.
-
 ## Vue presence support
 
-The SFC compiler plans lifecycle boundaries and generates internal Vue
-`Transition` or `TransitionGroup` integration. Users only author `v-liva`,
-`v-liva-target`, ordinary Vue structural directives, and Liva declarations.
-Generated components add no DOM wrapper. Existing element keys, props, listeners,
-and scoped CSS remain intact.
+Use `v-liva`, `v-liva-target`, ordinary Vue structural directives, and Liva
+declarations to animate element presence. Presence integration adds no DOM wrapper;
+existing element keys, props, listeners, and scoped CSS remain intact.
 
 Supported operations on native elements are direct or ancestor `v-if`, complete
 `v-if`/`v-else-if`/`v-else` chains, keyed `v-for`, and direct or ancestor
@@ -525,26 +516,23 @@ They remain opaque CSS values; unit-bearing arithmetic in Liva expressions
 is unsupported. URLs must be quoted, including arguments to `url()`, for example
 `url("https://example.com/image.png")` or `url("image.png")`.
 
-String spelling is preserved by the lexer. Expression strings decode `\n`, `\r`,
-`\t`, `\\`, `\'`, and `\"`; unsupported escapes are diagnosed. CSS strings retain
-all escapes verbatim for the browser. Interpolation parsing recovers at an unquoted
-newline if `}` is missing, so subsequent declarations remain available to tooling.
+Expression strings decode `\n`, `\r`, `\t`, `\\`, `\'`, and `\"`; unsupported
+escapes are diagnosed. CSS strings retain all escapes verbatim for the browser.
+If an interpolation's closing `}` is missing, recovery stops at an unquoted newline
+so subsequent declarations can still be diagnosed.
 
-The Rowan CST preserves every byte, trivia and UTF-8 ranges, including malformed
-input. Diagnostics prevent execution of invalid definitions while development
-retains the last valid definition. Production fails on any compilation error.
+Diagnostics prevent execution of invalid definitions. During development, invalid
+source updates retain the last valid definition. Production compilation fails on
+any error. Block nesting is limited to 64 levels.
 
-## Limitations and unresolved semantics
+## Limitations
 
 Standalone file imports, framework adapters other than Vue, SSR animation,
 component-root directive forwarding, Teleport targets and Shadow DOM target
 traversal are unsupported.
 
 Explicit authored velocity arguments, free-running inertia, state-change persistence events, scroll/orientation sources,
-user functions, custom CSS interpolation, and a standalone preview environment are
-unsupported. The editor edits resolved layer values, typed timing, existing transition
-frames, and motion-level lifecycles. Let bindings, guards, and new state-machine
-structure are authored in source.
+user functions, and custom CSS interpolation are unsupported.
 
 ## Toggle example
 
@@ -578,8 +566,8 @@ motion toggle(checked: boolean) {
 ## Reactive layer declarations
 
 An unconditional layer is always active; conditional layers are independently active
-when their Boolean expressions are true. Declaration order is preserved in Definition
-IR for property-level cascade resolution. Layers do not imply additive composition.
+when their Boolean expressions are true. Declaration order determines property-level
+cascade precedence. Layers do not imply additive composition.
 
 ```liva
 motion button(hovered: boolean, pressed: boolean) {
@@ -590,8 +578,8 @@ motion button(hovered: boolean, pressed: boolean) {
 ```
 
 Layer names are unique within a motion. CSS values retain CSS syntax and units;
-`${expression}` interpolates scalar values. The compiler preserves the layer declarations; the runtime resolves their active
-values and timing on each input update.
+`${expression}` interpolates scalar values. Active values and timing are resolved
+on each input update.
 
 ### Stateful layers
 
@@ -623,9 +611,7 @@ layer submission {
 Direct target declarations are common styles. The selected state's declarations
 replace common values per CSS property. Other layers have independent current states.
 Stateful layers are always active and cannot have a `when` condition; nested states
-use guarded transitions instead of `state ... when` selection. The compiler keeps
-common declarations and state declarations separate in IR, with an `initialState`
-name. Runtime transition evaluation is handled independently of these declarations.
+use guarded transitions instead of `state ... when` selection.
 
 ### Layer cascade and guarded updates
 
@@ -653,11 +639,6 @@ eligible, the current state persists. Only one transition occurs per layer per u
 so cycles cannot drain synchronously. A subsequent parameter or reactive-source
 notification schedules another evaluation; no internal loop or application-data
 mutation is performed. Multiple stateful layers can advance on the same update.
-
-Motion instances take parameter objects. Exclusive states are local to stateful
-layers; the runtime exposes their current selections through `composition.states`.
-Timing selection, transition animation ownership, and lifecycle precedence are separate
-steps of the layer animation pipeline.
 
 ## Timing and easing values
 
@@ -688,6 +669,10 @@ carry no implicit CSS units. The available signatures are:
   required and finite; x coordinates must be in `[0, 1]`. Y coordinates may overshoot.
 - Easing constants: `linear`, `ease`, `easeIn`, `easeOut`, `easeInOut`, `stepStart`, `stepEnd`.
 
+Physics springs follow `mass * x'' + damping * x' + stiffness * (x - destination) = 0`.
+Duration springs use damping ratio `1 - 0.9 * bounce`; increasing bounce reduces
+damping, while duration controls the settling target.
+
 A timing value is replaced as a whole. Different calls never merge their parameters.
 Timing and easing values cannot be interpolated into CSS or used as Boolean guards.
 Types are checked by the compiler; argument value errors from evaluated expressions
@@ -699,8 +684,7 @@ whose declared candidate set is a subset of the six choices. Unsupported strings
 non-string values, and broad `string` parameters are compile errors. Runtime calls
 and untrusted definitions still validate positions and numeric count constraints.
 
-This tightens the previous broad-string contract. Migrate a host parameter from
-`position: string` to the choices the application actually supplies, for example:
+Declare a host parameter using the choices the application supplies, for example:
 
 ```liva
 motion stepped(position: "start" | "end", count: number) {
@@ -749,17 +733,12 @@ An easing decorator on 100% has no outgoing interval and produces a warning.
 Omitted transition/lifecycle endpoints are completed at runtime, so an easing on
 an earlier last explicit frame still controls the interval to the implicit 100%.
 Timing and easing expressions use the ordinary expression grammar and type checks.
-Source edits emit structural prefixes on their own lines and keep value decorators as suffixes;
-there is no standalone formatter, and unrelated source formatting is preserved.
 
 The target timing is a default; a property's decorator replaces that whole value.
 Structural timing decorators precede the entire declaration. CSS values remain CSS, with `${...}`
 for scalar interpolation. Style tracks require an explicit 100% destination;
 transition tracks can omit endpoints for completion from their source/destination.
 Only the selected transition or lifecycle evaluates its timing and frame expressions.
-
-The lossless CST retains invalid input for diagnostics and decorators separately
-from CSS value text.
 
 ### Layer animation selection
 
@@ -794,7 +773,6 @@ layer interaction {
 }
 ```
 
-Timing remains scoped in the IR so source tools can distinguish defaults and overrides.
 The layer contributing the final CSS value owns its animation. Only that owner's
 selected transition may supply temporary timing or keyframes; obscured transition
 tracks do not animate or produce endpoint warnings.
@@ -804,8 +782,10 @@ as its final keyframe. Properties without an override use the ordinary cascaded 
 A missing start frame uses the displayed presentation, and a missing 100% frame uses
 the final cascaded CSS value. An explicit differing 100% frame reports a
 `runtime.endpoint` diagnostic; completion still restores the resolved CSS value.
-Interrupted properties retarget from their current displayed value. Unchanged property
-animations continue. Properties with no timing apply immediately.
+Interrupted properties retarget from their current displayed value. Authored
+intermediate frames remain and restart their full timeline. Explicit tracks can
+animate even when their endpoints are equal. Unchanged property animations continue.
+Properties with no timing apply immediately.
 
 Spring timing on layer tracks applies the sampled spring curve to the complete track,
 including intermediate waypoints. Initial state guards resolve before target binding;
@@ -861,11 +841,9 @@ Initial binding reads geometry synchronously before Motion settles its initial
 presentation, without an initial animation. Later supported invalidations coalesce
 into an animation-frame pass. All reads finish before snapshots publish; dependent
 writes schedule further reads on a later frame. Unchanged snapshots do not notify.
-The shared scheduler observes document-subtree structure, text, attributes, target
-and reference sizes, window resizing, and captured load/font completion events.
-Liva-managed layout animations also invalidate each frame while running. Registrations
-have independent cleanup; the document scheduler releases observers/listeners when
-its final registration leaves.
+Updates follow document structure, text, attributes, target and reference sizes,
+window resizing, and load/font completion events. Liva-managed layout animations
+also update measurements each frame while running.
 
 External CSSOM edits, arbitrary script timing, and third-party CSS/Web Animations
 are not continuously synchronized. A third-party write after the read phase may
@@ -874,10 +852,7 @@ reads do not solve feedback cycles: measuring self.width and writing width+10 is
 unsupported and can oscillate across frames.
 
 Measure naturally sized inner content for expansion; do not measure the constrained
-animated shell or remove application styles to discover intrinsic sizes. The measured
-layout playground demonstrates unequal responsive tabs and inner-content expansion.
-Editor playback preserves source expressions and uses its current live snapshot;
-scenario-specific preview capture remains deferred.
+animated shell or remove application styles to discover intrinsic sizes.
 
 ## Motion-local feedback timers
 
@@ -888,8 +863,7 @@ pending work and resets the result. Unchanged arguments never restart the timer.
 Changing duration restarts an active timer from that update, including after expiry.
 A success-to-error status change whose condition remains true does not restart it.
 Zero duration is scheduled asynchronously. Unbinding, replacement, disposal, and
-HMR cancel obsolete work. Inactive editor inspection/scrubbing reads the current
-snapshot without starting or advancing timers.
+HMR cancel obsolete work.
 
 ```liva
 let expired = timeout(when: status == "success" || status == "error", duration: 1500)
@@ -897,7 +871,7 @@ let expired = timeout(when: status == "success" || status == "error", duration: 
 
 Use the result in ordinary guarded transitions to return local feedback to idle.
 Vue continues to own asynchronous requests, their outcomes, and duplicate submission
-prevention. The async-submit playground demonstrates both success and failure.
+prevention.
 
 ## Property controllers and release events
 
@@ -934,7 +908,8 @@ or 1 degree before sensitivity. Translate preserves captured Z and unmapped axes
 Generic inputs have no pointer provenance: transform viewport input explicitly when
 local coordinates are needed. The runtime rejects component values other than `"x"`
 or `"y"` and rejects a change of component during a controller's lifetime, preserving
-the last committed state. These value constraints are not checked by the compiler.
+the last committed state. The compiler checks the permitted component set;
+component stability during a call's lifetime is checked at runtime.
 Unbound controllers, multiple addresses, and input feedback cycles are compile errors.
 The compiler checks that `:=` receives a controller, but does not check compatibility
 between its value shape and the receiving CSS property. Pair adapters with the supported
@@ -982,10 +957,7 @@ selected, control release transfers that velocity to property motion history bef
 the selected spring is prepared. Distinct occurrences are queued in order, never recursively
 evaluated or coalesced. Mount, reconnection, target replacement, HMR, and disposal
 never replay historical events. The 200ms projection and 48px threshold above are
-application policy. The swipe demo uses projected position for both snapping and
-immediate application deletion beyond 120px, and Vue input for outside closure.
-Every row owns independent open/closed state; removal runs the leave animation
-without a separate dismissed state.
+application policy.
 
 ## Automatic spring momentum
 
@@ -1009,17 +981,13 @@ Authored units and expressions remain unchanged.
 
 Controller release supplies recent mapped-input velocity; ordinary direct updates use
 recent displayed samples. Both use an 80ms freshness window. Stationary holds expire
-movement; same-time updates never divide by zero. Native effects supply sampled derivatives;
-sampled springs retain analytic component velocity, including momentum beyond
+movement; same-time updates never divide by zero. Spring velocity persists beyond
 rendered opacity bounds. Opacity rendering clamps to [0,1], without resetting the
 internal spring. A nonzero incoming velocity animates even with equal endpoints,
 and may initially move away before reversing. Replaced effects cannot write later.
 
 Both physics and duration springs preserve initial velocity. Duration is a settling
-target: the solver adjusts natural frequency while retaining the requested bounce
-ratio, then pins the final sample to the destination. It is not an exact trajectory
-or mathematical rest-time guarantee. Physics sampling retains the existing 10-second
-and 8192-sample limits. Mount, target replacement, and disposal reset motion history.
-Ordinary editor playback starts at rest; attachments show a frozen live snapshot and
-remain source-owned expressions. Captured gesture scenario playback is deferred to
-#116; scrubbing neither drives input nor emits release occurrences.
+target that preserves the requested bounce ratio and finishes at the destination;
+it is not an exact trajectory or mathematical rest-time guarantee. Physics springs
+must settle within 10 seconds, and sampling is limited to 8192 samples. Exceeding a
+limit reports an error. Mount, target replacement, and disposal reset motion history.
