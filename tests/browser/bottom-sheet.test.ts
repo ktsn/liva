@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { setGestureTime } from './gesture-time.ts'
 
 const base = 'http://127.0.0.1:4180'
 const names = ['Closed', 'Half', 'Expanded']
@@ -306,12 +307,17 @@ test.describe('bottom sheet', () => {
       [-1, 2],
       [1, 0],
     ] as const) {
+      // Keep the 16ms input interval independent of parallel browser load.
+      await setGestureTime(page, 1000)
+
       const point = await grab(page)
 
+      await setGestureTime(page, 1010)
       await page.mouse.move(point.x, point.y + direction * 80)
-      await page.waitForTimeout(16)
+      await setGestureTime(page, 1026)
       await page.mouse.move(point.x, point.y + direction * 180)
       await page.mouse.up()
+
       await expectSnap(page, snap)
     }
   })
@@ -525,6 +531,19 @@ test.describe('bottom sheet', () => {
     await page.getByText('Make a little room for discovery.').dblclick()
 
     expect(await page.evaluate(() => getSelection()?.toString().length)).toBeGreaterThan(0)
+  })
+
+  test('keeps the handle focused for keyboard control after a pointer drag', async ({ page }) => {
+    await openSheet(page)
+
+    await dragTo(page, 180)
+    await expectSnap(page, 2)
+
+    await expect(page.getByRole('slider')).toBeFocused()
+
+    await page.keyboard.press('ArrowDown')
+
+    await expectSnap(page, 1)
   })
 
   test('supports touch header dragging and native touch content scrolling', async ({

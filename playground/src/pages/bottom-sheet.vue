@@ -35,6 +35,18 @@ onMounted(() => {
 
 onScopeDispose(() => observer?.disconnect())
 
+function preventHandleSelection(event: MouseEvent) {
+  if (event.button !== 0) return
+
+  const handle = event.currentTarget as HTMLElement
+
+  // WebKit can start selection outside a moving handle, bypassing its
+  // selectstart listener. Cancel the initiating mouse action instead, and
+  // preserve the focus it would normally give this keyboard-operable slider.
+  event.preventDefault()
+  handle.focus({ preventScroll: true })
+}
+
 async function controlSheet(event: KeyboardEvent) {
   const element = frame.value!
   const style = getComputedStyle(element)
@@ -101,7 +113,7 @@ async function controlSheet(event: KeyboardEvent) {
           :aria-valuenow="snap"
           :aria-valuetext="snapNames[snap]"
           @keydown="controlSheet"
-          @selectstart.prevent
+          @mousedown="preventHandleSelection"
         >
           <span aria-hidden="true" class="sheet-grip"></span>
           <span aria-hidden="true" class="sheet-handle-label">Explore nearby <span>{{

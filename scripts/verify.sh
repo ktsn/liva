@@ -7,6 +7,6 @@ cargo test --workspace --locked
 sh scripts/build-wasm.sh
 node scripts/test-wasm.ts
 pnpm check
-vp test --run
+pnpm test
 pnpm exec playwright test
 node scripts/test-production.ts
