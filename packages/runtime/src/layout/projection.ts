@@ -1,6 +1,8 @@
 import type { Timing } from '../model/definition.ts'
 import type { LayoutAxes } from '../model/layout.ts'
-import { springMotion, type MotionSample } from '../motion/property-motion.ts'
+import { projectionTrajectory, type ProjectionTweenSampler } from './projection-trajectory.ts'
+
+export type { ProjectionTweenSampler } from './projection-trajectory.ts'
 
 /**
  * Fractional physical CSS-pixel border box. x/y are the transformed border origin
@@ -88,7 +90,6 @@ export function inverseProjection(matrix: ProjectionMatrix): ProjectionMatrix | 
 }
 
 const axes = ['x', 'y', 'width', 'height'] as const
-const zeroBox: ProjectionBox = Object.freeze({ x: 0, y: 0, width: 0, height: 0 })
 
 function vector(bounds: ProjectionBox): number[] {
   return axes.map((axis) => bounds[axis])
@@ -132,9 +133,6 @@ export type ProjectionMotionResult =
       /** Elapsed performance-clock milliseconds; completion returns exact destination/rest. */
       sample(elapsedMs: number): ProjectionState
     }
-
-/** Browser-supplied eased tween progress and derivative in progress/ms at elapsed milliseconds. */
-export type ProjectionTweenSampler = (elapsedMs: number) => { value: number; velocity: number }
 
 /**
  * Plans retained four-component motion without DOM reads or writes. Active axes
@@ -180,50 +178,15 @@ export function projectionMotion(
   )
     return { kind: 'settle', reason: 'geometry' }
 
-  if (initial.every((value, index) => value === end[index] && velocity[index] === 0))
-    return { kind: 'settle', reason: 'inactive' }
+  const trajectory = projectionTrajectory(initial, end, velocity, timing, tween)
 
-  let durationMs: number
-  let sample: (milliseconds: number) => MotionSample
-
-  if (timing.kind === 'tween') {
-    durationMs = timing.durationMs
-
-    if (!Number.isFinite(durationMs) || durationMs < 0)
-      throw new Error('Invalid projection tween duration')
-    if (durationMs === 0) return { kind: 'settle', reason: 'inactive' }
-    if (!tween && timing.easing !== 'linear')
-      throw new Error('Projection tween requires a browser easing sampler')
-
-    const progress =
-      tween ?? ((elapsed: number) => ({ value: elapsed / durationMs, velocity: 1 / durationMs }))
-
-    sample = (milliseconds) => {
-      const current = progress(milliseconds)
-
-      if (![current.value, current.velocity].every(Number.isFinite))
-        throw new Error('Projection tween sample must be finite')
-
-      return {
-        value: initial.map((value, index) => value + (end[index] - value) * current.value),
-        velocity: initial.map((value, index) => (end[index] - value) * current.velocity),
-      }
-    }
-  } else {
-    const spring = springMotion(timing, initial, end, velocity)
-    durationMs = spring.durationMs
-    sample = spring.sample
-  }
+  if (!trajectory) return { kind: 'settle', reason: 'inactive' }
 
   return {
     kind: 'motion',
-    durationMs,
+    durationMs: trajectory.durationMs,
     sample(elapsedMs) {
-      if (!Number.isFinite(elapsedMs))
-        throw new Error('Projection time must be finite milliseconds')
-      if (elapsedMs >= durationMs) return { box: box(end), velocity: zeroBox }
-
-      const current = sample(Math.max(0, elapsedMs))
+      const current = trajectory.sample(elapsedMs)
 
       return { box: box(current.value), velocity: box(current.velocity) }
     },
@@ -379,11 +342,6 @@ export function projectionTransform(
   )
     return { kind: 'settle', reason: 'geometry' }
 
-  const inverseFrame = inverseProjection(localToReference)
-  const inverseAncestor = inverseProjection(ancestorCorrection)
-
-  if (!inverseFrame || !inverseAncestor) return { kind: 'settle', reason: 'singular' }
-
   const horizontal = dimensionComponents(displayed.width, destination.width, 0)
   const vertical = dimensionComponents(displayed.height, destination.height, 0)
 
@@ -399,6 +357,27 @@ export function projectionTransform(
     e: displayed.x,
     f: displayed.y,
   }
+
+  return projectionFrameTransform(desiredFrame, localToReference, ancestorCorrection, origin)
+}
+
+/**
+ * Internal output shared by box and full-edge projection. Frames map local CSS px
+ * into the same reference plane; desiredFrame may retain inherited rotation/shear.
+ * Callers validate their desired representation and finite local-pixel origin.
+ * Returns explicit singular/geometry settlement, with no effect or style writes.
+ */
+export function projectionFrameTransform(
+  desiredFrame: ProjectionMatrix,
+  localToReference: ProjectionMatrix,
+  ancestorCorrection: ProjectionMatrix,
+  origin: Readonly<{ x: number; y: number }>,
+): ProjectionTransformResult {
+  const inverseFrame = inverseProjection(localToReference)
+  const inverseAncestor = inverseProjection(ancestorCorrection)
+
+  if (!inverseFrame || !inverseAncestor) return { kind: 'settle', reason: 'singular' }
+
   const cumulative = multiplyProjection(desiredFrame, inverseFrame)
   const totalLocal = multiplyProjection(inverseFrame, desiredFrame)
   const local = multiplyProjection(inverseFrame, multiplyProjection(inverseAncestor, desiredFrame))

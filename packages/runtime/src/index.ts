@@ -104,3 +104,15 @@ export type {
   CorrectionScale,
   CorrectionTransform,
 } from './layout/style-correction.ts'
+
+export {
+  projectionShape,
+  projectionShapeMotion,
+  projectionShapeTransform,
+} from './layout/projection-shape.ts'
+export type {
+  ProjectionPoint,
+  ProjectionShape,
+  ProjectionShapeState,
+  ProjectionShapeMotionResult,
+} from './layout/projection-shape.ts'
