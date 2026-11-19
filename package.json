@@ -13,10 +13,10 @@
     "verify": "sh scripts/verify.sh",
     "build": "pnpm --dir playground build",
     "typecheck": "tsc --runExternalCode --noEmit && tsc --runExternalCode --noEmit -p playground/tsconfig.json",
-    "size:measure": "node packages/bundle-size/cli.ts measure",
-    "size:compare": "node packages/bundle-size/cli.ts compare",
-    "test:size": "node --test packages/bundle-size/*.test.ts",
-    "test:size:integration": "node packages/bundle-size/integration.ts"
+    "size:measure": "node packages/bundle-size/src/cli.ts measure",
+    "size:compare": "node packages/bundle-size/src/cli.ts compare",
+    "test:size": "vp test --run --project unit packages/bundle-size --coverage.enabled=false",
+    "test:size:integration": "vp test --run --config packages/bundle-size/vite.integration.config.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.65.1",

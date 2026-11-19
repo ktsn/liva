@@ -32,7 +32,7 @@ jobs:
       - name: Pin base branch tip and actual PR head
         env:
           BUNDLE_SIZE_READ_TOKEN: ${{ github.token }}
-        run: node packages/bundle-size/pin.ts "$RUNNER_TEMP/bundle-size-pins.json"
+        run: node packages/bundle-size/src/pin.ts "$RUNNER_TEMP/bundle-size-pins.json"
 
       - name: Install browser validation tools
         run: |
@@ -40,10 +40,10 @@ jobs:
           pnpm exec playwright install --with-deps chromium
 
       - name: Test measurement and reporting contracts
-        run: node --test packages/bundle-size/*.test.ts
+        run: pnpm test:size
 
       - name: Measure pinned base and PR head
-        run: node packages/bundle-size/cli.ts ci "$RUNNER_TEMP/bundle-size-results"
+        run: node packages/bundle-size/src/cli.ts ci "$RUNNER_TEMP/bundle-size-results"
 
       - name: Retain result JSON
         if: always()

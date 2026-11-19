@@ -53,8 +53,7 @@ const config = defineViteConfig({
           include: ['packages/**/*.test.ts'],
           exclude: [
             '**/node_modules/**',
-            // Tooling contracts run with node:test through test:size, independently of Vitest.
-            'packages/bundle-size/**',
+            'packages/**/*.integration.test.ts',
             'packages/**/*.browser.test.ts',
             'packages/**/*.cross-browser.test.ts',
           ],
@@ -125,7 +124,7 @@ const config = defineViteConfig({
       provider: 'v8',
       include: ['packages/**/*.{ts,vue}'],
       exclude: [
-        // Runtime coverage excludes standalone CLI/reporting programs; test:size checks them.
+        // Runtime thresholds exclude build/reporting tools with process and integration contracts.
         'packages/bundle-size/**',
         'packages/**/*.test.ts',
         'packages/**/__test__/**',

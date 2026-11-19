@@ -124,7 +124,7 @@ async function main() {
 
   assert(
     ['measure', 'compare', 'ci'].includes(command),
-    'Usage: node packages/bundle-size/cli.ts measure REV OUTPUT | compare BASE HEAD OUTPUT | ci OUTPUT',
+    'Usage: node packages/bundle-size/src/cli.ts measure REV OUTPUT | compare BASE HEAD OUTPUT | ci OUTPUT',
   )
 
   const temporary = await mkdtemp(join(tmpdir(), 'liva-size-revisions-'))

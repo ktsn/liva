@@ -36,4 +36,4 @@ jobs:
       - name: Validate artifact and update PR comment
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node packages/bundle-size/report.ts
+        run: node packages/bundle-size/src/report.ts

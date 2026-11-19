@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "measure": "node cli.ts measure",
-    "compare": "node cli.ts compare",
-    "test": "node --test *.test.ts",
-    "test:integration": "node integration.ts"
+    "measure": "node src/cli.ts measure",
+    "compare": "node src/cli.ts compare",
+    "test": "pnpm --dir ../.. test:size",
+    "test:integration": "pnpm --dir ../.. test:size:integration"
   },
   "devDependencies": {
     "@liva/vue": "workspace:*",
