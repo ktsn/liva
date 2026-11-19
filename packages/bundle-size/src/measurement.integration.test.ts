@@ -4,7 +4,6 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { compare, prepareRevision } from './cli.ts'
-import { measure } from './measure.ts'
 import { measured } from './types.ts'
 import type { Measurement } from './types.ts'
 import { validateResult } from './model.ts'
@@ -15,6 +14,22 @@ let target: string
 let broken: string
 let baseline: Measurement
 
+// Use the CLI's process isolation for each target's compiler and Playwright client.
+async function measurement(directory: string): Promise<Measurement> {
+  const result = await compare({
+    base: sha,
+    head: sha,
+    baseDirectory: directory,
+    headDirectory: directory,
+    single: true,
+  })
+
+  expect(result.status).toBe('success')
+  assert(measured(result.head))
+
+  return result.head
+}
+
 beforeAll(async () => {
   // Every mutation belongs to an exported tree; the checkout and baseline target stay intact.
   temporary = await mkdtemp(join(tmpdir(), 'liva-size-integration-'))
@@ -23,7 +38,7 @@ beforeAll(async () => {
   broken = join(temporary, 'broken')
 
   await prepareRevision(sha, target)
-  baseline = await measure(target, sha)
+  baseline = await measurement(target)
   await prepareRevision(sha, broken)
   await writeFile(join(broken, 'packages/runtime/src/index.ts'), 'export const broken = ;')
 })
@@ -34,7 +49,7 @@ afterAll(async () => {
 
 describe('production measurement integration', () => {
   it('reproduces bytes, hashes and metadata for the same revision', async () => {
-    expect(await measure(target, sha)).toStrictEqual(baseline)
+    expect(await measurement(target)).toStrictEqual(baseline)
   })
 
   it('detects shipped code growth and restores the original measurement after removal', async () => {
@@ -47,7 +62,7 @@ describe('production measurement integration', () => {
         `${source}\nglobalThis.__bundleSizeVariant = '${'0123456789abcdef'.repeat(64)}';\n`,
       )
 
-      const larger = await measure(target, sha)
+      const larger = await measurement(target)
 
       for (const metric of ['minified', 'gzip', 'brotli'] as const) {
         expect(larger.bytes[metric], `${metric} must detect growth`).toBeGreaterThan(
@@ -60,7 +75,7 @@ describe('production measurement integration', () => {
       await writeFile(runtime, source)
     }
 
-    const restored = await measure(target, sha)
+    const restored = await measurement(target)
 
     expect(restored.bytes).toStrictEqual(baseline.bytes)
     expect(restored.bundle).toBe(baseline.bundle)
@@ -87,7 +102,7 @@ describe('production measurement integration', () => {
       { cwd: dependencyTarget, stdio: 'inherit' },
     )
 
-    const changed = await measure(dependencyTarget, sha)
+    const changed = await measurement(dependencyTarget)
 
     expect(changed.metadata.dependencies['@vizejs/vite-plugin']).toBe(replacement)
     expect(changed.metadata.lockfile).not.toBe(baseline.metadata.lockfile)
