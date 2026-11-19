@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/ktsn/liva/blob/main/scripts/bundle-size/schema.json",
+  "$id": "https://github.com/ktsn/liva/blob/main/packages/bundle-size/schema.json",
   "title": "Liva production bundle measurement v1",
   "type": "object",
   "additionalProperties": false,

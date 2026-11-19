@@ -13,13 +13,12 @@
     "verify": "sh scripts/verify.sh",
     "build": "pnpm --dir playground build",
     "typecheck": "tsc --runExternalCode --noEmit && tsc --runExternalCode --noEmit -p playground/tsconfig.json",
-    "size:measure": "node scripts/bundle-size/cli.ts measure",
-    "size:compare": "node scripts/bundle-size/cli.ts compare",
-    "test:size": "node --test scripts/bundle-size/*.test.ts",
-    "test:size:integration": "node scripts/bundle-size/integration.ts"
+    "size:measure": "node packages/bundle-size/cli.ts measure",
+    "size:compare": "node packages/bundle-size/cli.ts compare",
+    "test:size": "node --test packages/bundle-size/*.test.ts",
+    "test:size:integration": "node packages/bundle-size/integration.ts"
   },
   "devDependencies": {
-    "@liva/vue": "workspace:*",
     "@playwright/test": "1.65.1",
     "@types/node": "26.6.6",
     "@vitest/browser-playwright": "5.1.0",
@@ -27,8 +26,7 @@
     "@vizejs/vite-plugin": "0.752.0",
     "typescript": "7.1.0-dev.20261115.1",
     "vite-plus": "1.6.0",
-    "vize": "0.765.0",
-    "vue": "^3.5.45"
+    "vize": "0.765.0"
   },
   "engines": {
     "node": "26.13.1"

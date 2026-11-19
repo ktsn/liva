@@ -18,7 +18,11 @@ const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8' 
 export async function prepareRevision(revision: string, destination: string): Promise<void> {
   await mkdir(destination)
 
-  const archive = execFileSync('git', ['archive', revision], { maxBuffer: 50 * 1024 * 1024 })
+  // Package scripts run below the repository root; git archive otherwise scopes its paths.
+  const repository = git('rev-parse', '--show-toplevel')
+  const archive = execFileSync('git', ['-C', repository, 'archive', revision], {
+    maxBuffer: 50 * 1024 * 1024,
+  })
   const extracted = spawnSync('tar', ['-x', '-C', destination], {
     input: archive,
     stdio: ['pipe', 'inherit', 'inherit'],
@@ -120,7 +124,7 @@ async function main() {
 
   assert(
     ['measure', 'compare', 'ci'].includes(command),
-    'Usage: node scripts/bundle-size/cli.ts measure REV OUTPUT | compare BASE HEAD OUTPUT | ci OUTPUT',
+    'Usage: node packages/bundle-size/cli.ts measure REV OUTPUT | compare BASE HEAD OUTPUT | ci OUTPUT',
   )
 
   const temporary = await mkdtemp(join(tmpdir(), 'liva-size-revisions-'))

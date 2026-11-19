@@ -1,0 +1,16 @@
+{
+  "name": "@liva/bundle-size",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "measure": "node cli.ts measure",
+    "compare": "node cli.ts compare",
+    "test": "node --test *.test.ts",
+    "test:integration": "node integration.ts"
+  },
+  "devDependencies": {
+    "@liva/vue": "workspace:*",
+    "vue": "^3.5.45"
+  }
+}
