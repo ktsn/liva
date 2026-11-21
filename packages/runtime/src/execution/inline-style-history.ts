@@ -1,18 +1,6 @@
 import { observeLayoutInline } from '../layout/layout-scheduler.ts'
 
-export type InlineValue = { value: string; priority: string }
-
-export function inlineDeclarations(style: CSSStyleDeclaration): Map<string, InlineValue> {
-  return new Map(
-    Array.from(style).map((property) => [
-      property,
-      {
-        value: style.getPropertyValue(property),
-        priority: style.getPropertyPriority(property),
-      },
-    ]),
-  )
-}
+import type { InlineValue } from './style-ownership.ts'
 
 /** Splits browser-serialized declaration text, leaving CSS values opaque. */
 function split(value: string, delimiter: string): string[] {

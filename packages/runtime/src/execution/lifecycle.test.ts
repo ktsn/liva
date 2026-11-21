@@ -1,10 +1,11 @@
+import { builtinValues } from '../evaluation/full-expression.ts'
 import { expect, it } from 'vite-plus/test'
 import type { Transition } from '../model/definition.ts'
 import fixture from '../../../../fixtures/lifecycle.json'
-import { resolveLayers } from '../composition/layers.ts'
+import { resolveLayers } from '../composition/full-resolution.ts'
 import { decodeBundle } from '../model/definition.ts'
 import {
-  captureLifecycleDefinition,
+  captureLifecycleDefinition as capture,
   hasLifecycle,
   resolveLifecycleTracks,
   evaluateLifecycleTrack,
@@ -306,3 +307,7 @@ it.each([undefined, { targets: [] }, { targets: [{ name: 'body', properties: [] 
 
   expect(evaluateLifecycleTrack('leave', source, state, {}, captured)).toBe(captured)
 })
+
+function captureLifecycleDefinition(...[source, phase, values]: Parameters<typeof capture>) {
+  return capture(source, phase, builtinValues(values))
+}

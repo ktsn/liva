@@ -1,5 +1,11 @@
-import { planPresence, PresenceError } from './presence.ts'
+import {
+  planPresence,
+  PresenceError,
+  generatedPresence,
+  presenceAliasAttribute,
+} from './presence.ts'
 import { fileURLToPath } from 'node:url'
+import { emitFeatures } from './features.ts'
 import { EditorService } from './editor/communication/server.ts'
 import type { Plugin, Rollup, ViteDevServer } from 'vite-plus'
 import {
@@ -12,6 +18,9 @@ import {
   type SourceSnapshot,
 } from './compiler.ts'
 
+const pluginEntry = fileURLToPath(import.meta.url)
+const compiledVue = '@liva/vue/compiled'
+
 type TransformContext = Pick<Rollup.TransformPluginContext, 'error' | 'warn'>
 
 export default function liva(): Plugin {
@@ -20,6 +29,13 @@ export default function liva(): Plugin {
   const valid = new Map<string, SourceSnapshot>()
 
   const blocks = new Map<string, { source: string; result: Compilation }>()
+  const rejectedPresence = new Map<string, string>()
+
+  const remember = (file: string, snapshot: SourceSnapshot) => {
+    rejectedPresence.delete(file)
+    valid.set(file, snapshot)
+    blocks.set(file, { source: snapshot.block, result: snapshot.result })
+  }
 
   const preprocess = (context: TransformContext, source: string, file: string) => {
     if (!hasLivaBlock(source, file)) return undefined
@@ -27,12 +43,9 @@ export default function liva(): Plugin {
     const previous = valid.get(file)
     const snapshot = previous?.source === source ? previous : compileSfc(source, file, !!server)
 
-    if (!hasErrors(snapshot)) {
-      valid.set(file, snapshot)
-      blocks.set(file, { source: snapshot.block, result: snapshot.result })
-    }
+    const accepted = !hasErrors(snapshot)
 
-    if (hasErrors(snapshot) && !server) {
+    if (!accepted && !server) {
       const diagnostic = snapshot.result.diagnostics.find((d) => d.severity === 'error')!
       context.error({
         message: diagnostic.message,
@@ -41,17 +54,29 @@ export default function liva(): Plugin {
       })
     }
 
-    const current = valid.get(file)
+    const current = accepted ? snapshot : previous
     if (!current) return undefined
 
     try {
-      return planPresence(source, file, current.result.definitions)
+      const planned = planPresence(source, file, current.result.definitions)
+
+      if (accepted) remember(file, snapshot)
+
+      return planned
     } catch (error) {
-      /* v8 ignore else -- @preserve: Presence planning reports authored errors as PresenceError; other exceptions are internal faults. */
-      if (error instanceof PresenceError)
-        context.error({ message: error.message, id: file, loc: error.loc })
-      /* v8 ignore next -- @preserve: Vite's error hook throws for the handled PresenceError. */
-      throw error
+      /* v8 ignore if -- @preserve: Presence planning reports authored errors as PresenceError; other exceptions are internal faults. */
+      if (!(error instanceof PresenceError)) throw error
+
+      const diagnostic = { message: error.message, id: file, loc: error.loc }
+
+      if (!server || !previous) context.error(diagnostic)
+
+      // Vue's HMR hooks can still request a module after a rejected update.
+      // Keep its template, definitions, and generated imports on the same snapshot.
+      rejectedPresence.set(file, snapshot.block)
+      context.warn(diagnostic)
+
+      return planPresence(previous.source, file, previous.result.definitions)
     }
   }
 
@@ -60,9 +85,12 @@ export default function liva(): Plugin {
     code: string,
     file: string,
     id: string,
+    presenceIndex: number,
   ) => {
     const previous = blocks.get(file)
-    let result = previous?.source === code ? previous.result : compile(code, !!server)
+    const rejected = rejectedPresence.get(file) === code
+    const reused = previous && (previous.source === code || rejected)
+    let result = reused ? previous.result : compile(code, !!server)
     const diagnostic = result.diagnostics.find((d) => d.severity === 'error')
 
     if (diagnostic) {
@@ -74,7 +102,7 @@ export default function liva(): Plugin {
       if (!server || !previous) context.error(error)
       context.warn(error)
       result = previous.result
-    } else {
+    } else if (!reused) {
       blocks.set(file, { source: code, result })
     }
 
@@ -84,8 +112,26 @@ export default function liva(): Plugin {
     const association = editor
       ? `component.livaSource = ${JSON.stringify(await editor.register(file))};`
       : ''
+    const features = emitFeatures(result.definitions)
+    const names = generatedPresence(presenceIndex)
+    const assets = features.presence
+      ? [
+          `component.components = { ${JSON.stringify(names.component)}: LivaPresenceBoundary, ...component.components };`,
+          `component.directives = { ${JSON.stringify(names.directive)}: livaEntry, ...component.directives };`,
+          'component.livaPresenceBindings = PresenceBindings;',
+        ].join(' ')
+      : ''
+
     return {
-      code: `import { decodeBundle } from '@liva/runtime'; const bundle = decodeBundle(${JSON.stringify(bundle)}); export default (component) => { component.livaDefinitions = bundle.definitions; ${association} };`,
+      code: [
+        "import { decodeBundle } from 'liva:runtime/model/definition';",
+        features.imports,
+        `const bundle = decodeBundle(${JSON.stringify(bundle)});`,
+        `const features = ${features.motions};`,
+        `export default (component) => { component.livaDefinitions = bundle.definitions; component.livaFeatures = features; ${assets} ${association} };`,
+      ]
+        .filter(Boolean)
+        .join('\n'),
       map: null,
     }
   }
@@ -101,9 +147,27 @@ export default function liva(): Plugin {
       editor = new EditorService(devServer.config.root)
       editor.install(devServer)
     },
-    resolveId(id) {
+    async resolveId(id) {
       if (id === '@liva/vue') return '\0liva:vue-plugin'
-      return null
+      if (id === 'liva:vue/compiled' || id === compiledVue)
+        return this.resolve(compiledVue, pluginEntry, { skipSelf: true })
+
+      const feature = /^liva:(runtime|vue)\/([a-zA-Z0-9/-]+)$/.exec(id)
+
+      if (!feature) return null
+
+      const [, workspace, path] = feature
+      const specifier = `@liva/${workspace}/features/${path}`
+
+      if (workspace === 'vue') return this.resolve(specifier, pluginEntry, { skipSelf: true })
+
+      // Vue imports @liva/runtime/core from this same package instance. Resolving
+      // from the SFC or dereferencing symlinks in Node can split runtime identity.
+      const anchor = await this.resolve(compiledVue, pluginEntry, { skipSelf: true })
+
+      if (!anchor) throw new Error('Could not resolve the compiled Liva Vue entry')
+
+      return this.resolve(specifier, anchor.id, { skipSelf: true })
     },
     load(id) {
       if (id === '\0liva:vue-plugin' && editor) {
@@ -111,7 +175,7 @@ export default function liva(): Plugin {
         return `export * from "@liva/vue/runtime"; import { createDevPlugin } from ${JSON.stringify(client)}; export default createDevPlugin(${JSON.stringify(editor.token)});`
       }
       if (id === '\0liva:vue-plugin')
-        return `export * from "@liva/vue/runtime"; import { createLivaPlugin } from '@liva/vue/runtime'; export default createLivaPlugin();`
+        return `export * from "@liva/vue/runtime"; import { createCompiledLivaPlugin } from 'liva:vue/compiled'; export default createCompiledLivaPlugin();`
       return null
     },
     async transform(code, id) {
@@ -125,7 +189,9 @@ export default function liva(): Plugin {
 
       if (!parameters.has('vue') || parameters.get('type') !== 'liva') return undefined
 
-      return transformBlock(this, code, file, id)
+      const presenceIndex = Number(parameters.get(presenceAliasAttribute) ?? 0)
+
+      return transformBlock(this, code, file, id, presenceIndex)
     },
     async handleHotUpdate(context) {
       if (!context.file.endsWith('.vue')) return undefined
@@ -133,6 +199,7 @@ export default function liva(): Plugin {
       if (!hasLivaBlock(source, context.file)) return undefined
 
       let sourceId: string | undefined
+      let snapshot: SourceSnapshot | undefined
 
       try {
         sourceId = await editor?.register(context.file)
@@ -144,7 +211,7 @@ export default function liva(): Plugin {
             event: 'liva:source-changed',
             data: { sourceId },
           })
-        const snapshot = compileSfc(source, context.file, true)
+        snapshot = compileSfc(source, context.file, true)
         if (hasErrors(snapshot)) {
           server?.ws.send({
             type: 'custom',
@@ -153,8 +220,14 @@ export default function liva(): Plugin {
           })
           return []
         }
-        valid.set(context.file, snapshot)
+        // Preserve the previous definition and loader together if the updated
+        // template cannot install its authored lifecycle boundaries.
+        planPresence(source, context.file, snapshot.result.definitions)
+        remember(context.file, snapshot)
       } catch (error) {
+        if (error instanceof PresenceError && snapshot && valid.has(context.file))
+          rejectedPresence.set(context.file, snapshot.block)
+
         server?.ws.send({
           type: 'custom',
           event: 'liva:diagnostics',

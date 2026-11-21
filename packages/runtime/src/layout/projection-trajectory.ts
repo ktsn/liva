@@ -1,5 +1,6 @@
 import type { Timing } from '../model/definition.ts'
-import { springMotion, type MotionSample } from '../motion/property-motion.ts'
+import type { MotionSample } from '../motion/motion-history.ts'
+import type { springMotion } from '../motion/spring-motion.ts'
 
 /** Browser-supplied eased progress and progress/ms derivative at elapsed milliseconds. */
 export type ProjectionTweenSampler = (elapsedMs: number) => { value: number; velocity: number }
@@ -23,6 +24,7 @@ export function projectionTrajectory(
   velocity: readonly number[],
   timing: Timing,
   tween?: ProjectionTweenSampler,
+  solveSpring?: typeof springMotion,
 ): ProjectionTrajectory | undefined {
   if (initial.every((value, index) => value === end[index] && velocity[index] === 0))
     return undefined
@@ -54,7 +56,9 @@ export function projectionTrajectory(
       }
     }
   } else {
-    const spring = springMotion(timing, initial, end, velocity)
+    if (!solveSpring) throw new Error('Missing projection spring capability')
+
+    const spring = solveSpring(timing, initial, end, velocity)
     durationMs = spring.durationMs
     sample = spring.sample
   }

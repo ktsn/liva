@@ -137,7 +137,7 @@ export async function measure(target: string, sha: string, output?: string): Pro
       plugins: [livaPlugin.default(), vuePlugin.default(), observe],
       resolve: {
         alias: [
-          { find: '@liva/runtime', replacement: join(target, 'packages/runtime/src/index.ts') },
+          { find: /^@liva\/runtime$/, replacement: join(target, 'packages/runtime/src/index.ts') },
           { find: '@liva/vue/runtime', replacement: join(target, 'packages/vue/src/runtime.ts') },
         ],
       },

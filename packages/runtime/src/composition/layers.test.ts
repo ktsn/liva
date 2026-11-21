@@ -2,13 +2,8 @@ import selfFixture from '../../../../fixtures/self-target.json'
 import { decodeBundle } from '../model/definition.ts'
 import { describe, expect, it } from 'vite-plus/test'
 import type { Definition, Expression, Layer, Property, Target } from '../model/definition.ts'
-import {
-  layerTargets,
-  resolveLayers,
-  resolveLayerTracks,
-  resolveComposition,
-  type Composition,
-} from './layers.ts'
+import { layerTargets, type Composition } from './layers.ts'
+import { resolveLayers, resolveComposition, resolveLayerTracks } from './full-resolution.ts'
 
 const ref = (name: string): Expression => ({ kind: 'reference', path: [name] })
 const targets = (properties: Record<string, string>): Target<Property>[] => [

@@ -1,3 +1,4 @@
+import { BrowserExecutor } from '@liva/runtime/core'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import {
   createApp,
@@ -182,8 +183,8 @@ describe('ordinary Presence capture teardown', () => {
       const captures: string[][] = []
       // Retain only for explicit .call(this); the real capture still observes native CSS.
       // eslint-disable-next-line typescript/unbound-method
-      const capture = PresentationExecutor.prototype.capturePresence
-      vi.spyOn(PresentationExecutor.prototype, 'capturePresence').mockImplementation(function (
+      const capture = BrowserExecutor.prototype.capturePresence
+      vi.spyOn(BrowserExecutor.prototype, 'capturePresence').mockImplementation(function (
         this: PresentationExecutor,
         phase,
         names,

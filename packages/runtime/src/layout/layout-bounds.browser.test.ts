@@ -1,5 +1,6 @@
+import { ProjectionReadBatch } from './projection-read.ts'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
-import { LayoutReadBatch, readLayoutBounds, missingBounds } from './layout-bounds.ts'
+import { readLayoutBounds, missingBounds } from './layout-bounds.ts'
 import { measure } from '../builtins/measure.ts'
 
 const cleanups: (() => void)[] = []
@@ -196,7 +197,7 @@ describe('untransformed layout bounds', () => {
       scroller.append(spacer, target)
       target.style.cssText += 'position:absolute;left:60px;top:40px;'
       const before = readLayoutBounds(target, root)
-      const projectedBefore = new LayoutReadBatch().projection(target)
+      const projectedBefore = new ProjectionReadBatch().projection(target)
 
       scroller.scrollLeft = 30
       scroller.scrollTop = 50
@@ -206,7 +207,7 @@ describe('untransformed layout bounds', () => {
       expect(after.x).toBeCloseTo(before.x, 4)
       expect(after.y).toBeCloseTo(before.y, 4)
       expect(after.attached).toBe(true)
-      const projectedAfter = new LayoutReadBatch().projection(target)
+      const projectedAfter = new ProjectionReadBatch().projection(target)
 
       if (!projectedBefore || !projectedAfter) throw new Error('Expected supported scroll frames')
 

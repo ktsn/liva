@@ -1,15 +1,16 @@
+import { planControllerBindings, planControllerPresentation } from './controller-planning.ts'
+import { planPreviewPresentation } from './preview-planning.ts'
+import { springPlayback } from '../motion/spring-playback.ts'
 import type { ResolvedTrack } from '../composition/resolve.ts'
 import { describe, expect, it } from 'vite-plus/test'
-import { resolveLayers, type LayerResolution } from '../composition/layers.ts'
+import { type LayerResolution } from '../composition/layers.ts'
+import { resolveLayers } from '../composition/full-resolution.ts'
 import type { Definition } from '../model/definition.ts'
 import {
   planTrack,
-  planControllerBindings,
-  planControllerPresentation,
   planTrackObservations,
   planPresentation,
   planEffectCompletion,
-  planPreviewPresentation,
   planMotionChange,
   type PresentationFacts,
   trackTiming,
@@ -482,7 +483,7 @@ function receiverSnapshot(overrides: Partial<TrackSnapshot> = {}): TrackSnapshot
 }
 
 function finalPlan(snapshot: TrackSnapshot) {
-  return planTrack(snapshot, trackTiming(snapshot.track), 'both')
+  return planTrack(snapshot, trackTiming(snapshot.track, springPlayback), 'both', springPlayback)
 }
 
 describe('final pure track planning', () => {
@@ -930,4 +931,16 @@ describe('complete presentation planning', () => {
       { receiver: 2, property: 'opacity', value: '1' },
     ])
   })
+})
+
+it('rejects an authored spring track when playback was assembled without spring', () => {
+  const track: ResolvedTrack = {
+    target: 'self',
+    property: 'opacity',
+    keyframes: [{ offset: 1, value: '1' }],
+    destinationValue: '1',
+    timing: { kind: 'spring-duration', durationMs: 200, bounce: 0 },
+  }
+
+  expect(() => trackTiming(track)).toThrow('Missing spring playback capability')
 })

@@ -1,4 +1,5 @@
-import { createLivaPlugin } from '@liva/vue/runtime'
+import { inspectionFeatures } from './inspection-features.ts'
+import { createEditorLivaPlugin } from '@liva/vue/runtime'
 import type { Edit } from './communication/protocol.ts'
 import { createEditorTransport, subscribeToEditorEvents } from './communication/client.ts'
 import { EditorController } from './controller.ts'
@@ -13,11 +14,14 @@ export function createDevPlugin(token: string) {
   })
   import.meta.hot?.dispose(unsubscribe)
   Object.assign(window, { __LIVA_EDITOR__: controller })
-  return createLivaPlugin({
-    source: (component) => component.livaSource,
-    observe: (event, binding) => controller.observe(event, binding),
-    onDiagnostic: (diagnostic) => controller.report(diagnostic.message),
-  })
+  return createEditorLivaPlugin(
+    {
+      source: (component) => component.livaSource,
+      observe: (event, binding) => controller.observe(event, binding),
+      onDiagnostic: (diagnostic) => controller.report(diagnostic.message),
+    },
+    inspectionFeatures,
+  )
 }
 
 export type { Edit }

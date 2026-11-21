@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vite-plus/test'
 import fixture from '../../../../fixtures/toggle.json'
 import { decodeBundle, type Definition, type Timing, type Transition } from '../model/definition.ts'
 import { normalizeFrames } from '../composition/resolve.ts'
-import { resolveComposition, resolveLayerTracks } from '../composition/layers.ts'
+import { resolveComposition, resolveLayerTracks } from '../composition/full-resolution.ts'
 import { sampleSpring, springResponse, springState, SPRING_ERROR } from '../motion/spring.ts'
 import { waapiProperty } from '../motion/animation.ts'
 

@@ -137,3 +137,13 @@ export const LivaPresenceBoundary = defineComponent({
       )
   },
 })
+
+/** Connects the compiler's structural element to its local Presence entry. */
+export const livaEntry: import('vue').ObjectDirective<HTMLElement, PresenceEntry> = {
+  created(element, binding) {
+    binding.value.element = element
+  },
+  beforeUpdate(element, binding) {
+    binding.value.element = element
+  },
+}

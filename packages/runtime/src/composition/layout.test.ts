@@ -1,6 +1,7 @@
+import { resolveLayoutConfigurations } from '@liva/runtime'
 import { describe, expect, it } from 'vite-plus/test'
-import { resolveLayoutConfigurations } from './layout.ts'
-import { layerTargets, resolveComposition, resolveLayers, resolveLayerTracks } from './layers.ts'
+import { layerTargets } from './layers.ts'
+import { resolveComposition, resolveLayers, resolveLayerTracks } from './full-resolution.ts'
 import { decodeBundle, type Definition, type Layer, type Timing } from '../model/definition.ts'
 import type { LayoutAxes, LayoutDeclaration } from '../model/layout.ts'
 import fixture from '../../../../fixtures/layout-config.json'
@@ -386,6 +387,7 @@ describe('layout declaration cascade', () => {
     const from = { layers: {}, states: { phase: 'off' } }
     const to = { layers: {}, states: { phase: 'on' } }
     const update = resolveComposition(source, {}, to, from, [{ layer: 'phase', index: 0 }])
+    const directional = resolveLayoutConfigurations(source, {}, to, update.transitions)
     const later = resolveLayoutConfigurations(source, {}, to)
 
     expect(update.layout?.[0].timing).toEqual(instant)
@@ -395,6 +397,7 @@ describe('layout declaration cascade', () => {
       target: undefined,
       property: undefined,
     })
+    expect(directional).toEqual(update.layout)
     expect(later[0].timing).toEqual(spring)
     expect(later[0].timingSource?.transition).toBeUndefined()
   })
