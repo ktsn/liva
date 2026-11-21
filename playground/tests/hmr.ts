@@ -1,4 +1,4 @@
 import { createApp } from 'vue'
-import { createLivaPlugin } from '@liva/vue/runtime'
+import { createCompiledLivaPlugin } from '@liva/vue/compiled'
 import Hmr from './Hmr.vue'
-createApp(Hmr).use(createLivaPlugin()).mount('#app')
+createApp(Hmr).use(createCompiledLivaPlugin()).mount('#app')

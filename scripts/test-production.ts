@@ -4,6 +4,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 import { chromium, type Browser, type Page } from '@playwright/test'
+import { assertProductionFeatures } from './test-production-features.ts'
 
 const cwd = resolve(import.meta.dirname, '../playground')
 const base = 'http://127.0.0.1:4181'
@@ -175,6 +176,8 @@ async function layoutPlayback(page: Page) {
   assert.equal(await page.locator('[data-liva-editor]').count(), 0)
   assert.equal(await page.evaluate(() => '__LIVA_EDITOR__' in window), false)
 }
+
+await assertProductionFeatures()
 
 for (const mode of ['production', 'development']) {
   execFileSync('vp', ['build', '--mode', mode], { cwd, stdio: 'inherit' })

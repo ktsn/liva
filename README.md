@@ -58,6 +58,10 @@ import App from './App.vue'
 createApp(App).use(liva).mount('#app')
 ```
 
+The Vite plugin supplies each compiled Motion with the runtime features it uses.
+Applications that supply `livaDefinitions` directly or replace definitions at
+runtime can install `createLivaPlugin()` from `@liva/vue/runtime` for the full runtime.
+
 See complete component examples in
 [Toggle.vue](playground/src/components/Toggle.vue) and [drag.vue](playground/src/pages/drag.vue).
 

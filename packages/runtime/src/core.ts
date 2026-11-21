@@ -1,0 +1,7 @@
+export { MotionRuntime } from './execution/motion-runtime.ts'
+export { BrowserExecutor } from './execution/browser-executor.ts'
+export type { MotionFeatures } from './execution/motion-features.ts'
+export type { RuntimeDiagnostic } from './execution/execution-contracts.ts'
+export { rootTargetBindings, ROOT_TARGET } from './model/targets.ts'
+export { releaseResources } from './evaluation/resource-cleanup.ts'
+export type { Definition } from './model/definition.ts'

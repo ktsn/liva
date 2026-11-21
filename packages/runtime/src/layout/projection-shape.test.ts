@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test'
 import {
   projectionShape,
+  planProjectionShapeMotion,
   projectionShapeMotion,
   projectionShapeTransform,
   type ProjectionShape,
@@ -425,4 +426,10 @@ describe('affine shape boundaries', () => {
       }).kind,
     ).toBe('settle')
   })
+})
+
+it('rejects moving spring projection when no solver was selected', () => {
+  expect(() =>
+    planProjectionShapeMotion({ shape: oldShape, velocity: zero }, endShape, all, physics),
+  ).toThrow('Missing projection spring capability')
 })

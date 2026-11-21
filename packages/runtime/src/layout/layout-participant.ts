@@ -5,6 +5,7 @@ import type { ResolvedLayoutConfiguration } from '../model/layout.ts'
 /** One physical receiver; aliases never create separate generated style owners. */
 export interface LayoutCandidate {
   readonly element: HTMLElement
+  readonly spring?: typeof import('../motion/spring-motion.ts').springMotion
   readonly configuration?: ResolvedLayoutConfiguration
   readonly blocked: boolean
 }

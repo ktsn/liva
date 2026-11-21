@@ -1,5 +1,6 @@
 import { NodeTypes, ElementTypes, type ElementNode, type DirectiveNode } from '@vue/compiler-core'
 import { MagicString, parse } from '@vue/compiler-sfc'
+import { presenceBoundaryReference, presenceEntryReference } from './presence-reference.ts'
 import { hasLifecycle, lifecycleTransitions, ROOT_TARGET, type Definition } from '@liva/runtime'
 
 type Root = NonNullable<ReturnType<typeof parse>['descriptor']['template']>['ast']
@@ -295,13 +296,18 @@ export function planPresence(source: string, filename: string, definitions: read
   for (const [owner, boundary] of boundaries) {
     const members = chains.get(owner) ?? [owner]
     for (const member of members) {
-      add(member, ` v-liva-entry="${attr(entryExpression(owner, member))}"`)
+      // Use the same directive name as the root Motion so Vue can compile
+      // the tuple normally. The post transform binds this tuple to livaEntry.
+      const marker = `import('${presenceEntryReference}')(${entryExpression(owner, member)})`
+
+      add(member, ` v-liva="${attr(marker)}"`)
     }
+
     output.prependLeft(
       boundary.range.start,
-      `<LivaPresenceBoundary :group="${boundary.operation === 'for'}" :persisted="${boundary.operation === 'show'}" v-slot="livaBoundary${boundary.id}">`,
+      `<component :is="import('${presenceBoundaryReference}')" :group="${boundary.operation === 'for'}" :persisted="${boundary.operation === 'show'}" v-slot="livaBoundary${boundary.id}">`,
     )
-    output.appendRight(boundary.range.end, '</LivaPresenceBoundary>')
+    output.appendRight(boundary.range.end, '</component>')
   }
 
   return {

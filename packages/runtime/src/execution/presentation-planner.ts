@@ -1,9 +1,4 @@
-import { sampleSpring } from '../motion/spring.ts'
-import {
-  prepareSpringMotion,
-  type SpringObservation,
-  type MotionSample,
-} from '../motion/property-motion.ts'
+import { type SpringObservation, type MotionSample } from '../motion/motion-history.ts'
 import { isCssProperty } from '../model/definition.ts'
 import type { RenderedFrame } from '../model/presentation.ts'
 import {
@@ -16,7 +11,7 @@ import {
   type LayerResolution,
 } from '../composition/layers.ts'
 import type { ResolvedTrack } from '../composition/resolve.ts'
-import type { Definition, Expression } from '../model/definition.ts'
+import type { Definition, Timing } from '../model/definition.ts'
 import type { VariableValues } from '../evaluation/expression.ts'
 
 import { layerPropertyKey } from './execution-contracts.ts'
@@ -319,79 +314,6 @@ export interface PresentationFacts {
   })[]
 }
 
-export interface ControllerBinding {
-  readonly target: string
-  readonly property: string
-  readonly expression: Expression
-}
-
-/** Selects target-wide bindings before any live controller operation is requested. */
-export function planControllerBindings(
-  resolution: LayerResolution,
-  receivers: readonly ReceiverAddresses[],
-): ControllerBinding[] {
-  return resolution.presentation.targets.flatMap((target) =>
-    target.properties.flatMap((property) => {
-      if (!property.binding) return []
-
-      const obscured = receivers.some(
-        (receiver) =>
-          receiver.target === target.name &&
-          ((receiver.bindings !== undefined && !receiver.bindings.includes(property.name)) ||
-            receiver.addresses.some(
-              (declaration) =>
-                declaration.name === property.name &&
-                declaration.addresses.some(
-                  (address) => !ownsCanonicalProperty(receiver.addresses, property.name, address),
-                ),
-            )),
-      )
-
-      return obscured
-        ? []
-        : [{ target: target.name, property: property.name, expression: property.binding }]
-    }),
-  )
-}
-
-/** Applies supplied controller CSS values, preserving normal fallback and source order. */
-export function planControllerPresentation(
-  resolution: LayerResolution,
-  normal: LayerResolution,
-  outputs: ReadonlyMap<string, string | undefined>,
-  definition: Definition,
-): LayerResolution {
-  const targets = resolution.presentation.targets.map((target) => ({
-    ...target,
-    properties: target.properties.flatMap((property) => {
-      if (!property.binding) return [property]
-
-      const key = layerPropertyKey(target.name, property.name)
-
-      if (!outputs.has(key)) return []
-
-      const value = outputs.get(key)
-
-      if (value !== undefined) return [{ ...property, value }]
-
-      const fallback = normal.presentation.targets
-        .find((item) => item.name === target.name)
-        ?.properties.find((item) => item.name === property.name)
-
-      return fallback ? [fallback] : []
-    }),
-  }))
-
-  return orderedResolution(
-    {
-      ...resolution,
-      declarations: resolution.presentation,
-      presentation: { ...resolution.presentation, targets },
-    },
-    definition,
-  )
-}
-
 export interface TrackCandidate {
   readonly receiver: number
   readonly source: ResolvedTrack
@@ -500,23 +422,6 @@ export function planPresentation(
     writes: facts.suspended
       ? []
       : presentationWrites(resolution, facts.receivers, removed.size > 0 ? undefined : changed),
-    start,
-  }
-}
-
-/** Preview acceptance is isolated from application composition and always supports manual seeking. */
-export function planPreviewPresentation(
-  resolution: LayerResolution,
-  receivers: readonly ReceiverFacts[],
-  start: readonly TrackPlan[],
-): PresentationPlan {
-  return {
-    resolution,
-    mode: 'preview',
-    cancel: [],
-    restore: true,
-    preserveLifecycle: false,
-    writes: presentationWrites(resolution, receivers),
     start,
   }
 }
@@ -650,10 +555,18 @@ export interface TrackSnapshot {
 }
 
 /** Scalar timing, shared by ordinary playback and manually scrubbed previews. */
-export function trackTiming(track: ResolvedTrack) {
-  return track.timing.kind === 'tween'
-    ? { durationMs: track.timing.durationMs, easing: 'linear' }
-    : sampleSpring(track.timing)
+export type SpringPlayback = {
+  timing(timing: Exclude<Timing, { kind: 'tween' }>): { durationMs: number; easing: string }
+  frames: typeof import('../motion/spring-motion.ts').prepareSpringMotion
+}
+
+export function trackTiming(track: ResolvedTrack, spring?: SpringPlayback) {
+  if (track.timing.kind === 'tween')
+    return { durationMs: track.timing.durationMs, easing: 'linear' }
+
+  if (!spring) throw new Error('Missing spring playback capability')
+
+  return spring.timing(track.timing)
 }
 
 /** Determines observation needs before the executor reads displayed/numeric values. */
@@ -681,6 +594,7 @@ export function planTrack(
   snapshot: TrackSnapshot,
   timing: ReturnType<typeof trackTiming>,
   fill: TrackPlan['fill'],
+  spring?: SpringPlayback,
 ): TrackPlan | undefined {
   const { source, track } = snapshot
 
@@ -702,7 +616,7 @@ export function planTrack(
 
   const handoff =
     track.timing.kind !== 'tween' && snapshot.motion
-      ? prepareSpringMotion(track.property, track.timing, needs.motion, snapshot.motion)
+      ? spring?.frames(track.property, track.timing, needs.motion, snapshot.motion)
       : undefined
 
   return {

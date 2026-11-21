@@ -1,6 +1,7 @@
 import { expect, it } from 'vite-plus/test'
 import { compileSfc } from './compiler.ts'
 import { planPresence, PresenceError } from './presence.ts'
+import { presenceBoundaryReference, presenceEntryReference } from './presence-reference.ts'
 
 const block = `<liva>
 motion panel {
@@ -28,7 +29,7 @@ it('deduplicates shared boundaries and plans each nested structural operation', 
 
   expect(result.boundaries.map((boundary) => boundary.operation)).toEqual(['if', 'for'])
   expect(result.boundaries.map((boundary) => boundary.targets.length)).toEqual([2, 2])
-  expect(result.code.match(/<LivaPresenceBoundary /g)).toHaveLength(2)
+  expect(result.code.match(/liva:internal-presence-boundary/g)).toHaveLength(2)
   expect(result.code).toContain(':key="item.id"')
   expect(result.code).toContain('livaBoundary1.item(item.id)')
   expect(result.map.sources).toEqual(['Panel.vue'])
@@ -43,12 +44,10 @@ it('wraps the whole conditional chain while retaining listeners and authored key
   </div>`)
 
   expect(result.boundaries).toHaveLength(1)
-  expect(result.code.match(/<LivaPresenceBoundary /g)).toHaveLength(1)
+  expect(result.code.match(/liva:internal-presence-boundary/g)).toHaveLength(1)
   expect(result.code).toContain('@click="act"')
   expect(result.code).toContain('key="a"')
-  expect(result.code.indexOf('</LivaPresenceBoundary>')).toBeGreaterThan(
-    result.code.indexOf('v-else key="c"'),
-  )
+  expect(result.code.indexOf('</component>')).toBeGreaterThan(result.code.indexOf('v-else key="c"'))
 })
 
 it.each(['Transition', 'TransitionGroup', 'transition', 'transition-group'])(
@@ -111,7 +110,7 @@ it.each([
 
   expect(result.code).toContain(`v-liva:panel.compiled="{ value: (${value}), owner: [0] }"`)
   expect(result.code).toContain('v-liva-target:body.compiled=')
-  expect(result.code).toContain('v-liva-entry=')
+  expect(result.code).toContain(`v-liva="import('${presenceEntryReference}')`)
   expect(result.code).not.toMatch(/v-liva-(owner|lifecycle)/)
   expect(result.code.split(`value: (${value})`).length - 1).toBe(value === 'undefined' ? 2 : 1)
 })
@@ -184,7 +183,7 @@ it('finds native lifecycle owners through non-transition component slots', () =>
   )
 
   expect(result.boundaries).toHaveLength(1)
-  expect(result.code).toContain('<LivaPresenceBoundary')
+  expect(result.code).toContain(presenceBoundaryReference)
 })
 
 it('plans implicit self lifecycle presence without a target directive', () => {
@@ -219,3 +218,18 @@ it.each([false, true])(
     expect(result.code).toContain('v-liva:button.compiled=')
   },
 )
+
+it('preserves authored property spreads and lifecycle hooks on the same element', () => {
+  const result = plan(`
+    <div v-liva:panel>
+      <span v-if="shown" v-liva-target:body v-bind="props" v-bind.liva-presence="extra"
+        @vue:before-mount="onMount" />
+    </div>
+  `)
+
+  expect(result.code).toContain(
+    `v-liva="import('${presenceEntryReference}')(livaBoundary0.item(0))"`,
+  )
+  expect(result.code).toContain('v-bind="props" v-bind.liva-presence="extra"')
+  expect(result.code).toContain('@vue:before-mount="onMount"')
+})

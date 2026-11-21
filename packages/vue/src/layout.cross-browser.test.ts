@@ -1,3 +1,5 @@
+import { LayoutCoordinator } from '@liva/runtime/features/layout/layout-coordinator'
+import { BrowserExecutor } from '@liva/runtime/core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import {
   createApp,
@@ -14,7 +16,6 @@ import {
   type VNode,
 } from 'vue'
 import {
-  LayoutCoordinator,
   PresentationExecutor,
   type Definition,
   type LayoutAxes,
@@ -2343,7 +2344,7 @@ describe('Vue coordinated layout projection', () => {
   it.each([false, true])(
     'keeps target transform ownership separate from absolute-child containing-block changes (initial transform=%s)',
     async (initialTransform) => {
-      const output = vi.spyOn(PresentationExecutor.prototype, 'layoutTransform')
+      const output = vi.spyOn(BrowserExecutor.prototype, 'layoutTransform')
       const width = ref(200)
       const transformed = ref(initialTransform)
       const source: Definition = {
@@ -2673,7 +2674,7 @@ describe('Vue coordinated layout projection', () => {
       await flush()
       const receiver = element(host, `[data-capture="${failing}"]`)
       expect(receiver.style.transform).not.toBe('')
-      const captured = vi.spyOn(PresentationExecutor.prototype, 'capturePresence')
+      const captured = vi.spyOn(BrowserExecutor.prototype, 'capturePresence')
       // The wrapper retains this native method only for explicit .call(this).
       // eslint-disable-next-line typescript/unbound-method
       const set = KeyframeEffect.prototype.setKeyframes
@@ -2760,7 +2761,7 @@ describe('Vue coordinated layout projection', () => {
     // eslint-disable-next-line typescript/unbound-method
     const restore = PresentationExecutor.prototype.layoutTransform
     let fail = true
-    vi.spyOn(PresentationExecutor.prototype, 'layoutTransform').mockImplementation(function (
+    vi.spyOn(BrowserExecutor.prototype, 'layoutTransform').mockImplementation(function (
       this: PresentationExecutor,
       receiver,
       transform,
@@ -2954,7 +2955,7 @@ describe('Vue coordinated layout projection', () => {
     const observeLayout = PresentationExecutor.prototype.layoutMeasure
     // eslint-disable-next-line typescript/unbound-method
     const cancel = Animation.prototype.cancel
-    vi.spyOn(PresentationExecutor.prototype, 'layoutMeasure').mockImplementation(function (
+    vi.spyOn(BrowserExecutor.prototype, 'layoutMeasure').mockImplementation(function (
       this: PresentationExecutor,
       receiver,
       properties,
@@ -3067,7 +3068,7 @@ describe('Vue coordinated layout projection', () => {
     const observeLayout = PresentationExecutor.prototype.layoutMeasure
     // eslint-disable-next-line typescript/unbound-method
     const pause = Animation.prototype.pause
-    vi.spyOn(PresentationExecutor.prototype, 'layoutMeasure').mockImplementation(function (
+    vi.spyOn(BrowserExecutor.prototype, 'layoutMeasure').mockImplementation(function (
       this: PresentationExecutor,
       receiver,
       properties,
