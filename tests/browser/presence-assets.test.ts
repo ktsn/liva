@@ -76,6 +76,20 @@ test('preserves loop bindings and authored props and hooks during v-show leave',
   await expect(row).toBeVisible()
 })
 
+test('runs duplicate authored vnode hooks only once during Presence mount and update', async ({
+  page,
+}) => {
+  await page.goto(base + '?fixture=lexical')
+  const row = page.getByText('Second item', { exact: true })
+
+  await expect(row).toHaveAttribute('data-mounts', '1')
+
+  await page.getByRole('button', { name: 'Hide item' }).click()
+
+  await expect(row).toHaveAttribute('data-updates', '1')
+  await expect(row).toBeHidden()
+})
+
 test('retains Presence after a template hot update contains the old generated name', async ({
   page,
   browserName,

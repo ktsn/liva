@@ -2,6 +2,14 @@
 import { ref, type VNode } from 'vue'
 
 const visible = ref(true)
+const countedHooks = {
+  onVnodeBeforeMount(vnode: VNode) {
+    if (vnode.el instanceof HTMLElement) vnode.el.dataset.mounts = String(Number(vnode.el.dataset.mounts ?? 0) + 1)
+  },
+  onVnodeBeforeUpdate(vnode: VNode) {
+    if (vnode.el instanceof HTMLElement) vnode.el.dataset.updates = String(Number(vnode.el.dataset.updates ?? 0) + 1)
+  },
+}
 const rows = [
   {
     id: 'authored-row',
@@ -21,6 +29,15 @@ const rows = [
     <button @click="visible = !visible">{{ visible ? 'Hide item' : 'Show item' }}</button>
     <ul v-for="$options in rows" :key="$options.id">
       <li v-show="visible" v-liva:departure v-bind="$options.props">First item</li>
+      <li
+        v-show="visible"
+        v-liva:departure
+        :onVnodeBeforeMount="countedHooks.onVnodeBeforeMount"
+        :onVnodeBeforeUpdate="countedHooks.onVnodeBeforeUpdate"
+        v-bind="countedHooks"
+      >
+        Second item
+      </li>
     </ul>
   </main>
 </template>

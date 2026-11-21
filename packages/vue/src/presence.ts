@@ -1,9 +1,7 @@
 import {
   type Component,
-  type VNode,
   defineComponent,
   h,
-  mergeProps,
   onBeforeUnmount,
   Transition,
   TransitionGroup,
@@ -15,29 +13,12 @@ export interface PresenceTarget {
 }
 
 export class PresenceEntry {
-  element?: Element
+  element?: HTMLElement
   beforeMutation?: () => void
   readonly targets = new Set<PresenceTarget>()
   readonly snapshots = new Map<PresenceTarget, PresenceCapture>()
   session?: PresenceOperation
   leaving = false
-
-  private readonly observeElement = (vnode: VNode) => {
-    // The template planner binds only structural native elements. Vue sets el
-    // before both hooks and calls them before the enter/show hooks read it.
-    // eslint-disable-next-line typescript/no-unsafe-type-assertion -- The Vue hook exposes a renderer-agnostic host node.
-    this.element = vnode.el as Element
-  }
-
-  readonly elementHooks = {
-    onVnodeBeforeMount: this.observeElement,
-    onVnodeBeforeUpdate: this.observeElement,
-  }
-
-  /** Adds native entry hooks to authored props using Vue's usual hook ordering. */
-  mergeElementHooks(props: Record<string, unknown>) {
-    return mergeProps(this.elementHooks, props)
-  }
 
   capture(phase: 'enter' | 'leave') {
     const work = [...this.targets].flatMap((target) => {
@@ -157,7 +138,7 @@ export const LivaPresenceBoundary = defineComponent({
   },
 })
 
-/** Connects a native element to a Presence entry in hand-authored render functions. */
+/** Connects the compiler's structural element to its local Presence entry. */
 export const livaEntry: import('vue').ObjectDirective<HTMLElement, PresenceEntry> = {
   created(element, binding) {
     binding.value.element = element
