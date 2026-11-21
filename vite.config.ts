@@ -1,6 +1,7 @@
 import { defineConfig } from '@vizejs/vite-plugin/vite-plus'
 import { defineConfig as defineViteConfig } from 'vite-plus'
 import { playwright } from 'vite-plus/test/browser-playwright'
+import { fileURLToPath } from 'node:url'
 
 const config = defineViteConfig({
   optimizeDeps: {
@@ -44,6 +45,12 @@ const config = defineViteConfig({
   },
 
   test: {
+    // Unit and component coverage follows authored modules. The playground consumes dist.
+    alias: {
+      '@liva/runtime': fileURLToPath(new URL('./packages/runtime/src/index.ts', import.meta.url)),
+      '@liva/vue/runtime': fileURLToPath(new URL('./packages/vue/src/runtime.ts', import.meta.url)),
+      '@liva/vue': fileURLToPath(new URL('./packages/vue/src/index.ts', import.meta.url)),
+    },
     maxWorkers: process.env.CI ? 2 : undefined,
     projects: [
       {

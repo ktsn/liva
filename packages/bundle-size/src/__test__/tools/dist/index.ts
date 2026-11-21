@@ -35,8 +35,9 @@ export async function output(
 ): Promise<unknown> {
   const input = object(config)
   const root = text(input.root)
-  const runtime = text(object(array(object(input.resolve).alias)[0]).replacement)
-  const target = runtime.slice(0, -'/packages/runtime/src/index.ts'.length)
+  const aliases = array(object(input.resolve).alias)
+  const runtime = text(object(aliases[0]).replacement)
+  const vueRuntime = text(object(aliases[1]).replacement)
   const observer = object(array(input.plugins).at(-1))
   const transform = observer.transform
   const generate = observer.generateBundle
@@ -76,7 +77,7 @@ export async function output(
     dynamicImports: options.dynamicImports ?? [],
     modules: options.modules ?? {
       [runtime]: { renderedLength: 10 },
-      [`${target}/packages/vue/src/runtime.ts`]: { renderedLength: 10 },
+      [vueRuntime]: { renderedLength: 10 },
       [`${root}/Button.vue?type=liva`]: { renderedLength: 10 },
       [`${root}/Button.vue`]: { renderedLength: 10 },
       '\0liva:vue-plugin': { renderedLength: 10 },

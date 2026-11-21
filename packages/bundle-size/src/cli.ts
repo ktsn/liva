@@ -53,6 +53,13 @@ export async function prepareRevision(revision: string, destination: string): Pr
   }
 
   run('sh', ['scripts/build-wasm.sh'], destination, env)
+
+  // Historical revisions exposed source directly and have no package build.
+  const { scripts } = object(JSON.parse(await readFile(join(destination, 'package.json'), 'utf8')))
+
+  if (scripts && typeof object(scripts)['build:packages'] === 'string') {
+    run('pnpm', ['build:packages'], destination)
+  }
 }
 
 interface CompareOptions {

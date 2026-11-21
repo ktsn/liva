@@ -2,6 +2,7 @@ import { planPresence, PresenceError } from './presence.ts'
 import { fileURLToPath } from 'node:url'
 import { EditorService } from './editor/communication/server.ts'
 import type { Plugin, Rollup, ViteDevServer } from 'vite-plus'
+import { normalizePath } from 'vite-plus'
 import {
   compile,
   compileSfc,
@@ -13,6 +14,7 @@ import {
 } from './compiler.ts'
 
 type TransformContext = Pick<Rollup.TransformPluginContext, 'error' | 'warn'>
+const editorClient = 'virtual:liva-editor'
 
 export default function liva(): Plugin {
   let server: ViteDevServer | undefined
@@ -103,12 +105,14 @@ export default function liva(): Plugin {
     },
     resolveId(id) {
       if (id === '@liva/vue') return '\0liva:vue-plugin'
+      if (id === editorClient && editor)
+        return normalizePath(fileURLToPath(new URL('./editor.js', import.meta.url)))
+
       return null
     },
     load(id) {
       if (id === '\0liva:vue-plugin' && editor) {
-        const client = '/@fs/' + fileURLToPath(new URL('./editor/client.ts', import.meta.url))
-        return `export * from "@liva/vue/runtime"; import { createDevPlugin } from ${JSON.stringify(client)}; export default createDevPlugin(${JSON.stringify(editor.token)});`
+        return `export * from "@liva/vue/runtime"; import { createDevPlugin } from ${JSON.stringify(editorClient)}; export default createDevPlugin(${JSON.stringify(editor.token)}, import.meta.hot);`
       }
       if (id === '\0liva:vue-plugin')
         return `export * from "@liva/vue/runtime"; import { createLivaPlugin } from '@liva/vue/runtime'; export default createLivaPlugin();`

@@ -20,7 +20,7 @@
     "playground/vite.config.ts",
     "packages/**/*.vue"
   ],
-  "exclude": ["packages/vite/wasm"],
+  "exclude": ["packages/vite/wasm", "packages/*/dist"],
   "contentMappers": [
     {
       "package": "vize",

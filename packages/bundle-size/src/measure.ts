@@ -74,11 +74,15 @@ function isPluginFactory(value: unknown): value is { default: () => Plugin | Plu
   return typeof object(value).default === 'function'
 }
 
-/** Target must have its own frozen dependencies and freshly built compiler WASM. */
+/** Target must have its own frozen dependencies, compiler WASM, and any package build outputs. */
 export async function measure(target: string, sha: string, output?: string): Promise<Measurement> {
   assert.equal(process.versions.node, settings.node, `Use Node ${settings.node}`)
 
   const require = createRequire(join(target, 'package.json'))
+  const playgroundRequire = createRequire(join(target, 'playground/package.json'))
+  const runtime = playgroundRequire.resolve('@liva/runtime')
+  const vueRuntime = playgroundRequire.resolve('@liva/vue/runtime')
+  const plugin = playgroundRequire.resolve('@liva/vite')
   const viteManifest = require.resolve('vite-plus/package.json')
   const builder: unknown = await import(
     pathToFileURL(join(dirname(viteManifest), 'dist/index.js')).href
@@ -86,9 +90,7 @@ export async function measure(target: string, sha: string, output?: string): Pro
   const vuePlugin: unknown = await import(
     pathToFileURL(require.resolve('@vizejs/vite-plugin')).href
   )
-  const livaPlugin: unknown = await import(
-    pathToFileURL(join(target, 'packages/vite/src/index.ts')).href
-  )
+  const livaPlugin: unknown = await import(pathToFileURL(plugin).href)
 
   assert(isBuildApi(builder), 'Unsupported production build API')
   assert(
@@ -137,8 +139,8 @@ export async function measure(target: string, sha: string, output?: string): Pro
       plugins: [livaPlugin.default(), vuePlugin.default(), observe],
       resolve: {
         alias: [
-          { find: '@liva/runtime', replacement: join(target, 'packages/runtime/src/index.ts') },
-          { find: '@liva/vue/runtime', replacement: join(target, 'packages/vue/src/runtime.ts') },
+          { find: '@liva/runtime', replacement: runtime },
+          { find: '@liva/vue/runtime', replacement: vueRuntime },
         ],
       },
       define: { 'process.env.NODE_ENV': '"production"' },
@@ -163,8 +165,8 @@ export async function measure(target: string, sha: string, output?: string): Pro
     )
 
     for (const required of [
-      '/packages/vue/src/',
-      '/packages/runtime/src/',
+      dirname(vueRuntime) + '/',
+      dirname(runtime) + '/',
       'type=liva',
       '/Button.vue',
       'liva:vue-plugin',

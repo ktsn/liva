@@ -12,8 +12,8 @@ declare global {
 const base = 'http://127.0.0.1:4180'
 const file = new URL('../../playground/tests/EditorToggle.vue', import.meta.url)
 
-async function open(page: Page, fixture = false) {
-  await page.goto(fixture ? `${base}/tests/editor.html` : `${base}/tests/pulse-toggle.html`)
+async function open(page: Page, fixture = false, server = base) {
+  await page.goto(fixture ? `${server}/tests/editor.html` : `${server}/tests/pulse-toggle.html`)
   await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
   await expect(page.getByLabel('Playhead')).toBeVisible()
   await page
@@ -525,9 +525,16 @@ test(
 )
 
 test('editor rejects invalid sessions, origins, hosts and oversized requests', async ({ page }) => {
-  await page.goto(base)
-  const module = await (await page.request.get(`${base}/@id/__x00__liva:vue-plugin`)).text()
-  const token = module.match(/createDevPlugin\("([^"]+)"\)/)![1]
+  const inspecting = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' && new URL(request.url()).pathname === '/__liva/editor',
+  )
+
+  await open(page)
+
+  const token = await (await inspecting).headerValue('X-Liva-Session')
+  if (!token) throw new Error('The editor request did not include a session token')
+
   const headers = { 'X-Liva-Session': token, Origin: base, 'Content-Type': 'application/json' }
   for (const invalid of [
     { 'X-Liva-Session': 'invalid' },
@@ -801,6 +808,7 @@ test(
 
 test.describe('editor source HMR', { lock: '-exclusive-' }, () => {
   const componentRoot = '../../packages/vite/src/editor/components/'
+  const editorSourceServer = 'http://127.0.0.1:4182'
   const cases = [
     {
       name: 'parent template',
@@ -845,7 +853,7 @@ test.describe('editor source HMR', { lock: '-exclusive-' }, () => {
       page.on('pageerror', (error) => errors.push(error.message))
 
       try {
-        await open(page)
+        await open(page, false, editorSourceServer)
         await track(page, 'thumb', 'scale')
         await page.getByLabel('Track duration', { exact: true }).fill('700')
         await page.getByRole('button', { name: 'Apply timing', exact: true }).click()

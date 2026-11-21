@@ -11,7 +11,8 @@
     "test:compatibility": "vp test --run --project cross-browser-firefox --project cross-browser-webkit --coverage.enabled=false",
     "test:browser": "playwright test",
     "verify": "sh scripts/verify.sh",
-    "build": "pnpm --dir playground build",
+    "build": "pnpm build:packages && pnpm --dir playground build",
+    "build:packages": "node scripts/build-packages.ts",
     "typecheck": "tsc --runExternalCode --noEmit && tsc --runExternalCode --noEmit -p playground/tsconfig.json",
     "size:measure": "node packages/bundle-size/src/cli.ts measure",
     "size:compare": "node packages/bundle-size/src/cli.ts compare"

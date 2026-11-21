@@ -21,5 +21,11 @@ export default defineConfig({
       url: 'http://127.0.0.1:4180',
       reuseExistingServer: !process.env.CI,
     },
+    {
+      command:
+        'cd playground && vp dev --mode editor-source --host 127.0.0.1 --port 4182 --strictPort',
+      url: 'http://127.0.0.1:4182',
+      reuseExistingServer: !process.env.CI,
+    },
   ],
 })

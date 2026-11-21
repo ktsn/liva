@@ -64,6 +64,7 @@ describe('Vite compilation hooks', () => {
 
     expect(call('config')).toEqual({ optimizeDeps: { exclude: ['@liva/vue'] } })
     expect(call('resolveId', '@liva/vue')).toBe('\0liva:vue-plugin')
+    expect(call('resolveId', 'virtual:liva-editor')).toBeNull()
     expect(call('resolveId', './other')).toBeNull()
     expect(call('load', './other')).toBeNull()
     expect(call('load', '\0liva:vue-plugin')).toContain('createLivaPlugin()')
@@ -150,7 +151,8 @@ describe('Vite compilation hooks', () => {
     const { call, warnings } = hooks()
     const events = development(call)
 
-    expect(call('load', '\0liva:vue-plugin')).toContain('createDevPlugin')
+    expect(call('resolveId', 'virtual:liva-editor')).toMatch(/\/editor\.js$/)
+    expect(call('load', '\0liva:vue-plugin')).toContain('import.meta.hot')
 
     await call('transform', source, file)
     const first = await call('transform', block, `${file}?vue&type=liva`)

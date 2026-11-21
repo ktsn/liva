@@ -4,14 +4,19 @@ import { createEditorTransport, subscribeToEditorEvents } from './communication/
 import { EditorController } from './controller.ts'
 import { mountEditor } from './ui.ts'
 
-export function createDevPlugin(token: string) {
+/** The consuming dev server provides the session token and the virtual module's HMR context. */
+export function createDevPlugin(token: string, hot: ImportMeta['hot']) {
   const controller = new EditorController(createEditorTransport(token))
-  mountEditor(controller)
-  const unsubscribe = subscribeToEditorEvents({
+  const unmount = mountEditor(controller)
+  const unsubscribe = subscribeToEditorEvents(hot, {
     sourceChanged: (sourceId) => controller.sourceChanged(sourceId),
     diagnostics: (sourceId, message) => controller.reportSourceDiagnostics(sourceId, message),
   })
-  import.meta.hot?.dispose(unsubscribe)
+  hot?.dispose(() => {
+    unsubscribe()
+    unmount()
+  })
+
   Object.assign(window, { __LIVA_EDITOR__: controller })
   return createLivaPlugin({
     source: (component) => component.livaSource,

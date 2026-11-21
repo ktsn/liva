@@ -13,9 +13,5 @@ export function mountEditor(controller: EditorController) {
   host.dataset.livaEditor = ''
   document.body.append(host)
 
-  import.meta.hot?.dispose(
-    /* v8 ignore next -- @preserve: Vite owns module-disposal dispatch; the callback only removes its host. */ () => {
-      host.remove()
-    },
-  )
+  return () => host.remove()
 }

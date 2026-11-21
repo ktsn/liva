@@ -44,7 +44,11 @@ const keyOf = (node: Element) => {
 }
 const attr = (value: string) => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;')
 
-export function planPresence(source: string, filename: string, definitions: readonly Definition[]) {
+export function planPresence(
+  source: string,
+  filename: string,
+  definitions: readonly Definition[],
+): { code: string; map: ReturnType<MagicString['generateMap']>; boundaries: PresenceBoundary[] } {
   const { descriptor } = parse(source, { filename })
   const ast = descriptor.template?.ast
   const output = new MagicString(source)

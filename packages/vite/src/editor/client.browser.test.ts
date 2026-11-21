@@ -1,4 +1,4 @@
-import { expect, it } from 'vite-plus/test'
+import { assert, expect, it, vi } from 'vite-plus/test'
 import { createApp, defineComponent, h, nextTick, resolveDirective, withDirectives } from 'vue'
 import fixture from '../../../../fixtures/toggle.json'
 import { decodeBundle } from '@liva/runtime'
@@ -8,7 +8,7 @@ import { subscribeToEditorEvents } from './communication/client.ts'
 
 it('mounts the development editor and observes real component lifetimes', async () => {
   const definition = decodeBundle(JSON.stringify(fixture)).definitions[0]
-  const plugin = createDevPlugin('session')
+  const plugin = createDevPlugin('session', import.meta.hot)
   const registered = customElements.get('liva-motion-editor')
   const url = new URL('/packages/vite/src/editor/ui.ts?registration', window.location.href).href
 
@@ -49,7 +49,7 @@ it('mounts the development editor and observes real component lifetimes', async 
   controller.selected = [...controller.entries.values()][0]
 
   const received: string[] = []
-  const unsubscribe = subscribeToEditorEvents({
+  const unsubscribe = subscribeToEditorEvents(import.meta.hot, {
     sourceChanged: (id) => received.push(id),
     diagnostics: (_id, message) => received.push(message),
   })
@@ -72,4 +72,28 @@ it('mounts the development editor and observes real component lifetimes', async 
 
   host.remove()
   document.querySelector('liva-motion-editor')!.remove()
+})
+
+it('removes the editor host and unsubscribes when Vite disposes the virtual module', () => {
+  const hot = import.meta.hot
+  assert(hot)
+
+  const dispose = vi.spyOn(hot, 'dispose')
+  const off = vi.spyOn(hot, 'off')
+
+  try {
+    createDevPlugin('session', hot)
+    const host = document.querySelector('liva-motion-editor')
+    const registration = dispose.mock.calls[0]
+    assert(host && registration)
+
+    registration[0](hot.data)
+
+    expect(host.isConnected).toBe(false)
+    expect(off).toHaveBeenCalledWith('liva:source-changed', expect.any(Function))
+    expect(off).toHaveBeenCalledWith('liva:diagnostics', expect.any(Function))
+  } finally {
+    off.mockRestore()
+    dispose.mockRestore()
+  }
 })

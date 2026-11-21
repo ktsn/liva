@@ -2,8 +2,17 @@
   "name": "@liva/vite",
   "version": "0.1.0",
   "private": true,
+  "files": [
+    "dist",
+    "wasm"
+  ],
   "type": "module",
-  "exports": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "dependencies": {
     "@liva/runtime": "workspace:*",
     "@liva/vue": "workspace:*",

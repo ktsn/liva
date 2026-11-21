@@ -1,17 +1,17 @@
 import { defineConfig } from '@vizejs/vite-plugin/vite-plus'
 import VueRouter from 'vue-router/vite'
 import liva from '@liva/vite'
-import { fileURLToPath } from 'node:url'
 import { globSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Plugin } from 'vite-plus'
-import { normalizePath } from 'vite-plus'
+import { fileURLToPath } from 'node:url'
+import { normalizePath, type Plugin } from 'vite-plus'
 
+const editorRoot = new URL('../packages/vite/src/editor/', import.meta.url)
 const editorWatch: Plugin = {
   name: 'playground-editor-watch',
   enforce: 'pre',
   configureServer(server) {
-    const root = fileURLToPath(new URL('../packages/vite/src/editor', import.meta.url))
+    const root = fileURLToPath(editorRoot)
 
     // Vize's root-external SFC loads do not register individual files with the watcher.
     server.watcher.add([
@@ -20,11 +20,7 @@ const editorWatch: Plugin = {
     ])
   },
   hotUpdate({ file, timestamp }) {
-    const root = normalizePath(
-      fileURLToPath(new URL('../packages/vite/src/editor/', import.meta.url)),
-    )
-
-    if (!file.startsWith(root)) return
+    if (!file.startsWith(normalizePath(fileURLToPath(editorRoot)))) return
 
     // Custom-element styles are inline imports; invalidate them before the SFC reloads.
     for (const module of this.environment.moduleGraph.idToModuleMap.values()) {
@@ -36,8 +32,20 @@ const editorWatch: Plugin = {
 }
 
 export default defineConfig(
-  {
-    plugins: [VueRouter({ dts: false }), liva(), editorWatch],
+  ({ command, mode }) => {
+    const plugins = [VueRouter({ dts: false }), liva()]
+
+    if (command !== 'serve' || mode !== 'editor-source') return { plugins }
+
+    return {
+      plugins: [...plugins, editorWatch],
+      cacheDir: 'node_modules/.vite-editor-source',
+      resolve: {
+        alias: {
+          'virtual:liva-editor': fileURLToPath(new URL('client.ts', editorRoot)),
+        },
+      },
+    }
   },
   { tasks: false },
 )

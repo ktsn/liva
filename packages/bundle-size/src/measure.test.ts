@@ -19,6 +19,7 @@ const target = fileURLToPath(new URL('./__test__/tools/target', import.meta.url)
 const tools = fileURLToPath(new URL('./__test__/tools', import.meta.url))
 const sha = 'a'.repeat(40)
 let files: Map<string, string | Buffer<ArrayBuffer>>
+let entryDirectory: 'src' | 'dist'
 const argv = process.argv
 
 beforeEach(() => {
@@ -26,6 +27,7 @@ beforeEach(() => {
   configure((config) => output(config))
   setVue(() => ({ name: 'vue' }))
   setLiva(() => ({ name: 'liva' }))
+  entryDirectory = 'src'
   files = new Map<string, string | Buffer<ArrayBuffer>>([
     [
       join(target, 'package.json'),
@@ -44,6 +46,13 @@ beforeEach(() => {
     const require = actualModule.createRequire(import.meta.url)
     const resolve = Object.assign(
       vi.fn((id: string) => {
+        const extension = entryDirectory === 'src' ? 'ts' : 'js'
+
+        if (id === '@liva/runtime')
+          return join(target, 'packages/runtime', entryDirectory, `index.${extension}`)
+        if (id === '@liva/vue/runtime')
+          return join(target, 'packages/vue', entryDirectory, `runtime.${extension}`)
+        if (id === '@liva/vite') return join(target, 'packages/vite/src/index.ts')
         if (id === 'vite-plus/package.json') return join(tools, 'package.json')
         if (id === '@vizejs/vite-plugin') return join(tools, 'vue.ts')
         if (id === 'vue/package.json') return join(target, 'vue/package.json')
@@ -105,6 +114,18 @@ describe('production measurement', () => {
     expect(text(modules?.[1])).not.toContain(target)
     expect(text(modules?.[1])).not.toContain('/unused.ts')
     expect(rm).toHaveBeenCalledWith('/fixture', { recursive: true, force: true })
+  })
+
+  it('measures the prebuilt runtime and Vue paths when the target exports JavaScript', async () => {
+    entryDirectory = 'dist'
+
+    await measure(target, sha, '/output')
+
+    const modules = vi
+      .mocked(writeFile)
+      .mock.calls.find(([path]) => path === '/output/modules.json')
+    expect(text(modules?.[1])).toContain('<target>/packages/runtime/dist/index.js')
+    expect(text(modules?.[1])).toContain('<target>/packages/vue/dist/runtime.js')
   })
 
   it('detects output growth/removal and dependency changes without relying on cached results', async () => {
