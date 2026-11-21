@@ -200,6 +200,15 @@ importers:
         specifier: 0.778.0
         version: 0.778.0(vue@3.5.45(typescript@7.1.0-dev.20261117.1))
 
+  packages/bundle-size:
+    devDependencies:
+      '@liva/vue':
+        specifier: workspace:*
+        version: link:../vue
+      vue:
+        specifier: ^3.5.45
+        version: 3.5.45(typescript@7.1.0-dev.20261117.1)
+
   packages/runtime: {}
 
   packages/vite:
