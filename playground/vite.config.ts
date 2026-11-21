@@ -1,12 +1,43 @@
 import { defineConfig } from '@vizejs/vite-plugin/vite-plus'
 import VueRouter from 'vue-router/vite'
-import liva from '@liva/vite'
 import { globSync } from 'node:fs'
+import { createRequire, registerHooks } from 'node:module'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { normalizePath, type Plugin } from 'vite-plus'
+import sourceConfig from '../tsconfig.sources.json' with { type: 'json' }
 
-const editorRoot = new URL('../packages/vite/src/editor/', import.meta.url)
+const { paths } = sourceConfig.compilerOptions
+const workspace = new URL('../', import.meta.url)
+const runtimeSource = new URL(paths['@liva/runtime'][0], workspace)
+const viteEntry = new URL(paths['@liva/vite'][0], workspace)
+const viteSource = new URL('./', viteEntry)
+const editorRoot = new URL('editor/', viteEntry)
+const require = createRequire(import.meta.url)
+
+function loadLivaPlugin(source: boolean) {
+  const entry = source ? fileURLToPath(viteEntry) : '@liva/vite'
+
+  // Vite's browser aliases only apply after Node has loaded the compiler plugin.
+  const hooks = source
+    ? registerHooks({
+        resolve(id, context, nextResolve) {
+          if (id === '@liva/runtime' && context.parentURL?.startsWith(viteSource.href))
+            return nextResolve(runtimeSource.href, context)
+
+          return nextResolve(id, context)
+        },
+      })
+    : undefined
+
+  try {
+    const { default: liva }: { default: () => Plugin } = require(entry)
+    return liva()
+  } finally {
+    hooks?.deregister()
+  }
+}
+
 const editorWatch: Plugin = {
   name: 'playground-editor-watch',
   enforce: 'pre',
@@ -33,14 +64,17 @@ const editorWatch: Plugin = {
 
 export default defineConfig(
   ({ command, isPreview }) => {
-    const plugins = [VueRouter({ dts: false }), liva()]
+    const source = command === 'serve' && !isPreview
+    const plugins = [VueRouter({ dts: false }), loadLivaPlugin(source)]
 
-    if (command !== 'serve' || isPreview) return { plugins }
+    if (!source) return { plugins }
 
     return {
       plugins: [...plugins, editorWatch],
       resolve: {
         alias: {
+          '@liva/runtime': fileURLToPath(runtimeSource),
+          '@liva/vue/runtime': fileURLToPath(new URL(paths['@liva/vue/runtime'][0], workspace)),
           'virtual:liva-editor': fileURLToPath(new URL('client.ts', editorRoot)),
         },
       },
