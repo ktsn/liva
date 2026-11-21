@@ -9,6 +9,6 @@
   },
   "devDependencies": {
     "@liva/vue": "workspace:*",
-    "vue": "^3.5.45"
+    "vue": "3.5.45"
   }
 }
