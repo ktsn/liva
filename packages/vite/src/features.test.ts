@@ -118,7 +118,7 @@ describe('compiled feature imports', () => {
 
     expect(features.timings).toEqual(new Set(['tween', 'cubicBezier']))
     expect(features.constants).toEqual(new Set(['easeIn', 'easeOut']))
-    expect(generated.imports).toContain('import { LivaPresenceBoundary }')
+    expect(generated.imports).toContain('import { PresenceBindings }')
   })
 
   it.each([

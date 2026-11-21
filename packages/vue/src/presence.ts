@@ -3,6 +3,7 @@ import {
   type VNode,
   defineComponent,
   h,
+  mergeProps,
   onBeforeUnmount,
   Transition,
   TransitionGroup,
@@ -31,6 +32,11 @@ export class PresenceEntry {
   readonly elementHooks = {
     onVnodeBeforeMount: this.observeElement,
     onVnodeBeforeUpdate: this.observeElement,
+  }
+
+  /** Adds native entry hooks to authored props using Vue's usual hook ordering. */
+  mergeElementHooks(props: Record<string, unknown>) {
+    return mergeProps(this.elementHooks, props)
   }
 
   capture(phase: 'enter' | 'leave') {
@@ -151,7 +157,7 @@ export const LivaPresenceBoundary = defineComponent({
   },
 })
 
-/** Connects the compiler's structural element to its local Presence entry. */
+/** Connects a native element to a Presence entry in hand-authored render functions. */
 export const livaEntry: import('vue').ObjectDirective<HTMLElement, PresenceEntry> = {
   created(element, binding) {
     binding.value.element = element

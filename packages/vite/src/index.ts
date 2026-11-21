@@ -1,4 +1,5 @@
 import { planPresence, PresenceError } from './presence.ts'
+import { presenceReferencePlugin } from './presence-reference.ts'
 import { fileURLToPath } from 'node:url'
 import { emitFeatures } from './features.ts'
 import { EditorService } from './editor/communication/server.ts'
@@ -19,7 +20,7 @@ const fullVue = '@liva/vue/runtime'
 
 type TransformContext = Pick<Rollup.TransformPluginContext, 'error' | 'warn'>
 
-export default function liva(): Plugin {
+export default function liva(): [Plugin, Plugin] {
   let server: ViteDevServer | undefined
   let editor: EditorService | undefined
   const valid = new Map<string, SourceSnapshot>()
@@ -108,9 +109,7 @@ export default function liva(): Plugin {
       ? `component.livaSource = ${JSON.stringify(await editor.register(file))};`
       : ''
     const features = emitFeatures(result.definitions)
-    const assets = features.presence
-      ? 'component.livaPresenceBoundary = LivaPresenceBoundary; component.livaPresenceBindings = PresenceBindings;'
-      : ''
+    const assets = features.presence ? 'component.livaPresenceBindings = PresenceBindings;' : ''
 
     return {
       code: [
@@ -126,7 +125,7 @@ export default function liva(): Plugin {
     }
   }
 
-  return {
+  const compiler: Plugin = {
     name: 'liva',
     enforce: 'pre',
     config() {
@@ -139,8 +138,6 @@ export default function liva(): Plugin {
     },
     async resolveId(id) {
       if (id === '@liva/vue') return '\0liva:vue-plugin'
-      if (id === 'liva:vue/compiled')
-        return this.resolve(compiledVue, pluginEntry, { skipSelf: true })
       if (id === compiledVue || id === fullVue)
         return this.resolve(id, pluginEntry, { skipSelf: true })
 
@@ -164,10 +161,10 @@ export default function liva(): Plugin {
     load(id) {
       if (id === '\0liva:vue-plugin' && editor) {
         const client = '/@fs/' + fileURLToPath(new URL('./editor/client.ts', import.meta.url))
-        return `export * from "@liva/vue/runtime"; import { createDevPlugin } from ${JSON.stringify(client)}; export default createDevPlugin(${JSON.stringify(editor.token)});`
+        return `export * from "${fullVue}"; import { createDevPlugin } from ${JSON.stringify(client)}; export default createDevPlugin(${JSON.stringify(editor.token)});`
       }
       if (id === '\0liva:vue-plugin')
-        return `export * from "@liva/vue/runtime"; import { createCompiledLivaPlugin } from 'liva:vue/compiled'; export default createCompiledLivaPlugin();`
+        return `export * from "${fullVue}"; import { createCompiledLivaPlugin } from '${compiledVue}'; export default createCompiledLivaPlugin();`
       return null
     },
     async transform(code, id) {
@@ -228,4 +225,6 @@ export default function liva(): Plugin {
       return undefined
     },
   }
+
+  return [compiler, presenceReferencePlugin]
 }

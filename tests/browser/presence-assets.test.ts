@@ -50,8 +50,30 @@ test('retains a leaving row beside its author-registered component', async ({ pa
 
 test('retains leave with an authored custom-block attribute', async ({ page }) => {
   await page.goto(base + '?fixture=attribute')
+  await expect(
+    page.getByRole('heading', { name: 'Presence with an authored block attribute' }),
+  ).toBeVisible()
 
   await removeFirstItem(page)
+})
+
+test('preserves loop bindings and authored props and hooks during v-show leave', async ({
+  page,
+}) => {
+  await page.goto(base + '?fixture=lexical')
+  const row = page.getByText('First item', { exact: true })
+
+  await expect(row).toHaveAttribute('title', 'Scoped value')
+  await expect(row).toHaveAttribute('data-authored-mount', 'true')
+
+  await page.getByRole('button', { name: 'Hide item' }).click()
+
+  await expect.poll(() => row.evaluate((element) => element.getAnimations().length)).toBe(1)
+  await expect(row).toBeHidden()
+  await expect(row).toHaveCount(1)
+
+  await page.getByRole('button', { name: 'Show item' }).click()
+  await expect(row).toBeVisible()
 })
 
 test('retains Presence after a template hot update contains the old generated name', async ({
