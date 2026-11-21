@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import liva from './index.ts'
+import { compileScript, compileTemplate, parse } from '@vue/compiler-sfc'
 import type { Plugin } from 'vite-plus'
 
 let root: string
@@ -66,11 +67,21 @@ describe('Vite compilation hooks', () => {
   it('resolves feature imports from the same entry as Vue core', async () => {
     const { call, resolve } = hooks()
     const compiled = '/packages/vue/src/compiled.ts'
-    resolve.mockResolvedValueOnce({ id: compiled }).mockResolvedValueOnce({ id: compiled })
+    resolve.mockImplementation(async (specifier) => ({
+      id: specifier === '@liva/vue/compiled' ? compiled : specifier,
+    }))
 
-    expect(call('config')).toEqual({ optimizeDeps: { exclude: ['@liva/vue'] } })
+    expect(call('config')).toEqual({
+      optimizeDeps: { exclude: ['@liva/vue', '@liva/vue/compiled', '@liva/vue/runtime'] },
+    })
     expect(await call('resolveId', '@liva/vue')).toBe('\0liva:vue-plugin')
     expect(await call('resolveId', '@liva/vue/compiled')).toEqual({ id: compiled })
+    expect(await call('resolveId', 'liva:vue/compiled')).toEqual({ id: compiled })
+    const anchor = resolve.mock.calls.at(-1)?.[1]
+
+    await call('resolveId', '@liva/vue/runtime')
+    expect(resolve.mock.calls.at(-1)?.slice(0, 2)).toEqual(['@liva/vue/runtime', anchor])
+
     await call('resolveId', 'liva:runtime/motion/spring-playback')
 
     expect(resolve.mock.calls.at(-1)?.slice(0, 2)).toEqual([
@@ -252,30 +263,48 @@ it('registers Presence assets in the component emitted for a lifecycle block', a
     `${file}?vue&type=liva`,
   )
 
-  expect(loader.code).toContain(
-    '"LivaCompiledPresenceBoundary": LivaPresenceBoundary, ...component.components',
-  )
-  expect(loader.code).toContain('"livaCompiledEntry": livaEntry, ...component.directives')
+  expect(loader.code).toContain('component.livaPresenceBoundary = LivaPresenceBoundary')
+  expect(loader.code).toContain('component.livaPresenceBindings = PresenceBindings')
+  expect(loader.code).not.toMatch(/component\.(components|directives)/)
 })
 
-it('carries a free Presence name from the template into its custom block loader', async () => {
+it('links Presence independently of escaped setup bindings and authored custom-block attributes', async () => {
   const { call } = hooks()
   const lifecycle = 'motion fade { layer base { opacity: 1 } @tween() leave { opacity: 0 } }'
-  const authored = `<script setup>
-    const LivaCompiledPresenceBoundary = {}
-    const vLivaCompiledEntry1 = {}
+  const authored = String.raw`<script setup>
+    const \u004civaCompiledPresenceBoundary = {}
+    const v\u004civaCompiledEntry = {}
   </script>
-  <template><div v-if="true" v-liva:fade /></template>
-  <liva lang="liva">${lifecycle}</liva>`
+  <template>
+    <LivaCompiledPresenceBoundary v-liva-compiled-entry />
+    <div v-if="true" v-liva:fade />
+  </template>
+  <liva lang="liva" liva-presence-index="4">${lifecycle}</liva>`
 
   const planned = await call('transform', authored, file)
-  const loader = await call('transform', lifecycle, `${file}?vue&type=liva&liva-presence-index=2`)
+  const { descriptor, errors } = parse(planned.code, { filename: file })
 
-  expect(planned.code).toContain('<LivaCompiledPresenceBoundary2 ')
-  expect(planned.code).toContain('v-liva-compiled-entry2=')
-  expect(planned.code).toContain('liva-presence-index="2"')
-  expect(loader.code).toContain('"LivaCompiledPresenceBoundary2": LivaPresenceBoundary')
-  expect(loader.code).toContain('"livaCompiledEntry2": livaEntry')
+  expect(errors).toEqual([])
+  expect(descriptor.customBlocks[0].attrs['liva-presence-index']).toBe('4')
+
+  const script = compileScript(descriptor, { id: file })
+  const template = compileTemplate({
+    filename: file,
+    id: file,
+    source: descriptor.template!.content,
+    compilerOptions: { bindingMetadata: script.bindings },
+  })
+
+  expect(template.errors).toEqual([])
+  expect(template.code).toContain('$setup["LivaCompiledPresenceBoundary"]')
+  expect(template.code).toContain('$setup["vLivaCompiledEntry"]')
+  expect(template.code).toContain('_resolveDynamicComponent(_ctx.$options.livaPresenceBoundary)')
+  expect(template.code).toContain('livaBoundary0.item(0).elementHooks')
+
+  const loader = await call('transform', lifecycle, `${file}?vue&type=liva`)
+  expect(await call('transform', lifecycle, `${file}?vue&type=liva&liva-presence-index=4`)).toEqual(
+    loader,
+  )
 })
 
 it('retains the accepted template and loader after structural Presence validation rejects HMR', async () => {
@@ -297,6 +326,6 @@ it('retains the accepted template and loader after structural Presence validatio
   const corrected = `<template><div v-if="true" v-liva:fade /></template><liva>${lifecycle}</liva>`
 
   expect(await call('handleHotUpdate', { file, read: async () => corrected })).toBeUndefined()
-  expect((await call('transform', corrected, file)).code).toContain('LivaCompiledPresenceBoundary')
+  expect((await call('transform', corrected, file)).code).toContain('$options.livaPresenceBoundary')
   expect((await call('transform', lifecycle, loader)).code).toContain('PresenceExecution')
 })

@@ -236,7 +236,7 @@ export function emitFeatures(definitions: readonly Definition[]) {
 
     if (features.presence) {
       use('liva:runtime/execution/presence-execution', 'PresenceExecution')
-      use('liva:vue/presence', 'LivaPresenceBoundary', 'livaEntry')
+      use('liva:vue/presence', 'LivaPresenceBoundary')
       use('liva:vue/presence-bindings', 'PresenceBindings')
       executor.push('presence: PresenceExecution')
     }

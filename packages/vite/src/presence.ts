@@ -6,35 +6,6 @@ type Root = NonNullable<ReturnType<typeof parse>['descriptor']['template']>['ast
 type Element = ElementNode
 type Directive = DirectiveNode
 
-/** Internal custom-block attribute carrying the SFC's unused local asset names. */
-export const presenceAliasAttribute = 'liva-presence-index'
-
-export function generatedPresence(suffix = 0) {
-  const index = suffix === 0 ? '' : String(suffix)
-
-  return {
-    component: `LivaCompiledPresenceBoundary${index}`,
-    directive: `livaCompiledEntry${index}`,
-    attribute: `v-liva-compiled-entry${index}`,
-  }
-}
-
-function presenceAliasIndex(source: string) {
-  // Both Pascal/camel and kebab names can be resolved by Vue. Check the authored
-  // template and script together, including names bound lexically by script setup.
-  const authored = source.toLowerCase().replaceAll('-', '')
-  let index = 0
-
-  while (true) {
-    const { component, directive } = generatedPresence(index)
-
-    if (!authored.includes(component.toLowerCase()) && !authored.includes(directive.toLowerCase()))
-      return index
-
-    index++
-  }
-}
-
 export interface PresenceBoundary {
   id: number
   operation: 'if' | 'for' | 'show' | 'mount'
@@ -77,8 +48,6 @@ export function planPresence(source: string, filename: string, definitions: read
   const { descriptor } = parse(source, { filename })
   const ast = descriptor.template?.ast
   const output = new MagicString(source)
-  const aliasIndex = definitions.some(hasLifecycle) ? presenceAliasIndex(source) : 0
-  const assets = generatedPresence(aliasIndex)
   const paths = new Map<Element, Element[]>()
   const chains = new Map<Element, Element[]>()
   const roots = new Map<Element, { id: number; definition: Definition }>()
@@ -326,23 +295,22 @@ export function planPresence(source: string, filename: string, definitions: read
   for (const [owner, boundary] of boundaries) {
     const members = chains.get(owner) ?? [owner]
     for (const member of members) {
-      add(member, ` ${assets.attribute}="${attr(entryExpression(owner, member))}"`)
+      // A separate object binding lets Vue merge the registration hooks with
+      // authored vnode hooks and prop spreads. The modifier only distinguishes
+      // this attribute from any authored argument-less v-bind.
+      const bindings = new Set(member.props.map((prop) => prop.loc.source.split('=')[0]?.trim()))
+      let name = 'v-bind.liva-presence'
+
+      while (bindings.has(name)) name += '.entry'
+
+      add(member, ` ${name}="${attr(entryExpression(owner, member) + '.elementHooks')}"`)
     }
+
     output.prependLeft(
       boundary.range.start,
-      `<${assets.component} :group="${boundary.operation === 'for'}" :persisted="${boundary.operation === 'show'}" v-slot="livaBoundary${boundary.id}">`,
+      `<component :is="$options.livaPresenceBoundary" :group="${boundary.operation === 'for'}" :persisted="${boundary.operation === 'show'}" v-slot="livaBoundary${boundary.id}">`,
     )
-    output.appendRight(boundary.range.end, `</${assets.component}>`)
-  }
-
-  if (aliasIndex !== 0) {
-    const block = descriptor.customBlocks.find(({ type }) => type === 'liva')
-
-    if (block) {
-      // The block request carries the same names as the template. A collision
-      // added by a template-only edit changes the Vue custom-block fingerprint.
-      output.appendLeft(block.loc.start.offset - 1, ` ${presenceAliasAttribute}="${aliasIndex}"`)
-    }
+    output.appendRight(boundary.range.end, '</component>')
   }
 
   return {

@@ -42,7 +42,7 @@ interface Variant {
   readonly motion?: string
   readonly includes: readonly string[]
   readonly preserveSymlinks?: boolean
-  readonly directVue?: boolean
+  readonly entry?: 'compiled' | 'full' | 'named'
 }
 
 const variants: Record<string, Variant> = {
@@ -82,7 +82,25 @@ const variants: Record<string, Variant> = {
     }`,
     includes: optional.layout,
     preserveSymlinks: true,
-    directVue: true,
+    entry: 'compiled',
+  },
+  'named full plugin and compiled Motions with preserved symlinks': {
+    motion: `motion fade(active: boolean) {
+      @tween(duration: 200, easing: linear)
+      layer base { button { $layout: position } }
+    }`,
+    includes: Object.values(optional).flat(),
+    preserveSymlinks: true,
+    entry: 'full',
+  },
+  'named Vue re-export and compiled Motions with preserved symlinks': {
+    motion: `motion fade(active: boolean) {
+      @tween(duration: 200, easing: linear)
+      layer base { button { $layout: position } }
+    }`,
+    includes: Object.values(optional).flat(),
+    preserveSymlinks: true,
+    entry: 'named',
   },
   'spring with local Presence': {
     motion: `motion fade(active: boolean) {
@@ -102,24 +120,27 @@ export async function assertProductionFeatures() {
     await cp(fixture, root, { recursive: true })
     const file = join(root, 'Button.vue')
     const original = await readFile(file, 'utf8')
-    const entry = join(root, 'main.ts')
-    const originalEntry = await readFile(entry, 'utf8')
+    const entryFile = join(root, 'main.ts')
+    const originalEntry = await readFile(entryFile, 'utf8')
 
-    for (const [name, { motion, includes, preserveSymlinks, directVue }] of Object.entries(
-      variants,
-    )) {
-      if (motion)
-        await writeFile(file, original.replace(/motion fade[\s\S]*?(?=<\/liva>)/, motion + '\n'))
+    for (const [name, { motion, includes, preserveSymlinks, entry }] of Object.entries(variants)) {
+      await writeFile(
+        file,
+        motion ? original.replace(/motion fade[\s\S]*?(?=<\/liva>)/, motion + '\n') : original,
+      )
+
+      const vueImport = {
+        compiled: "import { createCompiledLivaPlugin as factory } from '@liva/vue/compiled'",
+        full: "import { createLivaPlugin as factory } from '@liva/vue/runtime'",
+        named: "import { createLivaPlugin as factory } from '@liva/vue'",
+      }
 
       await writeFile(
-        entry,
-        directVue
+        entryFile,
+        entry
           ? originalEntry
-              .replace(
-                "import liva from '@liva/vue'",
-                "import { createCompiledLivaPlugin } from '@liva/vue/compiled'",
-              )
-              .replace('.use(liva)', '.use(createCompiledLivaPlugin())')
+              .replace("import liva from '@liva/vue'", vueImport[entry])
+              .replace('.use(liva)', '.use(factory())')
           : originalEntry,
       )
 
@@ -139,13 +160,25 @@ export async function assertProductionFeatures() {
             `${name} should include core`,
           )
 
-          for (const shared of ['/evaluation/expression.ts', '/layout/geometry-animations.ts']) {
+          for (const shared of [
+            '/evaluation/expression.ts',
+            '/layout/geometry-animations.ts',
+            '/execution/browser-executor.ts',
+          ]) {
             assert.equal(
               modules.filter((id) => id.endsWith(shared)).length,
               1,
               `${name} should include one ${shared}`,
             )
           }
+
+          const layoutWrites = '/layout/layout-write-phase.ts'
+
+          assert.equal(
+            modules.filter((id) => id.endsWith(layoutWrites)).length,
+            includes.includes('/layout-write-phase.ts') ? 1 : 0,
+            `${name} should share the layout write phase`,
+          )
 
           for (const included of includes) {
             assert(
@@ -164,7 +197,6 @@ export async function assertProductionFeatures() {
           }
         },
       }
-      const resolveVueRuntime = new URL('../packages/vue/src/runtime.ts', import.meta.url).pathname
 
       const configure = defineConfig(
         {
@@ -173,7 +205,6 @@ export async function assertProductionFeatures() {
           logLevel: 'error',
           plugins: [liva(), observe],
           resolve: {
-            alias: [{ find: '@liva/vue/runtime', replacement: resolveVueRuntime }],
             preserveSymlinks,
           },
           build: {
@@ -181,7 +212,7 @@ export async function assertProductionFeatures() {
             minify: 'oxc',
             write: false,
             rolldownOptions: {
-              input: entry,
+              input: entryFile,
               external: ['vue'],
             },
           },

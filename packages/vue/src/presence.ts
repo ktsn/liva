@@ -1,5 +1,6 @@
 import {
   type Component,
+  type VNode,
   defineComponent,
   h,
   onBeforeUnmount,
@@ -13,12 +14,24 @@ export interface PresenceTarget {
 }
 
 export class PresenceEntry {
-  element?: HTMLElement
+  element?: Element
   beforeMutation?: () => void
   readonly targets = new Set<PresenceTarget>()
   readonly snapshots = new Map<PresenceTarget, PresenceCapture>()
   session?: PresenceOperation
   leaving = false
+
+  private readonly observeElement = (vnode: VNode) => {
+    // The template planner binds only structural native elements. Vue sets el
+    // before both hooks and calls them before the enter/show hooks read it.
+    // eslint-disable-next-line typescript/no-unsafe-type-assertion -- The Vue hook exposes a renderer-agnostic host node.
+    this.element = vnode.el as Element
+  }
+
+  readonly elementHooks = {
+    onVnodeBeforeMount: this.observeElement,
+    onVnodeBeforeUpdate: this.observeElement,
+  }
 
   capture(phase: 'enter' | 'leave') {
     const work = [...this.targets].flatMap((target) => {
