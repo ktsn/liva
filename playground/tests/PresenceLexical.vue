@@ -4,10 +4,12 @@ import { ref, type VNode } from 'vue'
 const visible = ref(true)
 const countedHooks = {
   onVnodeBeforeMount(vnode: VNode) {
-    if (vnode.el instanceof HTMLElement) vnode.el.dataset.mounts = String(Number(vnode.el.dataset.mounts ?? 0) + 1)
+    if (vnode.el instanceof HTMLElement)
+      vnode.el.dataset.mounts = String(Number(vnode.el.dataset.mounts ?? 0) + 1)
   },
   onVnodeBeforeUpdate(vnode: VNode) {
-    if (vnode.el instanceof HTMLElement) vnode.el.dataset.updates = String(Number(vnode.el.dataset.updates ?? 0) + 1)
+    if (vnode.el instanceof HTMLElement)
+      vnode.el.dataset.updates = String(Number(vnode.el.dataset.updates ?? 0) + 1)
   },
 }
 const rows = [
