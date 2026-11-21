@@ -1,3 +1,5 @@
+import { trackLayoutStyleSource } from './style-observation.ts'
+import { isLayoutStyleProperty } from './style-properties.ts'
 import { LayoutReadBatch } from './layout-bounds.ts'
 import { releaseResources } from '../evaluation/resource-cleanup.ts'
 
@@ -355,6 +357,10 @@ export function registerLayoutRead(
 
 /** Only Liva-managed layout effects opt into per-frame invalidation. */
 export function trackLayoutAnimation(element: HTMLElement, property: string, animation: Animation) {
+  if (isLayoutStyleProperty(property)) {
+    trackLayoutStyleSource(element, animation)
+    return
+  }
   if (visualProperties.has(property)) return
 
   const document = element.ownerDocument

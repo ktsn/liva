@@ -420,8 +420,8 @@ disables automatic projection and child compensation on that target. Ordinary CS
 transform is temporarily overridden while automatic projection owns the target.
 A CSS rotation can disappear during projection and return when it completes. Release
 reveals the current stylesheet/inline values, including edits made while animating.
-A CSS transform transition on that owned target can be interrupted; transitions of
-other properties and unprojected ancestors retain their ordinary ownership.
+A CSS transition on a temporarily corrected property can be interrupted; unrelated
+properties and unprojected ancestors retain their ordinary ownership.
 Changing that hidden target transform alone does not restart its own layout motion;
 changes to the natural containing block of absolute descendants remain layout changes.
 Width, height, translate and scale do not participate in conflict detection or
@@ -464,6 +464,24 @@ The collector may use temporary observation effects under the existing style own
 authored ancestor effects, declarations, selectors and scroll state retain their
 ownership. Browser coordinate rounding still applies, especially when transformed
 bounds must be recovered without neutralizing important ancestor presentation.
+
+Corner radii and box shadows are corrected from current, uncorrected CSS, including
+ordinary Liva animations. Participating children use their cumulative generated
+distortion; inherited parent values are observed without parent correction. Radius
+percentages use the natural destination border box. Source CSS edits refresh the
+baseline without adding a CSS-value animation. Liva radius/shadow effects keep their
+native handles and clocks; paused values are reused until their clock or source changes.
+Other CSS/third-party animations follow the usual update/invalidation snapshots.
+
+Corner correction preserves local ellipse semiaxes under axis scaling before CSS's
+final overlap reduction. A CSS ellipse cannot exactly undo genuine shear; that
+representation limit does not restrict supported 2D box projection. Shadow offsets
+use the full inverse linear map. Blur and spread use an area-preserving approximation:
+for x/y scales, divide their radius by the geometric mean of those scales. Unequal
+scales and shear can therefore leave radial distortion. If a browser-computed visual
+group cannot be decoded or represented (for example, an unresolved radius `round()`),
+that group keeps its underlying CSS while valid box projection and other visual
+corrections continue. A later fresh source snapshot can restore its correction.
 
 Only Vue mutation transactions start automatic motion. Window resizing, image/font
 completion and external DOM/CSS layout changes refresh geometry without starting it;

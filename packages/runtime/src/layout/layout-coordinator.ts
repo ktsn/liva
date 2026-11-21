@@ -1,3 +1,4 @@
+import { observeLayoutStyles } from './style-observation.ts'
 import {
   layoutConstraintPhases,
   layoutConstraintSources,
@@ -536,29 +537,64 @@ export class LayoutCoordinator {
     if (released && this.motions.size > 0)
       this.installFrames([...this.motions.values()].map((motion) => motion.candidate))
 
-    batchLayoutWrites(() => {
-      for (const [element, motion] of this.motions) {
-        const parent = parentMotion(element, this.motions)
-        const output = projectionShapeTransform(
-          sample(motion, time).shape,
-          motion.frame.box,
-          motion.frame.frame,
-          parent?.cumulative,
-          motion.frame.origin,
-        )
+    const settled: { element: HTMLElement; motion: Motion }[] = []
+    const outputs: {
+      element: HTMLElement
+      motion: Motion
+      output: Extract<ReturnType<typeof projectionShapeTransform>, { kind: 'projection' }>
+    }[] = []
 
-        if (output.kind === 'settle') {
-          this.motions.delete(element)
-          motion.candidate.participant.layoutTransform(element, undefined)
-        } else {
-          motion.cumulative = output.cumulative
-          motion.candidate.participant.layoutTransform(
-            element,
-            output.transform,
-            motion.constraints,
-          )
-        }
+    for (const [element, motion] of this.motions) {
+      const parent = parentMotion(element, this.motions)
+      const output = projectionShapeTransform(
+        sample(motion, time).shape,
+        motion.frame.box,
+        motion.frame.frame,
+        parent?.cumulative,
+        motion.frame.origin,
+      )
+
+      if (output.kind === 'settle') {
+        this.motions.delete(element)
+        settled.push({ element, motion })
+      } else {
+        motion.cumulative = output.cumulative
+        outputs.push({ element, motion, output })
       }
+    }
+
+    batchLayoutWrites(() => {
+      for (const { element, motion } of settled)
+        motion.candidate.participant.layoutTransform(element, undefined)
+    })
+
+    const observations = outputs.flatMap(({ element, motion }) => {
+      const observation = motion.candidate.participant.layoutStyleObservation(
+        element,
+        motion.destination.box.width,
+        motion.destination.box.height,
+      )
+      return observation ? [observation] : []
+    })
+    observeLayoutStyles(
+      observations.map((observation) => observation.element),
+      () => {
+        for (const observation of observations) observation.read()
+      },
+    )
+
+    batchLayoutWrites(() => {
+      for (const { element, motion, output } of outputs)
+        motion.candidate.participant.layoutTransform(
+          element,
+          output.transform,
+          motion.constraints,
+          {
+            width: motion.destination.box.width,
+            height: motion.destination.box.height,
+            distortion: output.distortion,
+          },
+        )
     })
   }
 
