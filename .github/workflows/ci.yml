@@ -87,6 +87,9 @@ jobs:
       - name: Test WASM contract
         run: node scripts/test-wasm.ts
 
+      - name: Build JavaScript packages
+        run: pnpm build:packages
+
       - name: Check TypeScript, lint and formatting
         run: pnpm check
 
@@ -134,6 +137,9 @@ jobs:
         with:
           name: browser-test-wasm
           path: packages/vite/wasm/
+
+      - name: Build JavaScript packages
+        run: pnpm build:packages
 
       - name: Install browser and system dependencies
         env:

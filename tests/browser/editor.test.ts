@@ -61,6 +61,22 @@ async function save(page: Page) {
   await expectMessage(page, 'All shared instances are synchronized')
 }
 
+test('loads the prebuilt editor with its shadow-root styles', async ({ page }) => {
+  await page.goto('/tests/browser/')
+  await page.addScriptTag({
+    type: 'module',
+    content: `
+      import { createDevPlugin } from '/packages/vite/dist/editor.js'
+      createDevPlugin('unused', undefined)
+    `,
+  })
+
+  await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
+
+  await expect(page.getByRole('region', { name: 'Liva motion editor' })).toBeVisible()
+  await expect(page.locator('[data-liva-editor] .editor')).toHaveCSS('position', 'fixed')
+})
+
 test('docked timeline scrubs both ways, isolates instances, and yields to application state', async ({
   page,
 }) => {
@@ -525,9 +541,16 @@ test(
 )
 
 test('editor rejects invalid sessions, origins, hosts and oversized requests', async ({ page }) => {
-  await page.goto(base)
-  const module = await (await page.request.get(`${base}/@id/__x00__liva:vue-plugin`)).text()
-  const token = module.match(/createDevPlugin\("([^"]+)"\)/)![1]
+  const inspecting = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' && new URL(request.url()).pathname === '/__liva/editor',
+  )
+
+  await open(page)
+
+  const token = await (await inspecting).headerValue('X-Liva-Session')
+  if (!token) throw new Error('The editor request did not include a session token')
+
   const headers = { 'X-Liva-Session': token, Origin: base, 'Content-Type': 'application/json' }
   for (const invalid of [
     { 'X-Liva-Session': 'invalid' },

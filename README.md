@@ -22,6 +22,15 @@ Open the URL printed in the terminal. Rebuild WASM after Rust compiler changes a
 before dependent tests or builds. The `wasm-bindgen-cli` version must match
 `crates/liva_wasm/Cargo.toml`; the generated artifact targets Node.js.
 
+The Playground dev server loads the Liva packages from their TypeScript sources
+and watches the editor's Vue components and styles for HMR. Restart the dev
+server after changing the Vite plugin or the runtime code it uses to compile
+motions.
+
+For distribution, `pnpm build:packages` runs `vp pack` in dependency order to emit
+JavaScript and TypeScript declarations for each package.
+`@liva/vite` also uses `vp build` to embed the editor's styles in its custom element.
+
 Open **Motion editor** to select an instance, edit its timeline and preview changes.
 **Save to source** updates the component's `<liva>` block and synchronizes shared
 instances through HMR, which may reload Vue state. Saves retain original files in
@@ -70,7 +79,9 @@ sh scripts/verify.sh
 
 On Linux, install browser system dependencies with
 `pnpm exec playwright install --with-deps`. Ports 4179–4181 must be available.
-Individual checks:
+
+To run `pnpm check`, Playwright, or the production verification on its own,
+build the compiler WASM and run `pnpm build:packages` first.
 
 | Check                             | Command                                                          |
 | --------------------------------- | ---------------------------------------------------------------- |

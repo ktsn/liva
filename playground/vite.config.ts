@@ -1,17 +1,48 @@
 import { defineConfig } from '@vizejs/vite-plugin/vite-plus'
 import VueRouter from 'vue-router/vite'
-import liva from '@liva/vite'
-import { fileURLToPath } from 'node:url'
 import { globSync } from 'node:fs'
+import { createRequire, registerHooks } from 'node:module'
 import { join } from 'node:path'
-import type { Plugin } from 'vite-plus'
-import { normalizePath } from 'vite-plus'
+import { fileURLToPath } from 'node:url'
+import { normalizePath, type Plugin } from 'vite-plus'
+import sourceConfig from '../tsconfig.sources.json' with { type: 'json' }
+
+const { paths } = sourceConfig.compilerOptions
+const workspace = new URL('../', import.meta.url)
+const runtimeSource = new URL(paths['@liva/runtime'][0], workspace)
+const viteEntry = new URL(paths['@liva/vite'][0], workspace)
+const viteSource = new URL('./', viteEntry)
+const editorRoot = new URL('editor/', viteEntry)
+const require = createRequire(import.meta.url)
+
+function loadLivaPlugin(source: boolean) {
+  const entry = source ? fileURLToPath(viteEntry) : '@liva/vite'
+
+  // Vite's browser aliases only apply after Node has loaded the compiler plugin.
+  const hooks = source
+    ? registerHooks({
+        resolve(id, context, nextResolve) {
+          if (id === '@liva/runtime' && context.parentURL?.startsWith(viteSource.href))
+            return nextResolve(runtimeSource.href, context)
+
+          return nextResolve(id, context)
+        },
+      })
+    : undefined
+
+  try {
+    const { default: liva }: { default: () => Plugin } = require(entry)
+    return liva()
+  } finally {
+    hooks?.deregister()
+  }
+}
 
 const editorWatch: Plugin = {
   name: 'playground-editor-watch',
   enforce: 'pre',
   configureServer(server) {
-    const root = fileURLToPath(new URL('../packages/vite/src/editor', import.meta.url))
+    const root = fileURLToPath(editorRoot)
 
     // Vize's root-external SFC loads do not register individual files with the watcher.
     server.watcher.add([
@@ -20,11 +51,7 @@ const editorWatch: Plugin = {
     ])
   },
   hotUpdate({ file, timestamp }) {
-    const root = normalizePath(
-      fileURLToPath(new URL('../packages/vite/src/editor/', import.meta.url)),
-    )
-
-    if (!file.startsWith(root)) return
+    if (!file.startsWith(normalizePath(fileURLToPath(editorRoot)))) return
 
     // Custom-element styles are inline imports; invalidate them before the SFC reloads.
     for (const module of this.environment.moduleGraph.idToModuleMap.values()) {
@@ -36,8 +63,22 @@ const editorWatch: Plugin = {
 }
 
 export default defineConfig(
-  {
-    plugins: [VueRouter({ dts: false }), liva(), editorWatch],
+  ({ command, isPreview }) => {
+    const source = command === 'serve' && !isPreview
+    const plugins = [VueRouter({ dts: false }), loadLivaPlugin(source)]
+
+    if (!source) return { plugins }
+
+    return {
+      plugins: [...plugins, editorWatch],
+      resolve: {
+        alias: {
+          '@liva/runtime': fileURLToPath(runtimeSource),
+          '@liva/vue/runtime': fileURLToPath(new URL(paths['@liva/vue/runtime'][0], workspace)),
+          'virtual:liva-editor': fileURLToPath(new URL('client.ts', editorRoot)),
+        },
+      },
+    }
   },
   { tasks: false },
 )

@@ -16,6 +16,8 @@ import {
 declare module 'vue' {
   interface ComponentCustomOptions {
     livaDefinitions?: readonly Definition[]
+    /** Opaque source identity attached by the Vite development plugin. */
+    livaSource?: string
   }
 }
 

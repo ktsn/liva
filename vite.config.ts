@@ -1,6 +1,8 @@
 import { defineConfig } from '@vizejs/vite-plugin/vite-plus'
 import { defineConfig as defineViteConfig } from 'vite-plus'
 import { playwright } from 'vite-plus/test/browser-playwright'
+import { fileURLToPath } from 'node:url'
+import sourceConfig from './tsconfig.sources.json' with { type: 'json' }
 
 const config = defineViteConfig({
   optimizeDeps: {
@@ -44,6 +46,13 @@ const config = defineViteConfig({
   },
 
   test: {
+    // Unit and component coverage follows authored modules.
+    alias: Object.fromEntries(
+      Object.entries(sourceConfig.compilerOptions.paths).map(([name, [entry]]) => [
+        name,
+        fileURLToPath(new URL(entry, import.meta.url)),
+      ]),
+    ),
     maxWorkers: process.env.CI ? 2 : undefined,
     projects: [
       {
@@ -123,6 +132,8 @@ const config = defineViteConfig({
       provider: 'v8',
       include: ['packages/**/*.{ts,vue}'],
       exclude: [
+        // Package build settings are exercised by the package builds in CI.
+        'packages/*/vite.config.ts',
         // These files are measurement inputs compiled by each target revision, not tooling modules.
         'packages/bundle-size/fixture/**',
         'packages/**/*.test.ts',

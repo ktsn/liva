@@ -20,6 +20,7 @@ const originalExitCode = process.exitCode
 const base = 'a'.repeat(40)
 const head = 'b'.repeat(40)
 let manifest: string
+let scripts: Record<string, string> | undefined
 let installed: ReturnType<typeof spawnSync>
 let workerFailure: unknown
 let failDirectory: string
@@ -31,6 +32,7 @@ beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.spyOn(console, 'log').mockImplementation(() => {})
   manifest = 'wasm-bindgen = "=0.2.130"'
+  scripts = undefined
   installed = {
     pid: 1,
     output: [],
@@ -55,6 +57,7 @@ beforeEach(() => {
   vi.mocked(readFile).mockImplementation(async (path) => {
     const name = text(path)
     if (name.endsWith('Cargo.toml')) return manifest
+    if (name.endsWith('package.json')) return JSON.stringify({ scripts })
     if (name.endsWith('pins.json')) return JSON.stringify(pins)
     if (name === '/event.json')
       return JSON.stringify({
@@ -113,6 +116,23 @@ describe('revision preparation', () => {
       expect.objectContaining({ cwd: '/revisions/head' }),
     )
     expect(execFileSync).not.toHaveBeenCalledWith('cargo', expect.anything(), expect.anything())
+    expect(execFileSync).not.toHaveBeenCalledWith('pnpm', ['build:packages'], expect.anything())
+  })
+
+  it('builds a revision’s JavaScript packages after generating its compiler WASM', async () => {
+    scripts = { 'build:packages': 'vp run -t @liva/vite#build' }
+
+    await prepareRevision(head, '/revisions/head')
+
+    expect(
+      vi
+        .mocked(execFileSync)
+        .mock.calls.slice(-2)
+        .map(([command, args]) => [command, args]),
+    ).toEqual([
+      ['sh', ['scripts/build-wasm.sh']],
+      ['pnpm', ['build:packages']],
+    ])
   })
 
   it.each([false, true])(

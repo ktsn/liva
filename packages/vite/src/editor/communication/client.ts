@@ -24,11 +24,13 @@ export function createEditorTransport(token: string) {
   }
 }
 
-export function subscribeToEditorEvents(handlers: {
-  sourceChanged: (sourceId: string) => void
-  diagnostics: (sourceId: string, message: string) => void
-}) {
-  const hot = import.meta.hot
+export function subscribeToEditorEvents(
+  hot: ImportMeta['hot'],
+  handlers: {
+    sourceChanged: (sourceId: string) => void
+    diagnostics: (sourceId: string, message: string) => void
+  },
+) {
   const sourceChanged = ({ sourceId }: { sourceId: string }) => handlers.sourceChanged(sourceId)
   const diagnostics = (event: { sourceId?: string; diagnostics: { message: string }[] }) => {
     if (event.sourceId)

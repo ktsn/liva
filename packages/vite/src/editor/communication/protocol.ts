@@ -33,12 +33,6 @@ export interface EditorReply extends Inspection {
   sequence?: number
 }
 
-declare module 'vue' {
-  interface ComponentCustomOptions {
-    livaSource?: string
-  }
-}
-
 function isEdit(value: unknown): value is Edit {
   if (!isRecord(value)) return false
   if (typeof value.path !== 'string') return false
