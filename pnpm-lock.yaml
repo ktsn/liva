@@ -206,7 +206,7 @@ importers:
         specifier: workspace:*
         version: link:../vue
       vue:
-        specifier: ^3.5.45
+        specifier: 3.5.45
         version: 3.5.45(typescript@7.1.0-dev.20261118.1)
 
   packages/runtime: {}
