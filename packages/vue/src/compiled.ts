@@ -1,3 +1,4 @@
+import type { LivaPresenceBoundary } from './presence.ts'
 import type { PresenceBinding, PresenceBindings } from './presence-bindings.ts'
 import type { createLayoutSession } from './layout.ts'
 import type { App, ComponentCustomOptions, DirectiveBinding, ObjectDirective, Plugin } from 'vue'
@@ -23,6 +24,7 @@ declare module 'vue' {
     livaSource?: string
     livaDefinitions?: readonly Definition[]
     livaFeatures?: Readonly<Record<string, CompiledMotionFeatures>>
+    livaPresenceBoundary?: typeof LivaPresenceBoundary
     livaPresenceBindings?: typeof PresenceBindings
   }
 }

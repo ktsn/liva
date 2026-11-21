@@ -1,9 +1,4 @@
-import {
-  planPresence,
-  PresenceError,
-  generatedPresence,
-  presenceAliasAttribute,
-} from './presence.ts'
+import { planPresence, PresenceError } from './presence.ts'
 import { fileURLToPath } from 'node:url'
 import { emitFeatures } from './features.ts'
 import { EditorService } from './editor/communication/server.ts'
@@ -21,6 +16,7 @@ import {
 
 const pluginEntry = fileURLToPath(import.meta.url)
 const compiledVue = '@liva/vue/compiled'
+const fullVue = '@liva/vue/runtime'
 
 type TransformContext = Pick<Rollup.TransformPluginContext, 'error' | 'warn'>
 const editorClient = 'virtual:liva-editor'
@@ -87,7 +83,6 @@ export default function liva(): Plugin {
     code: string,
     file: string,
     id: string,
-    presenceIndex: number,
   ) => {
     const previous = blocks.get(file)
     const rejected = rejectedPresence.get(file) === code
@@ -115,13 +110,8 @@ export default function liva(): Plugin {
       ? `component.livaSource = ${JSON.stringify(await editor.register(file))};`
       : ''
     const features = emitFeatures(result.definitions)
-    const names = generatedPresence(presenceIndex)
     const assets = features.presence
-      ? [
-          `component.components = { ${JSON.stringify(names.component)}: LivaPresenceBoundary, ...component.components };`,
-          `component.directives = { ${JSON.stringify(names.directive)}: livaEntry, ...component.directives };`,
-          'component.livaPresenceBindings = PresenceBindings;',
-        ].join(' ')
+      ? 'component.livaPresenceBoundary = LivaPresenceBoundary; component.livaPresenceBindings = PresenceBindings;'
       : ''
 
     return {
@@ -142,7 +132,7 @@ export default function liva(): Plugin {
     name: 'liva',
     enforce: 'pre',
     config() {
-      return { optimizeDeps: { exclude: ['@liva/vue'] } }
+      return { optimizeDeps: { exclude: ['@liva/vue', compiledVue, fullVue] } }
     },
     configureServer(devServer) {
       server = devServer
@@ -154,8 +144,10 @@ export default function liva(): Plugin {
       if (id === editorClient && editor)
         return normalizePath(fileURLToPath(new URL('./editor.js', import.meta.url)))
 
-      if (id === 'liva:vue/compiled' || id === compiledVue)
+      if (id === 'liva:vue/compiled')
         return this.resolve(compiledVue, pluginEntry, { skipSelf: true })
+      if (id === compiledVue || id === fullVue)
+        return this.resolve(id, pluginEntry, { skipSelf: true })
 
       const feature = /^liva:(runtime|vue)\/([a-zA-Z0-9/-]+)$/.exec(id)
 
@@ -193,9 +185,7 @@ export default function liva(): Plugin {
 
       if (!parameters.has('vue') || parameters.get('type') !== 'liva') return undefined
 
-      const presenceIndex = Number(parameters.get(presenceAliasAttribute) ?? 0)
-
-      return transformBlock(this, code, file, id, presenceIndex)
+      return transformBlock(this, code, file, id)
     },
     async handleHotUpdate(context) {
       if (!context.file.endsWith('.vue')) return undefined
