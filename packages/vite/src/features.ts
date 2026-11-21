@@ -236,7 +236,6 @@ export function emitFeatures(definitions: readonly Definition[]) {
 
     if (features.presence) {
       use('liva:runtime/execution/presence-execution', 'PresenceExecution')
-      use('liva:vue/presence', 'LivaPresenceBoundary')
       use('liva:vue/presence-bindings', 'PresenceBindings')
       executor.push('presence: PresenceExecution')
     }
@@ -251,6 +250,6 @@ export function emitFeatures(definitions: readonly Definition[]) {
       .map(([path, names]) => `import { ${[...names].join(', ')} } from ${JSON.stringify(path)};`)
       .join('\n'),
     motions: `{ ${motions.join(', ')} }`,
-    presence: imports.has('liva:vue/presence'),
+    presence: imports.has('liva:vue/presence-bindings'),
   }
 }

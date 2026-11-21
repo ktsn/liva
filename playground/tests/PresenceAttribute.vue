@@ -2,11 +2,12 @@
 import { ref } from 'vue'
 
 const visible = ref(true)
+const $options = { heading: 'Presence with an authored block attribute' }
 </script>
 
 <template>
   <main>
-    <h1>Presence with an authored block attribute</h1>
+    <h1>{{ $options.heading }}</h1>
     <button @click="visible = !visible">Remove first item</button>
     <ul>
       <li v-if="visible" v-liva:departure>First item</li>

@@ -1,6 +1,7 @@
 import { expect, it } from 'vite-plus/test'
 import { compileSfc } from './compiler.ts'
 import { planPresence, PresenceError } from './presence.ts'
+import { presenceReference } from './presence-reference.ts'
 
 const block = `<liva>
 motion panel {
@@ -28,7 +29,7 @@ it('deduplicates shared boundaries and plans each nested structural operation', 
 
   expect(result.boundaries.map((boundary) => boundary.operation)).toEqual(['if', 'for'])
   expect(result.boundaries.map((boundary) => boundary.targets.length)).toEqual([2, 2])
-  expect(result.code.match(/<component :is="\$options.livaPresenceBoundary"/g)).toHaveLength(2)
+  expect(result.code.match(/liva:internal-presence-boundary/g)).toHaveLength(2)
   expect(result.code).toContain(':key="item.id"')
   expect(result.code).toContain('livaBoundary1.item(item.id)')
   expect(result.map.sources).toEqual(['Panel.vue'])
@@ -43,7 +44,7 @@ it('wraps the whole conditional chain while retaining listeners and authored key
   </div>`)
 
   expect(result.boundaries).toHaveLength(1)
-  expect(result.code.match(/<component :is="\$options.livaPresenceBoundary"/g)).toHaveLength(1)
+  expect(result.code.match(/liva:internal-presence-boundary/g)).toHaveLength(1)
   expect(result.code).toContain('@click="act"')
   expect(result.code).toContain('key="a"')
   expect(result.code.indexOf('</component>')).toBeGreaterThan(result.code.indexOf('v-else key="c"'))
@@ -182,7 +183,7 @@ it('finds native lifecycle owners through non-transition component slots', () =>
   )
 
   expect(result.boundaries).toHaveLength(1)
-  expect(result.code).toContain('<component :is="$options.livaPresenceBoundary"')
+  expect(result.code).toContain(presenceReference)
 })
 
 it('plans implicit self lifecycle presence without a target directive', () => {
@@ -221,12 +222,14 @@ it.each([false, true])(
 it('preserves authored property spreads and lifecycle hooks on the same element', () => {
   const result = plan(`
     <div v-liva:panel>
-      <span v-if="shown" v-liva-target:body v-bind="props" v-bind.liva-presence="extra"
+      <span v-if="shown" v-liva-target:body v-bind.liva-presence="props" v-bind="extra"
         @vue:before-mount="onMount" />
     </div>
   `)
 
-  expect(result.code).toContain('v-bind.liva-presence.entry="livaBoundary0.item(0).elementHooks"')
-  expect(result.code).toContain('v-bind="props" v-bind.liva-presence="extra"')
+  expect(result.code).toContain(
+    'v-bind.liva-presence="livaBoundary0.item(0).mergeElementHooks((props))"',
+  )
+  expect(result.code).toContain('v-bind="extra"')
   expect(result.code).toContain('@vue:before-mount="onMount"')
 })

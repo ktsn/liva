@@ -1,5 +1,6 @@
 import { NodeTypes, ElementTypes, type ElementNode, type DirectiveNode } from '@vue/compiler-core'
 import { MagicString, parse } from '@vue/compiler-sfc'
+import { presenceReference } from './presence-reference.ts'
 import { hasLifecycle, lifecycleTransitions, ROOT_TARGET, type Definition } from '@liva/runtime'
 
 type Root = NonNullable<ReturnType<typeof parse>['descriptor']['template']>['ast']
@@ -299,20 +300,33 @@ export function planPresence(
   for (const [owner, boundary] of boundaries) {
     const members = chains.get(owner) ?? [owner]
     for (const member of members) {
-      // A separate object binding lets Vue merge the registration hooks with
-      // authored vnode hooks and prop spreads. The modifier only distinguishes
-      // this attribute from any authored argument-less v-bind.
-      const bindings = new Set(member.props.map((prop) => prop.loc.source.split('=')[0]?.trim()))
-      let name = 'v-bind.liva-presence'
+      const entry = entryExpression(owner, member)
+      const spread = member.props.find(
+        (prop) => prop.type === NodeTypes.DIRECTIVE && prop.name === 'bind' && !prop.arg,
+      )
 
-      while (bindings.has(name)) name += '.entry'
+      if (
+        spread?.type === NodeTypes.DIRECTIVE &&
+        spread.exp?.type === NodeTypes.SIMPLE_EXPRESSION
+      ) {
+        // Keep a single object binding. Vize may emit only the first spread
+        // on a native node with no explicit props.
+        const modifiers = spread.modifiers.map((modifier) => `.${modifier.content}`).join('')
+        const binding = attr(`${entry}.mergeElementHooks((${spread.exp.content}))`)
 
-      add(member, ` ${name}="${attr(entryExpression(owner, member) + '.elementHooks')}"`)
+        output.overwrite(
+          spread.loc.start.offset,
+          spread.loc.end.offset,
+          `v-bind${modifiers}="${binding}"`,
+        )
+      } else {
+        add(member, ` v-bind.liva-presence="${attr(entry + '.elementHooks')}"`)
+      }
     }
 
     output.prependLeft(
       boundary.range.start,
-      `<component :is="$options.livaPresenceBoundary" :group="${boundary.operation === 'for'}" :persisted="${boundary.operation === 'show'}" v-slot="livaBoundary${boundary.id}">`,
+      `<component :is="import('${presenceReference}')" :group="${boundary.operation === 'for'}" :persisted="${boundary.operation === 'show'}" v-slot="livaBoundary${boundary.id}">`,
     )
     output.appendRight(boundary.range.end, '</component>')
   }

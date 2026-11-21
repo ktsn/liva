@@ -100,6 +100,8 @@ async function mount(persisted: boolean, group = false, motion = definition, roo
       const root = resolveDirective('liva')!
       const target = resolveDirective('liva-target')!
 
+      const entryDirective = persisted ? undefined : resolveDirective('liva-entry')!
+
       return () =>
         withDirectives(
           h('section', [
@@ -127,12 +129,12 @@ async function mount(persisted: boolean, group = false, motion = definition, roo
                         { compiled: true },
                       ])
 
+                    const props = { key, 'data-revision': revision.value }
+
+                    if (entryDirective) directives.push([entryDirective, entry])
+
                     const node = withDirectives(
-                      h(
-                        'div',
-                        { ...entry.elementHooks, key, 'data-revision': revision.value },
-                        'content',
-                      ),
+                      h('div', entryDirective ? props : entry.mergeElementHooks(props), 'content'),
                       directives,
                     )
 
