@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { readFile, writeFile } from 'node:fs/promises'
 
-const file = new URL('../../playground/src/Toggle.vue', import.meta.url)
+const file = new URL('../../playground/src/components/Toggle.vue', import.meta.url)
 const base = 'http://127.0.0.1:4180'
 
 // Saving shared sources also affects pages that only read them through the dev server.
