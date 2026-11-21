@@ -59,7 +59,7 @@ createApp(App).use(liva).mount('#app')
 ```
 
 See complete component examples in
-[Toggle.vue](playground/src/Toggle.vue) and [drag.vue](playground/src/pages/drag.vue).
+[Toggle.vue](playground/src/components/Toggle.vue) and [drag.vue](playground/src/pages/drag.vue).
 
 ## Verification
 

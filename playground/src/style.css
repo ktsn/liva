@@ -88,6 +88,8 @@ a:focus-visible {
   max-inline-size: 864px;
   min-inline-size: 0;
   padding: 40px 48px;
+  /* Keep final focused controls clear of the fixed development editor launcher. */
+  padding-block-end: 96px;
   margin-inline: auto;
 }
 
@@ -149,6 +151,7 @@ h1 {
 
   .demo-content {
     padding: 24px 16px;
+    padding-block-end: 96px;
   }
 
   .demo-stage {
