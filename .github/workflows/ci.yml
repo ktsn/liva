@@ -90,13 +90,28 @@ jobs:
       - name: Build JavaScript packages
         run: pnpm build:packages
 
-      - name: Verify the Vite package includes the compiler and editor
+      - name: Verify package contents
+        shell: bash
         run: |
-          pnpm --dir packages/vite pack --dry-run --json | jq -e '
-            [.files[].path] as $files
-            | ["dist/editor.js", "wasm/liva_wasm.js", "wasm/liva_wasm_bg.wasm", "wasm/package.json"]
-            | all(.[]; . as $path | $files | index($path) != null)
-          '
+          for name in runtime vue vite; do
+            pnpm --dir "packages/$name" pack --dry-run --json |
+              jq --slurpfile package "packages/$name/package.json" '
+                [.files[].path] as $files
+                | $package[0] as $manifest
+                | [
+                    ($manifest.exports | .. | strings | ltrimstr("./")),
+                    (if $manifest.name == "@liva/vite" then
+                      "dist/editor.js", "wasm/liva_wasm.js", "wasm/liva_wasm_bg.wasm", "wasm/package.json"
+                    else empty end)
+                  ] as $required
+                | ($required | map(. as $path | select($files | index($path) == null))) as $missing
+                | ($files | map(select(startswith("src/") or endswith(".vue")
+                    or (endswith(".ts") and (endswith(".d.ts") | not))))) as $sources
+                | if ($missing | length) > 0 then error("Missing packed files: " + ($missing | join(", ")))
+                  elif ($sources | length) > 0 then error("Unexpected packed sources: " + ($sources | join(", ")))
+                  else empty end
+              '
+          done
 
       - name: Check TypeScript, lint and formatting
         run: pnpm check
