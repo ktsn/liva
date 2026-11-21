@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import liva from './index.ts'
 import { compileScript, compileTemplate, parse } from '@vue/compiler-sfc'
 import { parseAst, type Plugin } from 'vite-plus'
-import { presenceReference } from './presence-reference.ts'
+import { presenceBoundaryReference, presenceEntryReference } from './presence-reference.ts'
 
 let root: string
 let file: string
@@ -307,10 +307,12 @@ it('links Presence independently of escaped setup bindings and authored custom-b
 
   expect(linked.code).toContain('_resolveDynamicComponent(livaPresenceBoundary)')
   expect(linked.code).toContain(
-    "import { LivaPresenceBoundary as livaPresenceBoundary } from 'liva:vue/presence'",
+    "import { LivaPresenceBoundary as livaPresenceBoundary, livaEntry as livaPresenceEntry } from 'liva:vue/presence'",
   )
-  expect(linked.code).not.toContain(presenceReference)
-  expect(template.code).toContain('livaBoundary0.item(0).elementHooks')
+  expect(linked.code).toMatch(/livaPresenceEntry,\s*livaBoundary0.item\(0\)/)
+  expect(linked.code).not.toContain(presenceEntryReference)
+  expect(linked.code).not.toContain(presenceBoundaryReference)
+  expect(template.code).toContain(presenceEntryReference)
 
   const loader = await call('transform', lifecycle, `${file}?vue&type=liva`)
   expect(await call('transform', lifecycle, `${file}?vue&type=liva&liva-presence-index=4`)).toEqual(
@@ -326,7 +328,7 @@ const \u006civaPresenceBoundary = label
 const livaPresenceBoundary_ = import('./component.js')
 const load = (path) => import(path)
 `
-    const marker = `import('${presenceReference}')`
+    const marker = `import('${presenceBoundaryReference}')`
     const render = `render([${marker}, ${marker}])`
 
     const linked = await call('transform', authored + render, file)
@@ -340,9 +342,52 @@ const load = (path) => import(path)
     expect(() => parseAst(linked.code)).not.toThrow()
   })
 
+  it('links Vue production renders in script-setup submodules', async () => {
+    const { call } = hooks(liva()[1])
+    const value = `import('${presenceEntryReference}')(scope.item(7))`
+    const code = `const directive = resolveDirective('liva')
+export const rendered = makeVNode([[directive, ${value}], [directive, { user: 1 }]])`
+
+    const linked = await call('transform', code, `${file}?vue&type=script&setup=true&lang.ts`)
+
+    expect(linked.code).toContain('[livaPresenceEntry, scope.item(7)]')
+    expect(linked.code).toContain('[directive, { user: 1 }]')
+    expect(linked.code).not.toContain(presenceEntryReference)
+    expect(() => parseAst(linked.code)).not.toThrow()
+  })
+
+  it('links Vue server-rendered directive operands and fallback client slots', async () => {
+    const compiler = hooks()
+    const linker = hooks(liva()[1])
+    const lifecycle = 'motion fade { layer base { opacity: 1 } @tween() leave { opacity: 0 } }'
+    const authored = `<template><div v-show="true" v-liva:fade/></template><liva>${lifecycle}</liva>`
+
+    const planned = await compiler.call('transform', authored, file)
+    const { descriptor } = parse(planned.code, { filename: file })
+    const template = compileTemplate({
+      filename: file,
+      id: file,
+      source: descriptor.template!.content,
+      ssr: true,
+      ssrCssVars: [],
+    })
+
+    expect(template.errors).toEqual([])
+    const linked = await linker.call(
+      'transform',
+      template.code,
+      `${file}?vue&type=template&ssr=true`,
+    )
+
+    expect(linked.code).toContain('_ssrGetDirectiveProps(_ctx, livaPresenceEntry,')
+    expect(linked.code).not.toContain(presenceBoundaryReference)
+    expect(linked.code).not.toContain(presenceEntryReference)
+    expect(() => parseAst(linked.code)).not.toThrow()
+  })
+
   it('ignores other modules, Vue styles and source strings', async () => {
     const { call } = hooks(liva()[1])
-    const text = `export default "${presenceReference}"`
+    const text = `export default "${presenceBoundaryReference}"`
 
     expect(await call('transform', text, 'main.ts')).toBeUndefined()
     expect(await call('transform', text, `${file}?vue&type=style`)).toBeUndefined()
@@ -370,6 +415,6 @@ it('retains the accepted template and loader after structural Presence validatio
   const corrected = `<template><div v-if="true" v-liva:fade /></template><liva>${lifecycle}</liva>`
 
   expect(await call('handleHotUpdate', { file, read: async () => corrected })).toBeUndefined()
-  expect((await call('transform', corrected, file)).code).toContain(presenceReference)
+  expect((await call('transform', corrected, file)).code).toContain(presenceBoundaryReference)
   expect((await call('transform', lifecycle, loader)).code).toContain('PresenceExecution')
 })

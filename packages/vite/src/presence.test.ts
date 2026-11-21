@@ -1,7 +1,7 @@
 import { expect, it } from 'vite-plus/test'
 import { compileSfc } from './compiler.ts'
 import { planPresence, PresenceError } from './presence.ts'
-import { presenceReference } from './presence-reference.ts'
+import { presenceBoundaryReference, presenceEntryReference } from './presence-reference.ts'
 
 const block = `<liva>
 motion panel {
@@ -110,7 +110,7 @@ it.each([
 
   expect(result.code).toContain(`v-liva:panel.compiled="{ value: (${value}), owner: [0] }"`)
   expect(result.code).toContain('v-liva-target:body.compiled=')
-  expect(result.code).toContain('v-bind.liva-presence=')
+  expect(result.code).toContain(`v-liva="import('${presenceEntryReference}')`)
   expect(result.code).not.toMatch(/v-liva-(owner|lifecycle)/)
   expect(result.code.split(`value: (${value})`).length - 1).toBe(value === 'undefined' ? 2 : 1)
 })
@@ -183,7 +183,7 @@ it('finds native lifecycle owners through non-transition component slots', () =>
   )
 
   expect(result.boundaries).toHaveLength(1)
-  expect(result.code).toContain(presenceReference)
+  expect(result.code).toContain(presenceBoundaryReference)
 })
 
 it('plans implicit self lifecycle presence without a target directive', () => {
@@ -222,14 +222,14 @@ it.each([false, true])(
 it('preserves authored property spreads and lifecycle hooks on the same element', () => {
   const result = plan(`
     <div v-liva:panel>
-      <span v-if="shown" v-liva-target:body v-bind.liva-presence="props" v-bind="extra"
+      <span v-if="shown" v-liva-target:body v-bind="props" v-bind.liva-presence="extra"
         @vue:before-mount="onMount" />
     </div>
   `)
 
   expect(result.code).toContain(
-    'v-bind.liva-presence="livaBoundary0.item(0).mergeElementHooks((props))"',
+    `v-liva="import('${presenceEntryReference}')(livaBoundary0.item(0))"`,
   )
-  expect(result.code).toContain('v-bind="extra"')
+  expect(result.code).toContain('v-bind="props" v-bind.liva-presence="extra"')
   expect(result.code).toContain('@vue:before-mount="onMount"')
 })

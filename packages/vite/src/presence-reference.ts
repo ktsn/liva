@@ -8,22 +8,47 @@ type Expression = Extract<
 >['expression']
 type Identifier = Extract<Expression, { type: 'Identifier' }>
 type DynamicImport = Extract<Expression, { type: 'ImportExpression' }>
+type ArrayExpression = Extract<Expression, { type: 'ArrayExpression' }>
+type CallExpression = Extract<Expression, { type: 'CallExpression' }>
+type DirectiveOperand = ArrayExpression['elements'][number] | CallExpression['arguments'][number]
+type Span = { start: number; end: number }
+
+const referencePrefix = 'liva:internal-presence-'
+export const presenceBoundaryReference = referencePrefix + 'boundary'
+export const presenceEntryReference = referencePrefix + 'entry'
 
 function isNode<T extends { type: string }>(node: object, type: T['type']): node is T {
   return 'type' in node && node.type === type
 }
 
-export const presenceReference = 'liva:internal-presence-boundary'
+function importsReference(node: object, specifier: string): node is DynamicImport {
+  return (
+    isNode<DynamicImport>(node, 'ImportExpression') &&
+    node.source.type === 'Literal' &&
+    node.source.value === specifier
+  )
+}
 
-/**
- * Binds a compiler-generated component reference after Vue has resolved all
- * authored script and template scopes. A reserved dynamic import is the marker
- * shared by the Vue SFC compiler and Vize, including their template-only HMR.
- */
-export function linkPresenceReference(code: string, id: string, parse: Parse) {
+/** Finds compiled render placeholders and binds them outside all authored Vue scopes. */
+function linkPresenceReferences(code: string, id: string, parse: Parse) {
   const identifiers = new Set<string>()
-  const references: { start: number; end: number }[] = []
+  const boundaries: Span[] = []
+  const entries: { directive: Span; call: Span; entry: Span }[] = []
   const pending: unknown[] = [parse(code)]
+
+  const recordEntry = (
+    directive: DirectiveOperand | undefined,
+    value: DirectiveOperand | undefined,
+  ) => {
+    if (
+      directive &&
+      value?.type === 'CallExpression' &&
+      importsReference(value.callee, presenceEntryReference)
+    ) {
+      // The planner passes exactly one entry expression to the private marker.
+      entries.push({ directive, call: value, entry: value.arguments[0] })
+    }
+  }
 
   while (pending.length) {
     const node = pending.pop()
@@ -31,26 +56,48 @@ export function linkPresenceReference(code: string, id: string, parse: Parse) {
 
     if (isNode<Identifier>(node, 'Identifier')) identifiers.add(node.name)
 
-    if (
-      isNode<DynamicImport>(node, 'ImportExpression') &&
-      node.source.type === 'Literal' &&
-      node.source.value === presenceReference
-    ) {
-      references.push({ start: node.start, end: node.end })
-    }
+    if (importsReference(node, presenceBoundaryReference)) boundaries.push(node)
+
+    // Client render functions emit directive tuples. Vue's SSR renderer can
+    // also pass the same directive and value after its render context argument.
+    if (isNode<ArrayExpression>(node, 'ArrayExpression'))
+      recordEntry(node.elements[0], node.elements[1])
+    if (isNode<CallExpression>(node, 'CallExpression'))
+      recordEntry(node.arguments[1], node.arguments[2])
 
     for (const child of Object.values(node)) pending.push(child)
   }
 
-  if (!references.length) return undefined
-
-  let binding = 'livaPresenceBoundary'
-  while (identifiers.has(binding)) binding += '_'
+  if (!boundaries.length && !entries.length) return undefined
 
   const output = new MagicString(code)
-  output.append(`\nimport { LivaPresenceBoundary as ${binding} } from 'liva:vue/presence';\n`)
+  const imports: string[] = []
+  const bind = (exportName: string, base: string) => {
+    let binding = base
+    while (identifiers.has(binding)) binding += '_'
 
-  for (const { start, end } of references) output.overwrite(start, end, binding)
+    imports.push(`${exportName} as ${binding}`)
+
+    return binding
+  }
+
+  if (boundaries.length) {
+    const binding = bind('LivaPresenceBoundary', 'livaPresenceBoundary')
+
+    for (const { start, end } of boundaries) output.overwrite(start, end, binding)
+  }
+
+  if (entries.length) {
+    const binding = bind('livaEntry', 'livaPresenceEntry')
+
+    for (const { directive, call, entry } of entries) {
+      output.overwrite(directive.start, directive.end, binding)
+      output.remove(call.start, entry.start)
+      output.remove(entry.end, call.end)
+    }
+  }
+
+  output.append(`\nimport { ${imports.join(', ')} } from 'liva:vue/presence';\n`)
 
   return { code: output.toString(), map: output.generateMap({ source: id, hires: true }) }
 }
@@ -62,8 +109,14 @@ export const presenceReferencePlugin: Plugin = {
     const [file, query = ''] = id.split('?', 2)
     const type = new URLSearchParams(query).get('type')
 
-    if (file.endsWith('.vue') && (!type || type === 'template') && code.includes(presenceReference))
-      return linkPresenceReference(code, id, (source) => this.parse(source))
+    // Vue may inline the render function into a script-setup submodule in production.
+    if (
+      file.endsWith('.vue') &&
+      (!type || type === 'template' || type === 'script') &&
+      code.includes(referencePrefix)
+    ) {
+      return linkPresenceReferences(code, id, (source) => this.parse(source))
+    }
 
     return undefined
   },
