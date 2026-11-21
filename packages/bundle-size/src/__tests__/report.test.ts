@@ -1,10 +1,10 @@
 import { ZipEntry, createZipArchiveSync } from 'node:zlib'
 import { assert, describe, expect, it } from 'vite-plus/test'
-import { marker } from './model.ts'
-import { array, object } from './data.ts'
-import type { Comment, PullRequest, Run } from './github-data.ts'
-import type { Api, ApiOptions } from './report.ts'
-import { example, readField, replaceField } from './__tests__/test-fixture.ts'
+import { marker } from '../model.ts'
+import { array, object } from '../data.ts'
+import type { Comment, PullRequest, Run } from '../github-data.ts'
+import type { Api, ApiOptions } from '../report.ts'
+import { example, readField, replaceField } from './test-fixture.ts'
 import {
   githubApi,
   isCurrent,
@@ -12,7 +12,7 @@ import {
   report,
   verifyContext,
   workflowPath,
-} from './report.ts'
+} from '../report.ts'
 
 function zip(result: unknown, filename = 'result.json'): Buffer {
   const entry = ZipEntry.createSync(filename, Buffer.from(JSON.stringify(result)), {

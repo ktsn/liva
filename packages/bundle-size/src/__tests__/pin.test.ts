@@ -1,5 +1,5 @@
 import { assert, describe, expect, it } from 'vite-plus/test'
-import { pin, readOnlyGitEnvironment } from './pin.ts'
+import { pin, readOnlyGitEnvironment } from '../pin.ts'
 
 const event = { pull_request: { number: 92, base: { ref: 'main' }, head: { sha: 'b'.repeat(40) } } }
 

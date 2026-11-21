@@ -7,7 +7,7 @@
     "measure": "node src/cli.ts measure",
     "compare": "node src/cli.ts compare",
     "test": "vp test --run --root ../.. --project unit packages/bundle-size --coverage.enabled=false",
-    "test:integration": "vp test --run --config vite.integration.config.ts"
+    "test:integration": "vp test --run --config __tests__/vite.integration.config.ts"
   },
   "devDependencies": {
     "@liva/vue": "workspace:*",

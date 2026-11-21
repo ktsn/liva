@@ -1,9 +1,9 @@
 import { assert, describe, expect, it } from 'vite-plus/test'
-import { definitionJson, sizes } from './measure.ts'
-import { difference, formatComment, validateResult } from './model.ts'
+import { definitionJson, sizes } from '../measure.ts'
+import { difference, formatComment, validateResult } from '../model.ts'
 
-import type { Comparison } from './types.ts'
-import { example, readField, replaceField } from './__tests__/test-fixture.ts'
+import type { Comparison } from '../types.ts'
+import { example, readField, replaceField } from './test-fixture.ts'
 
 function stringFields(value: object, path: string[] = []): string[][] {
   return Object.entries(value).flatMap(([name, item]: [string, unknown]) => {

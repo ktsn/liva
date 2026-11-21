@@ -3,10 +3,10 @@ import { execFileSync } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { compare, prepareRevision } from './cli.ts'
-import { measured } from './types.ts'
-import type { Measurement } from './types.ts'
-import { validateResult } from './model.ts'
+import { compare, prepareRevision } from '../cli.ts'
+import { measured } from '../types.ts'
+import type { Measurement } from '../types.ts'
+import { validateResult } from '../model.ts'
 
 let temporary: string
 let sha: string

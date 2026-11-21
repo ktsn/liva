@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vite-plus/test'
 describe('measurement workflow', () => {
   it('skipped title/body edits cannot enter the active measurement cancellation group', async () => {
     const workflow = await readFile(
-      new URL('../../../.github/workflows/bundle-size.yml', import.meta.url),
+      new URL('../../../../.github/workflows/bundle-size.yml', import.meta.url),
       'utf8',
     )
 
