@@ -124,7 +124,8 @@ const config = defineViteConfig({
       provider: 'v8',
       include: ['packages/**/*.{ts,vue}'],
       exclude: [
-        // Runtime thresholds exclude build/reporting tools with process and integration contracts.
+        // Keep this tooling package outside the existing per-file 100% gate.
+        // Its integration measurements run in subprocesses.
         'packages/bundle-size/**',
         'packages/**/*.test.ts',
         'packages/**/__test__/**',
