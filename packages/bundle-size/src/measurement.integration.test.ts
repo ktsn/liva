@@ -14,7 +14,7 @@ let target: string
 let broken: string
 let baseline: Measurement
 
-// Use the CLI's process isolation for each target's compiler and Playwright client.
+// Use the CLI's process isolation for each target's compiler and build tools.
 async function measurement(directory: string): Promise<Measurement> {
   const result = await compare({
     base: sha,

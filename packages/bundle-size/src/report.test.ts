@@ -4,7 +4,7 @@ import { marker } from './model.ts'
 import { array, object } from './data.ts'
 import type { Comment, PullRequest, Run } from './github-data.ts'
 import type { Api, ApiOptions } from './report.ts'
-import { example, readField, replaceField } from './test-fixture.ts'
+import { example, readField, replaceField } from './__tests__/test-fixture.ts'
 import {
   githubApi,
   isCurrent,

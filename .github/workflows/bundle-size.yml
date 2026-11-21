@@ -26,7 +26,7 @@ jobs:
       - uses: voidzero-dev/setup-vp@cab1ab9eaff52d4857875f4f2c016e36af8f2c76 # v1.22.0
         with:
           version: '1.6.0'
-          node-version: '26.13.1'
+          node-version-file: .node-version
           run-install: false
 
       - name: Pin base branch tip and actual PR head
@@ -34,13 +34,11 @@ jobs:
           BUNDLE_SIZE_READ_TOKEN: ${{ github.token }}
         run: node packages/bundle-size/src/pin.ts "$RUNNER_TEMP/bundle-size-pins.json"
 
-      - name: Install browser validation tools
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm exec playwright install --with-deps chromium
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Test measurement and reporting contracts
-        run: pnpm test:size
+        run: pnpm --filter @liva/bundle-size test
 
       - name: Measure pinned base and PR head
         run: node packages/bundle-size/src/cli.ts ci "$RUNNER_TEMP/bundle-size-results"

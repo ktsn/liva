@@ -1,6 +1,6 @@
-import { object } from './data.ts'
-import type { Context, Success } from './types.ts'
-import { settings } from './model.ts'
+import { object } from '../data.ts'
+import type { Context, Success } from '../types.ts'
+import { settings } from '../model.ts'
 
 export function example(): Success & { context: Context } {
   const measurement = {

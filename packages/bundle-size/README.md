@@ -21,14 +21,12 @@ pnpm size:compare origin/main HEAD bundle-size-results/comparison
 
 ## Read the results
 
-`OUTPUT/result.json` records sizes, source commits and measurement conditions. The output directory also contains the measured JavaScript and playback screenshots.
+`OUTPUT/result.json` records sizes, source commits and measurement conditions. The output directory also contains the measured JavaScript.
 
 - Minified, gzip and Brotli bytes describe the complete JavaScript bundle.
 - Definition JSON bytes report the UTF-8 size of the embedded definitions. They are already included in the bundle totals and cannot be subtracted from compressed sizes.
 
-The [result schema](./schema.json) describes the recorded fields. Compare saved results only when their measurement conditions match.
-
-The [baseline](./baseline.json) is historical reference data. Each PR comparison measures its own base.
+Compare saved results only when their measurement conditions match.
 
 ## PR reports
 

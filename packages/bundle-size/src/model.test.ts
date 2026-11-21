@@ -1,10 +1,9 @@
-import { readFile } from 'node:fs/promises'
 import { assert, describe, expect, it } from 'vite-plus/test'
 import { definitionJson, sizes } from './measure.ts'
 import { difference, formatComment, validateResult } from './model.ts'
 
 import type { Comparison } from './types.ts'
-import { example, readField, replaceField } from './test-fixture.ts'
+import { example, readField, replaceField } from './__tests__/test-fixture.ts'
 
 function stringFields(value: object, path: string[] = []): string[][] {
   return Object.entries(value).flatMap(([name, item]: [string, unknown]) => {
@@ -84,7 +83,7 @@ describe('measurement results', () => {
     expect(comment).not.toMatch(/\| Minified JS/)
   })
 
-  it('schema rejects unsafe numbers, metadata injection, unsupported settings and unknown fields', () => {
+  it('result validation rejects unsafe numbers, metadata injection, unsupported settings and unknown fields', () => {
     const cases: [string[], unknown][] = [
       [['head', 'bytes', 'minified'], NaN],
       [['head', 'bytes', 'gzip'], -1],
@@ -160,13 +159,5 @@ describe('measurement results', () => {
     expect(comment).toMatch(/<details>/)
     expect(comment).toMatch(new RegExp(result.base.sha))
     expect(comment).toMatch(new RegExp(result.head.sha))
-  })
-
-  it('checked-in baseline passes the same strict artifact schema', async () => {
-    const baseline = validateResult(
-      JSON.parse(await readFile(new URL('../baseline.json', import.meta.url), 'utf8')),
-    )
-
-    expect(baseline.status, 'Historical baseline must contain measured values').toBe('success')
   })
 })

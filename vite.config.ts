@@ -128,6 +128,7 @@ const config = defineViteConfig({
         'packages/bundle-size/**',
         'packages/**/*.test.ts',
         'packages/**/__test__/**',
+        'packages/**/__tests__/**',
         'packages/**/*.d.ts',
         'packages/**/wasm/**',
       ],

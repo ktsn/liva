@@ -4,7 +4,7 @@ export default defineConfig({
   root: import.meta.dirname,
   test: {
     include: ['src/*.integration.test.ts'],
-    // Real dependency installs, WASM builds and browser playback can exceed unit-test limits.
+    // Real dependency installs and WASM builds can exceed unit-test limits.
     hookTimeout: 600_000,
     testTimeout: 600_000,
     fileParallelism: false,
