@@ -1,9 +1,9 @@
 import { assert, describe, expect, it } from 'vite-plus/test'
-import { definitionJson, sizes } from '../measure.ts'
-import { difference, formatComment, validateResult } from '../model.ts'
+import { definitionJson, sizes } from './measure.ts'
+import { difference, formatComment, validateResult } from './model.ts'
 
-import type { Comparison } from '../types.ts'
-import { example, readField, replaceField } from './test-fixture.ts'
+import type { Comparison } from './types.ts'
+import { example, readField, replaceField } from './__tests__/test-fixture.ts'
 
 function stringFields(value: object, path: string[] = []): string[][] {
   return Object.entries(value).flatMap(([name, item]: [string, unknown]) => {
@@ -159,5 +159,17 @@ describe('measurement results', () => {
     expect(comment).toMatch(/<details>/)
     expect(comment).toMatch(new RegExp(result.base.sha))
     expect(comment).toMatch(new RegExp(result.head.sha))
+  })
+  it('formats a zero-reference comparison without an undefined percentage', () => {
+    const result = example()
+    result.base.bytes.minified = 0
+    result.head.bytes.minified = 10
+    const comment = formatComment(result, {
+      repository: 'ktsn/liva',
+      run: 1,
+      attempt: 1,
+      headSha: result.head.sha,
+    })
+    expect(comment).toContain('Minified JS | 0 | 10 | +10 | n/a')
   })
 })

@@ -53,7 +53,6 @@ const config = defineViteConfig({
           include: ['packages/**/*.test.ts'],
           exclude: [
             '**/node_modules/**',
-            'packages/**/*.integration.test.ts',
             'packages/**/*.browser.test.ts',
             'packages/**/*.cross-browser.test.ts',
           ],
@@ -124,9 +123,9 @@ const config = defineViteConfig({
       provider: 'v8',
       include: ['packages/**/*.{ts,vue}'],
       exclude: [
-        // Keep this tooling package outside the existing per-file 100% gate.
-        // Its integration measurements run in subprocesses.
-        'packages/bundle-size/**',
+        // These files are measurement inputs compiled by each target revision, not tooling modules.
+        'packages/bundle-size/src/fixture/main.ts',
+        'packages/bundle-size/src/fixture/Button.vue',
         'packages/**/*.test.ts',
         'packages/**/__test__/**',
         'packages/**/__tests__/**',

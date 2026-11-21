@@ -1,18 +1,23 @@
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { ZipEntry, createZipArchiveSync } from 'node:zlib'
-import { assert, describe, expect, it } from 'vite-plus/test'
-import { marker } from '../model.ts'
-import { array, object } from '../data.ts'
-import type { Comment, PullRequest, Run } from '../github-data.ts'
-import type { Api, ApiOptions } from '../report.ts'
-import { example, readField, replaceField } from './test-fixture.ts'
+import { afterEach, beforeEach, assert, describe, expect, it, vi } from 'vite-plus/test'
+import { marker } from './model.ts'
+import { array, object, text } from './data.ts'
+import type { Comment, PullRequest, Run } from './github-data.ts'
+import type { Api, ApiOptions } from './report.ts'
+import { example, readField, replaceField } from './__tests__/test-fixture.ts'
 import {
+  main,
   githubApi,
   isCurrent,
   readArtifact,
   report,
   verifyContext,
   workflowPath,
-} from '../report.ts'
+} from './report.ts'
+
+vi.mock('node:fs/promises', { spy: true })
 
 function zip(result: unknown, filename = 'result.json'): Buffer {
   const entry = ZipEntry.createSync(filename, Buffer.from(JSON.stringify(result)), {
@@ -352,5 +357,187 @@ describe('PR reporting', () => {
     await expect(oversized('/actions/artifacts/5/zip', { binary: true })).rejects.toThrow(
       /too large/,
     )
+  })
+})
+
+describe('reporting API boundaries', () => {
+  it('ignores already superseded and closed PRs before downloading artifacts or writing comments', async () => {
+    for (const update of [
+      { state: 'closed' },
+      { base: { ref: 'other', sha: 'a'.repeat(40), repo: { id: 1, full_name: 'ktsn/liva' } } },
+      { head: { sha: '9'.repeat(40), ref: 'feature', repo: { id: 2, full_name: 'fork/liva' } } },
+    ]) {
+      const { api, event, calls } = github()
+      const current: Api = async (path, options) =>
+        path === '/pulls/92'
+          ? { ...object(await api(path, options)), ...update }
+          : api(path, options)
+      expect(await report(current, event, 'ktsn/liva')).toBe('superseded or closed PR')
+      expect(writes(calls)).toStrictEqual([])
+      expect(calls.some((call) => call.path.endsWith('/artifacts'))).toBe(false)
+    }
+  })
+
+  it('skips irrelevant edit runs and rejects missing run identity before attribution', async () => {
+    const skipped = github({ conclusion: 'skipped' })
+    expect(await report(skipped.api, skipped.event, 'ktsn/liva')).toBe('irrelevant edit')
+    const { api, event, calls } = github()
+    const invalid: Api = async (path, options) =>
+      path === `/actions/runs/${event.workflow_run.id}`
+        ? { ...event.workflow_run, display_title: '' }
+        : api(path, options)
+    await expect(report(invalid, event, 'ktsn/liva')).rejects.toThrow('no target identity')
+    expect(writes(calls)).toStrictEqual([])
+  })
+
+  it('filters unrelated, skipped and malformed run candidates before selecting the newest eligible result', async () => {
+    const { api, event, run, calls } = github()
+    const mixed: Api = async (path, options) =>
+      path.startsWith('/actions/workflows/10/runs?')
+        ? {
+            workflow_runs: [
+              { ...run, id: run.id + 1, head_repository: null },
+              { ...run, id: run.id + 2, head_branch: 'different' },
+              { ...run, id: run.id + 3, display_title: 'unattributable' },
+              { ...run, id: run.id + 4, display_title: 'Bundle size PR #92 to other' },
+              { ...run, id: run.id + 5, conclusion: 'skipped' },
+              { ...run, id: run.id - 1 },
+              run,
+            ],
+          }
+        : api(path, options)
+    expect(await report(mixed, event, 'ktsn/liva')).toBe('success')
+    expect(writes(calls)).toHaveLength(1)
+  })
+
+  it('does not mistake a user account or another bot comment for the sticky result', async () => {
+    for (const comment of [
+      { ...botComment, user: { ...botComment.user, type: 'User' } },
+      { ...botComment, body: 'another automation' },
+    ]) {
+      const { api, event, calls } = github({ comments: [comment] })
+      expect(await report(api, event, 'ktsn/liva')).toBe('success')
+      expect(writes(calls)[0].method).toBe('POST')
+    }
+  })
+
+  it('rejects non-Buffer artifacts and reports the validation failure', async () => {
+    const { api, event, calls } = github()
+    const invalid: Api = async (path, options) =>
+      path.endsWith('/zip') ? new Uint8Array() : api(path, options)
+    await expect(report(invalid, event, 'ktsn/liva')).rejects.toThrow('artifact rejected')
+    expect(posted(calls).body.body).toContain('Measurement failed')
+  })
+
+  it('streams successful artifact bytes, bounds declared size and refuses a missing body', async () => {
+    const payload = zip(example())
+    const streamed = githubApi({
+      repository: 'ktsn/liva',
+      token: 'token',
+      apiUrl: 'https://api.github.com',
+      fetcher: async () =>
+        new Response(Uint8Array.from(payload), {
+          headers: { 'content-length': String(payload.length) },
+        }),
+    })
+    expect(await streamed('/artifact', { binary: true })).toStrictEqual(payload)
+
+    const declared = githubApi({
+      repository: 'ktsn/liva',
+      token: 'token',
+      apiUrl: 'https://api.github.com',
+      fetcher: async () => new Response(null, { headers: { 'content-length': '1000001' } }),
+    })
+    await expect(declared('/artifact', { binary: true })).rejects.toThrow(Error)
+    const missing = githubApi({
+      repository: 'ktsn/liva',
+      token: 'token',
+      apiUrl: 'https://api.github.com',
+      fetcher: async () => new Response(null),
+    })
+    await expect(missing('/artifact', { binary: true })).rejects.toThrow(
+      'Missing artifact response body',
+    )
+  })
+})
+
+describe('report command entry', () => {
+  const originalArgv = process.argv
+  beforeEach(() => {
+    vi.resetAllMocks()
+    process.argv = [...originalArgv]
+    vi.stubEnv('GITHUB_REPOSITORY', 'ktsn/liva')
+    vi.stubEnv('GITHUB_TOKEN', 'comment-token')
+    vi.stubEnv('GITHUB_API_URL', 'https://api.github.com')
+    vi.stubEnv('GITHUB_EVENT_PATH', '/event.json')
+    const { run } = github({ conclusion: 'skipped' })
+    vi.mocked(readFile).mockResolvedValue(JSON.stringify({ workflow_run: run }))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>(
+        async (url) =>
+          new Response(
+            JSON.stringify(
+              (url instanceof Request ? url.url : url.toString()).endsWith('/bundle-size.yml')
+                ? { id: 10 }
+                : run,
+            ),
+          ),
+      ),
+    )
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    process.argv = originalArgv
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('loads trusted event/environment and uses the REST client without installing dependencies', async () => {
+    await main()
+    expect(console.log).toHaveBeenCalledWith('irrelevant edit')
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/repos/ktsn/liva/actions/runs/'),
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer comment-token' }),
+      }),
+    )
+  })
+
+  it('rejects malformed repository attribution and does not swallow event read errors', async () => {
+    vi.stubEnv('GITHUB_REPOSITORY', '../wrong')
+    await expect(main()).rejects.toThrow(Error)
+    vi.stubEnv('GITHUB_REPOSITORY', 'ktsn/liva')
+    vi.mocked(readFile).mockRejectedValueOnce(new Error('event unavailable'))
+    await expect(main()).rejects.toThrow('event unavailable')
+  })
+
+  it('dispatches the native TypeScript reporting entry', async () => {
+    process.argv[1] = fileURLToPath(new URL('./report.ts', import.meta.url))
+    const entry = new URL('./report.ts?entrypoint-unit', import.meta.url)
+    await import(entry.href)
+    expect(console.log).toHaveBeenCalledWith('irrelevant edit')
+  })
+})
+
+describe('REST comment serialization', () => {
+  it('encodes comment text as authenticated JSON rather than interpolating it into the request URL', async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => new Response('{"id":42}'))
+    const api = githubApi({
+      repository: 'ktsn/liva',
+      token: 'token',
+      apiUrl: 'https://api.github.com',
+      fetcher,
+    })
+    const comment = 'line\n"quoted" é <!-- marker -->'
+    const result = await api('/issues/92/comments', { method: 'POST', body: { body: comment } })
+    const request = fetcher.mock.calls[0]
+
+    expect(request[0]).toBe('https://api.github.com/repos/ktsn/liva/issues/92/comments')
+    expect(request[1]).toMatchObject({ method: 'POST', headers: { Authorization: 'Bearer token' } })
+    expect(JSON.parse(text(request[1]?.body))).toStrictEqual({ body: comment })
+    expect(result).toStrictEqual({ id: 42 })
   })
 })

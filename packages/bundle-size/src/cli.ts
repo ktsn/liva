@@ -101,7 +101,7 @@ export async function compare({
 
       if (output) workerArgs.push(join(output, side))
 
-      // Fresh processes keep each revision's compiler, native tools and browser client isolated.
+      // Fresh processes keep each revision's compiler and native tools isolated.
       run(process.execPath, workerArgs, process.cwd())
       sides[side] = validateMeasurement(JSON.parse(await readFile(resultFile, 'utf8')))
     } catch (error) {
@@ -119,7 +119,9 @@ export async function compare({
   return validateResult({ ...result, ...sides })
 }
 
-async function main() {
+/** Measure argv revisions and write JSON, setting a failing exit code for measurement errors.
+ * Setup/output failures reject; this command owns and always releases temporary exports. */
+export async function main() {
   const [command, ...args] = process.argv.slice(2)
 
   assert(
@@ -132,9 +134,9 @@ async function main() {
     args[command === 'compare' ? 2 : command === 'measure' ? 1 : 0] || 'bundle-size-results',
   )
 
-  await mkdir(output, { recursive: true })
-
   try {
+    await mkdir(output, { recursive: true })
+
     let context: Context | null = null
     let base
     let head

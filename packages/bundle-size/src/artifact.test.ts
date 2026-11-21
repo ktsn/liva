@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream'
 import { assert, describe, expect, it } from 'vite-plus/test'
 import { ZipEntry, createZipArchive, createZipArchiveSync } from 'node:zlib'
-import { artifactLimits, readArtifact } from '../report.ts'
+import { artifactLimits, readArtifact } from './report.ts'
 
 function archive(entries: ZipEntry[], baseOffset = 0): Buffer {
   return Buffer.concat([...createZipArchiveSync(entries, { baseOffset })])

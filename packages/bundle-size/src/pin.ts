@@ -39,7 +39,9 @@ export function readOnlyGitEnvironment(
   }
 }
 
-async function main() {
+/** Fetch CI refs with process-scoped read credentials and write pins to argv[2].
+ * Invalid event/credentials and fetch/read/write failures reject before measurement starts. */
+export async function main() {
   assert.equal(process.env.GITHUB_EVENT_NAME, 'pull_request')
 
   const event: unknown = JSON.parse(await readFile(environment('GITHUB_EVENT_PATH'), 'utf8'))

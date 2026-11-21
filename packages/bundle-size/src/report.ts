@@ -293,7 +293,9 @@ export function githubApi({
   return api
 }
 
-async function main() {
+/** Read the trusted workflow event/environment and publish through the bounded REST client.
+ * Validation, artifact and API failures reject so Actions records the reporting failure. */
+export async function main() {
   const repository = environment('GITHUB_REPOSITORY')
   const token = environment('GITHUB_TOKEN')
 
