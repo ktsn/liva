@@ -4,7 +4,8 @@ export default defineConfig(
   {
     compiler: false,
     pack: {
-      entry: ['src/index.ts'],
+      entry: ['src/index.ts', 'src/core.ts'],
+      unbundle: true,
       format: 'esm',
       platform: 'neutral',
       vue: { tsconfig: 'tsconfig.build.json' },

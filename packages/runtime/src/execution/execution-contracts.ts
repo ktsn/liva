@@ -1,3 +1,4 @@
+import type { ControllerBinding } from './controller-planning.ts'
 import type { PreviewOperation } from './preview-operation.ts'
 import type { Composition, LayerResolution } from '../composition/layers.ts'
 import type { ResolvedTrack } from '../composition/resolve.ts'
@@ -5,7 +6,6 @@ import type { SourceConnection } from '../evaluation/reactive-value.ts'
 import type { VariableValues } from '../evaluation/expression.ts'
 import type { Definition } from '../model/definition.ts'
 import type {
-  ControllerBinding,
   PresentationFacts,
   PresentationPlan,
   ReceiverAddresses,

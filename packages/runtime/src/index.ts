@@ -45,13 +45,7 @@ export {
   lifecycleTransitions,
   resolveLifecycleTracks,
 } from './execution/lifecycle.ts'
-export {
-  layerTargets,
-  declarationTargets,
-  resolveComposition,
-  resolveLayerTracks,
-  compositionTransitions,
-} from './composition/layers.ts'
+export { layerTargets, declarationTargets, compositionTransitions } from './composition/layers.ts'
 export type { Composition, CompositionTransition, LayerResolution } from './composition/layers.ts'
 export {
   compositionLayerSelection,
@@ -60,7 +54,8 @@ export {
   transitionPropertySources,
 } from './composition/layer-cascade.ts'
 export type { PropertySource, TimingSource } from './composition/layer-cascade.ts'
-export { renderFrame } from './evaluation/expression.ts'
+export { renderFrame } from './evaluation/full-expression.ts'
+export { resolveComposition, resolveLayerTracks } from './composition/full-resolution.ts'
 export { sampleSpring } from './motion/spring.ts'
 
 export type {
@@ -73,7 +68,7 @@ export type {
 
 export { isCssProperty } from './model/definition.ts'
 
-export { resolveLayoutConfigurations } from './composition/layout.ts'
+export { resolveLayoutConfigurations } from './composition/full-resolution.ts'
 
 export {
   identityProjection,
@@ -119,4 +114,4 @@ export type {
   ProjectionShapeMotionResult,
 } from './layout/projection-shape.ts'
 
-export { LayoutCoordinator } from './layout/layout-coordinator.ts'
+export { LayoutCoordinator } from './layout/full-layout-coordinator.ts'

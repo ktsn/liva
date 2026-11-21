@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test'
 import { createEventValue, isEventValue } from './events.ts'
-import { resolveLayers } from '../composition/layers.ts'
+import { resolveLayers } from '../composition/full-resolution.ts'
 import type { Definition } from '../model/definition.ts'
 
 const signal = { kind: 'reference', path: ['signal'] } as const

@@ -569,3 +569,146 @@ describe('PresentationExecutor browser execution', () => {
     expect(element.style.height).toBe('')
   })
 })
+
+describe('feature-scoped browser execution', () => {
+  it('renders and restores a tween Motion with only its pure implementations', async () => {
+    const { MotionRuntime, BrowserExecutor } = await import('../core.ts')
+    const { tween } = await import('../evaluation/timing-builtins.ts')
+    const { linear } = await import('../evaluation/constants.ts')
+    const source: PropertyIRDefinition = {
+      name: 'opacity',
+      parameters: [{ name: 'active', type: 'boolean' }],
+      letBindings: [
+        {
+          name: 'timing',
+          initializer: {
+            kind: 'call',
+            function: 'tween',
+            arguments: [
+              { name: 'duration', value: { kind: 'number', value: 300 } },
+              { name: 'easing', value: { kind: 'reference', path: ['linear'] } },
+            ],
+          },
+        },
+      ],
+      layers: [
+        {
+          name: 'base',
+          timingExpression: { kind: 'reference', path: ['timing'] },
+          targets: [
+            {
+              name: 'self',
+              properties: [{ name: 'opacity', value: { kind: 'literal', value: '0.4' } }],
+            },
+          ],
+        },
+        {
+          name: 'active',
+          when: { kind: 'reference', path: ['active'] },
+          targets: [
+            {
+              name: 'self',
+              properties: [{ name: 'opacity', value: { kind: 'literal', value: '1' } }],
+            },
+          ],
+        },
+      ],
+    }
+    const errors: unknown[] = []
+    const report = (error: unknown) => errors.push(error)
+    const executor = new BrowserExecutor(report)
+    const runtime = new MotionRuntime(executor, source, { active: false }, report, {
+      pure: { constants: { linear }, functions: { tween } },
+    })
+    const element = document.createElement('div')
+    element.style.opacity = '0.2'
+    harness.append(element)
+    executor.attach(runtime.environment)
+
+    try {
+      executor.bind([['self', element]])
+      expect(element.style.opacity).toBe('0.4')
+      expect(runtime.layout).toEqual([])
+
+      runtime.updateParameters({ active: true })
+
+      const [animation] = element.getAnimations()
+      expect(animation.effect?.getComputedTiming().duration).toBe(300)
+
+      animation.finish()
+      await animation.finished
+      expect(element.style.opacity).toBe('1')
+
+      runtime.replaceDefinition({ ...source, layers: source.layers.slice(0, 1) })
+
+      expect(element.style.opacity).toBe('0.4')
+      expect(runtime.evaluateCandidate(source, (values) => values.timing)).toEqual({
+        kind: 'tween',
+        durationMs: 300,
+        easing: 'linear',
+      })
+
+      expect(errors).toEqual([])
+    } finally {
+      runtime.dispose()
+    }
+
+    expect(element.style.opacity).toBe('0.2')
+    expect(element.getAnimations()).toEqual([])
+  })
+})
+
+describe('feature boundaries', () => {
+  it('leaves ordinary playback and styles intact when layout is absent', async () => {
+    const { BrowserExecutor, MotionRuntime } = await import('../core.ts')
+    const executor = new BrowserExecutor(console.warn)
+    const runtime = new MotionRuntime(executor, { name: 'plain', layers: [] }, {}, console.warn)
+    const target = document.createElement('div')
+    target.style.transform = 'translateX(5px)'
+    harness.append(target)
+    executor.attach(runtime.environment)
+
+    try {
+      executor.bind([['self', target]])
+
+      const revision = executor.layoutRevision
+      const restore = executor.layoutMeasure(target, new Map([['transform', 'none']]))
+
+      expect(executor.layoutCandidates(revision)).toEqual([])
+      expect(executor.lifecycleOwns(target, 'transform')).toBe(false)
+      expect(target.style.transform).toBe('translateX(5px)')
+
+      restore()
+      expect(target.getAnimations()).toEqual([])
+    } finally {
+      runtime.dispose()
+    }
+  })
+
+  it('reports unavailable optional operations before creating browser work', async () => {
+    const { BrowserExecutor } = await import('../core.ts')
+    const executor = new BrowserExecutor(console.warn)
+    const values = {}
+    const resolution = {
+      composition: { layers: {}, states: {} },
+      states: new Map(),
+      transitions: new Map(),
+      presentation: { name: '@layers', targets: [] },
+    }
+    const source = {
+      value: true,
+      bind() {
+        throw new Error('Unexpected browser connection')
+      },
+    }
+
+    expect(() => executor.capturePresence('leave', ['self'])).toThrow('Missing Presence capability')
+    expect(() => executor.connectSource(source, () => {})).toThrow(
+      'Missing reactive source capability',
+    )
+    expect(() => executor.beginPreview([])).toThrow('Missing preview capability')
+    expect(() => executor.completePreview()).toThrow('Missing preview capability')
+    expect(executor.observeReceivers(resolution, new Set(['self']), true)).toEqual([])
+    expect(executor.applyControllers([], values, performance.now(), true).size).toBe(0)
+  })
+})

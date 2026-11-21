@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { registerLayoutRead, trackLayoutAnimation } from './layout-scheduler.ts'
+import { BrowserExecutor, MotionRuntime, type Definition } from '../core.ts'
 import { measure } from '../builtins/measure.ts'
 
 const cleanups: (() => void)[] = []
@@ -82,6 +83,85 @@ describe('shared layout scheduling', () => {
     await settled()
 
     expect(source.value).toMatchObject({ width: 200 })
+  })
+
+  it('observes a stationary-size sibling after a core Motion started changing its position', async () => {
+    const container = document.createElement('div')
+    container.style.blockSize = '200px'
+    const spacer = document.createElement('div')
+    const target = document.createElement('div')
+    target.style.cssText = 'width:64px;height:20px'
+    container.append(spacer, target)
+    document.body.append(container)
+    cleanups.push(() => container.remove())
+
+    const errors: unknown[] = []
+    const report = (error: unknown) => errors.push(error)
+    const executor = new BrowserExecutor(report)
+    const source: Definition = {
+      name: 'resize',
+      parameters: [{ name: 'expanded', type: 'boolean' }],
+      layers: [
+        {
+          name: 'base',
+          timing: { kind: 'tween', durationMs: 1000, easing: 'linear' },
+          targets: [
+            {
+              name: 'self',
+              properties: [{ name: 'height', value: { kind: 'literal', value: '20px' } }],
+            },
+          ],
+        },
+        {
+          name: 'large',
+          when: { kind: 'reference', path: ['expanded'] },
+          targets: [
+            {
+              name: 'self',
+              properties: [{ name: 'height', value: { kind: 'literal', value: '120px' } }],
+            },
+          ],
+        },
+      ],
+    }
+    const runtime = new MotionRuntime(executor, source, { expanded: false }, report)
+    cleanups.push(() => runtime.dispose())
+    executor.attach(runtime.environment)
+    executor.bind([['self', spacer]])
+
+    runtime.updateParameters({ expanded: true })
+    const [animation] = spacer.getAnimations()
+    await animation.ready
+    animation.currentTime = 200
+
+    const observer = measure({ target: { name: 'target' }, relativeTo: { name: 'reference' } })
+    cleanups.push(
+      observer.bind(
+        new Map([
+          ['target', target],
+          ['reference', container],
+        ]),
+        () => {},
+      ),
+    )
+    const sample = () => {
+      const value = observer.value
+      if (typeof value !== 'object') throw new Error('Expected measured bounds')
+
+      return Number(value.y)
+    }
+
+    await settled()
+    const early = sample()
+    animation.currentTime = 650
+    await settled()
+    const late = sample()
+
+    expect(early).toBeGreaterThan(20)
+    expect(late).toBeGreaterThan(early + 30)
+    expect(observer.value).toMatchObject({ width: 64, height: 20 })
+    expect(animation.playState).toBe('running')
+    expect(errors).toEqual([])
   })
 
   it('releases failed initialization and propagates the original cause', () => {

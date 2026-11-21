@@ -1,3 +1,4 @@
+import { planPreviewPresentation } from './preview-planning.ts'
 import type { PreviewOperation } from './preview-operation.ts'
 import {
   resolveComposition,
@@ -11,14 +12,15 @@ import { renderTransition, type VariableValues } from '../evaluation/expression.
 import type { Definition } from '../model/definition.ts'
 import type { ResolvedTrack } from '../composition/resolve.ts'
 import type { InspectionExecutionPort, RuntimeDiagnostic } from './execution-contracts.ts'
-import { Runtime } from './runtime.ts'
+import type { MotionRuntime } from './motion-runtime.ts'
+import type { MotionFeatures } from './motion-features.ts'
+import { fullMotionFeatures } from './full.ts'
 import { resolveControllerPresentation } from './controller-presentation.ts'
 import { captureLifecycleDefinition, resolveLifecycleTracks } from './lifecycle.ts'
 import {
   planTrackObservations,
   planTrack,
   trackTiming,
-  planPreviewPresentation,
   presentationWrites,
   layerPropertyKey,
   type PresentationFacts,
@@ -32,18 +34,39 @@ import {
  * Inspection never accepts live inputs, advances state history, or emits events.
  */
 export class RuntimeInspection {
-  private readonly runtime: Runtime
+  private readonly runtime: MotionRuntime
   private readonly execution: InspectionExecutionPort
   private readonly report: (diagnostic: RuntimeDiagnostic) => void
 
+  private readonly resolveFeatures: (definition: Definition) => MotionFeatures
+
   constructor(
-    runtime: Runtime,
+    runtime: MotionRuntime,
     execution: InspectionExecutionPort,
     report: (diagnostic: RuntimeDiagnostic) => void = console.warn,
+    resolveFeatures: (definition: Definition) => MotionFeatures = () => fullMotionFeatures,
   ) {
     this.runtime = runtime
     this.execution = execution
     this.report = report
+    this.resolveFeatures = resolveFeatures
+  }
+
+  private evaluateCandidate<T>(definition: Definition, transform: (values: VariableValues) => T) {
+    return this.runtime.evaluateCandidate(definition, transform, this.resolveFeatures(definition))
+  }
+
+  private resolveComposition(...args: Parameters<typeof resolveComposition>) {
+    const [definition, values, composition, from, selected] = args
+
+    return resolveComposition(
+      definition,
+      values,
+      composition,
+      from,
+      selected,
+      fullMotionFeatures.layout.selected,
+    )
   }
 
   private resolveControllers(
@@ -66,7 +89,12 @@ export class RuntimeInspection {
     facts: PresentationFacts,
     fill: TrackPlan['fill'],
   ) {
-    const timings = new Map(sources.map(({ source }) => [source, trackTiming(source)]))
+    const timings = new Map(
+      sources.map(({ source }) => [
+        source,
+        trackTiming(source, fullMotionFeatures.executor.spring),
+      ]),
+    )
     const candidates = this.execution.expandTracks(sources)
     const observations = planTrackObservations(candidates, facts.active, false)
     const snapshots = this.execution.observeTracks(observations.requests)
@@ -75,7 +103,14 @@ export class RuntimeInspection {
     for (const snapshot of snapshots) {
       // The executor preserves each request's source and ownership facts. All requests
       // passed the ownership filter, so these plans cannot be omitted; timings are cached above.
-      start.push(planTrack(snapshot, timings.get(snapshot.source)!, fill)!)
+      start.push(
+        planTrack(
+          snapshot,
+          timings.get(snapshot.source)!,
+          fill,
+          fullMotionFeatures.executor.spring,
+        )!,
+      )
     }
 
     return { changed: observations.changed, start }
@@ -87,9 +122,9 @@ export class RuntimeInspection {
     composition: Composition,
     definition = this.runtime.definition,
   ) {
-    return this.runtime.evaluateCandidate(definition, (values) => ({
+    return this.evaluateCandidate(definition, (values) => ({
       presentation: this.resolveControllers(
-        resolveComposition(definition, values, composition),
+        this.resolveComposition(definition, values, composition),
         values,
         performance.now(),
         definition,
@@ -107,9 +142,9 @@ export class RuntimeInspection {
     definition = this.runtime.definition,
   ): LayerResolution {
     try {
-      return this.runtime.evaluateCandidate(definition, (values) => {
+      return this.evaluateCandidate(definition, (values) => {
         const resolution = this.resolveControllers(
-          resolveComposition(definition, values, composition, from, transitions),
+          this.resolveComposition(definition, values, composition, from, transitions),
           values,
           performance.now(),
           definition,
@@ -198,16 +233,16 @@ export class RuntimeInspection {
     }
 
     try {
-      const candidate = this.runtime.evaluateCandidate(definition, (values) => {
+      const candidate = this.evaluateCandidate(definition, (values) => {
         const previous = this.resolveControllers(
-          resolveComposition(definition, values, from),
+          this.resolveComposition(definition, values, from),
           values,
           performance.now(),
           definition,
           false,
         )
         const next = this.resolveControllers(
-          resolveComposition(definition, values, to, from, transitions),
+          this.resolveComposition(definition, values, to, from, transitions),
           values,
           performance.now(),
           definition,

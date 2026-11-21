@@ -7,17 +7,17 @@ import {
 import { batchLayoutWrites } from './layout-write-phase.ts'
 import { releaseResources } from '../evaluation/resource-cleanup.ts'
 import {
-  LayoutReadBatch,
+  ProjectionReadBatch,
   ProjectionReadPhase,
   type LayoutProjectionSnapshot,
-} from './layout-bounds.ts'
+} from './projection-read.ts'
 import { captureInheritedProjection } from './layout-capture.ts'
 import { registerLayoutRead } from './layout-scheduler.ts'
 import type { LayoutCandidate, LayoutParticipant } from './layout-participant.ts'
 import { identityProjection, type ProjectionMatrix } from './projection.ts'
 import {
   projectionShape,
-  projectionShapeMotion,
+  planProjectionShapeMotion,
   projectionShapeTransform,
   type ProjectionShape,
   type ProjectionShapeState,
@@ -141,9 +141,11 @@ export class LayoutCoordinator {
   private disposed = false
 
   private readonly report: (error: unknown) => void
+  private readonly solveSpring?: LayoutCandidate['spring']
 
-  constructor(report: (error: unknown) => void) {
+  constructor(report: (error: unknown) => void, solveSpring?: LayoutCandidate['spring']) {
     this.report = report
+    this.solveSpring = solveSpring
   }
 
   register(participant: LayoutParticipant): () => void {
@@ -271,7 +273,7 @@ export class LayoutCoordinator {
         }
       })
 
-      const batch = new LayoutReadBatch()
+      const batch = new ProjectionReadBatch()
       return new Map(candidates.map(({ element }) => [element, phase.read(element, batch)]))
     } finally {
       batchLayoutWrites(() => releaseResources(prepared.toReversed().map(({ restore }) => restore)))
@@ -436,7 +438,14 @@ export class LayoutCoordinator {
         timing?.kind === 'tween' && timing.durationMs > 0 && timing.easing !== 'linear'
           ? tweenSampler(timing.durationMs, timing.easing)
           : undefined
-      const motion = projectionShapeMotion(previous, shape, configuration.axes, timing, tween)
+      const motion = planProjectionShapeMotion(
+        previous,
+        shape,
+        configuration.axes,
+        timing,
+        tween,
+        candidate.spring ?? this.solveSpring,
+      )
       if (motion.kind === 'settle' && !parentMotion(candidate.element, this.motions)) continue
 
       const entry: Motion = {

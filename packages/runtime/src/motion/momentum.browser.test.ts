@@ -1,3 +1,4 @@
+import { MotionHistory } from './motion-history.ts'
 import {
   assembleRuntime,
   nativeEffects,
@@ -8,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import type { RuntimeDiagnostic } from '../execution/execution-contracts.ts'
 import type { Definition, Timing } from '../model/definition.ts'
 import { PresenceOperation } from '../execution/presence-operation.ts'
-import { PropertyMotion, springMotion } from './property-motion.ts'
+import { springMotion } from './property-motion.ts'
 import { decodeProperty } from './property-codec.ts'
 
 const physics: Timing = { kind: 'spring-physics', stiffness: 300, damping: 25, mass: 1 }
@@ -139,7 +140,7 @@ describe('displayed momentum integration', () => {
     ordinary.pause()
     ordinary.currentTime = 250
 
-    const observations = vi.spyOn(PropertyMotion.prototype, 'observeSpring')
+    const observations = vi.spyOn(MotionHistory.prototype, 'observeSpring')
     const leave = new PresenceOperation(capturePresence(instance, 'leave', ['self']), 'leave')
     let enter: PresenceOperation | undefined
 
@@ -301,7 +302,7 @@ describe('displayed momentum integration', () => {
     const { instance, element, errors } = setup('translate', '100% 0px')
     instance.runtime.updateParameters({ enabled: true })
     const failure = new Error('Failed to sample replacement effect')
-    const sampling = vi.spyOn(PropertyMotion.prototype, 'read').mockImplementationOnce(() => {
+    const sampling = vi.spyOn(MotionHistory.prototype, 'read').mockImplementationOnce(() => {
       throw failure
     })
     element.style.width = '200px'

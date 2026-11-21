@@ -47,11 +47,16 @@ const config = defineViteConfig({
 
   test: {
     // Unit and component coverage follows authored modules.
-    alias: Object.fromEntries(
-      Object.entries(sourceConfig.compilerOptions.paths).map(([name, [entry]]) => [
-        name,
-        fileURLToPath(new URL(entry, import.meta.url)),
-      ]),
+    alias: Object.entries(sourceConfig.compilerOptions.paths).map(([name, [entry]]) =>
+      name.endsWith('/*')
+        ? {
+            find: name.slice(0, -2),
+            replacement: fileURLToPath(new URL(entry.slice(0, -5), import.meta.url)),
+          }
+        : {
+            find: new RegExp(`^${name}$`),
+            replacement: fileURLToPath(new URL(entry, import.meta.url)),
+          },
     ),
     maxWorkers: process.env.CI ? 2 : undefined,
     projects: [

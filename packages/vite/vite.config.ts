@@ -19,7 +19,7 @@ export default defineConfig(
         fileName: () => 'editor.js',
       },
       rolldownOptions: {
-        external: ['vue', '@liva/runtime', '@liva/vue/runtime'],
+        external: ['vue', /^@liva\/(runtime|vue)(\/|$)/],
       },
     },
   },

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vite-plus/test'
-import { evaluate } from './expression.ts'
+import { evaluate as evaluateScoped, type VariableValues } from './expression.ts'
 import { sampleSpring } from '../motion/spring.ts'
-import { EvaluationFixture } from '../__test__/helpers/evaluation.ts'
-import { callTiming, builtinConstant, easingCss, timingValue } from './timing-values.ts'
+import { EvaluationFixture, builtinValues } from '../__test__/helpers/evaluation.ts'
+import { easingCss, timingValue } from './timing-values.ts'
+import { spring, steps } from './timing-builtins.ts'
+import type { FunctionArguments } from './reactive-value.ts'
 import type { Expression } from '../model/definition.ts'
 
 const reference = (name: string): Expression => ({ kind: 'reference', path: [name] })
@@ -12,6 +14,10 @@ const call = (functionName: string, args: Record<string, Expression> = {}): Expr
   function: functionName,
   arguments: Object.entries(args).map(([name, value]) => ({ name, value })),
 })
+
+function evaluate(expression: Expression, values: VariableValues) {
+  return evaluateScoped(expression, builtinValues(values))
+}
 
 describe('typed timing values', () => {
   it('evaluates nested easing expressions without a subscription context', () => {
@@ -85,7 +91,9 @@ describe('typed timing values', () => {
   })
 
   it('rejects unknown timing constructors', () => {
-    expect(() => callTiming('missing', {})).toThrow('Unknown timing function: missing')
+    expect(() => evaluate(call('missing'), {})).toThrow(
+      'Function call requires a let initializer context',
+    )
   })
 
   it.each([
@@ -96,7 +104,20 @@ describe('typed timing values', () => {
     ['spring', { damping: -1 }],
     ['cubicBezier', { x1: 2, y1: 0, x2: 1, y2: 1 }],
   ])('rejects invalid %s values', (name, args) => {
-    expect(() => callTiming(name, args)).toThrow(/Expected|must be/)
+    expect(() =>
+      evaluate(
+        call(
+          name,
+          Object.fromEntries(
+            Object.entries(args).map(([key, value]) => [
+              key,
+              typeof value === 'number' ? number(value) : { kind: 'string', value },
+            ]),
+          ),
+        ),
+        {},
+      ),
+    ).toThrow(/Expected|must be/)
   })
 
   it('resolves Instant as an explicit timing and honors motion shadowing', () => {
@@ -112,7 +133,7 @@ describe('typed timing values', () => {
 
     expect(easingCss(value)).toBe('ease-in')
     expect(() => timingValue(value)).toThrow('Expected timing value')
-    expect(builtinConstant('missing')).toBeUndefined()
+    expect(() => evaluate(reference('missing'), {})).toThrow('Unknown variable reference: missing')
   })
 
   it('evaluates dynamic duration springs and preserves requested duration', () => {
@@ -148,7 +169,7 @@ describe('typed timing values', () => {
     expect(Object.isFrozen(value)).toBe(true)
   })
 
-  it.each<Parameters<typeof callTiming>[1]>([
+  it.each<FunctionArguments>([
     { duration: 0 },
     { duration: -1 },
     { duration: Infinity },
@@ -159,7 +180,7 @@ describe('typed timing values', () => {
     { bounce: 0.25 },
     { duration: 400, damping: 20 },
   ])('rejects invalid duration spring arguments: %j', (args) => {
-    expect(() => callTiming('spring', args)).toThrow(/Spring|Expected/)
+    expect(() => spring(args)).toThrow(/Spring|Expected/)
   })
 
   it.each([
@@ -215,7 +236,7 @@ describe('typed timing values', () => {
     expect(easingCss(evaluate(reference(name), {}))).toBe(css)
   })
 
-  it.each<Parameters<typeof callTiming>[1]>([
+  it.each<FunctionArguments>([
     { count: 0 },
     { count: -1 },
     { count: 1.5 },
@@ -226,6 +247,6 @@ describe('typed timing values', () => {
     { count: 4, position: 1 },
     { count: 1, position: 'jump-none' },
   ])('rejects invalid step easing arguments: %j', (args) => {
-    expect(() => callTiming('steps', args)).toThrow(/Step count|step position|Expected/)
+    expect(() => steps(args)).toThrow(/Step count|step position|Expected/)
   })
 })

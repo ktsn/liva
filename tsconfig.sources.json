@@ -2,7 +2,11 @@
   "compilerOptions": {
     "paths": {
       "@liva/runtime": ["./packages/runtime/src/index.ts"],
+      "@liva/runtime/core": ["./packages/runtime/src/core.ts"],
+      "@liva/runtime/features/*": ["./packages/runtime/src/*.ts"],
       "@liva/vue/runtime": ["./packages/vue/src/runtime.ts"],
+      "@liva/vue/compiled": ["./packages/vue/src/compiled.ts"],
+      "@liva/vue/features/*": ["./packages/vue/src/*.ts"],
       "@liva/vue": ["./packages/vue/src/index.ts"],
       "@liva/vite": ["./packages/vite/src/index.ts"]
     }

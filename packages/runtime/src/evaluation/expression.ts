@@ -3,13 +3,8 @@ import {
   timingProvider,
   type TimingDeclaration,
 } from '../composition/layer-cascade.ts'
-import {
-  builtinConstant,
-  isTimingFunction,
-  callTiming,
-  timingValue,
-  easingCss,
-} from './timing-values.ts'
+import { timingValue, easingCss } from './timing-values.ts'
+import type { EvaluationBuiltins } from './evaluation-builtins.ts'
 import type {
   CallExpression,
   Expression,
@@ -25,6 +20,22 @@ import type { RuntimeValue, Scalar } from './reactive-value.ts'
 
 export type VariableValues = Readonly<Record<string, RuntimeValue>>
 
+// Scopes carry their selected implementations without exposing them as Motion values.
+const scopedBuiltins = new WeakMap<VariableValues, EvaluationBuiltins>()
+
+export function withBuiltins(values: VariableValues, builtins: EvaluationBuiltins): VariableValues {
+  scopedBuiltins.set(values, builtins)
+
+  return values
+}
+
+export function withDefaultBuiltins(
+  values: VariableValues,
+  builtins: EvaluationBuiltins,
+): VariableValues {
+  return scopedBuiltins.has(values) ? values : withBuiltins(values, builtins)
+}
+
 type InvokeCall = (call: CallExpression, values: VariableValues) => RuntimeValue
 
 export function evaluate(
@@ -39,9 +50,12 @@ export function evaluate(
       return expression.value
     case 'reference': {
       const [name, ...members] = expression.path
+      const constants = scopedBuiltins.get(values)?.constants
       let value: RuntimeValue | undefined = Object.hasOwn(values, name)
         ? values[name]
-        : builtinConstant(name)
+        : constants && Object.hasOwn(constants, name)
+          ? constants[name]
+          : undefined
 
       for (const member of members) {
         value =
@@ -57,7 +71,13 @@ export function evaluate(
         throw new Error(`Value is not callable: ${expression.function}`)
       }
 
-      if (isTimingFunction(expression.function)) {
+      const functions = scopedBuiltins.get(values)?.functions
+      const implementation =
+        functions && Object.hasOwn(functions, expression.function)
+          ? functions[expression.function]
+          : undefined
+
+      if (implementation) {
         const args = Object.fromEntries(
           expression.arguments.map((argument) => [
             argument.name,
@@ -65,7 +85,7 @@ export function evaluate(
           ]),
         )
 
-        return callTiming(expression.function, args)
+        return implementation(args)
       }
 
       if (!invoke) throw new Error('Function call requires a let initializer context')

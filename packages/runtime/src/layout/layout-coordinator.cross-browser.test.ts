@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { assembleRuntime } from '../__test__/helpers/assembly.ts'
 import type { Definition } from '../model/definition.ts'
 import { LayoutCoordinator } from './layout-coordinator.ts'
+import { LayoutCoordinator as PublicLayoutCoordinator } from '@liva/runtime'
 
 const cleanups: (() => void)[] = []
 let time: number
@@ -87,6 +88,56 @@ function fixture(
 }
 
 describe('LayoutCoordinator failure and registration ownership', () => {
+  it('uses standard spring playback for a public participant without a supplied solver', () => {
+    const { root, assembly, release } = fixture()
+    release()
+
+    const executor = assembly.executor
+    const [initial] = executor.layoutCandidates()
+    const configuration = initial.configuration
+
+    if (!configuration) throw new Error('Expected an active layout configuration')
+
+    const errors: unknown[] = []
+    const coordinator = new PublicLayoutCoordinator((error) => errors.push(error))
+    coordinator.register({
+      get layoutRevision() {
+        return executor.layoutRevision
+      },
+      layoutCandidates() {
+        return [
+          {
+            element: root,
+            blocked: false,
+            configuration: {
+              ...configuration,
+              timing: { kind: 'spring-duration', durationMs: 400, bounce: 0.15 },
+            },
+          },
+        ]
+      },
+      layoutTransform: executor.layoutTransform.bind(executor),
+      layoutStyleObservation: executor.layoutStyleObservation.bind(executor),
+      layoutMeasure: executor.layoutMeasure.bind(executor),
+      layoutCleanup: executor.layoutCleanup.bind(executor),
+    })
+    cleanups.push(() => coordinator.dispose())
+
+    coordinator.begin()
+    root.style.width = '200px'
+    coordinator.finish()
+
+    expect(root.getBoundingClientRect().width).toBeCloseTo(100)
+    frame(200)
+    const width = root.getBoundingClientRect().width
+    expect(width).toBeGreaterThan(100)
+
+    frame(250)
+    expect(root.style.transform).toBe('')
+    expect(root.getBoundingClientRect().width).toBe(200)
+    expect(errors).toEqual([])
+  })
+
   it('ignores a captured transaction completion delivered after disposal', () => {
     const { coordinator, root, resize, failures } = fixture()
     resize(200)
