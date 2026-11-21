@@ -45,7 +45,7 @@ const config = defineViteConfig({
   },
 
   test: {
-    // Unit and component coverage follows authored modules. The playground consumes dist.
+    // Unit and component coverage follows authored modules.
     alias: {
       '@liva/runtime': fileURLToPath(new URL('./packages/runtime/src/index.ts', import.meta.url)),
       '@liva/vue/runtime': fileURLToPath(new URL('./packages/vue/src/runtime.ts', import.meta.url)),
@@ -130,6 +130,8 @@ const config = defineViteConfig({
       provider: 'v8',
       include: ['packages/**/*.{ts,vue}'],
       exclude: [
+        // Package build settings are exercised by the package builds in CI.
+        'packages/*/vite.config.ts',
         // These files are measurement inputs compiled by each target revision, not tooling modules.
         'packages/bundle-size/fixture/**',
         'packages/**/*.test.ts',

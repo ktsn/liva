@@ -90,8 +90,13 @@ jobs:
       - name: Build JavaScript packages
         run: pnpm build:packages
 
-      - name: Check package contents and JavaScript exports
-        run: node scripts/test-packages.ts
+      - name: Verify the Vite package includes the compiler and editor
+        run: |
+          pnpm --dir packages/vite pack --dry-run --json | jq -e '
+            [.files[].path] as $files
+            | ["dist/editor.js", "wasm/liva_wasm.js", "wasm/liva_wasm_bg.wasm", "wasm/package.json"]
+            | all(.[]; . as $path | $files | index($path) != null)
+          '
 
       - name: Check TypeScript, lint and formatting
         run: pnpm check

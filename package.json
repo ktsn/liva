@@ -12,7 +12,7 @@
     "test:browser": "playwright test",
     "verify": "sh scripts/verify.sh",
     "build": "pnpm build:packages && pnpm --dir playground build",
-    "build:packages": "node scripts/build-packages.ts",
+    "build:packages": "vp run -t @liva/vite#build",
     "typecheck": "tsc --runExternalCode --noEmit && tsc --runExternalCode --noEmit -p playground/tsconfig.json",
     "size:measure": "node packages/bundle-size/src/cli.ts measure",
     "size:compare": "node packages/bundle-size/src/cli.ts compare"

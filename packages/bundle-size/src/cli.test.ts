@@ -120,7 +120,7 @@ describe('revision preparation', () => {
   })
 
   it('builds a revision’s JavaScript packages after generating its compiler WASM', async () => {
-    scripts = { 'build:packages': 'node scripts/build-packages.ts' }
+    scripts = { 'build:packages': 'vp run -t @liva/vite#build' }
 
     await prepareRevision(head, '/revisions/head')
 

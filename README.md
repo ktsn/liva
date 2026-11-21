@@ -23,13 +23,11 @@ Open the URL printed in the terminal. Rebuild WASM after Rust compiler changes a
 before dependent tests or builds. The `wasm-bindgen-cli` version must match
 `crates/liva_wasm/Cargo.toml`; the generated artifact targets Node.js.
 
-Run `pnpm build:packages` and restart the playground after changing a Liva package.
-The playground loads the same JavaScript entry points and TypeScript declarations
-included by `pnpm pack`. Liva builds the development editor and its styles as part
-of `@liva/vite`.
-
-To edit the editor's own Vue components or styles with HMR, start the repository's
-Playground with `pnpm --dir playground dev --mode editor-source --host 127.0.0.1`.
+The Playground dev server watches the editor's Vue components and styles for HMR.
+After changing the runtime, Vue integration or Vite plugin, run `pnpm build:packages`
+and restart the Playground. This runs the package builds in dependency order.
+`vp pack` emits JavaScript and TypeScript declarations for each package.
+`@liva/vite` also uses `vp build` to embed the editor's styles in its custom element.
 
 Open **Motion editor** to select an instance, edit its timeline and preview changes.
 **Save to source** updates the component's `<liva>` block and synchronizes shared
@@ -78,7 +76,7 @@ sh scripts/verify.sh
 ```
 
 On Linux, install browser system dependencies with
-`pnpm exec playwright install --with-deps`. Ports 4179–4182 must be available.
+`pnpm exec playwright install --with-deps`. Ports 4179–4181 must be available.
 Individual checks:
 
 | Check                             | Command                                                          |
@@ -87,7 +85,6 @@ Individual checks:
 | Rust lint                         | `cargo clippy --workspace --all-targets --locked -- -D warnings` |
 | Rust tests                        | `cargo test --workspace --locked`                                |
 | WASM serialization contract       | `node scripts/test-wasm.ts`                                      |
-| Package contents and JS exports   | `node scripts/test-packages.ts`                                  |
 | Types, lint and formatting        | `pnpm check`                                                     |
 | Unit and component tests          | `pnpm test`                                                      |
 | Browser integration               | `pnpm exec playwright test`                                      |

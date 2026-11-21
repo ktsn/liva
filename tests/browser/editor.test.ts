@@ -12,8 +12,8 @@ declare global {
 const base = 'http://127.0.0.1:4180'
 const file = new URL('../../playground/tests/EditorToggle.vue', import.meta.url)
 
-async function open(page: Page, fixture = false, server = base) {
-  await page.goto(fixture ? `${server}/tests/editor.html` : `${server}/tests/pulse-toggle.html`)
+async function open(page: Page, fixture = false) {
+  await page.goto(fixture ? `${base}/tests/editor.html` : `${base}/tests/pulse-toggle.html`)
   await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
   await expect(page.getByLabel('Playhead')).toBeVisible()
   await page
@@ -60,6 +60,22 @@ async function save(page: Page) {
   await page.getByRole('button', { name: 'Save to source' }).click()
   await expectMessage(page, 'All shared instances are synchronized')
 }
+
+test('loads the prebuilt editor with its shadow-root styles', async ({ page }) => {
+  await page.goto('/tests/browser/')
+  await page.addScriptTag({
+    type: 'module',
+    content: `
+      import { createDevPlugin } from '/packages/vite/dist/editor.js'
+      createDevPlugin('unused', undefined)
+    `,
+  })
+
+  await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
+
+  await expect(page.getByRole('region', { name: 'Liva motion editor' })).toBeVisible()
+  await expect(page.locator('[data-liva-editor] .editor')).toHaveCSS('position', 'fixed')
+})
 
 test('docked timeline scrubs both ways, isolates instances, and yields to application state', async ({
   page,
@@ -808,7 +824,6 @@ test(
 
 test.describe('editor source HMR', { lock: '-exclusive-' }, () => {
   const componentRoot = '../../packages/vite/src/editor/components/'
-  const editorSourceServer = 'http://127.0.0.1:4182'
   const cases = [
     {
       name: 'parent template',
@@ -853,7 +868,7 @@ test.describe('editor source HMR', { lock: '-exclusive-' }, () => {
       page.on('pageerror', (error) => errors.push(error.message))
 
       try {
-        await open(page, false, editorSourceServer)
+        await open(page)
         await track(page, 'thumb', 'scale')
         await page.getByLabel('Track duration', { exact: true }).fill('700')
         await page.getByRole('button', { name: 'Apply timing', exact: true }).click()

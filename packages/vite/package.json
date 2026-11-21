@@ -2,6 +2,9 @@
   "name": "@liva/vite",
   "version": "0.1.0",
   "private": true,
+  "scripts": {
+    "build": "vp pack && vp build"
+  },
   "files": [
     "dist",
     "wasm"

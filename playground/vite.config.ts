@@ -32,14 +32,13 @@ const editorWatch: Plugin = {
 }
 
 export default defineConfig(
-  ({ command, mode }) => {
+  ({ command, isPreview }) => {
     const plugins = [VueRouter({ dts: false }), liva()]
 
-    if (command !== 'serve' || mode !== 'editor-source') return { plugins }
+    if (command !== 'serve' || isPreview) return { plugins }
 
     return {
       plugins: [...plugins, editorWatch],
-      cacheDir: 'node_modules/.vite-editor-source',
       resolve: {
         alias: {
           'virtual:liva-editor': fileURLToPath(new URL('client.ts', editorRoot)),
