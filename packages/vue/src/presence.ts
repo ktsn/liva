@@ -14,6 +14,7 @@ export interface PresenceTarget {
 
 export class PresenceEntry {
   element?: HTMLElement
+  beforeMutation?: () => void
   readonly targets = new Set<PresenceTarget>()
   readonly snapshots = new Map<PresenceTarget, PresenceCapture>()
   session?: PresenceOperation
@@ -41,6 +42,7 @@ export class PresenceEntry {
     this.targets.clear()
     this.snapshots.clear()
     this.element = undefined
+    this.beforeMutation = undefined
   }
 }
 
@@ -83,19 +85,27 @@ export const LivaPresenceBoundary = defineComponent({
       const complete = (result: import('@liva/runtime').PresenceResult) => {
         if (entry.session !== session) return
         entry.session = undefined
-        if (
-          result === 'completed' ||
-          result === 'failed' ||
-          (result === 'superseded' && !entry.leaving)
-        )
-          done()
-
-        if (!props.persisted && !element.isConnected) {
-          for (const [key, candidate] of entries) {
-            if (candidate === entry) entries.delete(key)
+        try {
+          if (
+            result === 'completed' ||
+            result === 'failed' ||
+            (result === 'superseded' && !entry.leaving)
+          ) {
+            try {
+              entry.beforeMutation?.()
+            } finally {
+              // Capture failure cannot retain DOM after operation completion.
+              done()
+            }
           }
-          entry.dispose()
-          retained.delete(entry)
+        } finally {
+          if (!props.persisted && !element.isConnected) {
+            for (const [key, candidate] of entries) {
+              if (candidate === entry) entries.delete(key)
+            }
+            entry.dispose()
+            retained.delete(entry)
+          }
         }
       }
       void session.finished.then(complete)

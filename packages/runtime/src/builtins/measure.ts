@@ -1,5 +1,5 @@
 import type { ReactiveSubscription, RuntimeValue } from '../evaluation/reactive-value.ts'
-import { readLayoutBounds, missingBounds } from '../layout/layout-bounds.ts'
+import { missingBounds } from '../layout/layout-bounds.ts'
 import { registerLayoutRead } from '../layout/layout-scheduler.ts'
 
 function targetName(value: RuntimeValue | undefined): string {
@@ -37,13 +37,16 @@ export function measure(args: Readonly<Record<string, RuntimeValue>>): ReactiveS
 
       const cleanup = registerLayoutRead(
         document,
-        () => {
-          const next = readLayoutBounds(element, reference, (reason) => {
-            if (warnings.has(reason)) return
+        (batch) => {
+          const next =
+            !element || !reference
+              ? missingBounds
+              : batch.bounds(element, reference, (reason) => {
+                  if (warnings.has(reason)) return
 
-            warnings.add(reason)
-            console.warn({ code: 'runtime.measure', message: reason })
-          })
+                  warnings.add(reason)
+                  console.warn({ code: 'runtime.measure', message: reason })
+                })
 
           return () => {
             if (

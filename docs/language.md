@@ -343,8 +343,10 @@ Rebinding settles the current composition without replaying old animations.
 Liva passes CSS properties and values to the browser without an allowlist or
 support checks. Unsupported CSS may produce no visible change without a diagnostic.
 Overlapping shorthands/longhands and transform combinations follow browser behavior.
-Animated properties require exclusive ownership: competing Vue style bindings,
-CSS transitions, and external animations on those properties are unsupported.
+Authored property animations require exclusive ownership: competing Vue style
+bindings, CSS transitions, and external animations on those properties are unsupported.
+Automatic `$layout` instead receives destination geometry from the application and
+uses the transform ownership rules below.
 When Liva releases a property, it restores the original inline value where it still
 owns that property, preserving external edits.
 
@@ -358,8 +360,8 @@ direct control and application state remain responsive.
 
 `$layout` is a reserved Liva declaration, separate from CSS properties and timing
 decorators. It selects physical position and generated-scale axes for the root or
-a named target. Layout configuration is available for inspection; automatic geometry
-playback is not yet available.
+a named target. In Vue, opted-in targets animate application-owned layout changes
+while their DOM and component identities stay under Vue ownership.
 
 ```liva
 motion item(dragging: boolean) {
@@ -415,16 +417,72 @@ Only the layer owning the effective selection supplies a directional override.
 
 An effective explicit Liva `transform` declaration, including `transform: none`,
 disables automatic projection and child compensation on that target. Ordinary CSS
-transform is a separate browser-owned value. Width, height, translate and scale do
-not participate in this ownership rule.
+transform is temporarily overridden while automatic projection owns the target.
+A CSS rotation can disappear during projection and return when it completes. Release
+reveals the current stylesheet/inline values, including edits made while animating.
+A CSS transform transition on that owned target can be interrupted; transitions of
+other properties and unprojected ancestors retain their ordinary ownership.
+Changing that hidden target transform alone does not restart its own layout motion;
+changes to the natural containing block of absolute descendants remain layout changes.
+Width, height, translate and scale do not participate in conflict detection or
+arbitration; their browser interactions have no added continuity guarantee.
+
+### Vue-owned layout changes
+
+Use keyed per-item Motion roots for reordering. The Vue plugin coordinates potential
+layout targets throughout one application, including neighbors whose components do
+not render. Separate Vue applications retain separate transactions. Component
+`beforeMount`, `beforeUpdate` and `beforeUnmount` hooks capture before DOM mutation;
+the post-update pass reconciles bindings and applies initial corrections before paint.
+Async/Suspense resolution, Teleport moves and KeepAlive activation use these update
+boundaries. Presence additionally captures immediately before its completed leave
+actually removes or hides retained DOM, so neighbors move when that space is released.
+
+Vue applies destination dimensions immediately. Automatic layout writes translation
+and scaling together in `transform`; it does not create width/height animation tracks.
+Text uses the destination line breaks throughout size projection. Participating
+children receive their own correction; other descendants scale normally with the
+parent. `measure()` continues to report untransformed destination geometry, including
+when a generated transform temporarily changes an absolute child's containing block.
+For participating absolute boxes, Liva temporarily preserves differing used logical
+padding and fixes min/max sizes when needed to retain natural destination text layout
+under that changed containing block. These fixed constraints respect writing mode
+and box sizing, share the transform's ownership and cleanup, and restore current CSS
+when released. They are
+not width/height animation tracks.
+
+Enabling layout and changing geometry in one update uses a fresh pre-update shape.
+Initial mount, replacement, missing geometry and undefined required size ratios
+settle immediately. Interruption retains displayed physical origin, edge vectors and
+velocity, then resolves current timing for the new destination. Disabling layout or
+removing an axis releases the affected correction; reduced motion settles immediately.
+
+Geometry follows the supported single-box HTML and 2D ancestor-coordinate contract
+of [reactive layout bounds](#reactive-layout-bounds), including physical axes and
+scroll-neutral positions. Singular, unsupported or unrepresentable geometry settles.
+The collector may use temporary observation effects under the existing style owner;
+authored ancestor effects, declarations, selectors and scroll state retain their
+ownership. Browser coordinate rounding still applies, especially when transformed
+bounds must be recovered without neutralizing important ancestor presentation.
+
+Only Vue mutation transactions start automatic motion. Window resizing, image/font
+completion and external DOM/CSS layout changes refresh geometry without starting it;
+an actual external layout change ends active correction immediately. Scrolling alone
+does not become a layout transition. Playback samples retained numeric state, with
+no geometry-read loop solely for automatic transform output and no idle frame loop.
 
 The runtime exposes effective axes, timing, transform ownership and declaration/timing
 provenance separately from CSS presentation. The editor preserves layout declarations
 and timing expressions as source-owned configuration; ordinary CSS value, timing and
 keyframe edits cannot rewrite them. Ordinary timeline preview has no before/after
 layout capture. Reproducing a layout transition requires before/after geometry,
-coordinated target identities, displayed shape/velocity and the underlying uncorrected
-radius/shadow styles. Generated transforms and captured dimensions must not be saved
+coordinated receiver identities and binding generations, and each displayed physical
+origin and border-edge vector with its velocity in CSS px/ms. Before/after natural
+border boxes and the renderer's containing-block frame must share a scroll-neutral
+reference plane and a common `performance.now()` clock in milliseconds. Capture also
+needs selected axes/timing/provenance and underlying uncorrected radius/shadow styles;
+known authored effects keep their own native clocks. Ordinary preview only seeks
+its property effects; it does not capture or reproduce those geometry transactions. Generated transforms and captured dimensions must not be saved
 as authored CSS tracks. Dedicated captured-layout editing and playback are deferred
 to [#116](https://github.com/ktsn/liva/issues/116).
 
@@ -532,6 +590,9 @@ accepted inputs and ordinary presentation across disposal or definition replacem
 Necessary DOM-relative observations continue until its effects end.
 Vue waits for the currently applicable effects, including replacements, before
 removing or hiding the boundary. Reduced motion settles live playback immediately.
+If source capture fails during teardown, registrations and independent runtime/browser
+owners are still released. The original failure is reported through Vue's error
+handling; multiple independent cleanup failures retain the first cause.
 
 A conditional event is independent of state selection and animation completion:
 
@@ -916,8 +977,10 @@ presentation, without an initial animation. Later supported invalidations coales
 into an animation-frame pass. All reads finish before snapshots publish; dependent
 writes schedule further reads on a later frame. Unchanged snapshots do not notify.
 Updates follow document structure, text, attributes, target and reference sizes,
-window resizing, and load/font completion events. Liva-managed layout animations
-also update measurements each frame while running.
+window resizing, and load/font completion events. Liva-managed CSS animations that
+alter layout also update measurements each frame while running. Automatic `$layout`
+projection samples retained geometry; its transform output alone does not schedule
+per-frame measurements.
 
 External CSSOM edits, arbitrary script timing, and third-party CSS/Web Animations
 are not continuously synchronized. A third-party write after the read phase may

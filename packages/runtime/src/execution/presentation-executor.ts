@@ -1,3 +1,9 @@
+import { InlineStyleHistory, inlineDeclarations, type InlineValue } from './inline-style-history.ts'
+import type { LayoutBoxConstraints } from '../layout/layout-constraints.ts'
+import { batchLayoutWrites } from '../layout/layout-write-phase.ts'
+import { waapiProperty } from '../motion/animation.ts'
+import { resolveLayoutConfigurations } from '../composition/layout.ts'
+import type { LayoutCandidate } from '../layout/layout-participant.ts'
 import { releaseResources } from '../evaluation/resource-cleanup.ts'
 import type { PreviewOperation } from './preview-operation.ts'
 import { materializeEffect } from './native-effect.ts'
@@ -64,35 +70,25 @@ import {
   resolvePresenceTrack,
   normalizePresenceLayers,
 } from './presence-calculation.ts'
-import { trackLayoutAnimation } from '../layout/layout-scheduler.ts'
+import { trackLayoutAnimation, writeLayoutStyle } from '../layout/layout-scheduler.ts'
 import { PropertyMotion, type MotionSample } from '../motion/property-motion.ts'
 
-type InlineValue = { value: string; priority: string }
 type OwnedElement = {
   element: HTMLElement
   original: Map<string, InlineValue>
   originalCss: string
   pending: Map<string, { property: string; value: string; priority: string }>
   written: Map<string, InlineValue>
-}
-
-function inlineDeclarations(style: CSSStyleDeclaration): Map<string, InlineValue> {
-  return new Map(
-    Array.from(style).map((property) => [
-      property,
-      {
-        value: style.getPropertyValue(property),
-        priority: style.getPropertyPriority(property),
-      },
-    ]),
-  )
+  history?: InlineStyleHistory
 }
 
 /** Calculates the released baseline while preserving external CSS edits and serialization. */
 function restoredStyle(
-  { original, originalCss, pending, written }: OwnedElement,
+  { original, originalCss, pending, written, history }: OwnedElement,
   cssText: string,
 ): CSSStyleDeclaration {
+  if (history) return history.current()
+
   const baseline = document.createElement('div')
   const external = document.createElement('div')
 
@@ -222,6 +218,282 @@ const emptyResolution = (): LayerResolution => ({
  * continue with retained browser resources after logical Runtime teardown.
  */
 export class PresentationExecutor {
+  private layoutGeneration = 0
+  private layoutOwned: OwnedElement[] = []
+  private readonly layoutTransforms = new Map<HTMLElement, string>()
+  private readonly layoutEffects = new Map<
+    HTMLElement,
+    {
+      animation: Animation
+      effect: KeyframeEffect
+      constraints?: LayoutBoxConstraints
+      addresses: Set<string>
+    }
+  >()
+  private readonly layoutMeasurements = new Map<Animation, 'active' | 'releasing'>()
+  onLayoutChange?: () => void
+
+  get layoutRevision() {
+    return this.layoutGeneration
+  }
+
+  /** Potential targets include inactive declarations, so enablement captures a fresh shape. */
+  layoutCandidates(transactionRevision?: number): readonly LayoutCandidate[] {
+    if (this.disposed) return []
+
+    const configurations =
+      transactionRevision !== undefined && transactionRevision === this.layoutRevision
+        ? resolveLayoutConfigurations(
+            this.definition,
+            this.values,
+            this.layerResolution.composition,
+          )
+        : (this.layerResolution.layout ?? [])
+    const candidates = new Map<HTMLElement, LayoutCandidate>()
+
+    for (const target of declarationTargets(this.definition)) {
+      if (!target.properties.some((property) => 'kind' in property)) continue
+
+      for (const receiver of this.targetReceivers.get(target.name) ?? []) {
+        const element = receiver.element
+        const explicit = this.layerResolution.presentation.targets.some(
+          (selected) =>
+            this.targetReceivers
+              .get(selected.name)
+              ?.some((binding) => binding.element === element) &&
+            selected.properties.some((property) => property.name === 'transform'),
+        )
+        const scoped =
+          this.lifecycleOwns(element, 'transform') ||
+          this.active.some(
+            (entry) => entry.receiver.element === element && entry.track.property === 'transform',
+          )
+        candidates.set(element, {
+          element,
+          configuration:
+            configurations.find((configuration) => configuration.target === target.name) ??
+            candidates.get(element)?.configuration,
+          blocked:
+            this.suspended ||
+            this.presentationMode !== 'live' ||
+            this.motion.matches ||
+            explicit ||
+            scoped,
+        })
+      }
+    }
+
+    return [...candidates.values()]
+  }
+
+  /**
+   * Temporary projection overrides CSS at important priority. Ordinary style writes
+   * and generated output use the same ownership/rebase implementation, with separate
+   * lifetimes so release reveals current CSS, including intervening inline edits.
+   * Optional constraints are fixed used CSS lengths captured from the natural box:
+   * they retain destination padding/text layout when an absolute containing block
+   * changes. Undefined transform releases all temporary properties and native output.
+   */
+  layoutTransform(
+    element: HTMLElement,
+    transform: string | undefined,
+    constraints?: LayoutBoxConstraints,
+  ) {
+    batchLayoutWrites((finishLayoutWrites) => {
+      if (transform === undefined) {
+        const output = this.layoutEffects.get(element)
+        const owned = this.layoutOwned.find((entry) => entry.element === element)
+        if (owned)
+          writeLayoutStyle(element, () => {
+            element.style.cssText = restoredStyle(owned, element.style.cssText).cssText
+          })
+
+        if (output) {
+          output.animation.cancel()
+          // Discard transform transitions created from generated values, so release
+          // cannot continue a size interpolation after projection has ended. This
+          // target's transform and optional stabilization properties were owned;
+          // unrelated properties/elements stay intact.
+          finishLayoutWrites(
+            element,
+            [...output.addresses, ...(output.constraints?.keys() ?? [])],
+            () => {
+              // A later write in the same phase may have reacquired this output.
+              if (
+                this.layoutEffects.get(element) === output &&
+                !this.layoutTransforms.has(element)
+              ) {
+                const current = this.layoutOwned.find((entry) => entry.element === element)
+                current?.history?.dispose()
+                this.layoutEffects.delete(element)
+                this.layoutOwned = this.layoutOwned.filter((entry) => entry !== current)
+              }
+            },
+          )
+        }
+
+        // Retain ownership until restoration succeeds, so failed cleanup remains
+        // retryable by the executor's later teardown rather than becoming orphaned.
+        this.layoutTransforms.delete(element)
+        return
+      }
+
+      let output = this.layoutEffects.get(element)
+      const created = output === undefined
+      const sizingChanged =
+        (output?.constraints?.size ?? 0) !== (constraints?.size ?? 0) ||
+        [...(constraints ?? [])].some(
+          ([property, value]) => output?.constraints?.get(property) !== value,
+        )
+      if (sizingChanged) {
+        const owned = this.layoutOwned.find((entry) => entry.element === element)
+        if (owned) {
+          writeLayoutStyle(element, () => {
+            element.style.cssText = restoredStyle(owned, element.style.cssText).cssText
+          })
+          owned.history?.dispose()
+          this.layoutOwned = this.layoutOwned.filter((entry) => entry !== owned)
+        }
+        finishLayoutWrites(element, [
+          'transform',
+          ...(output?.addresses ?? []),
+          ...(output?.constraints?.keys() ?? []),
+          ...(constraints?.keys() ?? []),
+        ])
+      }
+      if (!output) {
+        finishLayoutWrites(element, ['transform', ...(constraints?.keys() ?? [])])
+        const effect = new KeyframeEffect(element, [{ transform }, { transform }], {
+          duration: 1,
+          fill: 'both',
+        })
+        const animation = new Animation(effect, element.ownerDocument.timeline)
+        output = { animation, effect, addresses: new Set(['transform']) }
+        this.layoutEffects.set(element, output)
+      }
+
+      if (sizingChanged || created) {
+        const owner = output
+        finishLayoutWrites(element, ['transform', ...(constraints?.keys() ?? [])], (addresses) => {
+          for (const address of addresses) owner.addresses.add(address)
+        })
+      }
+
+      if (output.animation.playState === 'idle') {
+        output.animation.pause()
+        output.animation.currentTime = 0
+      }
+
+      // CSS transitions can interpolate even an important inline transform. A
+      // generic effect gives this same owned value later animation composite order;
+      // the inline path still overrides author-important declarations. Both paths
+      // carry the identical numeric output and have one Executor-owned lifetime.
+      const frame = {
+        transform,
+        ...Object.fromEntries(
+          [...(constraints ?? [])].map(([property, value]) => [waapiProperty(property), value]),
+        ),
+      }
+      output.effect.setKeyframes([frame, frame])
+      this.write(element, 'transform', transform, 'important', 'layout')
+      if (sizingChanged)
+        for (const [property, value] of constraints ?? [])
+          this.write(element, property, value, 'important', 'layout')
+      if (sizingChanged) output.constraints = constraints ? new Map(constraints) : undefined
+      this.layoutTransforms.set(element, transform)
+    })
+  }
+
+  /**
+   * Excludes visual transforms for one synchronous read while preserving unrelated
+   * authored declarations and native effect objects. A generic replacement has later effect
+   * order than CSS transitions/animations. The collector verifies actual cascade
+   * effectiveness; author important declarations may still defeat this overlay.
+   */
+  layoutMeasure(element: HTMLElement, properties: ReadonlyMap<string, string>): () => void {
+    this.retryLayoutMeasurements()
+    const frame = Object.fromEntries(
+      [...properties].map(([property, value]) => [waapiProperty(property), value]),
+    )
+    const animation = new Animation(
+      new KeyframeEffect(element, [frame, frame], { duration: 1, fill: 'both' }),
+      element.ownerDocument.timeline,
+    )
+    this.layoutMeasurements.set(animation, 'active')
+    const projection = this.layoutTransforms.get(element)
+    const constraints = this.layoutEffects.get(element)?.constraints
+
+    try {
+      animation.pause()
+      animation.currentTime = 0
+      // Neutralize only generated visual projection. Keep its fixed logical size
+      // constraints/padding during this collector read so destination text/containing-block
+      // layout stays stable. The shared natural-measurement prepare phase releases
+      // all output instead. Unrelated authored effects keep their own clocks.
+      if (projection !== undefined)
+        this.layoutTransform(element, 'matrix(1, 0, 0, 1, 0, 0)', constraints)
+    } catch (error) {
+      releaseResources([
+        () => {
+          throw error
+        },
+        () => this.cancelLayoutMeasurement(animation),
+      ])
+    }
+
+    return () => {
+      if (this.layoutMeasurements.get(animation) !== 'active') {
+        this.cancelLayoutMeasurement(animation)
+        return
+      }
+
+      try {
+        if (projection !== undefined && !this.disposed)
+          this.layoutTransform(element, projection, constraints)
+      } finally {
+        this.cancelLayoutMeasurement(animation)
+      }
+    }
+  }
+
+  /** Releases temporary output and retries retained observation cleanup. Failed resources stay owned. */
+  layoutCleanup() {
+    this.releaseLayout()
+  }
+
+  private cancelLayoutMeasurement(animation: Animation) {
+    if (!this.layoutMeasurements.has(animation)) return
+
+    this.layoutMeasurements.set(animation, 'releasing')
+    animation.cancel()
+    this.layoutMeasurements.delete(animation)
+  }
+
+  private retryLayoutMeasurements() {
+    releaseResources(
+      [...this.layoutMeasurements]
+        .filter(([, state]) => state === 'releasing')
+        .map(
+          ([animation]) =>
+            () =>
+              this.cancelLayoutMeasurement(animation),
+        ),
+    )
+  }
+
+  private releaseLayout() {
+    batchLayoutWrites(() =>
+      releaseResources([
+        ...[...new Set([...this.layoutTransforms.keys(), ...this.layoutEffects.keys()])].map(
+          (element) => () => this.layoutTransform(element, undefined),
+        ),
+        ...[...this.layoutMeasurements.keys()].map(
+          (animation) => () => this.cancelLayoutMeasurement(animation),
+        ),
+      ]),
+    )
+  }
+
   private layerResolution: LayerResolution = emptyResolution()
   private readonly operations = new Map<PresenceOperation, PresenceState>()
   private readonly presented = new Map<string, LayerResolution>()
@@ -273,6 +545,8 @@ export class PresentationExecutor {
 
   initialize(resolution: LayerResolution) {
     this.layerResolution = resolution
+    this.layoutGeneration++
+    this.onLayoutChange?.()
   }
 
   get bindingFacts(): BindingFacts {
@@ -336,8 +610,9 @@ export class PresentationExecutor {
       this.receivers.delete(id)
 
       // Preview restoration still owns its saved inline baseline until preview
-      // teardown. Live terminal failures have no later owner to retry that work.
-      if (this.presentationMode === 'live') {
+      // teardown. Final disposal also retains failed restoration for an explicit
+      // Executor retry; other live terminal failures have no later owner.
+      if (this.presentationMode === 'live' && !this.disposed) {
         this.owned = this.owned.filter((entry) => entry.element !== receiver.element)
         this.dirtyProperties.delete(receiver.element)
       }
@@ -364,6 +639,8 @@ export class PresentationExecutor {
 
   private readonly targetReceivers = new Map<string, TargetReceivers>()
   private active: ActiveTrack[] = []
+  /** Failed final cancellations stay owned without remaining live execution entries. */
+  private readonly disposalAnimations = new Set<Animation>()
   private readonly propertyMotion = new PropertyMotion()
   private readonly dirtyProperties = new Map<HTMLElement, Set<string>>()
   private referenceFrame?: number
@@ -1365,6 +1642,7 @@ export class PresentationExecutor {
   }
 
   private motionChanged = () => {
+    this.onLayoutChange?.()
     if (this.disposed) {
       if (this.motion.matches)
         this.present(
@@ -1433,9 +1711,20 @@ export class PresentationExecutor {
     this.scheduleReferences()
   }
 
-  private write(element: HTMLElement, property: string, value: string, priority = '') {
+  private write(
+    element: HTMLElement,
+    property: string,
+    value: string,
+    priority = '',
+    scope: 'ordinary' | 'layout' = 'ordinary',
+  ) {
+    if (scope === 'ordinary' && property === 'transform') this.layoutTransform(element, undefined)
+
+    const ownership = scope === 'ordinary' ? this.owned : this.layoutOwned
+
+    let owned = ownership.find((o) => o.element === element)
+    owned?.history?.current()
     const before = inlineDeclarations(element.style)
-    let owned = this.owned.find((o) => o.element === element)
 
     if (!owned) {
       owned = {
@@ -1445,16 +1734,27 @@ export class PresentationExecutor {
         pending: new Map(),
         written: new Map(),
       }
-      this.owned.push(owned)
+      if (scope === 'layout') owned.history = new InlineStyleHistory(element, owned.written)
+      ownership.push(owned)
     }
 
     const beforeCss = element.style.cssText
-    if (propertyRule(property)?.kind === 'length') {
-      // Keep CSS logical/physical aliases in the same order as the resolved cascade.
-      element.style.removeProperty(property)
+    const mutate = (action: () => void) => {
+      if (scope === 'layout') writeLayoutStyle(element, action)
+      else action()
+    }
+    if (
+      propertyRule(property)?.kind === 'length' ||
+      (scope === 'layout' && property !== 'transform')
+    ) {
+      // Keep logical/physical aliases in cascade order. Temporary logical size
+      // constraints also follow current physical min/max declarations. Record
+      // every actual mutation separately so intermediate own writes cannot look
+      // like external layout changes to the shared MutationObserver.
+      mutate(() => element.style.removeProperty(property))
     }
 
-    element.style.setProperty(property, value, priority)
+    mutate(() => element.style.setProperty(property, value, priority))
 
     const after = inlineDeclarations(element.style)
 
@@ -1505,6 +1805,8 @@ export class PresentationExecutor {
         }
       }
     }
+    if (scope !== 'ordinary') return
+
     const dirty = this.dirtyProperties.get(element) ?? new Set<string>()
     dirty.add(property)
     this.dirtyProperties.set(element, dirty)
@@ -1544,6 +1846,15 @@ export class PresentationExecutor {
   }
 
   private restore(preserveLifecycle = false, elements?: ReadonlySet<HTMLElement>) {
+    const projections = (this.disposed ? [] : [...this.layoutTransforms])
+      .filter(([element]) => !elements || elements.has(element))
+      .map(([element, transform]) => ({
+        element,
+        transform,
+        constraints: this.layoutEffects.get(element)?.constraints,
+      }))
+    for (const { element } of projections) this.layoutTransform(element, undefined)
+
     const owned = this.owned.filter((entry) => !elements || elements.has(entry.element))
     const protectedValues = preserveLifecycle
       ? owned.flatMap(({ element, written }) =>
@@ -1575,6 +1886,9 @@ export class PresentationExecutor {
     for (const { element, property, value, priority } of protectedValues) {
       this.write(element, property, value, priority)
     }
+
+    for (const { element, transform, constraints } of projections)
+      this.layoutTransform(element, transform, constraints)
   }
 
   bind(entries: readonly (readonly [string, HTMLElement])[]) {
@@ -1604,6 +1918,7 @@ export class PresentationExecutor {
 
     if (unchanged) return
 
+    this.releaseLayout()
     this.endCompositionPreview()
     this.environment?.invalidateBinding()
 
@@ -1618,6 +1933,7 @@ export class PresentationExecutor {
     this.replaceReceivers(next)
 
     this.bindingStatus = status
+    this.onLayoutChange?.()
 
     this.environment?.rebound(previousInputs !== JSON.stringify(this.values))
 
@@ -1634,6 +1950,7 @@ export class PresentationExecutor {
   private previewRevision = 0
 
   beginPreview(writes: readonly StyleWrite[]) {
+    this.releaseLayout()
     this.previewRevision++
 
     for (const controller of this.controllers.keys()) controller.setPreview(true)
@@ -1645,6 +1962,7 @@ export class PresentationExecutor {
     this.propertyMotion.reset()
     this.dirtyProperties.clear()
     this.presentationMode = 'preparing-preview'
+    this.onLayoutChange?.()
     this.applyWrites(writes)
   }
 
@@ -1721,9 +2039,16 @@ export class PresentationExecutor {
 
     if (plan.mode === 'live') {
       this.layerResolution = plan.resolution
+      this.layoutGeneration++
 
       if (!this.disposed) this.environment?.acceptPresentation(plan.resolution)
     }
+
+    // Any physical alias, preview, or retained Presence owner can suppress layout.
+    for (const candidate of this.layoutCandidates()) {
+      if (candidate.blocked) this.layoutTransform(candidate.element, undefined)
+    }
+    this.onLayoutChange?.()
 
     const groups = new Set(
       [...replaced, ...prepared].flatMap((entry) => (entry.session ? [entry.session] : [])),
@@ -1853,37 +2178,70 @@ export class PresentationExecutor {
   }
 
   dispose() {
+    // Runtime disposal is terminal even if a browser cleanup fails. Invalidate
+    // callbacks first; detached leave retains its accepted data and normal lifetime.
     this.disposed = true
-    this.releaseControllers()
-    this.cancelEnterSessions('owner-teardown')
-    this.disconnectBindings()
 
-    const leave = this.active.filter(
-      (entry) => entry.session && this.operations.get(entry.session)?.phase === 'leave',
-    )
+    releaseResources([
+      () => this.releaseLayout(),
+      () => this.onLayoutChange?.(),
+      () => this.releaseControllers(),
+      () => this.cancelEnterSessions('owner-teardown'),
+      () => this.disconnectBindings(),
+      () => {
+        const leave = this.active.filter(
+          (entry) => entry.session && this.operations.get(entry.session)?.phase === 'leave',
+        )
+        const ending = this.active.filter((entry) => !leave.includes(entry))
 
-    for (const entry of this.active) {
-      if (!leave.includes(entry)) {
-        this.retainMotion(entry)
-        entry.animation.cancel()
-      }
-    }
+        // Native cancellation may notify synchronously. Retire live entries before
+        // attempting it, while retaining failed handles for a later Executor retry.
+        this.active = leave
+        const pending = [...this.disposalAnimations]
+        for (const entry of ending) this.disposalAnimations.add(entry.animation)
 
-    this.active = leave
-    this.presentationMode = 'live'
-    this.restore(this.operations.size > 0)
-    this.controllers.clear()
-    this.dirtyProperties.clear()
-    this.targetReceivers.clear()
-    this.pruneReceivers()
-    // Detached execution keeps accepted values and pure completion data, never Runtime callbacks.
-    this.environment = undefined
+        const cancel = (animation: Animation) => () => {
+          animation.cancel()
+          this.disposalAnimations.delete(animation)
+        }
 
-    if (this.operations.size === 0) {
-      this.clearReferenceFrame()
-      if (this.attached) this.motion.removeEventListener('change', this.motionChanged)
-
-      this.receivers.clear()
-    }
+        releaseResources([
+          ...ending.flatMap((entry) => [() => this.retainMotion(entry), cancel(entry.animation)]),
+          ...pending.map(cancel),
+        ])
+      },
+      () => {
+        this.presentationMode = 'live'
+        // Final restoration must not replay a projection whose release failed.
+        // Each inline owner is independent, so one CSSOM failure cannot skip the
+        // remaining receivers. Failed entries stay retained for an Executor retry.
+        releaseResources(
+          this.owned.map(
+            ({ element }) =>
+              () =>
+                this.restore(this.operations.size > 0, new Set([element])),
+          ),
+        )
+      },
+      () => {
+        this.controllers.clear()
+        this.dirtyProperties.clear()
+        this.targetReceivers.clear()
+        this.pruneReceivers()
+        // Detached execution retains accepted data, never Runtime callbacks.
+        this.environment = undefined
+      },
+      () => {
+        if (this.operations.size === 0) {
+          releaseResources([
+            () => this.clearReferenceFrame(),
+            () => {
+              if (this.attached) this.motion.removeEventListener('change', this.motionChanged)
+            },
+            () => this.receivers.clear(),
+          ])
+        }
+      },
+    ])
   }
 }
