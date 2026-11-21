@@ -6,7 +6,7 @@ import { marker } from './model.ts'
 import { array, object, text } from './data.ts'
 import type { Comment, PullRequest, Run } from './github-data.ts'
 import type { Api, ApiOptions } from './report.ts'
-import { example, readField, replaceField } from './__tests__/test-fixture.ts'
+import { example, readField, replaceField } from './__test__/test-fixture.ts'
 import {
   main,
   githubApi,

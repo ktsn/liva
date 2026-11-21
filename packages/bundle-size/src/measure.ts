@@ -17,7 +17,7 @@ import { settings } from './model.ts'
 export { settings }
 export const digest = (bytes: string | Uint8Array) =>
   createHash('sha256').update(bytes).digest('hex')
-const fixture = join(import.meta.dirname, 'fixture')
+const fixture = join(import.meta.dirname, '../fixture')
 
 /** Extract the decoded JSON argument, never the escaped JavaScript literal's length. */
 export function definitionJson(ast: unknown): string {

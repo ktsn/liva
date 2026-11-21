@@ -8,7 +8,7 @@ import { compare, main, prepareRevision } from './cli.ts'
 import { specification } from './measure.ts'
 import { text } from './data.ts'
 import { validateResult } from './model.ts'
-import { example } from './__tests__/test-fixture.ts'
+import { example } from './__test__/test-fixture.ts'
 
 vi.mock('node:child_process', { spy: true })
 vi.mock('node:fs', { spy: true })

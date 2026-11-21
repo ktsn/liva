@@ -124,11 +124,9 @@ const config = defineViteConfig({
       include: ['packages/**/*.{ts,vue}'],
       exclude: [
         // These files are measurement inputs compiled by each target revision, not tooling modules.
-        'packages/bundle-size/src/fixture/main.ts',
-        'packages/bundle-size/src/fixture/Button.vue',
+        'packages/bundle-size/fixture/**',
         'packages/**/*.test.ts',
         'packages/**/__test__/**',
-        'packages/**/__tests__/**',
         'packages/**/*.d.ts',
         'packages/**/wasm/**',
       ],

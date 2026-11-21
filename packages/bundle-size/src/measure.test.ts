@@ -6,17 +6,17 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { definitionJson, digest, measure, sizes, specification } from './measure.ts'
 import { text } from './data.ts'
-import { configure, output, setApi } from './__tests__/tools/dist/index.ts'
-import { setPlugin as setVue } from './__tests__/tools/vue.ts'
-import { setPlugin as setLiva } from './__tests__/tools/target/packages/vite/src/index.ts'
+import { configure, output, setApi } from './__test__/tools/dist/index.ts'
+import { setPlugin as setVue } from './__test__/tools/vue.ts'
+import { setPlugin as setLiva } from './__test__/tools/target/packages/vite/src/index.ts'
 
 vi.mock('node:fs/promises', { spy: true })
 vi.mock('node:child_process', { spy: true })
 vi.mock('node:module', { spy: true })
 
 const actualModule = await vi.importActual<typeof import('node:module')>('node:module')
-const target = fileURLToPath(new URL('./__tests__/tools/target', import.meta.url))
-const tools = fileURLToPath(new URL('./__tests__/tools', import.meta.url))
+const target = fileURLToPath(new URL('./__test__/tools/target', import.meta.url))
+const tools = fileURLToPath(new URL('./__test__/tools', import.meta.url))
 const sha = 'a'.repeat(40)
 let files: Map<string, string | Buffer<ArrayBuffer>>
 const argv = process.argv
@@ -216,7 +216,7 @@ describe('production measurement', () => {
   it('fingerprints fixture and producer contents, so changes cannot masquerade as matching conditions', async () => {
     const first = await specification()
     files.set(
-      fileURLToPath(new URL('./fixture/main.ts', import.meta.url)),
+      fileURLToPath(new URL('../fixture/main.ts', import.meta.url)),
       Buffer.from('changed fixture'),
     )
     const changed = await specification()

@@ -37,9 +37,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Test measurement and reporting contracts
-        run: pnpm --filter @liva/bundle-size test
-
       - name: Measure pinned base and PR head
         run: node packages/bundle-size/src/cli.ts ci "$RUNNER_TEMP/bundle-size-results"
 

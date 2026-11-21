@@ -5,8 +5,7 @@
   "type": "module",
   "scripts": {
     "measure": "node src/cli.ts measure",
-    "compare": "node src/cli.ts compare",
-    "test": "vp test --run --root ../.. --project unit packages/bundle-size --coverage.include='packages/bundle-size/src/**/*.{ts,vue}'"
+    "compare": "node src/cli.ts compare"
   },
   "devDependencies": {
     "@liva/vue": "workspace:*",
