@@ -53,6 +53,32 @@ describe('expression evaluation', () => {
   })
 
   it.each([
+    [3, 3, true],
+    [3, 4, false],
+    ['a', 'a', true],
+    ['a', 'b', false],
+    [true, true, true],
+    [true, false, false],
+    [1, '1', false],
+    [0, false, false],
+    ['', false, false],
+  ])('compares %s and %s without coercion', (left, right, equal) => {
+    for (const operator of ['==', '!=']) {
+      expect(
+        evaluate(
+          {
+            kind: 'binary',
+            operator,
+            left: { kind: 'reference', path: ['left'] },
+            right: { kind: 'reference', path: ['right'] },
+          },
+          { left, right },
+        ),
+      ).toBe(operator === '==' ? equal : !equal)
+    }
+  })
+
+  it.each([
     ['!', 0, true],
     ['-', 3, -3],
     ['+', 3, 3],

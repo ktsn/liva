@@ -305,3 +305,48 @@ fn interaction_rejects_unknown_members() {
             .any(|item| item.message.contains("pressed"))
     );
 }
+
+#[test]
+fn equality_preserves_operators_for_matching_scalar_types() {
+    for operator in ["==", "!="] {
+        for (left, right) in [("1", "2"), ("true", "false"), ("'a'", "'b'")] {
+            let result = valid(&format!(
+                "motion a {{ let value = {left} {operator} {right}; layer idle {{}} }}"
+            ));
+            let initializer =
+                serde_json::to_value(&result.definitions[0].let_bindings[0].initializer).unwrap();
+
+            assert_eq!(initializer["operator"], operator);
+        }
+    }
+}
+
+#[test]
+fn equality_rejects_mismatched_types_and_non_scalar_operands() {
+    for operator in ["==", "!="] {
+        for (left, right) in [
+            ("1", "'1'"),
+            ("'1'", "1"),
+            ("1", "true"),
+            ("true", "1"),
+            ("false", "'false'"),
+            ("'false'", "false"),
+            ("body", "body"),
+        ] {
+            let source = format!(
+                "motion a {{ let value = {left} {operator} {right}; layer idle {{ body {{ opacity: 1 }} }} }}"
+            );
+            let result = compile(&source, false);
+
+            assert!(result.definitions.is_empty(), "{source}");
+            assert!(
+                result
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.message == "Incompatible expression operands"),
+                "{source}: {:?}",
+                result.diagnostics
+            );
+        }
+    }
+}

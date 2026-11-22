@@ -184,8 +184,10 @@ let farEnough = dragging && travel > 30
 | ---------- | --------------------------- | --------------------- |
 | Arithmetic | `+ - * / %` and unary `+ -` | Numbers               |
 | Ordering   | `< <= > >=`                 | Matching scalar types |
-| Equality   | `== != === !==`             | Matching scalar types |
+| Equality   | `== !=`                     | Matching scalar types |
 | Logic      | `&&`, `\|\|`, and unary `!` | Booleans              |
+
+`==` and `!=` compare matching scalar types without coercion.
 
 All string types share the same comparison rules, so a literal, a union, and a
 general string can be compared with one another. Expressions have no assignments,
