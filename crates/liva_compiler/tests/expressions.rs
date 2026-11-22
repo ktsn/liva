@@ -305,3 +305,65 @@ fn interaction_rejects_unknown_members() {
             .any(|item| item.message.contains("pressed"))
     );
 }
+
+#[test]
+fn equality_aliases_are_rejected_in_authored_expressions() {
+    for operator in ["===", "!=="] {
+        for expression in [
+            format!("1{operator}1"),
+            format!("(true {operator} false)"),
+            format!("'a' {operator} 'b'"),
+        ] {
+            for body in [
+                format!("let value = {expression}; layer idle {{}}"),
+                format!("layer idle {{}} layer active when {expression} {{}}"),
+                format!("layer idle {{ body {{ content: ${{{expression}}} }} }}"),
+            ] {
+                let source = format!("motion a {{ {body} }}");
+                let result = compile(&source, false);
+                assert!(result.definitions.is_empty(), "{source}");
+                assert!(
+                    result.diagnostics.iter().any(|d| d.severity == "error"),
+                    "{source}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn equality_requires_matching_scalar_types_and_preserves_operators() {
+    for operator in ["==", "!="] {
+        for (left, right) in [("1", "2"), ("true", "false"), ("'a'", "'b'")] {
+            let result = valid(&format!(
+                "motion a {{ let value = {left} {operator} {right}; layer idle {{}} }}"
+            ));
+            let initializer =
+                serde_json::to_value(&result.definitions[0].let_bindings[0].initializer).unwrap();
+            assert_eq!(initializer["operator"], operator);
+        }
+        for (left, right) in [
+            ("1", "'1'"),
+            ("'1'", "1"),
+            ("1", "true"),
+            ("true", "1"),
+            ("false", "'false'"),
+            ("'false'", "false"),
+            ("body", "body"),
+        ] {
+            let source = format!(
+                "motion a {{ let value = {left} {operator} {right}; layer idle {{ body {{ opacity: 1 }} }} }}"
+            );
+            let result = compile(&source, false);
+            assert!(result.definitions.is_empty(), "{source}");
+            assert!(
+                result
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.message == "Incompatible expression operands"),
+                "{source}: {:?}",
+                result.diagnostics
+            );
+        }
+    }
+}
