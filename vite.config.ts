@@ -1,8 +1,7 @@
 import { defineConfig } from '@vizejs/vite-plugin/vite-plus'
 import { defineConfig as defineViteConfig } from 'vite-plus'
 import { playwright } from 'vite-plus/test/browser-playwright'
-import { fileURLToPath } from 'node:url'
-import sourceConfig from './tsconfig.sources.json' with { type: 'json' }
+import { sourceAliases } from './scripts/source-aliases.ts'
 
 const config = defineViteConfig({
   optimizeDeps: {
@@ -47,17 +46,7 @@ const config = defineViteConfig({
 
   test: {
     // Unit and component coverage follows authored modules.
-    alias: Object.entries(sourceConfig.compilerOptions.paths).map(([name, [entry]]) =>
-      name.endsWith('/*')
-        ? {
-            find: name.slice(0, -2),
-            replacement: fileURLToPath(new URL(entry.slice(0, -5), import.meta.url)),
-          }
-        : {
-            find: new RegExp(`^${name}$`),
-            replacement: fileURLToPath(new URL(entry, import.meta.url)),
-          },
-    ),
+    alias: sourceAliases,
     maxWorkers: process.env.CI ? 2 : undefined,
     projects: [
       {

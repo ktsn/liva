@@ -188,7 +188,7 @@ describe('Vite compilation hooks', () => {
     const { call, warnings } = hooks()
     const events = development(call)
 
-    expect(call('resolveId', 'virtual:liva-editor')).toMatch(/\/editor\.js$/)
+    expect(await call('resolveId', 'virtual:liva-editor')).toMatch(/\/editor\.js$/)
     expect(call('load', '\0liva:vue-plugin')).toContain('import.meta.hot')
 
     await call('transform', source, file)

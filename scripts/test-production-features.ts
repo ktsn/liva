@@ -4,38 +4,38 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { build, type Plugin } from 'vite-plus'
 import { defineConfig } from '@vizejs/vite-plugin/vite-plus'
-import liva from '../packages/vite/src/index.ts'
+import liva from '../packages/vite/dist/index.js'
 
 const fixture = new URL('../packages/bundle-size/fixture/', import.meta.url)
 const optional = {
-  reactive: ['/reactive-call-store.ts', '/sources-execution.ts'],
+  reactive: ['/reactive-call-store.js', '/sources-execution.js'],
   builtins: [
-    '/builtins/drag.ts',
-    '/builtins/interaction.ts',
-    '/builtins/link.ts',
-    '/builtins/measure.ts',
-    '/builtins/timeout.ts',
+    '/builtins/drag.js',
+    '/builtins/interaction.js',
+    '/builtins/link.js',
+    '/builtins/measure.js',
+    '/builtins/timeout.js',
   ],
   presence: [
-    '/presence-execution.ts',
-    '/presence-operation.ts',
-    '/presence-bindings.ts',
-    '/vue/src/presence.ts',
+    '/presence-execution.js',
+    '/presence-operation.js',
+    '/presence-bindings.js',
+    '/vue/dist/presence.js',
   ],
   layout: [
-    '/layout-execution.ts',
-    '/layout-write-phase.ts',
-    '/layout-coordinator.ts',
-    '/projection-read.ts',
-    '/style-correction.ts',
+    '/layout-execution.js',
+    '/layout-write-phase.js',
+    '/layout-coordinator.js',
+    '/projection-read.js',
+    '/style-correction.js',
   ],
   controllers: [
-    '/controllers-execution.ts',
-    '/controller-addresses.ts',
-    '/controller-presentation.ts',
+    '/controllers-execution.js',
+    '/controller-addresses.js',
+    '/controller-presentation.js',
   ],
-  spring: ['/spring.ts', '/spring-motion.ts'],
-  inspection: ['/inspection.ts', '/preview-execution.ts'],
+  spring: ['/spring.js', '/spring-motion.js'],
+  inspection: ['/inspection.js', '/preview-execution.js'],
 }
 
 interface Variant {
@@ -52,13 +52,13 @@ const variants: Record<string, Variant> = {
       let bounds = measure(target: button)
       layer base { button { opacity: \${bounds.width / 1000} } }
     }`,
-    includes: [...optional.reactive, '/builtins/measure.ts', '/layout-bounds.ts'],
+    includes: [...optional.reactive, '/builtins/measure.js', '/layout-bounds.js'],
   },
   'link without spring': {
     motion: `motion fade(active: boolean) {
       layer base { button { translate := link(input: 10, component: "x") } }
     }`,
-    includes: [...optional.reactive, ...optional.controllers, '/builtins/link.ts'],
+    includes: [...optional.reactive, ...optional.controllers, '/builtins/link.js'],
   },
   'tween layout without spring': {
     motion: `motion fade(active: boolean) {
@@ -160,14 +160,14 @@ export async function assertProductionFeatures() {
           )
 
           assert(
-            modules.some((id) => id.endsWith('/browser-executor.ts')),
+            modules.some((id) => id.endsWith('/browser-executor.js')),
             `${name} should include core`,
           )
 
           for (const shared of [
-            '/evaluation/expression.ts',
-            '/layout/geometry-animations.ts',
-            '/execution/browser-executor.ts',
+            '/evaluation/expression.js',
+            '/layout/geometry-animations.js',
+            '/execution/browser-executor.js',
           ]) {
             assert.equal(
               modules.filter((id) => id.endsWith(shared)).length,
@@ -176,11 +176,11 @@ export async function assertProductionFeatures() {
             )
           }
 
-          const layoutWrites = '/layout/layout-write-phase.ts'
+          const layoutWrites = '/layout/layout-write-phase.js'
 
           assert.equal(
             modules.filter((id) => id.endsWith(layoutWrites)).length,
-            includes.includes('/layout-write-phase.ts') ? 1 : 0,
+            includes.includes('/layout-write-phase.js') ? 1 : 0,
             `${name} should share the layout write phase`,
           )
 

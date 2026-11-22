@@ -1,7 +1,12 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "rootDir": "src"
+    "rootDir": "src",
+    "paths": {
+      "@liva/runtime": ["../runtime/dist/index.d.ts"],
+      "@liva/runtime/core": ["../runtime/dist/core.d.ts"],
+      "@liva/runtime/features/*": ["../runtime/dist/*.d.ts"]
+    }
   },
   "include": ["src/index.ts"]
 }

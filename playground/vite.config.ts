@@ -3,13 +3,13 @@ import VueRouter from 'vue-router/vite'
 import { globSync } from 'node:fs'
 import { createRequire, registerHooks } from 'node:module'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { normalizePath, type Plugin } from 'vite-plus'
 import sourceConfig from '../tsconfig.sources.json' with { type: 'json' }
+import { sourceAliases } from '../scripts/source-aliases.ts'
 
 const { paths } = sourceConfig.compilerOptions
 const workspace = new URL('../', import.meta.url)
-const runtimeSource = new URL(paths['@liva/runtime'][0], workspace)
 const viteEntry = new URL(paths['@liva/vite'][0], workspace)
 const viteSource = new URL('./', viteEntry)
 const editorRoot = new URL('editor/', viteEntry)
@@ -22,8 +22,15 @@ function loadLivaPlugin(source: boolean) {
   const hooks = source
     ? registerHooks({
         resolve(id, context, nextResolve) {
-          if (id === '@liva/runtime' && context.parentURL?.startsWith(viteSource.href))
-            return nextResolve(runtimeSource.href, context)
+          if (context.parentURL?.startsWith(viteSource.href)) {
+            const alias = sourceAliases.find(({ find }) => find.test(id))
+
+            if (alias)
+              return nextResolve(
+                pathToFileURL(id.replace(alias.find, alias.replacement)).href,
+                context,
+              )
+          }
 
           return nextResolve(id, context)
         },
@@ -72,11 +79,13 @@ export default defineConfig(
     return {
       plugins: [...plugins, editorWatch],
       resolve: {
-        alias: {
-          '@liva/runtime': fileURLToPath(runtimeSource),
-          '@liva/vue/runtime': fileURLToPath(new URL(paths['@liva/vue/runtime'][0], workspace)),
-          'virtual:liva-editor': fileURLToPath(new URL('client.ts', editorRoot)),
-        },
+        alias: [
+          ...sourceAliases.filter(({ find }) => !find.test('@liva/vue')),
+          {
+            find: 'virtual:liva-editor',
+            replacement: fileURLToPath(new URL('client.ts', editorRoot)),
+          },
+        ],
       },
     }
   },

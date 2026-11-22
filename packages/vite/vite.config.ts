@@ -4,6 +4,7 @@ export default defineConfig(
   {
     pack: {
       entry: ['src/index.ts'],
+      tsconfig: 'tsconfig.build.json',
       format: 'esm',
       fixedExtension: false,
       deps: { neverBundle: ['../wasm/liva_wasm.js'] },
