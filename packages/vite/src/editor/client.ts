@@ -1,9 +1,20 @@
 import { inspectionFeatures } from './inspection-features.ts'
-import { createEditorLivaPlugin } from '@liva/vue/runtime'
+import { handAuthoredFeatures, type InstanceBinding } from '@liva/vue/runtime'
+import { createCompiledLivaPlugin } from '@liva/vue/compiled'
+import { registerPresence } from '@liva/vue/features/presence'
+import { RuntimeInspection } from '@liva/runtime'
+import { PreviewExecution } from '@liva/runtime/features/execution/preview-execution'
+import type { App } from 'vue'
 import type { Edit } from './communication/protocol.ts'
 import { createEditorTransport, subscribeToEditorEvents } from './communication/client.ts'
 import { EditorController } from './controller.ts'
 import { mountEditor } from './ui.ts'
+
+function hasInspection(
+  binding: InstanceBinding,
+): binding is InstanceBinding & { readonly inspection: RuntimeInspection } {
+  return binding.inspection !== undefined
+}
 
 /** The consuming dev server provides the session token and the virtual module's HMR context. */
 export function createDevPlugin(token: string, hot: ImportMeta['hot']) {
@@ -19,14 +30,29 @@ export function createDevPlugin(token: string, hot: ImportMeta['hot']) {
   })
 
   Object.assign(window, { __LIVA_EDITOR__: controller })
-  return createEditorLivaPlugin(
-    {
-      source: (component) => component.livaSource,
-      observe: (event, binding) => controller.observe(event, binding),
-      onDiagnostic: (diagnostic) => controller.report(diagnostic.message),
+
+  const plugin = createCompiledLivaPlugin({
+    defaults: handAuthoredFeatures,
+    source: (component) => component.livaSource,
+    observe: (event, binding) => {
+      /* v8 ignore else -- @preserve: This adapter supplies both the observer and its inspection. */
+      if (hasInspection(binding)) controller.observe(event, binding)
     },
-    inspectionFeatures,
-  )
+    onDiagnostic: (diagnostic) => controller.report(diagnostic.message),
+    inspect: (runtime, executor, report) =>
+      new RuntimeInspection(runtime, executor, report, inspectionFeatures),
+    preview: {
+      controllers: handAuthoredFeatures.executor.controllers,
+      preview: PreviewExecution,
+    },
+  })
+
+  return {
+    install(app: App) {
+      registerPresence(app)
+      app.use(plugin)
+    },
+  }
 }
 
 export type { Edit }

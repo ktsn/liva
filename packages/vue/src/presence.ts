@@ -1,4 +1,5 @@
 import {
+  type App,
   type Component,
   defineComponent,
   h,
@@ -7,6 +8,12 @@ import {
   TransitionGroup,
 } from 'vue'
 import { PresenceOperation, type PresenceCapture } from '@liva/runtime'
+
+/** Register the public Presence assets used by authored templates. */
+export function registerPresence(app: App) {
+  app.component('LivaPresenceBoundary', LivaPresenceBoundary)
+  app.directive('liva-entry', livaEntry)
+}
 
 export interface PresenceTarget {
   capture(phase: 'enter' | 'leave', interrupted: boolean): PresenceCapture | undefined

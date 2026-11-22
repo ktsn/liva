@@ -1,6 +1,8 @@
 import { Runtime } from '../../execution/runtime.ts'
 import { RuntimeInspection } from '../../execution/inspection.ts'
-import { PresentationExecutor } from '../../execution/presentation-executor.ts'
+import { BrowserExecutor } from '../../execution/browser-executor.ts'
+import { fullMotionFeatures } from '../../execution/full.ts'
+import { PreviewExecution } from '../../execution/preview-execution.ts'
 import type { Definition } from '../../model/definition.ts'
 import type { RuntimeDiagnostic } from '../../execution/execution-contracts.ts'
 
@@ -10,7 +12,10 @@ export function assembleRuntime(
   inputs: Readonly<Record<string, unknown>> = {},
   report: (diagnostic: RuntimeDiagnostic) => void = console.warn,
 ) {
-  const executor = new PresentationExecutor(report)
+  const executor = new BrowserExecutor(report, {
+    ...fullMotionFeatures.executor,
+    preview: PreviewExecution,
+  })
   let runtime: Runtime | undefined
 
   try {
@@ -41,7 +46,7 @@ export type RuntimeAssembly = ReturnType<typeof assembleRuntime>
  * deliberately expose only scoped preview operations. Preserve the executor's
  * native ordering and preview selection without adding a public Animation view.
  */
-export function nativeEffects(executor: PresentationExecutor): readonly Animation[] {
+export function nativeEffects(executor: BrowserExecutor): readonly Animation[] {
   const active: unknown = Reflect.get(executor, 'active')
   const mode: unknown = Reflect.get(executor, 'presentationMode')
 

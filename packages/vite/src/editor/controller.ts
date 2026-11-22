@@ -8,7 +8,7 @@ export type EditorBinding = Pick<InstanceBinding, 'source' | 'definition' | 'lab
     'definition' | 'replaceDefinition' | 'composition'
   >
   readonly inspection: Pick<
-    InstanceBinding['inspection'],
+    NonNullable<InstanceBinding['inspection']>,
     'inspectComposition' | 'inspectLifecycle' | 'previewComposition' | 'previewLifecycle'
   >
 }

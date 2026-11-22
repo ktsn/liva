@@ -89,7 +89,9 @@ const variants: Record<string, Variant> = {
       @tween(duration: 200, easing: linear)
       layer base { button { $layout: position } }
     }`,
-    includes: Object.values(optional).flat(),
+    includes: Object.entries(optional).flatMap(([feature, modules]) =>
+      feature === 'inspection' ? [] : modules,
+    ),
     preserveSymlinks: true,
     entry: 'full',
   },
@@ -98,7 +100,9 @@ const variants: Record<string, Variant> = {
       @tween(duration: 200, easing: linear)
       layer base { button { $layout: position } }
     }`,
-    includes: Object.values(optional).flat(),
+    includes: Object.entries(optional).flatMap(([feature, modules]) =>
+      feature === 'inspection' ? [] : modules,
+    ),
     preserveSymlinks: true,
     entry: 'named',
   },

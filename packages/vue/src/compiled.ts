@@ -43,7 +43,8 @@ export interface InstanceBinding {
   /** Optional opaque source identity supplied by the integration, never a filesystem path. */
   readonly source?: string
   readonly runtime: MotionRuntime
-  readonly inspection: RuntimeInspection
+  /** Available when the development editor supplies inspection. */
+  readonly inspection?: RuntimeInspection
   readonly definition: Definition
 
   /** Reads current viewport geometry; returns undefined after this registration unmounts. */
@@ -230,22 +231,25 @@ export function createCompiledLivaPlugin(options: PluginOptions = {}): Plugin {
             element.dispatchEvent(new CustomEvent(`liva-${name}`, { bubbles: true })),
           )
           const inspection = options.inspect?.(runtime, executor, report)
-          const observed = inspection && {
-            label: definition.name,
-            source,
-            runtime,
-            inspection,
-            get definition() {
-              return runtime.definition
-            },
-            bounds() {
-              if (roots.get(element) !== record) return undefined
+          const observed = options.observe
+            ? {
+                label: definition.name,
+                source,
+                runtime,
+                ...(inspection && { inspection }),
+                get definition() {
+                  return runtime.definition
+                },
+                bounds() {
+                  if (roots.get(element) !== record) return undefined
 
-              const { top, bottom, left, right, width, height } = element.getBoundingClientRect()
+                  const { top, bottom, left, right, width, height } =
+                    element.getBoundingClientRect()
 
-              return { top, bottom, left, right, width, height }
-            },
-          }
+                  return { top, bottom, left, right, width, height }
+                },
+              }
+            : undefined
           const record: RootBinding = {
             root: element,
             runtime,
