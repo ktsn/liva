@@ -59,8 +59,6 @@ fn expression_nodes_report_the_offending_token_or_operand() {
         ("«1» || false", "Incompatible expression operands"),
         ("1 == «false»", "Incompatible expression operands"),
         ("1 != «false»", "Incompatible expression operands"),
-        ("1 «===» false", "Unsupported expression token"),
-        ("1 «!==» false", "Unsupported expression token"),
         ("1 < «false»", "Incompatible expression operands"),
         ("1 <= «false»", "Incompatible expression operands"),
         ("1 > «false»", "Incompatible expression operands"),

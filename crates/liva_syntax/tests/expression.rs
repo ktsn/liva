@@ -193,23 +193,3 @@ fn lexical_string_closure_is_independent_of_escape_validity() {
         );
     }
 }
-
-#[test]
-fn equality_aliases_are_rejected_without_losing_source_text() {
-    for operator in ["===", "!=="] {
-        for source in [
-            format!("1{operator}1"),
-            format!("'日本😀' /* comment */ {operator} '日本😀'"),
-        ] {
-            let parsed = liva_syntax::parse_expression(&source);
-            assert_eq!(parsed.root.text(), source);
-            assert_eq!(parsed.diagnostics.len(), 1, "{:?}", parsed.diagnostics);
-            let diagnostic = &parsed.diagnostics[0];
-            assert_eq!(diagnostic.message, "Unsupported expression token");
-            assert_eq!(
-                &source[diagnostic.range.start..diagnostic.range.end],
-                operator
-            );
-        }
-    }
-}

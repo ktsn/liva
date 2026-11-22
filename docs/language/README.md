@@ -187,8 +187,7 @@ let farEnough = dragging && travel > 30
 | Equality   | `== !=`                     | Matching scalar types |
 | Logic      | `&&`, `\|\|`, and unary `!` | Booleans              |
 
-`==` and `!=` compare matching scalar types without coercion. `===` and `!==`
-are not supported; replace them with `==` and `!=`, respectively.
+`==` and `!=` compare matching scalar types without coercion.
 
 All string types share the same comparison rules, so a literal, a union, and a
 general string can be compared with one another. Expressions have no assignments,
