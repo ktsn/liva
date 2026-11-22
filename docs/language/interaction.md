@@ -1,6 +1,6 @@
 # Reactive inputs and property controllers
 
-[Language specification](language.md)
+[Language specification](README.md)
 
 Observe browser interactions or elapsed time in a motion. Use property controllers
 to turn input changes into movement and release events to choose a destination.

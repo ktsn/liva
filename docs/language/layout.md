@@ -1,6 +1,6 @@
 # Layout measurement and animation
 
-[Language specification](language.md)
+[Language specification](README.md)
 
 Read element geometry with `measure()` and animate Vue-driven layout changes
 with `$layout`.
@@ -192,7 +192,7 @@ child's used logical padding and min/max sizes to preserve its destination text
 layout. These adjustments honor writing mode and box sizing and are released
 with the transform.
 
-See the runnable [layout example](../playground/src/pages/layout-animation.vue).
+See the runnable [layout example](../../playground/src/pages/layout-animation.vue).
 
 ### Corner and shadow correction
 

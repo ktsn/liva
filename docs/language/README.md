@@ -59,8 +59,8 @@ motion toggle(checked: boolean) {
 
 The argument to `v-liva` names the motion. The directive's value supplies its
 parameters, and `v-liva-target:thumb` binds the target named `thumb`. Initial layer
-styles settle immediately. See the [Vue setup instructions](../README.md#vue-integration)
-and the complete [switch component](../playground/src/components/Toggle.vue).
+styles settle immediately. See the [Vue setup instructions](../../README.md#vue-integration)
+and the complete [switch component](../../playground/src/components/Toggle.vue).
 
 ## Motions
 
