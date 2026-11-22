@@ -1,6 +1,6 @@
 # Animation timing and keyframes
 
-[Language specification](language.md)
+[Language specification](README.md)
 
 Timing values set how properties animate. Keyframes supply values along the way.
 Springs can carry velocity from an interrupted animation or drag.

@@ -1,6 +1,6 @@
 # Vue lifecycle and events
 
-[Language specification](language.md)
+[Language specification](README.md)
 
 Animate elements as Vue inserts, removes, or hides them. Motion events notify
 the Vue component when a condition becomes true.

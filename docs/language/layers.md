@@ -1,6 +1,6 @@
 # Layers and state transitions
 
-[Language specification](language.md)
+[Language specification](README.md)
 
 A motion requires at least one layer. Layer names are unique within a motion.
 
