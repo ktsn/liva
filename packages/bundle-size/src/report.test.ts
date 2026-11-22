@@ -153,7 +153,12 @@ describe('PR reporting', () => {
       expect(await report(api, event, 'ktsn/liva')).toBe('success')
       expect(writes(calls).length).toBe(1)
       expect(writes(calls)[0].method).toBe(comments[0] === botComment ? 'PATCH' : 'POST')
-      assert(posted(calls).body.body.startsWith(marker))
+      const comment = posted(calls).body.body
+
+      assert(comment.startsWith(marker))
+      expect(comment).toContain('| Feature | Minified | gzip | brotli |')
+      expect(comment).toContain('| Measure + Layout | 0.10 / 0.10 KB (+0.00%) |')
+      expect(comment).toContain('| Full | 0.10 / 0.10 KB (+0.00%) |')
     }
   })
 
@@ -208,7 +213,7 @@ describe('PR reporting', () => {
 
       await expect(report(api, event, 'ktsn/liva')).rejects.toThrow(/artifact rejected/)
       expect(posted(calls).body.body).toMatch(/Measurement failed/)
-      expect(posted(calls).body.body).not.toMatch(/Minified JS/)
+      expect(posted(calls).body.body).not.toContain('| Feature |')
     }
   })
 
@@ -231,7 +236,7 @@ describe('PR reporting', () => {
       await expect(report(api, event, 'ktsn/liva')).rejects.toThrow(/artifact rejected/)
       expect(writes(calls).length).toBe(1)
       expect(posted(calls).body.body).toMatch(/Measurement failed/)
-      expect(posted(calls).body.body).not.toMatch(/Minified JS/)
+      expect(posted(calls).body.body).not.toContain('| Feature |')
     }
   })
 

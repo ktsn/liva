@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { environment, object, text } from './data.ts'
 import { pullRequest } from './github-data.ts'
-import { validateMeasurement, validateResult } from './model.ts'
+import { validateFeatureMeasurement, validateResult } from './model.ts'
 import type { Comparison, Context, Side, SideResult } from './types.ts'
 import { specification } from './measure.ts'
 
@@ -84,7 +84,7 @@ export async function compare({
   single = false,
 }: CompareOptions): Promise<Comparison> {
   const result = {
-    schema: 1,
+    schema: 2,
     specification: await specification(),
     context,
 
@@ -110,7 +110,11 @@ export async function compare({
 
       // Fresh processes keep each revision's compiler and native tools isolated.
       run(process.execPath, workerArgs, process.cwd())
-      sides[side] = validateMeasurement(JSON.parse(await readFile(resultFile, 'utf8')))
+      const measured = validateFeatureMeasurement(JSON.parse(await readFile(resultFile, 'utf8')))
+
+      assert.equal(measured.sha, sha)
+
+      sides[side] = measured
     } catch (error) {
       result.status = 'failure'
       sides[side] = {

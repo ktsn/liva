@@ -80,7 +80,7 @@ describe('measurement results', () => {
 
     expect(comment).toMatch(/Measurement failed/)
     expect(comment).toMatch(/base `aaaaaaaa/)
-    expect(comment).not.toMatch(/\| Minified JS/)
+    expect(comment).not.toContain('| Feature |')
   })
 
   it('result validation rejects unsafe numbers, metadata injection, unsupported settings and unknown fields', () => {
@@ -89,6 +89,9 @@ describe('measurement results', () => {
       [['head', 'bytes', 'gzip'], -1],
       [['head', 'bytes', 'brotli'], 1.5],
       [['head', 'bytes', 'definitions'], 0],
+      [['head', 'features', 'spring', 'bytes', 'gzip'], -1],
+      [['head', 'features', 'presence', 'bundle'], 'invalid'],
+      [['head', 'features'], {}],
       [['head', 'metadata', 'dependencies', 'vue'], '```<img>'],
       [['specification', 'target'], 'esnext'],
       [
@@ -138,11 +141,13 @@ describe('measurement results', () => {
     expect(validateResult(decoded)).toStrictEqual(decoded)
   })
 
-  it('comment includes signed byte/percentage deltas, definitions, SHAs, logs and collapsed metadata', () => {
+  it('comment lists all six features with base and PR sizes in KB, byte-based changes and provenance', () => {
     const result = example()
 
-    result.head.bytes.minified = 120
-    result.head.bytes.gzip = 60
+    result.base.bytes.minified = 142_669
+    result.head.bytes.minified = 62_415
+    result.base.bytes.gzip = 84
+    result.head.bytes.gzip = 56
 
     const comment = formatComment(result, {
       repository: 'ktsn/liva',
@@ -151,10 +156,17 @@ describe('measurement results', () => {
       headSha: result.head.sha,
     })
 
-    expect(comment).toMatch(/Minified JS \| 100 \| 120 \| \+20 \| \+20.00%/)
-    expect(comment).toMatch(/gzip JS \| 80 \| 60 \| -20 \| -25.00%/)
-    expect(comment).toMatch(/Brotli JS \| 70 \| 70 \| \+0 \| \+0.00%/)
-    expect(comment).toMatch(/Definition JSON \(UTF-8\)/)
+    const table = comment.split('\n').filter((line) => line.startsWith('|'))
+
+    expect(table).toStrictEqual([
+      '| Feature | Minified | gzip | brotli |',
+      '| --- | ---: | ---: | ---: |',
+      '| Core | 142.67 / 62.42 KB (-56.25%) | 0.08 / 0.06 KB (-33.33%) | 0.07 / 0.07 KB (+0.00%) |',
+      ...['Spring', 'Controller', 'Measure + Layout', 'Presence', 'Full'].map(
+        (name) =>
+          `| ${name} | 0.10 / 0.10 KB (+0.00%) | 0.08 / 0.08 KB (+0.00%) | 0.07 / 0.07 KB (+0.00%) |`,
+      ),
+    ])
     expect(comment).toMatch(/actions\/runs\/10000000001\/attempts\/1/)
     expect(comment).toMatch(/<details>/)
     expect(comment).toMatch(new RegExp(result.base.sha))
@@ -170,6 +182,23 @@ describe('measurement results', () => {
       attempt: 1,
       headSha: result.head.sha,
     })
-    expect(comment).toContain('Minified JS | 0 | 10 | +10 | n/a')
+    expect(comment).toContain('| Core | 0.00 / 0.01 KB (n/a) |')
+  })
+
+  it('reports Core from existing schema 1 artifacts', () => {
+    const result = example()
+    result.schema = 1
+    delete result.base.features
+    delete result.head.features
+
+    const comment = formatComment(validateResult(result), {
+      repository: 'ktsn/liva',
+      run: 1,
+      attempt: 1,
+      headSha: result.head.sha,
+    })
+
+    expect(comment).toContain('| Core |')
+    expect(comment).not.toContain('| Spring |')
   })
 })

@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict'
 import { number, object, text } from './data.ts'
+import { featureFixtures } from './fixtures.ts'
 import {
   measured,
+  type BundleSize,
   type Bytes,
   type Comparison,
   type Context,
+  type MeasuredSide,
   type Measurement,
   type Metadata,
   type Provenance,
@@ -24,13 +27,7 @@ export const settings = Object.freeze({
   external: Object.freeze(['vue']),
 })
 export const marker = '<!-- liva-bundle-size:v1 -->'
-export const metrics: Record<keyof Bytes, string> = {
-  minified: 'Minified JS',
-  gzip: 'gzip JS',
-  brotli: 'Brotli JS',
-  definitions: 'Definition JSON (UTF-8)',
-}
-export const metricNames = ['minified', 'gzip', 'brotli', 'definitions'] as const
+const sizeColumns = ['minified', 'gzip', 'brotli'] as const
 export const sideNames = ['base', 'head'] as const
 const sha = /^[a-f0-9]{40}$/
 const hash = /^[a-f0-9]{64}$/
@@ -52,13 +49,22 @@ function keys(value: unknown, names: string[]): Record<string, unknown> {
   return record
 }
 
-/** Decode a measurement only after checking every field of the untrusted payload. */
-export function validateMeasurement(value: unknown): Measurement {
-  const result = keys(value, ['sha', 'bytes', 'bundle', 'metadata'])
-  const bytes = keys(result.bytes, Object.keys(metrics))
+function decodeBuildSize(result: Record<string, unknown>): BundleSize {
+  const bytes = keys(result.bytes, [...sizeColumns, 'definitions'])
+  assert(matchesString(result.bundle, hash))
 
-  for (const bytesValue of Object.values(bytes)) assert(integer(bytesValue))
+  return {
+    bundle: text(result.bundle),
+    bytes: {
+      minified: positiveBytes(bytes.minified),
+      gzip: positiveBytes(bytes.gzip),
+      brotli: positiveBytes(bytes.brotli),
+      definitions: positiveBytes(bytes.definitions),
+    },
+  }
+}
 
+function decodeMeasurement(result: Record<string, unknown>): Measurement {
   const metadata = keys(result.metadata, [
     'node',
     'rustc',
@@ -94,7 +100,7 @@ export function validateMeasurement(value: unknown): Measurement {
     }),
   )
 
-  assert(matchesString(result.sha, sha) && matchesString(result.bundle, hash))
+  assert(matchesString(result.sha, sha))
 
   const decodedMetadata: Metadata = {
     node: text(metadata.node),
@@ -113,15 +119,32 @@ export function validateMeasurement(value: unknown): Measurement {
   }
 
   return {
+    ...decodeBuildSize(result),
     sha: text(result.sha),
-    bundle: text(result.bundle),
-    bytes: {
-      minified: positiveBytes(bytes.minified),
-      gzip: positiveBytes(bytes.gzip),
-      brotli: positiveBytes(bytes.brotli),
-      definitions: positiveBytes(bytes.definitions),
-    },
     metadata: decodedMetadata,
+  }
+}
+
+const measurementFields = ['sha', 'bytes', 'bundle', 'metadata']
+
+/** Decode the single-build format used by historical artifacts. */
+export function validateMeasurement(value: unknown): Measurement {
+  return decodeMeasurement(keys(value, measurementFields))
+}
+
+/** Decode the current worker format and reject missing or unknown feature measurements. */
+export function validateFeatureMeasurement(value: unknown): MeasuredSide {
+  const result = keys(value, [...measurementFields, 'features'])
+  const features = keys(result.features, Object.keys(featureFixtures))
+
+  return {
+    ...decodeMeasurement(result),
+    features: Object.fromEntries(
+      Object.entries(features).map(([name, feature]) => [
+        name,
+        decodeBuildSize(keys(feature, ['bytes', 'bundle'])),
+      ]),
+    ),
   }
 }
 
@@ -131,7 +154,7 @@ function positiveBytes(value: unknown): number {
   return value
 }
 
-function decodeSide(value: unknown): SideResult {
+function decodeSide(value: unknown, schema: 1 | 2): SideResult {
   const result = object(value)
 
   assert(matchesString(result.sha, sha))
@@ -143,14 +166,14 @@ function decodeSide(value: unknown): SideResult {
     return { sha: text(result.sha), error: result.error }
   }
 
-  return validateMeasurement(result)
+  return schema === 2 ? validateFeatureMeasurement(result) : validateMeasurement(result)
 }
 
 /** Validate every artifact field before it reaches a privileged formatter or API call. */
 export function validateResult(value: unknown): Comparison {
   const result = keys(value, ['schema', 'status', 'specification', 'context', 'base', 'head'])
 
-  assert.equal(result.schema, 1)
+  assert(result.schema === 1 || result.schema === 2)
   assert(result.status === 'success' || result.status === 'failure')
 
   const spec = keys(result.specification, [...Object.keys(settings), 'fixture', 'harness'])
@@ -199,9 +222,13 @@ export function validateResult(value: unknown): Comparison {
     }
   }
 
-  const base = decodeSide(result.base)
-  const head = decodeSide(result.head)
-  const common = { schema: 1 as const, specification, context }
+  const base = decodeSide(result.base, result.schema)
+  const head = decodeSide(result.head, result.schema)
+  const common: Pick<Comparison, 'schema' | 'specification' | 'context'> = {
+    schema: result.schema,
+    specification,
+    context,
+  }
 
   if (measured(base) && measured(head)) {
     assert.equal(result.status, 'success')
@@ -218,6 +245,24 @@ export function difference(base: number, head: number) {
   return { bytes: head - base, percent: base === 0 ? null : ((head - base) / base) * 100 }
 }
 
+const kilobytes = new Intl.NumberFormat('en-US', {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+})
+
+function sizeRow(label: string, base: Bytes, head: Bytes): string {
+  const cells = sizeColumns.map((key) => {
+    const baseKB = kilobytes.format(base[key] / 1_000)
+    const headKB = kilobytes.format(head[key] / 1_000)
+    const { percent } = difference(base[key], head[key])
+    const change = percent === null ? 'n/a' : `${percent >= 0 ? '+' : ''}${percent.toFixed(2)}%`
+
+    return `${baseKB} / ${headKB} KB (${change})`
+  })
+
+  return `| ${label} | ${cells.join(' | ')} |`
+}
+
 export function formatComment(result: Comparison | null, provenance: Provenance) {
   const logs = `https://github.com/${provenance.repository}/actions/runs/${provenance.run}/attempts/${provenance.attempt}`
   const lines = [
@@ -229,19 +274,19 @@ export function formatComment(result: Comparison | null, provenance: Provenance)
 
   if (result?.status === 'success') {
     lines.push(
-      '| Metric | Base bytes | PR bytes | Difference | Change |',
-      '| --- | ---: | ---: | ---: | ---: |',
+      'Each cell shows base / PR size in KB and percentage change.',
+      '',
+      '| Feature | Minified | gzip | brotli |',
+      '| --- | ---: | ---: | ---: |',
+      sizeRow('Core', result.base.bytes, result.head.bytes),
     )
 
-    for (const key of metricNames) {
-      const label = metrics[key]
-      const base = result.base.bytes[key]
-      const head = result.head.bytes[key]
-      const delta = difference(base, head)
-
-      lines.push(
-        `| ${label} | ${base} | ${head} | ${delta.bytes >= 0 ? '+' : ''}${delta.bytes} | ${delta.percent === null ? 'n/a' : `${delta.percent >= 0 ? '+' : ''}${delta.percent.toFixed(2)}%`} |`,
-      )
+    if (result.base.features && result.head.features) {
+      for (const [name, { label }] of Object.entries(featureFixtures)) {
+        lines.push(
+          sizeRow(label, result.base.features[name].bytes, result.head.features[name].bytes),
+        )
+      }
     }
   } else {
     const failures = result
