@@ -33,7 +33,7 @@ async function move(direction: -1 | 1, event: MouseEvent) {
 </script>
 
 <template>
-  <li v-liva:topic="{ expanded }" class="topic-card" :data-topic="topic.id">
+  <li v-liva:topic="{ expanded }" class="topic-card" :class="{ expanded }" :data-topic="topic.id">
     <header v-liva-target:header class="topic-header">
       <div class="topic-introduction">
         <p class="topic-category">{{ topic.category }}</p>
@@ -47,7 +47,15 @@ async function move(direction: -1 | 1, event: MouseEvent) {
               expanded ? '−' : '+'
             }}</span></button>
         </h2>
-        <p class="topic-summary">{{ topic.summary }}</p>
+        <div v-if="!expanded" v-liva-target:summary class="topic-preview">
+          <svg aria-hidden="true" class="topic-art" focusable="false" viewBox="0 0 80 56">
+            <rect fill="#dce6d5" height="56" rx="8" width="80" />
+            <circle cx="61" cy="15" fill="#e7b86c" r="8" />
+            <path d="M0 43 24 19 48 43 64 29 80 45V56H0Z" fill="#88a38a" />
+            <path d="M0 50 27 38 51 48 80 39V56H0Z" fill="#487857" />
+          </svg>
+          <p class="topic-summary">{{ topic.summary }}</p>
+        </div>
       </div>
       <div aria-label="Change topic order" class="topic-order" role="group">
         <button class="topic-move" :aria-label="`Move ${topic.title} up`" @click="move(-1, $event)"
@@ -69,6 +77,7 @@ async function move(direction: -1 | 1, event: MouseEvent) {
         paragraph
       }}</p>
       <a
+        v-liva-target:reference
         class="topic-reference"
         href="https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_display/Flow_layout"
       >Read about natural CSS layout</a>
@@ -78,12 +87,23 @@ async function move(direction: -1 | 1, event: MouseEvent) {
 
 <style scoped>
 .topic-card {
-  padding: 22px;
+  --topic-padding: 22px;
+  inline-size: calc(100% - 24px);
+  transform-origin: top center;
+  padding: var(--topic-padding);
   border: 1px solid #cbd8cb;
   border-radius: 18px;
   background: #fffefa;
   box-shadow: 0 3px 12px #173d3614;
   overflow: clip;
+}
+.topic-card.expanded {
+  inline-size: 100%;
+}
+/* Keep line wrapping fixed while the paper grows around its content. */
+.topic-header,
+.topic-details {
+  inline-size: calc(100cqi - 24px - 2px - var(--topic-padding) - var(--topic-padding));
 }
 .topic-header {
   display: flex;
@@ -125,9 +145,21 @@ async function move(direction: -1 | 1, event: MouseEvent) {
   flex: none;
   color: #487857;
 }
+.topic-preview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-block-start: 10px;
+}
+.topic-art {
+  inline-size: 64px;
+  block-size: 44.8px;
+  flex: none;
+}
 .topic-summary {
-  margin-block: 10px 0;
-  margin-inline: 0;
+  flex: 1 1 16ch;
+  margin: 0;
   color: #64766f;
   font-size: 14px;
   line-height: 1.5;
@@ -160,7 +192,7 @@ async function move(direction: -1 | 1, event: MouseEvent) {
 }
 @media (max-width: 600px) {
   .topic-card {
-    padding: 16px;
+    --topic-padding: 16px;
   }
   .topic-header {
     flex-direction: column;
@@ -177,19 +209,35 @@ motion topic(expanded: boolean) {
   @spring(duration: 500, bounce: .1)
   layer base {
     $layout: position size
+    rotate: -.5deg
     header { $layout: position }
-    details { $layout: position; opacity: 1 }
+    summary { opacity: 1 }
+    details { $layout: position; opacity: 1; translate: 0px 0px }
+    reference { opacity: 1 }
   }
 
   @tween(duration: 240, easing: easeOut)
   layer expanded when expanded {
+    rotate: 0deg
     border-radius: 26px
     box-shadow: 0px 12px 28px #173d3624
   }
 
-  @tween(duration: 180, easing: easeOut)
-  enter { details { opacity: 0 } }
-  @tween(duration: 180, easing: easeOut)
-  leave { details { opacity: 0 } }
+  // Holds in property tracks coordinate entry without timers or a second timeline.
+  @tween(duration: 420, easing: easeOut)
+  enter {
+    summary { opacity ~> { 0%: 0; 60%: 0 } }
+    details {
+      opacity ~> { 0%: 0; 35%: 0 }
+      translate: 0px 12px
+    }
+    reference { opacity ~> { 0%: 0; 65%: 0 } }
+  }
+  @tween(duration: 140, easing: easeOut)
+  leave {
+    summary { opacity: 0 }
+    details { opacity: 0; translate: 0px -8px }
+    reference { opacity: 0 }
+  }
 }
 </liva>

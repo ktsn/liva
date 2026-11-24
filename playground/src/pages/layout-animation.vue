@@ -109,6 +109,7 @@ function reverse() {
   padding-block: 8px;
 }
 .topic-list {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: 18px;
