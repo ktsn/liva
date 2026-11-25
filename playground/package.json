@@ -16,7 +16,7 @@
   },
   "devDependencies": {
     "@liva/vite": "workspace:*",
-    "@vizejs/vite-plugin": "0.787.0",
+    "@vizejs/vite-plugin": "0.789.0",
     "vite-plus": "1.6.0"
   }
 }
