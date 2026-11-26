@@ -16,6 +16,7 @@
 (animation) @attribute
 (operator) @operator
 (punctuation) @punctuation.delimiter
+"," @punctuation.delimiter
 (css_token) @string.special
 ["{" "}" "(" ")" "[" "]"] @punctuation.bracket
 (interpolation ["${" "}"] @punctuation.special)
@@ -26,3 +27,6 @@
   (#eq? @variable.builtin "self"))
 
 (layout_name) @property
+
+(motion (block (selector_block name: (identifier) @keyword
+  (#any-of? @keyword "enter" "leave"))))

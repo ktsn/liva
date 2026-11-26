@@ -138,6 +138,7 @@
               "transition": {
                 "targets": [
                   {
+                    "timingProperties": ["$layout"],
                     "timingExpression": {
                       "kind": "reference",
                       "path": ["instant"]

@@ -125,7 +125,7 @@ fn identifiers_and_duplicate_declarations_use_names_and_related_names() {
             "Duplicate declaration",
         ),
         (
-            "motion a { layer idle { ‹t› { x: 0 } «t» { x: 0 } } }",
+            "motion a { layer idle { t { ‹x›: 0 } t { «x»: 0 } } }",
             "semantic.duplicate",
             "Duplicate declaration",
         ),
@@ -145,7 +145,7 @@ fn identifiers_and_duplicate_declarations_use_names_and_related_names() {
             "Duplicate declaration",
         ),
         (
-            "motion a { layer idle { t { x: 0 } } @tween() enter { ‹t› {} «t» {} } }",
+            "motion a { layer idle { t { x: 0 } } @tween() enter { t { ‹x›: 0 } t { «x»: 0 } } }",
             "semantic.duplicate",
             "Duplicate declaration",
         ),
@@ -180,7 +180,7 @@ fn identifiers_and_duplicate_declarations_use_names_and_related_names() {
             "reserved built-in target",
         ),
         (
-            "motion a { layer idle { ‹self› { opacity: 1 } «self» { scale: 1 } } }",
+            "motion a { layer idle { self { ‹opacity›: 1 } self { «opacity»: 0 } } }",
             "semantic.duplicate",
             "Duplicate declaration",
         ),

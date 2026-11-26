@@ -217,3 +217,43 @@ test('added and moved keyframes remain selected for subsequent edits and deletio
     await writeFile(file, original)
   }
 })
+
+test('grouped target edits preview and save only the selected member', async ({
+  page,
+  browserName,
+}) => {
+  test.skip(browserName !== 'chromium', 'Shared source writes run once')
+  const original = await readFile(file, 'utf8')
+  const grouped = original.replace(
+    'layer base {',
+    'layer base {\n    @tween(duration: 100)\n    track, thumb { opacity: 1 }',
+  )
+  try {
+    await writeFile(file, grouped)
+    await page.goto(`${base}/toggle`)
+    await page.getByRole('button', { name: 'Motion editor', exact: true }).click()
+    await page
+      .getByLabel('Preview instance', { exact: true })
+      .selectOption({ label: 'Notifications · toggle' })
+    await page.getByRole('button', { name: 'Toggle thumb tracks', exact: true }).click()
+    await page.getByLabel('Select thumb.opacity', { exact: true }).click()
+    await expect(page.getByLabel('Source value', { exact: true })).toHaveValue('1')
+    await page.getByLabel('Source value', { exact: true }).fill('0.6')
+    await page.getByRole('button', { name: 'Apply value', exact: true }).click()
+    await expectMessage(page, 'Previewing')
+    const first = page.getByRole('switch', { name: 'Notifications', exact: true })
+    await expect(first).toHaveCSS('opacity', '1')
+    await expect(first.locator('.thumb')).toHaveCSS('opacity', '0.6')
+    expect(await readFile(file, 'utf8')).toBe(grouped)
+    await save(page)
+    const saved = await readFile(file, 'utf8')
+    expect(saved).not.toContain('track, thumb')
+    expect(saved).toContain('opacity: 1')
+    expect(saved).toContain('opacity: 0.6')
+    expect(saved.match(/@tween\(duration: 100\)/g)).toHaveLength(2)
+    await expect(first).toHaveCSS('opacity', '1')
+    await expect(first.locator('.thumb')).toHaveCSS('opacity', '0.6')
+  } finally {
+    await writeFile(file, original)
+  }
+})

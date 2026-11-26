@@ -4,7 +4,15 @@ module.exports = grammar({
   name: 'liva',
   extras: ($) => [/\s/, $.comment],
   word: ($) => $.identifier,
-  conflicts: ($) => [[$._header_item, $.decorator]],
+  conflicts: ($) => [
+    [$._header_item, $.decorator],
+    [$._header_item, $.selector_block],
+    [$.event_block, $._target_name],
+    [$._header_item, $._target_name],
+    [$._target_name, $.keyword],
+    [$._target_name, $.type],
+    [$._target_name, $.boolean],
+  ],
   rules: {
     source_file: ($) => repeat($._item),
     _item: ($) =>
@@ -78,12 +86,40 @@ module.exports = grammar({
         ),
       ),
     selector_block: ($) =>
-      prec(
+      prec.dynamic(
         1,
         seq(
           optional($.decorator),
-          field('name', choice($.identifier, $.css_token, $.layout_name)),
+          field('name', choice($._target_name, $.css_token, $.layout_name)),
+          repeat(seq(',', field('name', $._target_name))),
           $.block,
+        ),
+      ),
+    _target_name: ($) =>
+      choice(
+        $.identifier,
+        alias(
+          choice(
+            'motion',
+            'layer',
+            'state',
+            'transition',
+            'on',
+            'initial',
+            'let',
+            'event',
+            'when',
+            'enter',
+            'leave',
+            'number',
+            'boolean',
+            'string',
+            'timing',
+            'easing',
+            'true',
+            'false',
+          ),
+          $.identifier,
         ),
       ),
     call: ($) => prec(1, seq(field('function', $.identifier), $.parenthesized)),

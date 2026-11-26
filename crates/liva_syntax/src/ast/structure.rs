@@ -29,7 +29,13 @@ fn keyword(node: &SyntaxNode, word: &str) -> bool {
         && node
             .children()
             .find(|node| node.kind() == Kind::Header)
-            .is_some_and(|header| header.semantic_text().split_whitespace().next() == Some(word))
+            .is_some_and(|header| {
+                // A list is a target header even when its first member spells a keyword.
+                !header
+                    .children_with_tokens()
+                    .any(|item| item.as_token().is_some_and(|token| token.text() == ","))
+                    && header.semantic_text().split_whitespace().next() == Some(word)
+            })
 }
 
 node!(Document, |n: &SyntaxNode| n.kind() == Kind::Document);
@@ -305,6 +311,32 @@ pub fn animation_properties(node: &impl AstNode) -> impl Iterator<Item = Animati
 }
 
 impl Target {
+    /// Individual target references and their exact UTF-8 source ranges.
+    /// The header remains lossless, including separators and comments.
+    pub fn references(&self) -> Vec<(String, crate::Range)> {
+        self.header_node()
+            .into_iter()
+            .flat_map(|header| {
+                header
+                    .syntax()
+                    .children_with_tokens()
+                    .filter_map(|element| {
+                        let token = element.into_token()?;
+                        (token.kind() != Kind::Trivia && crate::is_name(token.text())).then(|| {
+                            (
+                                token.text().to_string(),
+                                crate::Range {
+                                    start: u32::from(token.text_range().start()) as usize,
+                                    end: u32::from(token.text_range().end()) as usize,
+                                },
+                            )
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
     /// Style/configuration declarations and explicit tracks in source order, including malformed items.
     pub fn animation_properties(&self) -> impl Iterator<Item = AnimationProperty> {
         animation_properties(self)

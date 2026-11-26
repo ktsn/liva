@@ -55,7 +55,7 @@ function field(fields: Inspection['fields'], path: string): DeclarationSource | 
 }
 
 function timingField(fields: Inspection['fields'], path: string): DeclarationSource | undefined {
-  return field(fields, `${path}/timing`)
+  return field(fields, `${path}/timing`) ?? field(fields, `${path}/blockTiming`)
 }
 
 function scopePath(motion: string, source: TimingSource | PropertySource) {
@@ -218,7 +218,7 @@ export function lifecycleProvenance(
   const localTiming = field(fields, `${destination}/timing`)
   const lifecycleTarget = inspection.definition[phase]?.targets.find((item) => item.name === target)
   const timingSource =
-    localTiming ??
+    timingField(fields, destination) ??
     (targetTiming(lifecycleTarget, property)
       ? field(fields, `${path}/target/${target}/timing`)
       : undefined) ??

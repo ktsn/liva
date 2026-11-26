@@ -100,7 +100,7 @@ pub struct State {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Target<T> {
-    /// Restricts shared timing to declarations inside a merged explicit target block.
+    /// Restricts shared timing to properties declared in its authored target block.
     #[serde(rename = "timingProperties", skip_serializing_if = "Option::is_none")]
     pub timing_properties: Option<Vec<String>>,
     #[serde(rename = "timingExpression", skip_serializing_if = "Option::is_none")]

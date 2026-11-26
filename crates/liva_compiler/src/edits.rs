@@ -3,7 +3,7 @@ use liva_syntax::ast::{AstNode, HasHeader, HasValue};
 use liva_syntax::semantic_text;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "op", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Edit {
     Easing {
@@ -438,6 +438,101 @@ fn prepare_typed_track(source: &str, compiled: &Compilation, path: &str) -> Resu
     Ok(result)
 }
 
+fn edit_path(edit: &Edit) -> &str {
+    match edit {
+        Edit::Easing { path, .. }
+        | Edit::Timing { path, .. }
+        | Edit::Set { path, .. }
+        | Edit::RemoveFrame { path }
+        | Edit::AddFrame { path, .. } => path,
+    }
+}
+
+/// Locate the authored block through the property mapping, since a target can
+/// now have several blocks. Fall back to the target for insertion operations.
+fn grouped_source(
+    source: &str,
+    compiled: &Compilation,
+    path: &str,
+) -> Option<liva_syntax::ast::Target> {
+    let (scope, tail) = path.split_once("/target/")?;
+    let name = tail.split('/').next()?;
+    let target_path = format!("{scope}/target/{name}");
+    let property_path = path
+        .split_once("/property/")
+        .map(|(parent, tail)| format!("{parent}/property/{}", tail.split('/').next().unwrap()));
+    let field = property_path
+        .as_ref()
+        .and_then(|path| mapping(compiled, path, "block").ok())
+        .or_else(|| mapping(compiled, &target_path, "block").ok())?;
+    let node = property_syntax(source, field).ok()?;
+    node.ancestors()
+        .find_map(liva_syntax::ast::Target::cast)
+        .filter(|target| target.references().len() > 1)
+}
+
+fn split_group(source: &str, target: &liva_syntax::ast::Target, selected: &str) -> String {
+    let range = target.range();
+    let references = target.references();
+    let header = target.header_node().unwrap();
+    let render = |selected_only: bool| {
+        let mut removals = vec![];
+        let mut kept = false;
+        for token in header
+            .syntax()
+            .children_with_tokens()
+            .filter_map(|item| item.into_token())
+        {
+            if token.kind() == liva_syntax::Kind::Trivia {
+                continue;
+            }
+            let start = u32::from(token.text_range().start()) as usize;
+            let end = u32::from(token.text_range().end()) as usize;
+            if token.text() == "," {
+                // Keep separators only when a retained member exists on both sides.
+                let following = references
+                    .iter()
+                    .any(|(name, r)| r.start > start && ((name == selected) == selected_only));
+                if !(kept && following) {
+                    removals.push(start..end);
+                }
+                kept = false;
+            } else if (token.text() == selected) == selected_only {
+                kept = true;
+            } else {
+                removals.push(start..end);
+            }
+        }
+        let mut text = source[range.start..range.end].to_string();
+        for removal in removals.into_iter().rev() {
+            text.replace_range(removal.start - range.start..removal.end - range.start, "");
+        }
+        text
+    };
+    let newline = if source.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let line_start = source[..range.start]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    let indent: String = source[line_start..range.start]
+        .chars()
+        .take_while(|c| matches!(c, ' ' | '\t'))
+        .collect();
+    let mut result = source.to_string();
+    result.replace_range(
+        range.start..range.end,
+        &format!(
+            "{}{newline}{newline}{indent}{}",
+            render(false),
+            render(true)
+        ),
+    );
+    result
+}
+
 pub fn apply_edits(source: &str, edits: &[Edit]) -> Result<EditResult, String> {
     if edits.len() > 100 {
         return Err("At most 100 edits per transaction".into());
@@ -446,17 +541,133 @@ pub fn apply_edits(source: &str, edits: &[Edit]) -> Result<EditResult, String> {
     let mut compiled = compile(&current, true);
     check(&compiled)?;
 
-    for edit in edits {
-        let path = match edit {
-            Edit::Easing { path, .. }
-            | Edit::Timing { path, .. }
-            | Edit::Set { path, .. }
-            | Edit::RemoveFrame { path }
-            | Edit::AddFrame { path, .. } => path,
-        };
-
+    let mut skipped = std::collections::BTreeSet::new();
+    for (index, edit) in edits.iter().enumerate() {
+        if skipped.contains(&index) {
+            continue;
+        }
+        let path = edit_path(edit);
         if path.split('/').any(|segment| segment == "$layout") {
             return Err("Layout configuration is inspection-only; edit $layout in source".into());
+        }
+        let unchanged_field = match edit {
+            Edit::Set { value, .. } => Some((path.to_string(), value)),
+            Edit::Timing {
+                value: Some(value), ..
+            } if path.contains("/property/") && !path.contains("/frame/") => {
+                Some((format!("{path}/timing"), value))
+            }
+            Edit::Easing {
+                value: Some(value), ..
+            } => Some((format!("{path}/easing"), value)),
+            _ => None,
+        };
+        if unchanged_field.is_some_and(|(field_path, value)| {
+            mapping(&compiled, &field_path, "value").is_ok_and(|field| {
+                !liva_syntax::contains_comments(value)
+                    && semantic_text(&current[field.range.start..field.range.end])
+                        == semantic_text(value)
+            })
+        }) {
+            continue;
+        }
+        if matches!(edit, Edit::Easing { value: None, .. })
+            && path.contains("/frame/")
+            && mapping(&compiled, path, "block").is_ok_and(|field| {
+                property_syntax(&current, field)
+                    .is_ok_and(|node| node.kind() == liva_syntax::Kind::Declaration)
+            })
+            && mapping(&compiled, &format!("{path}/easing/decorator"), "block").is_err()
+        {
+            continue;
+        }
+        if let Some(group) = grouped_source(&current, &compiled, path) {
+            let (scope, tail) = path.split_once("/target/").unwrap();
+            let (selected, suffix) = tail.split_once('/').unwrap_or((tail, ""));
+            let mut matching = vec![];
+            let mut all = true;
+            for (name, _) in group.references() {
+                if name == selected {
+                    continue;
+                }
+                let sibling_path = format!("{scope}/target/{name}/{suffix}");
+                let mut expected = serde_json::to_value(edit).unwrap();
+                expected["path"] = sibling_path.into();
+                // Preserve order within a property (including frame operations),
+                // while allowing independent property edits to retain the group.
+                let sibling_target = format!("{scope}/target/{name}/");
+                let sibling_property = suffix.strip_prefix("property/").map(|tail| {
+                    format!(
+                        "{sibling_target}property/{}",
+                        tail.split('/').next().unwrap()
+                    )
+                });
+                if let Some((other, candidate)) =
+                    edits
+                        .iter()
+                        .enumerate()
+                        .skip(index + 1)
+                        .find(|(i, candidate)| {
+                            !skipped.contains(i)
+                                && edit_path(candidate).starts_with(&sibling_target)
+                                && sibling_property.as_ref().is_none_or(|property| {
+                                    !edit_path(candidate).contains("/property/")
+                                        || edit_path(candidate).strip_prefix(property).is_some_and(
+                                            |tail| tail.is_empty() || tail.starts_with('/'),
+                                        )
+                                })
+                        })
+                    && serde_json::to_value(candidate).unwrap() == expected
+                    // Distinct property paths can alias the same block decorator.
+                    // Do not cross writes through another alias of that field.
+                    // Identical member requests are part of this same coalescing group.
+                    && !edits[index + 1..other].iter().enumerate().any(|(offset, between)| {
+                        !skipped.contains(&(index + 1 + offset))
+                            && matches!((edit, between), (Edit::Set { .. }, Edit::Set { .. }))
+                            && !matches!((edit, between),
+                                (Edit::Set { value, .. }, Edit::Set { path: other_path, value: other_value })
+                                if value == other_value && other_path.split_once("/target/")
+                                    .and_then(|(_, tail)| tail.split_once('/'))
+                                    .is_some_and(|(_, other_suffix)| other_suffix == suffix))
+                            && mapping(&compiled, path, "value").is_ok_and(|field| {
+                                mapping(&compiled, edit_path(between), "value").is_ok_and(|other| {
+                                    field.range.start < other.range.end
+                                        && other.range.start < field.range.end
+                                })
+                            })
+                    })
+                    && grouped_source(&current, &compiled, edit_path(candidate))
+                        .is_some_and(|sibling| sibling.range() == group.range())
+                    && match edit {
+                        // Lowered block defaults may have different mapping paths
+                        // when only one member also has another authored block.
+                        Edit::Set { .. } => {
+                            mapping(&compiled, path, "value")
+                                .ok()
+                                .map(|field| &field.range)
+                                == mapping(&compiled, edit_path(candidate), "value")
+                                    .ok()
+                                    .map(|field| &field.range)
+                        }
+                        Edit::AddFrame { .. } | Edit::Timing { value: Some(_), .. } => {
+                            ensure_typed_property(&current, &compiled, edit_path(candidate)).is_ok()
+                        }
+                        _ => true,
+                    }
+                {
+                    matching.push(other);
+                } else {
+                    all = false;
+                    break;
+                }
+            }
+            if all {
+                skipped.extend(matching);
+            } else {
+                current = split_group(&current, &group, selected);
+                compiled = compile(&current, true);
+                check(&compiled)?;
+            }
         }
 
         let frame_path = match edit {

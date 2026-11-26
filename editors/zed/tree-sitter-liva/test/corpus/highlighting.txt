@@ -161,20 +161,21 @@ motion card(active: boolean) {
                       (punctuation)
                       (number)
                       (animation)))))))))
-      (keyword)
-      (block
-        (selector_block
-          (decorator
-            (animation)
-            (parenthesized
+      (selector_block
+        (identifier)
+        (block
+          (selector_block
+            (decorator
+              (animation)
+              (parenthesized
+                (property
+                  (identifier))
+                (number)))
+            (identifier)
+            (block
               (property
                 (identifier))
-              (number)))
-          (identifier)
-          (block
-            (property
-              (identifier))
-            (number)))))))
+              (number))))))))
 
 ==================
 Shared timing headers
@@ -466,3 +467,33 @@ motion item {
                   (animation))
                 (layout_name)
                 (block)))))))))
+
+==================
+Grouped Liva targets
+==================
+motion sample {
+  layer base {
+    @spring()
+    self, icon, label { opacity: 1 }
+  }
+}
+---
+
+(source_file
+  (motion
+    (identifier)
+    (block
+      (layer
+        (identifier)
+        (block
+          (selector_block
+            (decorator
+              (animation)
+              (parenthesized))
+            (identifier)
+            (identifier)
+            (identifier)
+            (block
+              (property
+                (identifier))
+              (number))))))))

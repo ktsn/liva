@@ -122,7 +122,10 @@ fn lifecycle_errors_report_exact_source_ranges_for_both_phases() {
     for phase in ["enter", "leave"] {
         for (body, code) in [
             ("«missing» { opacity: 0 }", "semantic.reference"),
-            ("body {} «body» {}", "semantic.duplicate"),
+            (
+                "body { opacity: 1 } body { «opacity»: 0 }",
+                "semantic.duplicate",
+            ),
             (
                 "body { opacity ~> {} «opacity» ~> {} }",
                 "semantic.duplicate",
