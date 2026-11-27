@@ -688,3 +688,151 @@ it('analyzes call sites without evaluation and uses only the operations supplied
   expect(second.invoke).toHaveBeenCalledExactlyOnceWith('sample', 0, 'sampleBuiltin', {})
   expect(builtin).not.toHaveBeenCalled()
 })
+
+it('evaluates object fields with forward dependencies and nested reactive calls', () => {
+  const bindings: LetBinding[] = [
+    { name: 'selected', initializer: { kind: 'reference', path: ['config', 'value'] } },
+    {
+      name: 'config',
+      initializer: {
+        kind: 'object',
+        properties: [
+          { name: 'value', value: { kind: 'reference', path: ['later'] } },
+          { name: '__proto__', value: { kind: 'string', value: 'own' } },
+          {
+            name: 'nested',
+            value: {
+              kind: 'object',
+              properties: [
+                {
+                  name: 'ui',
+                  value: {
+                    kind: 'call',
+                    function: 'interaction',
+                    arguments: [{ name: 'target', value: { kind: 'reference', path: ['self'] } }],
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    },
+    { name: 'later', initializer: { kind: 'reference', path: ['input'] } },
+  ]
+  const inputs = { input: 'value', self: { name: 'self' } }
+  const graph = new EvaluationFixture(bindings, inputs)
+  try {
+    const first = graph.evaluate(inputs)
+    const second = graph.evaluate({ ...inputs, input: 'changed' })
+    expect(first.selected).toBe('value')
+    expect(second.selected).toBe('changed')
+    expect(first.config).toHaveProperty('__proto__', 'own')
+    expect(Object.isFrozen(first.config)).toBe(true)
+    expect(first.config).toHaveProperty('nested.ui.hover', false)
+    expect(first.config).toHaveProperty('value', 'value')
+  } finally {
+    graph.dispose()
+  }
+  expect(
+    () =>
+      new LetBindingGraph([
+        {
+          name: 'loop',
+          initializer: {
+            kind: 'object',
+            properties: [{ name: 'again', value: { kind: 'reference', path: ['loop'] } }],
+          },
+        },
+      ]),
+  ).toThrow('Cyclic let binding dependency')
+})
+
+const siblingControllerBindings = (swap: boolean): LetBinding[] => [
+  { name: 'first', initializer: { kind: 'reference', path: ['alias', swap ? 'b' : 'a'] } },
+  { name: 'second', initializer: { kind: 'reference', path: ['alias', swap ? 'a' : 'b'] } },
+  { name: 'alias', initializer: { kind: 'reference', path: ['config', 'nested'] } },
+  {
+    name: 'config',
+    initializer: {
+      kind: 'object',
+      properties: [
+        {
+          name: 'nested',
+          value: {
+            kind: 'object',
+            properties: [
+              { name: 'a', value: { kind: 'reference', path: ['a'] } },
+              { name: 'b', value: { kind: 'reference', path: ['b'] } },
+            ],
+          },
+        },
+      ],
+    },
+  },
+  ...['a', 'b'].map((name): LetBinding => ({
+    name,
+    initializer: {
+      kind: 'call',
+      function: 'link',
+      arguments: [{ name: 'input', value: { kind: 'number', value: 0 } }],
+    },
+  })),
+]
+
+it('tracks selected sibling controllers through nested object and forward aliases', () => {
+  const targets = [
+    ...controllerTargets('self', 'width', 'first'),
+    ...controllerTargets('self', 'height', 'second'),
+  ]
+  const graph = new EvaluationFixture(siblingControllerBindings(false), {}, undefined, targets)
+  const first = graph.evaluate({})
+  const unchanged = new EvaluationFixture(siblingControllerBindings(false), {}, graph, targets)
+  graph.dispose(unchanged)
+  const retained = unchanged.evaluate({})
+  expect(propertyController(retained.a)).toBe(propertyController(first.a))
+  expect(propertyController(retained.b)).toBe(propertyController(first.b))
+  const swapped = new EvaluationFixture(siblingControllerBindings(true), {}, unchanged, targets)
+  unchanged.dispose(swapped)
+  const changed = swapped.evaluate({})
+  expect(propertyController(changed.a)).not.toBe(propertyController(first.a))
+  expect(propertyController(changed.b)).not.toBe(propertyController(first.b))
+  expect(swapped.graph.addresses.get('a')).toBe(
+    JSON.stringify([JSON.stringify(['self', 'height'])]),
+  )
+  expect(swapped.graph.addresses.get('b')).toBe(JSON.stringify([JSON.stringify(['self', 'width'])]))
+  swapped.dispose()
+})
+
+it('does not spread unresolved member attachments to unrelated object properties', () => {
+  const graph = new LetBindingGraph(
+    [
+      {
+        name: 'config',
+        initializer: {
+          kind: 'object',
+          properties: [{ name: 'a', value: { kind: 'reference', path: ['external'] } }],
+        },
+      },
+    ],
+    [
+      {
+        name: 'self',
+        properties: [
+          {
+            name: 'width',
+            value: {
+              kind: 'binding',
+              expression: { kind: 'reference', path: ['config', 'missing'] },
+            },
+          },
+          {
+            name: 'height',
+            value: { kind: 'binding', expression: { kind: 'reference', path: ['external'] } },
+          },
+        ],
+      },
+    ],
+  )
+  expect(graph.addresses.get('external')).toBe(JSON.stringify([JSON.stringify(['self', 'height'])]))
+})

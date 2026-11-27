@@ -31,26 +31,100 @@ impl ControllerBindings {
     /// Keeps a lowered let and its inferred controller identity. The range identifies
     /// its initializer when an unmatched originating call must be diagnosed.
     pub(crate) fn declare(&mut self, binding: LetBinding, value_type: Option<&Type>, range: Range) {
-        if matches!(value_type, Some(Type::Controller(_)))
-            && !self.origins.contains_key(&binding.name)
-        {
-            let origin = match &binding.initializer.kind {
+        let mut binding = binding;
+        if let Some(value_type) = value_type.filter(|_| {
+            !self
+                .bindings
+                .iter()
+                .any(|existing| existing.name == binding.name)
+        }) {
+            self.register(
+                &binding.name,
+                &mut binding.initializer,
+                value_type,
+                &range,
+                true,
+            );
+        }
+        self.bindings.push(binding);
+    }
+
+    // Lift controller calls to ordinary bindings so their lifetime and receiving
+    // address use the existing runtime contract. Object aliases retain the same origin.
+    fn register(
+        &mut self,
+        path: &str,
+        expression: &mut Expression,
+        value_type: &Type,
+        range: &Range,
+        root: bool,
+    ) {
+        if matches!(value_type, Type::Controller(_)) {
+            let origin = match &expression.kind {
                 ExpressionKind::Call { .. } => {
-                    self.unmatched.insert(self.bindings.len(), range);
-                    Origin::Declaration(self.bindings.len())
+                    let index = self.bindings.len();
+                    self.unmatched.insert(index, range.clone());
+                    if !root {
+                        let name = format!("$object_{path}");
+                        let call = std::mem::replace(
+                            expression,
+                            Expression {
+                                kind: ExpressionKind::Reference {
+                                    path: vec![Name { text: name.clone() }],
+                                },
+                            },
+                        );
+                        self.origins
+                            .insert(name.clone(), Origin::Declaration(index));
+                        self.bindings.push(LetBinding {
+                            name,
+                            initializer: call,
+                        });
+                    }
+                    Origin::Declaration(index)
                 }
-                ExpressionKind::Reference { path } if path.len() == 1 => {
-                    Origin::Alias(path[0].text.clone())
-                }
-                // Successful controller inference admits only calls and whole-value aliases.
-                // Parentheses have already been removed by expression lowering.
+                ExpressionKind::Reference { path } => Origin::Alias(
+                    path.iter()
+                        .map(|name| name.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join("."),
+                ),
                 _ => unreachable!("controller declaration must be a call or alias"),
             };
-
-            self.origins.insert(binding.name.clone(), origin);
+            self.origins.insert(path.into(), origin);
+        } else if let Type::Object(fields) = value_type {
+            match &mut expression.kind {
+                ExpressionKind::Object { properties } => {
+                    for property in properties {
+                        if let Some(value_type) = fields.get(&property.name.text) {
+                            self.register(
+                                &format!("{path}.{}", property.name.text),
+                                &mut property.value,
+                                value_type,
+                                range,
+                                false,
+                            );
+                        }
+                    }
+                }
+                ExpressionKind::Reference { path: reference } => {
+                    for (name, value_type) in fields {
+                        let mut reference = reference.clone();
+                        reference.push(Name { text: name.clone() });
+                        self.register(
+                            &format!("{path}.{name}"),
+                            &mut Expression {
+                                kind: ExpressionKind::Reference { path: reference },
+                            },
+                            value_type,
+                            range,
+                            false,
+                        );
+                    }
+                }
+                _ => {}
+            }
         }
-
-        self.bindings.push(binding);
     }
 
     /// Layer indices start at zero. State zero means common layer styles; one and
@@ -127,6 +201,23 @@ impl ControllerScope<'_> {
         let (origin, expression) = match &expression.kind {
             ExpressionKind::Reference { path } if path.len() == 1 => {
                 (self.bindings.origin(&path[0].text), expression)
+            }
+            ExpressionKind::Reference { path } => {
+                let name = path
+                    .iter()
+                    .map(|name| name.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                let origin = self.bindings.origin(&name);
+                let name = self.bindings.bindings[origin].name.clone();
+                (
+                    origin,
+                    Expression {
+                        kind: ExpressionKind::Reference {
+                            path: vec![Name { text: name }],
+                        },
+                    },
+                )
             }
             ExpressionKind::Call { .. } => {
                 let name = format!(

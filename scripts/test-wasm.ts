@@ -183,3 +183,57 @@ assert(
 console.log(
   'Node WASM goldens, immutable TS view, schema rejection, UTF-8 mappings, lexical shadowing, and runtime component validation passed',
 )
+
+// Object literals cross the real compiler/JSON/runtime boundary, including forward
+// dependencies, reactive call indexing, controller attachment and safe own keys.
+const objectSource = `motion objects(input: number) {
+  let selected = config.property
+  let config = {
+    property: "value",
+    nested: { amount: later * 2 },
+    empty: {},
+    __proto__: "own",
+    constructor: true,
+    timing: tween(duration: 100),
+    controller: link(input: input),
+  }
+  let later = input
+  let controllerAlias = config.controller
+  layer base { opacity := controllerAlias; content: \${selected} }
+}`
+const objectCompilation: Compilation = JSON.parse(compile(objectSource, false))
+assert.deepEqual(objectCompilation.diagnostics, [])
+const objectDefinition = decodeBundle(JSON.stringify(objectCompilation)).definitions[0]
+assert(objectDefinition.letBindings)
+const objectGraph = new EvaluationFixture(objectDefinition.letBindings, { input: 0.25 })
+try {
+  for (const input of [0.25, 0.75]) {
+    const values = objectGraph.evaluate({ input })
+    assert.equal(values.selected, 'value')
+    assert(typeof values.config === 'object')
+    const config = values.config
+    assert.deepEqual(config.nested, { amount: input * 2 })
+    assert.deepEqual(config.empty, {})
+    assert.equal(config.__proto__, 'own')
+    assert.equal(config.constructor, true)
+    assert.equal(Object.hasOwn(config, '__proto__'), true)
+    assert.equal(Object.isFrozen(config), true)
+    assert.equal(Object.isFrozen(config.nested), true)
+    assert(typeof values.controllerAlias === 'object')
+    assert.equal(values.controllerAlias.value, input)
+  }
+} finally {
+  objectGraph.dispose()
+}
+const invalidObjectBundle = structuredClone(objectCompilation)
+assert(invalidObjectBundle.definitions[0].letBindings)
+Object.assign(invalidObjectBundle.definitions[0].letBindings[0], {
+  initializer: {
+    kind: 'object',
+    properties: [{ name: 'bad', value: { kind: 'unknown' } }],
+  },
+})
+assert.throws(() => decodeBundle(JSON.stringify(invalidObjectBundle)), /schema/)
+console.log(
+  'Object literal compilation, immutable values, forward dependencies, updates and controllers passed',
+)

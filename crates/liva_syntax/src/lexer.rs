@@ -97,10 +97,21 @@ impl<'a> Lexer<'a> {
             }
             token.parts.push(self.next());
 
+            let mut objects = 0usize;
             while self.index < self.limit {
                 let part = self.next();
-                let done = part.text == "}"
-                    || (part.kind == TokenKind::Comment && part.text.contains('}'));
+                let done = match part.text {
+                    "{" => {
+                        objects += 1;
+                        false
+                    }
+                    "}" if objects > 0 => {
+                        objects -= 1;
+                        false
+                    }
+                    "}" => true,
+                    _ => part.kind == TokenKind::Comment && part.text.contains('}'),
+                };
                 token.parts.push(part);
                 if done {
                     break;

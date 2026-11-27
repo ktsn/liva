@@ -465,3 +465,27 @@ it('validates string expressions, unknown timing kinds and expression depth limi
 
   expectInvalidDefinition({ ...valid, events: [{ name: 'deep', when: expression }] })
 })
+
+const withObject = (initializer: unknown) => ({
+  ...valid,
+  letBindings: [{ name: 'config', initializer }],
+})
+
+it('validates nested object expression values at the IR boundary', () => {
+  expect(
+    isDefinition(
+      withObject({
+        kind: 'object',
+        properties: [{ name: 'nested', value: { kind: 'object', properties: [] } }],
+      }),
+    ),
+  ).toBe(true)
+  for (const initializer of [
+    { kind: 'object' },
+    { kind: 'object', properties: {} },
+    { kind: 'object', properties: [null] },
+    { kind: 'object', properties: [{ name: 1, value: { kind: 'number', value: 1 } }] },
+    { kind: 'object', properties: [{ name: 'x', value: { kind: 'unknown' } }] },
+  ])
+    expectInvalidDefinition(withObject(initializer))
+})

@@ -238,15 +238,10 @@ fn expression_hovers(node: &impl AstNode, scope: &expression::Scope, result: &mu
                 });
 
                 for name in names {
-                    let (expression::Type::Record(fields) | expression::Type::Controller(fields)) =
-                        value_type
-                    else {
+                    let Some(member) = value_type.member(&name.text()) else {
                         break;
                     };
-                    let Some(field) = fields.iter().find(|field| field.name == name.text()) else {
-                        break;
-                    };
-                    value_type = &field.value_type;
+                    value_type = member;
                     path.push('.');
                     path.push_str(&name.text());
                     result.push(Hover {

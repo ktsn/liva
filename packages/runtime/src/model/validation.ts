@@ -146,6 +146,16 @@ function isExpression(value: unknown, depth = 0): value is Expression {
   if (!isRecord(value) || depth > 256) return false
 
   switch (value.kind) {
+    case 'object':
+      return (
+        Array.isArray(value.properties) &&
+        value.properties.every(
+          (property: unknown) =>
+            isRecord(property) &&
+            typeof property.name === 'string' &&
+            isExpression(property.value, depth + 1),
+        )
+      )
     case 'call':
       return (
         typeof value.function === 'string' &&

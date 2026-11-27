@@ -59,6 +59,19 @@ function development(call: ReturnType<typeof hooks>['call']) {
 }
 
 describe('Vite compilation hooks', () => {
+  it('compiles object literal bindings through a Vue custom block', async () => {
+    const { call, warnings } = hooks()
+    const objectBlock =
+      'motion objects { let config = { property: "value" }; let selected = config.property; layer base { content: ${selected} } }'
+    const component = `<template><div /></template><liva>${objectBlock}</liva>`
+    expect(await call('transform', component, file)).toMatchObject({ code: component })
+    const transformed = await call('transform', objectBlock, `${file}?vue&type=liva`)
+    expect(transformed.code).toContain('decodeBundle')
+    expect(transformed.code).toContain('properties')
+    expect(transformed.code).toContain('selected')
+    expect(warnings).toEqual([])
+  })
+
   it('resolves the runtime plugin and ignores unrelated modules', () => {
     const { call } = hooks()
 

@@ -96,6 +96,20 @@ Use `let name = expression` to name a derived value. The compiler infers its typ
 let doubled = value * 2
 ```
 
+Object literals construct records with `{ property: expression }`. Separate properties
+with commas; a trailing comma is optional. Property names are identifiers, and each
+property's type is inferred from its value. Empty and nested objects are allowed.
+Duplicate property names are errors. Read properties with dot notation:
+
+```liva
+let config = { property: "value", nested: { amount: 2 } }
+let selected = config.property
+let amount = config.nested.amount
+```
+
+Here `selected` has the literal type `"value"` and `amount` has type `number`.
+Property values can use the same expressions and references as other let initializers.
+
 Bindings may refer to parameters, targets, and other bindings, including later
 declarations. Cycles are compile errors. When parameters or reactive sources
 change, Liva evaluates bindings in dependency order before conditions and CSS
@@ -191,7 +205,7 @@ let farEnough = dragging && travel > 30
 
 All string types share the same comparison rules, so a literal, a union, and a
 general string can be compared with one another. Expressions have no assignments,
-computed member access, object or array literals, or implicit conversions.
+computed member access, array literals, or implicit conversions.
 
 ### CSS templates
 

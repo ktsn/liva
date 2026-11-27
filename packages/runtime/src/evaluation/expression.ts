@@ -37,6 +37,15 @@ export function evaluate(
     case 'boolean':
     case 'string':
       return expression.value
+    case 'object':
+      return Object.freeze(
+        Object.fromEntries(
+          expression.properties.map((property) => [
+            property.name,
+            evaluate(property.value, values, invoke),
+          ]),
+        ),
+      )
     case 'reference': {
       const [name, ...members] = expression.path
       let value: RuntimeValue | undefined = Object.hasOwn(values, name)
