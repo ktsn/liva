@@ -19,7 +19,7 @@
   },
   "devDependencies": {
     "@playwright/test": "1.65.1",
-    "@types/node": "26.6.6",
+    "@types/node": "26.6.7",
     "@vitest/browser-playwright": "5.1.0",
     "@vitest/coverage-v8": "5.1.0",
     "@vizejs/vite-plugin": "0.791.0",
