@@ -23,6 +23,7 @@ pub enum ExprView {
     Unary,
     Binary,
     Parenthesized,
+    Object,
 }
 
 impl Expr {
@@ -52,6 +53,7 @@ impl Expr {
             Kind::UnaryExpr => ExprView::Unary,
             Kind::BinaryExpr => ExprView::Binary,
             Kind::ParenExpr => ExprView::Parenthesized,
+            Kind::ObjectExpr => ExprView::Object,
             _ => unreachable!(),
         }
     }
@@ -77,6 +79,13 @@ impl Expr {
 
     pub fn function(&self) -> Option<Name> {
         header_name(&self.0)
+    }
+
+    pub fn properties(&self) -> impl Iterator<Item = Argument> {
+        self.0
+            .children()
+            .filter(|node| node.kind() == Kind::ObjectProperty)
+            .map(Argument)
     }
 
     pub fn arguments(&self) -> impl Iterator<Item = Argument> {
@@ -125,6 +134,7 @@ impl AstNode for Expr {
                 | Kind::UnaryExpr
                 | Kind::BinaryExpr
                 | Kind::ParenExpr
+                | Kind::ObjectExpr
         )
         .then_some(Self(node))
     }
@@ -146,7 +156,7 @@ impl AstNode for Name {
 
 impl AstNode for Argument {
     fn cast(node: SyntaxNode) -> Option<Self> {
-        (node.kind() == Kind::Argument).then_some(Self(node))
+        matches!(node.kind(), Kind::Argument | Kind::ObjectProperty).then_some(Self(node))
     }
 
     fn syntax(&self) -> &SyntaxNode {

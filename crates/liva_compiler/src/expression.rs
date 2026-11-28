@@ -31,6 +31,7 @@ pub enum Type {
     Event,
     Controller(&'static [crate::builtins::Field]),
     Record(&'static [crate::builtins::Field]),
+    Object(BTreeMap<String, Type>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -48,6 +49,9 @@ pub struct Argument {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ExpressionKind {
+    Object {
+        properties: Vec<Argument>,
+    },
     Call {
         function: Name,
         arguments: Vec<Argument>,
@@ -100,6 +104,33 @@ pub enum PrimitiveCategory {
 }
 
 impl Type {
+    /// Named members shared by inferred records and built-in records/controllers.
+    pub fn fields(&self) -> impl Iterator<Item = (&str, &Type)> {
+        let builtin = match self {
+            Self::Record(fields) | Self::Controller(fields) => *fields,
+            _ => &[],
+        };
+        let inferred = match self {
+            Self::Object(fields) => Some(fields),
+            _ => None,
+        };
+        builtin
+            .iter()
+            .map(|field| (field.name, &field.value_type))
+            .chain(
+                inferred
+                    .into_iter()
+                    .flatten()
+                    .map(|(name, value)| (name.as_str(), value)),
+            )
+    }
+
+    pub fn member(&self, name: &str) -> Option<&Type> {
+        self.fields()
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| value)
+    }
+
     /// The primitive category of a scalar value; records and opaque built-ins have none.
     pub fn primitive_category(&self) -> Option<PrimitiveCategory> {
         match self {
@@ -142,6 +173,14 @@ impl Type {
             (Self::StringUnion(source), Self::StringUnion(target)) => {
                 source.iter().all(|member| target.contains(member))
             }
+            (Self::Object(source), Self::Record(target)) => {
+                source.len() == target.len()
+                    && target.iter().all(|field| {
+                        source
+                            .get(field.name)
+                            .is_some_and(|value| value.is_assignable_to(&field.value_type))
+                    })
+            }
             _ => self == destination,
         }
     }
@@ -175,15 +214,15 @@ impl fmt::Display for Type {
             Self::Target => formatter.write_str("target"),
             Self::Event => formatter.write_str("event"),
             Self::Controller(_) => formatter.write_str("controller"),
-            Self::Record(fields) => {
+            Self::Record(_) | Self::Object(_) => {
                 formatter.write_str("{ ")?;
 
-                for (index, field) in fields.iter().enumerate() {
+                for (index, (name, value_type)) in self.fields().enumerate() {
                     if index > 0 {
                         formatter.write_str(", ")?;
                     }
 
-                    write!(formatter, "{}: {}", field.name, field.value_type)?;
+                    write!(formatter, "{name}: {value_type}")?;
                 }
 
                 formatter.write_str(" }")
@@ -251,6 +290,25 @@ impl ExprExt for Expr {
                     .map_err(|message| self.error(message))?
                     .into(),
             )),
+            ExprView::Object => {
+                let mut fields = BTreeMap::new();
+                for property in self.properties() {
+                    let name = property
+                        .name()
+                        .ok_or_else(|| self.error("Expected object property name"))?;
+                    if fields.contains_key(&name.text()) {
+                        return Err(name_error(
+                            &name,
+                            format!("Duplicate object property: {}", name.text()),
+                        ));
+                    }
+                    let value = property
+                        .value()
+                        .ok_or_else(|| self.error("Expected object property value"))?;
+                    fields.insert(name.text(), value.check(scope)?);
+                }
+                Ok(Type::Object(fields))
+            }
             ExprView::Parenthesized => operand(self, 0)?.check(scope),
             ExprView::Reference => {
                 let path: Vec<_> = self.names().collect();
@@ -283,14 +341,7 @@ impl ExprExt for Expr {
                             ),
                         )
                     };
-                    let (Type::Record(fields) | Type::Controller(fields)) = value_type else {
-                        return Err(error());
-                    };
-                    value_type = &fields
-                        .iter()
-                        .find(|field| field.name == member.text())
-                        .ok_or_else(error)?
-                        .value_type;
+                    value_type = value_type.member(&member.text()).ok_or_else(error)?;
                 }
                 Ok(value_type.clone())
             }
@@ -458,6 +509,25 @@ impl ExprExt for Expr {
                     .names()
                     .map(|name| Name { text: name.text() })
                     .collect(),
+            },
+            ExprView::Object => ExpressionKind::Object {
+                properties: self
+                    .properties()
+                    .map(|property| {
+                        Ok(Argument {
+                            name: Name {
+                                text: property
+                                    .name()
+                                    .ok_or_else(|| self.error("Expected object property name"))?
+                                    .text(),
+                            },
+                            value: property
+                                .value()
+                                .ok_or_else(|| self.error("Expected object property value"))?
+                                .to_output()?,
+                        })
+                    })
+                    .collect::<Result<_, TypeError>>()?,
             },
             ExprView::Parenthesized => return operand(self, 0)?.to_output(),
             ExprView::Call => ExpressionKind::Call {

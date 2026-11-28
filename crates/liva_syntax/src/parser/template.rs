@@ -23,10 +23,14 @@ pub(super) fn emit(
 
         let begin = index;
         index += 1;
+        let mut objects = 0usize;
         while index < tokens.len() {
             split_boundary(&mut tokens, index);
-            if tokens[index].text == "}" {
-                break;
+            match tokens[index].text {
+                "{" => objects += 1,
+                "}" if objects > 0 => objects -= 1,
+                "}" => break,
+                _ => {}
             }
             index += 1;
         }

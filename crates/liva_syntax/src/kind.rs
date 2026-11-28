@@ -30,6 +30,8 @@ pub enum Kind {
     Interpolation,
     Event,
     Decorator,
+    ObjectExpr,
+    ObjectProperty,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -66,6 +68,8 @@ impl Language for Liva {
             24 => Kind::Interpolation,
             25 => Kind::Event,
             26 => Kind::Decorator,
+            27 => Kind::ObjectExpr,
+            28 => Kind::ObjectProperty,
             _ => Kind::Error,
         }
     }

@@ -484,13 +484,15 @@ impl Parser<'_> {
 
         while !self.at().is_empty() {
             let text = self.at();
-            if header && matches!(text, "\n" | "\r") && !stack.is_empty() {
+            if (header || stack.contains(&"}")) && matches!(text, "\n" | "\r") && !stack.is_empty()
+            {
                 let mut next = self.tokens[self.index + 1..]
                     .iter()
                     .filter(|token| !token.trivia)
                     .map(|token| token.text);
                 let declaration = match (next.next(), next.next(), next.next()) {
-                    (Some("state"), Some(name), Some("{" | "when")) => is_name(name),
+                    (Some("state" | "layer"), Some(name), Some("{" | "when")) => is_name(name),
+                    (Some("motion"), Some(name), Some("{" | "(")) => is_name(name),
                     (Some("enter" | "leave" | "transition"), Some("{"), _) => true,
                     (Some("transition"), Some(name), Some("->")) => is_name(name),
                     (Some("event"), Some(name), Some("when")) => is_name(name),
@@ -512,7 +514,7 @@ impl Parser<'_> {
                     continue;
                 }
             }
-            if text == "}"
+            if (text == "}" && stack.last() != Some(&"}"))
                 || (header && matches!(text, "{" | ";"))
                 || (stack.is_empty() && matches!(text, ";" | "\n" | "\r"))
                 || (header && stack.is_empty() && text == ":")
@@ -528,7 +530,10 @@ impl Parser<'_> {
                         self.error("Mismatched delimiter");
                     }
                 }
-                "{" if !header => self.error("Unexpected brace in value"),
+                "{" if !header => stack.push("}"),
+                "}" if !header => {
+                    stack.pop();
+                }
                 _ => {}
             }
             self.index += 1;
@@ -549,10 +554,14 @@ impl Parser<'_> {
         let begin = self.index;
         let start = self.offset();
         let mut end = begin + 1;
+        let mut objects = 0usize;
         while end < self.tokens.len() {
             template::split_boundary(&mut self.tokens, end);
-            if matches!(self.tokens[end].text, "}" | "\n" | "\r") {
-                break;
+            match self.tokens[end].text {
+                "{" => objects += 1,
+                "}" if objects > 0 => objects -= 1,
+                "}" | "\n" | "\r" => break,
+                _ => {}
             }
             end += 1;
         }

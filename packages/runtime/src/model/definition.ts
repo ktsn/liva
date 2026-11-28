@@ -27,6 +27,10 @@ export interface CallExpression {
 
 export type Expression =
   | CallExpression
+  | {
+      readonly kind: 'object'
+      readonly properties: readonly { readonly name: string; readonly value: Expression }[]
+    }
   | { readonly kind: 'number'; readonly value: number }
   | { readonly kind: 'boolean'; readonly value: boolean }
   | { readonly kind: 'string'; readonly value: string }

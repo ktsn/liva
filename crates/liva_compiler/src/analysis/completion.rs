@@ -164,30 +164,21 @@ fn name_choices(scope: &Scope, typed: &str) -> Vec<Completion> {
         };
 
         for name in path {
-            let (crate::expression::Type::Record(fields)
-            | crate::expression::Type::Controller(fields)) = value_type
-            else {
+            let Some(member) = value_type.member(name) else {
                 return vec![];
             };
-            let Some(field) = fields.iter().find(|field| field.name == name) else {
-                return vec![];
-            };
-            value_type = &field.value_type;
+            value_type = member;
         }
 
-        return match value_type {
-            crate::expression::Type::Record(fields)
-            | crate::expression::Type::Controller(fields) => fields
-                .iter()
-                .filter(|field| field.name.starts_with(partial))
-                .map(|field| Completion {
-                    label: field.name.into(),
-                    detail: type_name(&field.value_type),
-                    text_edit: None,
-                })
-                .collect(),
-            _ => vec![],
-        };
+        return value_type
+            .fields()
+            .filter(|(name, _)| name.starts_with(partial))
+            .map(|(name, value_type)| Completion {
+                label: name.into(),
+                detail: type_name(value_type),
+                text_edit: None,
+            })
+            .collect();
     }
 
     scope

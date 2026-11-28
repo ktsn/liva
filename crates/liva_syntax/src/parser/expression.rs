@@ -74,7 +74,7 @@ impl Parser<'_, '_, '_> {
         let checkpoint = self.builder.checkpoint();
         let token = self.at().to_owned();
         match token.as_str() {
-            "" | ")" | "," => {
+            "" | ")" | "," | "}" => {
                 self.error("Expected expression", self.last.clone());
                 return;
             }
@@ -82,6 +82,42 @@ impl Parser<'_, '_, '_> {
                 self.start(Kind::UnaryExpr);
                 self.bump(Kind::Operator);
                 self.expression(7);
+                self.end();
+            }
+            "{" => {
+                self.start(Kind::ObjectExpr);
+                self.bump(Kind::Text);
+                while !matches!(self.at(), "" | "}") {
+                    self.gap();
+                    if !is_identifier(self.at()) {
+                        self.error(
+                            "Expected object property name",
+                            self.tokens[self.index].range.clone(),
+                        );
+                        break;
+                    }
+                    self.start(Kind::ObjectProperty);
+                    self.start(Kind::Header);
+                    self.name();
+                    self.end();
+                    self.expect(":", "Expected colon after object property name");
+                    self.start(Kind::Value);
+                    self.expression(0);
+                    self.end();
+                    self.end();
+                    if self.at() != "," {
+                        if !matches!(self.at(), "" | "}") {
+                            self.error(
+                                "Expected comma between object properties",
+                                self.tokens[self.significant().unwrap()].range.clone(),
+                            );
+                        }
+                        break;
+                    }
+                    self.gap();
+                    self.bump(Kind::Text);
+                }
+                self.expect("}", "Expected closing object brace");
                 self.end();
             }
             "(" => {
@@ -244,9 +280,20 @@ pub(crate) fn emit_prefix(
     builder: &mut GreenNodeBuilder<'static>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> usize {
+    let mut groups = 0usize;
     let boundary = tokens
         .iter()
-        .position(|token| matches!(token.text, "{" | "}" | ";" | "@"))
+        .position(|token| {
+            if groups == 0 && matches!(token.text, "{" | "}" | ";" | "@") {
+                return true;
+            }
+            match token.text {
+                "(" | "[" | "{" => groups += 1,
+                ")" | "]" | "}" => groups = groups.saturating_sub(1),
+                _ => {}
+            }
+            false
+        })
         .unwrap_or(tokens.len());
     // A track's CSS name is a structural suffix, including custom/vendor names
     // whose leading hyphens would otherwise be consumed as expression operators.

@@ -156,7 +156,7 @@ export class LetBindingGraph {
   }
 }
 
-/** Derives stable receiving-address keys for calls and their whole-value aliases. */
+/** Traces receiving addresses through aliases and selected object members to call owners. */
 function controllerAddresses(
   nodes: readonly LetBindingNode[],
   targets: readonly Target<Property>[],
@@ -174,26 +174,31 @@ function controllerAddresses(
     entries.add(address)
   }
 
+  const initializers = new Map(
+    nodes.map(({ definition }) => [definition.name, definition.initializer]),
+  )
+
+  // Dependency sorting has already rejected cycles. Carry the remaining member
+  // path through whole-object aliases, and visit only the selected property.
+  const trace = (expression: Expression, members: readonly string[], address: string): void => {
+    if (expression.kind === 'reference') {
+      const [name, ...path] = expression.path
+      add(name, address)
+      const initializer = initializers.get(name)
+      if (initializer) trace(initializer, [...path, ...members], address)
+    } else if (expression.kind === 'object') {
+      const [name, ...rest] = members
+      const property = expression.properties.find((candidate) => candidate.name === name)
+      if (property) trace(property.value, rest, address)
+    }
+  }
+
   // Include inactive states too: an attachment belongs to the call's lifetime,
   // not just to the currently effective style. Duplicate declarations share a key.
   for (const target of targets) {
     for (const property of target.properties) {
       if (property.value.kind !== 'binding') continue
-
-      const expression = property.value.expression
-
-      if (expression.kind === 'reference' && expression.path.length === 1)
-        add(expression.path[0], JSON.stringify([target.name, property.name]))
-    }
-  }
-
-  // Consumers precede dependencies in reverse topological order. Propagating here
-  // resolves forward aliases without evaluating calls or duplicating cycle checks.
-  for (const { definition } of nodes.toReversed()) {
-    const expression = definition.initializer
-
-    if (expression.kind === 'reference' && expression.path.length === 1) {
-      for (const address of addresses.get(definition.name) ?? []) add(expression.path[0], address)
+      trace(property.value.expression, [], JSON.stringify([target.name, property.name]))
     }
   }
 
@@ -204,6 +209,8 @@ function controllerAddresses(
 
 function collectCalls(expression: Expression): CallExpression[] {
   switch (expression.kind) {
+    case 'object':
+      return expression.properties.flatMap((property) => collectCalls(property.value))
     case 'call':
       return [
         expression,
@@ -220,6 +227,8 @@ function collectCalls(expression: Expression): CallExpression[] {
 
 function dependencies(expression: Expression): string[] {
   switch (expression.kind) {
+    case 'object':
+      return expression.properties.flatMap((property) => dependencies(property.value))
     case 'reference':
       return [expression.path[0]]
     case 'unary':

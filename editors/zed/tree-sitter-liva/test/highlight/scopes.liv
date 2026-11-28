@@ -105,3 +105,13 @@ motion layoutExample {
 //            ^ property
   }
 }
+
+motion objects {
+  let config = { property: "value", nested: { amount: 2 } }
+//               ^ property
+//                         ^ string
+//                                  ^ property
+//                                            ^ property
+  let selected = config.property
+//                     ^ punctuation.delimiter
+}

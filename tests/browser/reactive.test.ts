@@ -766,3 +766,98 @@ test('derived let bindings follow parameters and drag through aliases and preser
     for (const instance of window.letInstances) instance.runtime.dispose()
   })
 })
+
+test('object properties drive styles and retain controller address checks through replacement', async ({
+  page,
+}) => {
+  const definitions = ['width', 'height'].map(
+    (property) =>
+      decodeBundle(
+        compile(
+          `
+    motion objects(input: number, active: boolean) {
+      let selected = config.amount
+      let config = { amount: input, controller: link(input: input) }
+      let alias = config.controller
+      layer base { width: 100px; height: 200px; opacity: \${selected} }
+      layer controlled when active { ${property} := alias }
+    }
+  `,
+          false,
+        ),
+      ).definitions[0],
+  )
+  await page.goto('/tests/browser/')
+  await page.waitForFunction(() => !!window.liva)
+  const result = await page.evaluate(([before, after]) => {
+    const element = document.createElement('div')
+    document.body.append(element)
+    const errors: RuntimeDiagnostic[] = []
+    const instance = window.assembleRuntime(before, { input: 0, active: false }, (error) =>
+      errors.push(error),
+    )
+    try {
+      instance.executor.bind([['self', element]])
+      instance.runtime.updateParameters({ input: 0, active: true })
+      instance.runtime.updateParameters({ input: 0.5, active: true })
+      const opacity = getComputedStyle(element).opacity
+      instance.runtime.updateParameters({ input: 10, active: true })
+      const width = getComputedStyle(element).width
+      instance.runtime.updateParameters({ input: 10, active: false })
+      instance.runtime.replaceDefinition(after)
+      instance.runtime.updateParameters({ input: 10, active: true })
+      instance.runtime.updateParameters({ input: 20, active: true })
+      return { opacity, width, height: getComputedStyle(element).height, errors }
+    } finally {
+      instance.runtime.dispose()
+      element.remove()
+    }
+  }, definitions)
+  expect(result).toEqual({ opacity: '0.5', width: '110px', height: '210px', errors: [] })
+})
+
+test('replacing swapped sibling object controllers keeps their receiving addresses separate', async ({
+  page,
+}) => {
+  const definitions = [false, true].map(
+    (swap) =>
+      decodeBundle(
+        compile(
+          `
+    motion siblings(input: number) {
+      let config = { a: link(input: input), b: link(input: input) }
+      let first = config.${swap ? 'b' : 'a'}
+      let second = config.${swap ? 'a' : 'b'}
+      layer base { width := first; height := second }
+    }
+  `,
+          false,
+        ),
+      ).definitions[0],
+  )
+  await page.goto('/tests/browser/')
+  await page.waitForFunction(() => !!window.liva)
+  const result = await page.evaluate(([before, after]) => {
+    const element = document.createElement('div')
+    element.style.cssText = 'width: 100px; height: 200px'
+    document.body.append(element)
+    const errors: RuntimeDiagnostic[] = []
+    const instance = window.assembleRuntime(before, { input: 0 }, (error) => errors.push(error))
+    try {
+      instance.executor.bind([['self', element]])
+      instance.runtime.updateParameters({ input: 10 })
+      const initial = [getComputedStyle(element).width, getComputedStyle(element).height]
+      instance.runtime.replaceDefinition(after)
+      instance.runtime.updateParameters({ input: 30 })
+      return {
+        initial,
+        updated: [getComputedStyle(element).width, getComputedStyle(element).height],
+        errors,
+      }
+    } finally {
+      instance.runtime.dispose()
+      element.remove()
+    }
+  }, definitions)
+  expect(result).toEqual({ initial: ['110px', '210px'], updated: ['120px', '220px'], errors: [] })
+})
