@@ -1,6 +1,7 @@
 import { releaseResources } from './resource-cleanup.ts'
 import type { ReactiveNotification } from './events.ts'
-import { callBuiltin } from '../builtins/index.ts'
+import type { ReactiveDispatcher } from '../execution/motion-features.ts'
+import type { ReactiveBuiltins } from './evaluation-builtins.ts'
 import {
   isReactiveSubscription,
   isReactiveCall,
@@ -55,6 +56,13 @@ export interface ReactiveCallEvaluation {
  * a replacement store.
  */
 export class ReactiveCallStore {
+  private builtin(name: string, args: FunctionArguments): FunctionResult {
+    if (typeof this.builtins === 'function') return this.builtins(name, args)
+    if (!Object.hasOwn(this.builtins, name)) throw new Error(`Unknown function: ${name}`)
+
+    return this.builtins[name](args)
+  }
+
   private calls: CallSites = new Map()
   private initializing = true
   private evaluating = false
@@ -118,12 +126,20 @@ export class ReactiveCallStore {
 
   private binding?: SubscriptionBinding
 
+  private readonly builtins: ReactiveBuiltins | ReactiveDispatcher
+
   /**
    * Borrows caches for retainedBindings from previous. The caller must establish
    * that these names have structurally identical initializers. Borrowing does not
    * transfer ownership or activate subscriptions.
    */
-  constructor(previous?: ReactiveCallStore, retainedBindings: readonly string[] = []) {
+  constructor(
+    builtins: ReactiveBuiltins | ReactiveDispatcher,
+    previous?: ReactiveCallStore,
+    retainedBindings: readonly string[] = [],
+  ) {
+    this.builtins = builtins
+
     for (const name of retainedBindings) {
       this.calls.set(name, new Map(previous?.calls.get(name)))
     }
@@ -148,7 +164,12 @@ export class ReactiveCallStore {
     this.evaluating = true
     const pendingEvents = this.eventNotifications.length
     const pendingNotification = this.notificationPending
-    const evaluation = new PreparedCalls(this.calls, this.initializing, notification)
+    const evaluation = new PreparedCalls(
+      this.calls,
+      this.initializing,
+      (name, args) => this.builtin(name, args),
+      notification,
+    )
     let committed = false
 
     try {
@@ -387,7 +408,16 @@ class PreparedCalls implements ReactiveCallEvaluation {
   private readonly previous: CallSites
   private readonly initializing: boolean
 
-  constructor(previous: CallSites, initializing: boolean, notification?: ReactiveNotification) {
+  private readonly builtin: ReactiveDispatcher
+
+  constructor(
+    previous: CallSites,
+    initializing: boolean,
+    builtin: ReactiveDispatcher,
+    notification?: ReactiveNotification,
+  ) {
+    this.builtin = builtin
+
     this.previous = previous
     this.initializing = initializing
     this.snapshots = new Map(notification?.snapshots)
@@ -417,7 +447,7 @@ class PreparedCalls implements ReactiveCallEvaluation {
     } else {
       // Changed ordinary calls are recomputed. During initial evaluation, changed
       // borrowed calls also need new instances to keep the live store untouched.
-      const result = callBuiltin(name, args)
+      const result = this.builtin(name, args)
 
       if (isReactiveCall(result)) this.created.add(result)
 

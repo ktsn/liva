@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { definitionJson, digest, measure, sizes, specification } from './measure.ts'
 import { text } from './data.ts'
+import { featureFixtures } from './fixtures.ts'
 import { configure, output, setApi } from './__test__/tools/dist/index.ts'
 import { setPlugin as setVue } from './__test__/tools/vue.ts'
 import { setPlugin as setLiva } from './__test__/tools/target/packages/vite/src/index.ts'
@@ -70,9 +71,11 @@ beforeEach(() => {
   vi.mocked(cp).mockResolvedValue(undefined)
   vi.mocked(rm).mockResolvedValue(undefined)
   vi.mocked(writeFile).mockResolvedValue(undefined)
-  vi.mocked(readFile).mockImplementation(async (path) => {
+  vi.mocked(readFile).mockImplementation(async (path, encoding) => {
     const name = path instanceof URL ? fileURLToPath(path) : text(path)
-    return files.get(name) ?? Buffer.from(`source:${name}`)
+    const content = files.get(name) ?? Buffer.from(`source:${name}`)
+
+    return encoding === 'utf8' && Buffer.isBuffer(content) ? content.toString('utf8') : content
   })
   vi.mocked(execFileSync).mockReturnValue('rustc 1.100.0 (test 2026-11-01)\n')
 })
@@ -252,6 +255,15 @@ describe('production measurement', () => {
     const producerChanged = await specification()
     expect(producerChanged.fixture).toBe(changed.fixture)
     expect(producerChanged.harness).not.toBe(changed.harness)
+
+    files.set(
+      fileURLToPath(new URL('./fixtures.ts', import.meta.url)),
+      Buffer.from('changed feature fixtures'),
+    )
+
+    const fixturesChanged = await specification()
+
+    expect(fixturesChanged.fixture).not.toBe(producerChanged.fixture)
   })
 
   it('dispatches the native TypeScript measurement worker and writes its validated result', async () => {
@@ -261,14 +273,45 @@ describe('production measurement', () => {
       target,
       sha,
       '/result.json',
+      '/output',
     ]
     const entry = new URL('./measure.ts?entrypoint-unit', import.meta.url)
+
     await import(entry.href)
+
     const written = vi.mocked(writeFile).mock.calls.find(([path]) => path === '/result.json')
-    expect(JSON.parse(text(written?.[1]))).toMatchObject({
+    const result = JSON.parse(text(written?.[1]))
+
+    expect(result).toMatchObject({
       sha,
       bytes: { definitions: Buffer.byteLength('{"definitions":[{"label":"é"}]}') },
     })
+    expect(Object.keys(result.features)).toStrictEqual(Object.keys(featureFixtures))
+    expect(writeFile).toHaveBeenCalledWith('/output/measure-layout/bundle.js', expect.any(Buffer))
+  })
+
+  it('names the failed feature and preserves its build error before publishing worker results', async () => {
+    const cause = new Error('feature build failed')
+    let builds = 0
+    configure((config) => {
+      if (++builds === 1) return output(config)
+
+      throw cause
+    })
+    process.argv = [
+      process.execPath,
+      fileURLToPath(new URL('./measure.ts', import.meta.url)),
+      target,
+      sha,
+      '/result.json',
+    ]
+    const entry = new URL('./measure.ts?feature-failure-unit', import.meta.url)
+
+    await expect(import(entry.href)).rejects.toMatchObject({
+      message: 'spring measurement failed',
+      cause,
+    })
+    expect(writeFile).not.toHaveBeenCalledWith('/result.json', expect.any(String))
   })
 })
 

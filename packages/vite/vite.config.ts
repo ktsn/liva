@@ -4,6 +4,7 @@ export default defineConfig(
   {
     pack: {
       entry: ['src/index.ts'],
+      tsconfig: 'tsconfig.build.json',
       format: 'esm',
       fixedExtension: false,
       deps: { neverBundle: ['../wasm/liva_wasm.js'] },
@@ -19,7 +20,7 @@ export default defineConfig(
         fileName: () => 'editor.js',
       },
       rolldownOptions: {
-        external: ['vue', '@liva/runtime', '@liva/vue/runtime'],
+        external: ['vue', /^@liva\/(runtime|vue)(\/|$)/],
       },
     },
   },

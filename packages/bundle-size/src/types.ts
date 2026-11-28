@@ -30,26 +30,32 @@ export interface Metadata {
   cargoLockfile: string
   wasm: string
 }
-export interface Measurement {
-  sha: string
+export interface BundleSize {
   bytes: Bytes
   bundle: string
+}
+export interface Measurement extends BundleSize {
+  sha: string
   metadata: Metadata
+}
+export interface MeasuredSide extends Measurement {
+  /** Additional fixtures in schema 2. The top-level bytes and hash measure the core. */
+  features?: Record<string, BundleSize>
 }
 export interface Failure {
   sha: string
   error: string
 }
-export type SideResult = Measurement | Failure
+export type SideResult = MeasuredSide | Failure
 interface CommonResult {
-  schema: 1
+  schema: 1 | 2
   specification: Specification
   context: Context | null
 }
 export interface Success extends CommonResult {
   status: 'success'
-  base: Measurement
-  head: Measurement
+  base: MeasuredSide
+  head: MeasuredSide
 }
 export interface Failed extends CommonResult {
   status: 'failure'
@@ -65,6 +71,6 @@ export interface Provenance {
   baseSha?: string
 }
 
-export function measured(side: SideResult): side is Measurement {
+export function measured(side: SideResult): side is MeasuredSide {
   return 'bytes' in side
 }

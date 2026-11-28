@@ -1,4 +1,5 @@
 {
+  "extends": "./tsconfig.sources.json",
   "compilerOptions": {
     "target": "ES2023",
     "module": "ESNext",

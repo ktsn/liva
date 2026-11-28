@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { compare, main, prepareRevision } from './cli.ts'
 import { specification } from './measure.ts'
 import { text } from './data.ts'
+import { featureFixtures } from './fixtures.ts'
 import { validateResult } from './model.ts'
 import { example } from './__test__/test-fixture.ts'
 
@@ -84,7 +85,14 @@ beforeEach(() => {
     if (command === process.execPath) {
       if (failDirectory && String(values[1]).includes(failDirectory)) throw workerFailure
       const measurement = { ...example().head, sha: values[2] }
-      writtenWorkers.set(String(values[3]), JSON.stringify(measurement))
+      const features = Object.fromEntries(
+        Object.keys(featureFixtures).map((name, index) => [
+          name,
+          { bundle: measurement.bundle, bytes: { ...measurement.bytes, gzip: 100 + index } },
+        ]),
+      )
+
+      writtenWorkers.set(String(values[3]), JSON.stringify({ ...measurement, features }))
     }
     return Buffer.alloc(0)
   })
@@ -188,7 +196,13 @@ describe('comparison orchestration', () => {
   it.each(['base', 'head'])('retains the other side when the %s worker fails', async (side) => {
     failDirectory = side
     workerFailure = side === 'base' ? new Error('compiler failed') : 'native failure'
-    const result = await compare({ base, head, baseDirectory: '/base', headDirectory: '/head' })
+    const result = await compare({
+      base,
+      head,
+      baseDirectory: '/base',
+      headDirectory: '/head',
+      output: '/output',
+    })
     expect(result.status).toBe('failure')
     expect(result[side === 'base' ? 'base' : 'head']).toHaveProperty(
       'error',
@@ -230,12 +244,19 @@ describe('command entry', () => {
         vi.stubEnv('RUNNER_TEMP', '/runner')
       }
       await main()
-      const call = vi.mocked(writeFile).mock.calls.at(-1)
+      expect(writeFile).toHaveBeenCalledTimes(1)
+      const [call] = vi.mocked(writeFile).mock.calls
       assert(call)
       expect(text(call[0])).toContain('result.json')
       const result = validateResult(JSON.parse(text(call[1])))
+
       expect(result.status).toBe('success')
+      assert(result.status === 'success' && result.head.features)
+
       expect(result.context?.pr ?? null).toBe(command === 'ci' ? 92 : null)
+      expect(Object.keys(result.head.features)).toStrictEqual(Object.keys(featureFixtures))
+      expect(result.head.features.spring.bytes.gzip).toBe(100)
+      expect(result.head.features.controller.bytes.gzip).toBe(101)
       expect(rm).toHaveBeenCalledWith('/temporary', { recursive: true, force: true })
     },
   )
@@ -249,6 +270,14 @@ describe('command entry', () => {
       resolve('bundle-size-results/result.json'),
       expect.stringContaining('worker failed'),
     )
+
+    const [result] = vi.mocked(writeFile).mock.calls
+
+    assert(result)
+    expect(validateResult(JSON.parse(text(result[1])))).toMatchObject({
+      base: { features: { spring: { bytes: { gzip: 100 } } } },
+      head: { error: 'worker failed' },
+    })
     expect(process.exitCode).toBe(1)
 
     vi.mocked(execFileSync).mockImplementationOnce(() => {

@@ -1,3 +1,4 @@
+import { builtinValues } from './full-expression.ts'
 import { isCssProperty } from '../model/definition.ts'
 import { describe, expect, it } from 'vite-plus/test'
 import {
@@ -5,9 +6,9 @@ import {
   evaluateScalar,
   renderValue,
   renderProperty,
-  renderTransition,
+  renderTransition as render,
 } from './expression.ts'
-import { resolveComposition, resolveLayerTracks } from '../composition/layers.ts'
+import { resolveComposition, resolveLayerTracks } from '../composition/full-resolution.ts'
 import type { Definition, Expression, Property } from '../model/definition.ts'
 
 const number = (value: number): Expression => ({ kind: 'number', value })
@@ -318,3 +319,7 @@ describe('expression evaluation', () => {
     })
   })
 })
+
+function renderTransition(...[transition, values]: Parameters<typeof render>) {
+  return render(transition, builtinValues(values))
+}

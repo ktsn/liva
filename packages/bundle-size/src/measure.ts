@@ -1,7 +1,8 @@
 import type { Plugin } from 'vite-plus'
 import { array, object, text } from './data.ts'
+import { featureFixtures, fixtureSources, type FeatureFixture } from './fixtures.ts'
 import { validateMeasurement } from './model.ts'
-import type { Bytes, Measurement, Metadata, Specification } from './types.ts'
+import type { BundleSize, Bytes, Measurement, Metadata, Specification } from './types.ts'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -74,8 +75,13 @@ function isPluginFactory(value: unknown): value is { default: () => Plugin | Plu
   return typeof object(value).default === 'function'
 }
 
-/** Target must have its own frozen dependencies, compiler WASM, and any package build outputs. */
-export async function measure(target: string, sha: string, output?: string): Promise<Measurement> {
+/** Build one fixture with the target's frozen dependencies, compiler WASM, and package outputs. */
+export async function measure(
+  target: string,
+  sha: string,
+  output?: string,
+  variant?: FeatureFixture,
+): Promise<Measurement> {
   assert.equal(process.versions.node, settings.node, `Use Node ${settings.node}`)
 
   const require = createRequire(join(target, 'package.json'))
@@ -103,6 +109,19 @@ export async function measure(target: string, sha: string, output?: string): Pro
 
   try {
     await cp(fixture, root, { recursive: true })
+
+    if (variant) {
+      const component = join(root, 'Button.vue')
+      const entry = join(root, 'main.ts')
+      const sources = fixtureSources(
+        await readFile(component, 'utf8'),
+        await readFile(entry, 'utf8'),
+        variant,
+      )
+
+      await writeFile(component, sources.source)
+      await writeFile(entry, sources.entry)
+    }
 
     let definition: string | undefined
     let modules: string[] | undefined
@@ -139,7 +158,7 @@ export async function measure(target: string, sha: string, output?: string): Pro
       plugins: [livaPlugin.default(), vuePlugin.default(), observe],
       resolve: {
         alias: [
-          { find: '@liva/runtime', replacement: runtime },
+          { find: /^@liva\/runtime$/, replacement: runtime },
           { find: '@liva/vue/runtime', replacement: vueRuntime },
         ],
       },
@@ -266,7 +285,9 @@ export async function measure(target: string, sha: string, output?: string): Pro
 
 export async function specification(): Promise<Specification> {
   const parts = await Promise.all(
-    ['Button.vue', 'main.ts'].map((name) => readFile(join(fixture, name))),
+    ['../fixture/Button.vue', '../fixture/main.ts', 'fixtures.ts'].map((name) =>
+      readFile(new URL(name, import.meta.url)),
+    ),
   )
 
   return {
@@ -286,7 +307,18 @@ export async function specification(): Promise<Specification> {
 
 if (process.argv[1] === import.meta.filename) {
   const [target, sha, resultFile, output] = process.argv.slice(2)
-  const result = await measure(target, sha, output)
+  const core = await measure(target, sha, output)
+  const features: Record<string, BundleSize> = {}
 
-  await writeFile(resultFile, JSON.stringify(result))
+  for (const [name, variant] of Object.entries(featureFixtures)) {
+    try {
+      const { bytes, bundle } = await measure(target, sha, output && join(output, name), variant)
+
+      features[name] = { bytes, bundle }
+    } catch (error) {
+      throw new Error(`${name} measurement failed`, { cause: error })
+    }
+  }
+
+  await writeFile(resultFile, JSON.stringify({ ...core, features }))
 }

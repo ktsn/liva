@@ -1,13 +1,9 @@
+import { planControllerBindings, planControllerPresentation } from './controller-planning.ts'
 import { resolveComposition, type LayerResolution } from '../composition/layers.ts'
 import type { VariableValues } from '../evaluation/expression.ts'
 import { isCssProperty, type Definition } from '../model/definition.ts'
 import type { ExecutionPort } from './execution-contracts.ts'
-import {
-  orderedResolution,
-  planControllerBindings,
-  planControllerPresentation,
-  layerPropertyKey,
-} from './presentation-planner.ts'
+import { orderedResolution, layerPropertyKey } from './presentation-planner.ts'
 
 /** Resolves controller ownership and values through shared live/isolated browser phases. Times use performance-clock milliseconds. */
 export function resolveControllerPresentation(

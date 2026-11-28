@@ -1,27 +1,21 @@
-import { ROOT_TARGET } from '../model/targets.ts'
+import { definitionTargetNames } from '../model/targets.ts'
 import type {
   Definition,
   Expression,
   MotionParameter,
   LetBinding,
   CallExpression,
-  Property,
-  Target,
 } from '../model/definition.ts'
 import type { ReactiveCallEvaluation } from './reactive-call-store.ts'
 import type { RuntimeValue } from './reactive-value.ts'
-import { evaluate, type VariableValues } from './expression.ts'
+import { evaluate, withBuiltins, type VariableValues } from './expression.ts'
+import type { EvaluationBuiltins } from './evaluation-builtins.ts'
 
 export function targetValues(
   definition: Definition,
   previous: VariableValues = {},
 ): VariableValues {
-  const names = new Set([
-    ROOT_TARGET,
-    ...definition.layers
-      .flatMap((layer) => [layer, ...(layer.states ?? [])])
-      .flatMap((state) => state.targets.map((target) => target.name)),
-  ])
+  const names = definitionTargetNames(definition)
 
   return Object.fromEntries(
     [...names].map((name) => {
@@ -34,7 +28,7 @@ export function targetValues(
   )
 }
 
-type LetBindingNode = {
+export type LetBindingNode = {
   readonly definition: LetBinding
   readonly callIds: ReadonlyMap<CallExpression, number>
 }
@@ -53,11 +47,19 @@ export class LetBindingGraph {
   /** Sorted authored [target, property] receiving addresses by binding, including aliases and inactive states. */
   readonly addresses: ReadonlyMap<string, string>
 
+  private readonly builtins: EvaluationBuiltins
+
   /**
-   * targets must include common styles and every state, including inactive states.
-   * Omit targets only for graphs with no property attachments.
+   * The optional address resolver runs after dependency ordering and describes
+   * controller call ownership, including attachments in inactive states.
    */
-  constructor(letBindings: readonly LetBinding[], targets: readonly Target<Property>[] = []) {
+  constructor(
+    letBindings: readonly LetBinding[],
+    addresses?: (nodes: readonly LetBindingNode[]) => ReadonlyMap<string, string>,
+    builtins: EvaluationBuiltins = {},
+  ) {
+    this.builtins = builtins
+
     const pending = new Map(letBindings.map((binding) => [binding.name, binding]))
     const visiting = new Set<string>()
 
@@ -84,7 +86,7 @@ export class LetBindingGraph {
 
     // Resolve property references only after dependency sorting has rejected cycles.
     // Address changes must replace the call even when its authored arguments match.
-    this.addresses = controllerAddresses(this.nodes, targets)
+    this.addresses = addresses?.(this.nodes) ?? new Map()
   }
 
   /** Names whose initializer and complete receiving-address set match a previous graph. */
@@ -113,33 +115,35 @@ export class LetBindingGraph {
   evaluate(variables: VariableValues, operations: ReactiveCallEvaluation): VariableValues
   evaluate<T>(
     variables: VariableValues,
-    operations: ReactiveCallEvaluation,
+    operations: ReactiveCallEvaluation | undefined,
     afterEvaluate: (values: VariableValues) => T,
   ): T
   evaluate<T>(
     variables: VariableValues,
-    operations: ReactiveCallEvaluation,
+    operations: ReactiveCallEvaluation | undefined,
     afterEvaluate?: (values: VariableValues) => T,
   ): T | VariableValues {
     // Keep candidate variables local so a later failure cannot publish a partial
     // environment. Dependency order makes each completed value available below.
-    const values = { ...variables }
+    const values = withBuiltins({ ...variables }, this.builtins)
 
     for (const node of this.nodes) {
       // The graph resolves argument expressions, including nested calls; the store
       // decides whether to reuse a result, prepare an update, or create an instance.
-      const invoke = (call: CallExpression, scope: VariableValues): RuntimeValue => {
-        const args = Object.fromEntries(
-          call.arguments.map((argument) => [
-            argument.name,
-            evaluate(argument.value, scope, invoke),
-          ]),
-        )
-        // Every initializer call is indexed by collectCalls, including inactive branches.
-        const id = node.callIds.get(call)!
+      const invoke = operations
+        ? (call: CallExpression, scope: VariableValues): RuntimeValue => {
+            const args = Object.fromEntries(
+              call.arguments.map((argument) => [
+                argument.name,
+                evaluate(argument.value, scope, invoke),
+              ]),
+            )
+            // Every initializer call is indexed by collectCalls, including inactive branches.
+            const id = node.callIds.get(call)!
 
-        return operations.invoke(node.definition.name, id, call.function, args)
-      }
+            return operations.invoke(node.definition.name, id, call.function, args)
+          }
+        : undefined
 
       const value = evaluate(node.definition.initializer, values, invoke)
       Object.defineProperty(values, node.definition.name, {
@@ -154,52 +158,6 @@ export class LetBindingGraph {
     // returning control to the store, which then activates and commits call state.
     return afterEvaluate ? afterEvaluate(values) : values
   }
-}
-
-/** Derives stable receiving-address keys for calls and their whole-value aliases. */
-function controllerAddresses(
-  nodes: readonly LetBindingNode[],
-  targets: readonly Target<Property>[],
-): ReadonlyMap<string, string> {
-  const addresses = new Map<string, Set<string>>()
-
-  const add = (name: string, address: string) => {
-    let entries = addresses.get(name)
-
-    if (!entries) {
-      entries = new Set()
-      addresses.set(name, entries)
-    }
-
-    entries.add(address)
-  }
-
-  // Include inactive states too: an attachment belongs to the call's lifetime,
-  // not just to the currently effective style. Duplicate declarations share a key.
-  for (const target of targets) {
-    for (const property of target.properties) {
-      if (property.value.kind !== 'binding') continue
-
-      const expression = property.value.expression
-
-      if (expression.kind === 'reference' && expression.path.length === 1)
-        add(expression.path[0], JSON.stringify([target.name, property.name]))
-    }
-  }
-
-  // Consumers precede dependencies in reverse topological order. Propagating here
-  // resolves forward aliases without evaluating calls or duplicating cycle checks.
-  for (const { definition } of nodes.toReversed()) {
-    const expression = definition.initializer
-
-    if (expression.kind === 'reference' && expression.path.length === 1) {
-      for (const address of addresses.get(definition.name) ?? []) add(expression.path[0], address)
-    }
-  }
-
-  return new Map(
-    [...addresses].map(([name, entries]) => [name, JSON.stringify([...entries].toSorted())]),
-  )
 }
 
 function collectCalls(expression: Expression): CallExpression[] {

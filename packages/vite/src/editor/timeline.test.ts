@@ -1,5 +1,6 @@
+import { builtinValues } from '../../../runtime/src/evaluation/full-expression.ts'
 import { resolveComposition, type Definition } from '@liva/runtime'
-import { renderTransition } from '../../../runtime/src/evaluation/expression.ts'
+import { renderTransition as render } from '../../../runtime/src/evaluation/expression.ts'
 import { describe, expect, it } from 'vite-plus/test'
 import { compile } from '../compiler.ts'
 import { readFileSync } from 'node:fs'
@@ -389,3 +390,7 @@ describe('composition lifecycle resolved endpoints', () => {
 it('labels immediate timing without exposing meaningless easing', () => {
   expect(timingText({ kind: 'tween', durationMs: 0, easing: 'ease' })).toBe('Instant')
 })
+
+function renderTransition(...[transition, values]: Parameters<typeof render>) {
+  return render(transition, builtinValues(values))
+}

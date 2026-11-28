@@ -1,3 +1,4 @@
+import { springMotion } from '../motion/spring-motion.ts'
 import type { Timing } from '../model/definition.ts'
 import type { LayoutAxes } from '../model/layout.ts'
 import {
@@ -201,12 +202,13 @@ function fixedEdge(
  * is imposed. Static reflected frames remain supported. Caller owns cancellation,
  * reduced motion, the common clock and intermediate singular-shape settlement.
  */
-export function projectionShapeMotion(
+export function planProjectionShapeMotion(
   start: ProjectionShapeState | undefined,
   destination: ProjectionShape | undefined,
   selection: LayoutAxes,
   timing: Timing | undefined,
   tween?: ProjectionTweenSampler,
+  spring?: Parameters<typeof projectionTrajectory>[5],
 ): ProjectionShapeMotionResult {
   if (!start || !destination) return { kind: 'settle', reason: 'missing' }
   if (!usableShape(start.shape) || !finiteShape(start.velocity) || !usableShape(destination))
@@ -233,7 +235,7 @@ export function projectionShapeMotion(
     return { kind: 'settle', reason: 'geometry' }
 
   const fixed = [fixedEdge(initial, end, velocity, 0), fixedEdge(initial, end, velocity, 2)]
-  const trajectory = projectionTrajectory(initial, end, velocity, timing, tween)
+  const trajectory = projectionTrajectory(initial, end, velocity, timing, tween, spring)
 
   if (!trajectory) return { kind: 'settle', reason: 'inactive' }
 
@@ -327,4 +329,10 @@ export function projectionShapeTransform(
   if (!inverseProjection(desired)) return { kind: 'settle', reason: 'geometry' }
 
   return projectionFrameTransform(desired, localToReference, ancestorCorrection, origin)
+}
+
+export function projectionShapeMotion(
+  ...[start, destination, selection, timing, tween]: Parameters<typeof planProjectionShapeMotion>
+) {
+  return planProjectionShapeMotion(start, destination, selection, timing, tween, springMotion)
 }

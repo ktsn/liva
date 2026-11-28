@@ -1,5 +1,8 @@
-import { trackLayoutStyleSource } from './style-observation.ts'
-import { isLayoutStyleProperty } from './style-properties.ts'
+import {
+  managedAnimations,
+  observeGeometryAnimations,
+  visualProperties,
+} from './geometry-animations.ts'
 import { LayoutReadBatch } from './layout-bounds.ts'
 import { releaseResources } from '../evaluation/resource-cleanup.ts'
 
@@ -31,8 +34,6 @@ type InlineChange = { readonly before: string; readonly after: string; readonly 
 type InlineObserver = (change: InlineChange) => void
 
 const schedulers = new WeakMap<Document, LayoutScheduler>()
-const managedAnimations = new WeakMap<Document, Set<Animation>>()
-const visualProperties = new Set(['transform', 'translate', 'rotate', 'scale', 'opacity'])
 
 function layoutStyle(css: string, document: Document): string {
   const style = document.createElement('div').style
@@ -56,6 +57,7 @@ class LayoutScheduler {
   private inlineNotification = false
 
   private readonly document: Document
+  private readonly releaseAnimations: () => void
 
   constructor(document: Document) {
     this.document = document
@@ -76,6 +78,7 @@ class LayoutScheduler {
     document.addEventListener('load', this.invalidate, true)
     document.fonts.addEventListener('loadingdone', this.invalidate)
     document.fonts.addEventListener('loadingerror', this.invalidate)
+    this.releaseAnimations = observeGeometryAnimations(document, this.invalidate)
   }
 
   private changed = (records: MutationRecord[], synchronous: boolean) => {
@@ -315,6 +318,7 @@ class LayoutScheduler {
     this.document.removeEventListener('load', this.invalidate, true)
     this.document.fonts.removeEventListener('loadingdone', this.invalidate)
     this.document.fonts.removeEventListener('loadingerror', this.invalidate)
+    this.releaseAnimations()
     schedulers.delete(this.document)
   }
 }
@@ -355,36 +359,7 @@ export function registerLayoutRead(
   return cleanup
 }
 
-/** Only Liva-managed layout effects opt into per-frame invalidation. */
-export function trackLayoutAnimation(element: HTMLElement, property: string, animation: Animation) {
-  if (isLayoutStyleProperty(property)) {
-    trackLayoutStyleSource(element, animation)
-    return
-  }
-  if (visualProperties.has(property)) return
-
-  const document = element.ownerDocument
-  let active = managedAnimations.get(document)
-
-  if (!active) {
-    active = new Set()
-    managedAnimations.set(document, active)
-  }
-
-  if (active.has(animation)) return
-
-  active.add(animation)
-  schedulers.get(document)?.invalidate()
-
-  const remove = () => {
-    active.delete(animation)
-    animation.removeEventListener('finish', remove)
-    animation.removeEventListener('cancel', remove)
-    schedulers.get(document)?.invalidate()
-  }
-  animation.addEventListener('finish', remove, { once: true })
-  animation.addEventListener('cancel', remove, { once: true })
-}
+export { trackLayoutAnimation } from './geometry-animations.ts'
 
 /** Executor-owned temporary output, excluded from external-layout invalidation. */
 export function writeLayoutStyle(element: HTMLElement, action: () => void) {

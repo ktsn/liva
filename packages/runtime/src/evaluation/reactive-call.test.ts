@@ -104,7 +104,7 @@ describe('stable reactive calls', () => {
               ? { ...source, value: 3, dispose: secondDispose }
               : source,
         )
-      const calls = new ReactiveCallStore()
+      const calls = new ReactiveCallStore((name, args) => functions.callBuiltin(name, args))
       const update = vi.fn<() => void>()
       calls.evaluate((evaluation) => evaluation.invoke('live', 0, 'live', {}))
       calls.bind((_source, notify) => {
@@ -175,7 +175,7 @@ describe('stable reactive calls', () => {
           }
         : source,
     )
-    const calls = new ReactiveCallStore()
+    const calls = new ReactiveCallStore((name, args) => functions.callBuiltin(name, args))
     calls.evaluate((evaluation) => evaluation.invoke('old', 0, 'old', {}))
 
     expect(() =>
@@ -203,7 +203,7 @@ describe('stable reactive calls', () => {
           disposed.push(Number(args.index))
         },
       }))
-      const calls = new ReactiveCallStore()
+      const calls = new ReactiveCallStore((name, args) => functions.callBuiltin(name, args))
       calls.evaluate((evaluation) =>
         [1, 2].map((index) => evaluation.invoke(String(index), 0, 'source', { index })),
       )
@@ -246,9 +246,13 @@ describe('stable reactive calls', () => {
         if (args.index === 2) throw failure
       },
     }))
-    const live = new ReactiveCallStore()
+    const live = new ReactiveCallStore((name, args) => functions.callBuiltin(name, args))
     live.evaluate((evaluation) => evaluation.invoke('borrowed', 0, 'source', { index: 1 }))
-    const candidate = new ReactiveCallStore(live, ['borrowed'])
+    const candidate = new ReactiveCallStore(
+      (name, args) => functions.callBuiltin(name, args),
+      live,
+      ['borrowed'],
+    )
     candidate.evaluate((evaluation) =>
       ['borrowed', 'candidate', 'other'].map((name, index) =>
         evaluation.invoke(name, 0, 'source', { index: index + 1 }),
@@ -289,7 +293,7 @@ describe('stable reactive calls', () => {
 
         return source
       })
-      const calls = new ReactiveCallStore()
+      const calls = new ReactiveCallStore((name, args) => functions.callBuiltin(name, args))
       const read = (indices: readonly number[]) =>
         calls.evaluate((evaluation) =>
           indices.map((index) => evaluation.invoke(String(index), 0, 'source', { index })),
@@ -777,5 +781,25 @@ describe('stable reactive calls', () => {
     live.dispose()
 
     expect(dispose).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('compiled reactive function table', () => {
+  it('evaluates included calls and rejects names omitted from the Motion', async () => {
+    const { timeout } = await import('../builtins/timeout.ts')
+    const calls = new ReactiveCallStore({ timeout })
+
+    try {
+      const value = calls.evaluate((evaluation) =>
+        evaluation.invoke('timer', 0, 'timeout', { when: false, duration: 100 }),
+      )
+
+      expect(value).toBe(false)
+      expect(() =>
+        calls.evaluate((evaluation) => evaluation.invoke('timer', 1, 'interaction', {})),
+      ).toThrow('Unknown function: interaction')
+    } finally {
+      calls.dispose()
+    }
   })
 })

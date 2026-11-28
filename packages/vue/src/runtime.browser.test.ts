@@ -12,7 +12,7 @@ import {
 import constrainedFixture from '../../../fixtures/constrained.json'
 import fixture from '../../../fixtures/toggle.json'
 import reactiveFixture from '../../../fixtures/reactive-toggle.json'
-import { decodeBundle, type Definition, type RuntimeDiagnostic } from '@liva/runtime'
+import { decodeBundle, Runtime, type Definition, type RuntimeDiagnostic } from '@liva/runtime'
 import * as functions from '../../runtime/src/builtins/index.ts'
 import { createLivaPlugin, type InstanceBinding, type LivaOptions } from './runtime.ts'
 
@@ -466,5 +466,152 @@ describe('built-in self target', () => {
 
     expect(host.querySelector('[data-root]')).toBeNull()
     expect(errors).toEqual([])
+  })
+})
+
+describe('compiled and full Vue integration', () => {
+  it('accepts an explicit replacement with capabilities absent from the original compiled Motion', async () => {
+    const source: Definition = {
+      name: 'fade',
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'self',
+              properties: [{ name: 'opacity', value: { kind: 'literal', value: '0.4' } }],
+            },
+          ],
+        },
+      ],
+    }
+    const records: InstanceBinding[] = []
+    const component = defineComponent({
+      livaDefinitions: [source],
+      livaFeatures: { fade: {} },
+      setup() {
+        const directive = resolveDirective('liva')!
+
+        return () =>
+          withDirectives(h('div', { 'data-target': 'fade' }), [[directive, {}, source.name]])
+      },
+    })
+    const host = document.createElement('div')
+    document.body.append(host)
+    hosts.push(host)
+    const app = createApp(component).use(
+      createLivaPlugin({
+        observe(event, binding) {
+          if (event === 'mount') records.push(binding)
+        },
+      }),
+    )
+    apps.push(app)
+    app.mount(host)
+
+    await nextTick()
+    expect(host.firstElementChild).toBeInstanceOf(HTMLElement)
+    const element = host.querySelector<HTMLElement>('[data-target="fade"]')!
+    expect(element.style.opacity).toBe('0.4')
+
+    expect(records[0].runtime).toBeInstanceOf(Runtime)
+
+    const replacement: Definition = {
+      ...source,
+      letBindings: [
+        {
+          name: 'timer',
+          initializer: {
+            kind: 'call',
+            function: 'timeout',
+            arguments: [
+              { name: 'when', value: { kind: 'boolean', value: true } },
+              { name: 'duration', value: { kind: 'number', value: 0 } },
+            ],
+          },
+        },
+      ],
+      layers: [
+        ...source.layers,
+        {
+          name: 'ready',
+          when: { kind: 'reference', path: ['timer'] },
+          targets: [
+            {
+              name: 'self',
+              properties: [{ name: 'opacity', value: { kind: 'literal', value: '1' } }],
+            },
+          ],
+        },
+      ],
+    }
+    records[0].runtime.replaceDefinition(replacement)
+
+    await expect.poll(() => element.style.opacity).toBe('1')
+  })
+
+  it('registers compiled child Presence targets and releases them through the thin plugin', async () => {
+    const { PresenceExecution } =
+      await import('@liva/runtime/features/execution/presence-execution')
+    const { createCompiledLivaPlugin } = await import('./compiled.ts')
+    const { PresenceBindings } = await import('./presence-bindings.ts')
+    const { PresenceEntry } = await import('./presence.ts')
+    const shown = ref(true)
+    const entry = new PresenceEntry()
+    const source: Definition = {
+      name: 'fade',
+      layers: [
+        {
+          name: 'base',
+          targets: [
+            {
+              name: 'badge',
+              properties: [{ name: 'opacity', value: { kind: 'literal', value: '0.7' } }],
+            },
+          ],
+        },
+      ],
+      enter: { targets: [] },
+    }
+    const owner = ['root']
+    const component = defineComponent({
+      livaDefinitions: [source],
+      livaFeatures: { fade: { executor: { presence: PresenceExecution } } },
+      livaPresenceBindings: PresenceBindings,
+      setup() {
+        const root = resolveDirective('liva')!
+        const target = resolveDirective('liva-target')!
+
+        return () =>
+          shown.value
+            ? withDirectives(
+                h('div', [
+                  withDirectives(h('span', { 'data-target': 'badge' }), [
+                    [target, { owner, entries: [entry] }, 'badge', { compiled: true }],
+                  ]),
+                ]),
+                [[root, { value: {}, owner }, source.name, { compiled: true }]],
+              )
+            : null
+      },
+    })
+    const host = document.createElement('div')
+    document.body.append(host)
+    hosts.push(host)
+    const app = createApp(component).use(createCompiledLivaPlugin())
+    apps.push(app)
+    app.mount(host)
+
+    await nextTick()
+    await Promise.resolve()
+
+    expect(entry.targets.size).toBe(1)
+    expect(host.querySelector<HTMLElement>('[data-target="badge"]')?.style.opacity).toBe('0.7')
+
+    shown.value = false
+    await nextTick()
+
+    expect(entry.targets.size).toBe(0)
+    expect(host.querySelector('[data-target="badge"]')).toBeNull()
   })
 })

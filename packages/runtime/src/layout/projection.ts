@@ -1,3 +1,4 @@
+import { springMotion } from '../motion/spring-motion.ts'
 import type { Timing } from '../model/definition.ts'
 import type { LayoutAxes } from '../model/layout.ts'
 import { projectionTrajectory, type ProjectionTweenSampler } from './projection-trajectory.ts'
@@ -178,7 +179,7 @@ export function projectionMotion(
   )
     return { kind: 'settle', reason: 'geometry' }
 
-  const trajectory = projectionTrajectory(initial, end, velocity, timing, tween)
+  const trajectory = projectionTrajectory(initial, end, velocity, timing, tween, springMotion)
 
   if (!trajectory) return { kind: 'settle', reason: 'inactive' }
 

@@ -1,12 +1,19 @@
 import { object } from '../data.ts'
+import { featureFixtures } from '../fixtures.ts'
 import type { Context, Success } from '../types.ts'
 import { settings } from '../model.ts'
 
 export function example(): Success & { context: Context } {
-  const measurement = {
-    sha: 'a'.repeat(40),
+  const core = {
     bytes: { minified: 100, gzip: 80, brotli: 70, definitions: 20 },
     bundle: 'b'.repeat(64),
+  }
+  const measurement = {
+    ...core,
+    sha: 'a'.repeat(40),
+    features: Object.fromEntries(
+      Object.keys(featureFixtures).map((name) => [name, structuredClone(core)]),
+    ),
     metadata: {
       node: settings.node,
       rustc: 'rustc 1.100.0 (test 2026-11-01)',
@@ -25,7 +32,7 @@ export function example(): Success & { context: Context } {
   }
 
   return {
-    schema: 1,
+    schema: 2,
     status: 'success',
     specification: {
       ...structuredClone(settings),

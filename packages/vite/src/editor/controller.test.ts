@@ -36,13 +36,13 @@ function binding(label: string) {
     }),
   }
   const inspection = {
-    inspectComposition: vi.fn<InstanceBinding['inspection']['inspectComposition']>(),
-    inspectLifecycle: vi.fn<InstanceBinding['inspection']['inspectLifecycle']>(),
+    inspectComposition: vi.fn<NonNullable<InstanceBinding['inspection']>['inspectComposition']>(),
+    inspectLifecycle: vi.fn<NonNullable<InstanceBinding['inspection']>['inspectLifecycle']>(),
     previewComposition: vi
-      .fn<InstanceBinding['inspection']['previewComposition']>()
+      .fn<NonNullable<InstanceBinding['inspection']>['previewComposition']>()
       .mockReturnValue(preview),
     previewLifecycle: vi
-      .fn<InstanceBinding['inspection']['previewLifecycle']>()
+      .fn<NonNullable<InstanceBinding['inspection']>['previewLifecycle']>()
       .mockReturnValue(preview),
   }
 

@@ -9,7 +9,7 @@ import {
   type MotionParameter,
 } from '../model/definition.ts'
 import { evaluate, renderProperty, renderValue } from '../evaluation/expression.ts'
-import { resolveLayers } from '../composition/layers.ts'
+import { resolveLayers } from '../composition/full-resolution.ts'
 import { parameterValues } from '../evaluation/let-bindings.ts'
 
 const toggle = decodeBundle(JSON.stringify(toggleFixture)).definitions[0]

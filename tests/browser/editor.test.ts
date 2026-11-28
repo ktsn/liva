@@ -916,3 +916,55 @@ test.describe('editor source HMR', { lock: '-exclusive-' }, () => {
     })
   }
 })
+
+test('previews an unsaved spring in a tween-only Motion and restores live playback', async ({
+  page,
+}) => {
+  const original = await readFile(file, 'utf8')
+
+  await open(page, true)
+  const first = page.getByRole('button', { name: 'First', exact: true })
+  await expect(first).toHaveCSS('background-color', 'rgb(255, 0, 0)')
+
+  await track(page, 'box', 'background-color')
+  await page.getByLabel('Timing mode').selectOption('spring-duration')
+  await page.getByLabel('Track duration').fill('400')
+  await page.getByRole('button', { name: 'Apply timing', exact: true }).click()
+
+  await expectMessage(page, 'Previewing')
+  await seek(page, 160)
+  const preview = await page.evaluate(() =>
+    document.getAnimations().map((animation) => animation.effect?.getTiming()),
+  )
+
+  expect(preview).toEqual([
+    expect.objectContaining({ duration: 400, easing: expect.stringMatching(/^linear\(/) }),
+  ])
+  await expect(first).not.toHaveCSS('background-color', 'rgb(255, 0, 0)')
+  expect(await readFile(file, 'utf8')).toBe(original)
+
+  await page.getByRole('button', { name: 'End preview', exact: true }).click()
+
+  await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0)
+  await expect(first).toHaveCSS('background-color', 'rgb(255, 0, 0)')
+
+  const live = await first.evaluateHandle((element) => ({
+    timing: new Promise<EffectTiming | undefined>((resolve) => {
+      function read() {
+        const [animation] = element.getAnimations()
+
+        if (animation) resolve(animation.effect?.getTiming())
+        else requestAnimationFrame(read)
+      }
+
+      requestAnimationFrame(read)
+    }),
+  }))
+  await first.click()
+  expect(await live.evaluate(({ timing }) => timing)).toMatchObject({
+    duration: 50,
+    easing: 'linear',
+  })
+  await live.dispose()
+  await expect(first).toHaveCSS('background-color', 'rgb(0, 0, 255)')
+})

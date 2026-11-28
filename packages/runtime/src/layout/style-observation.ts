@@ -1,6 +1,5 @@
 import type { ProjectionMatrix } from './projection.ts'
 import { releaseResources } from '../evaluation/resource-cleanup.ts'
-import { batchLayoutWrites } from './layout-write-phase.ts'
 
 /** Natural destination border-box CSS px and cumulative generated local distortion. */
 export interface LayoutStyleProjection {
@@ -17,7 +16,12 @@ export interface LayoutStyleObservation {
 
 // Paint source inheritance crosses Motion roots. Weak receiver keys retain no
 // detached tree after both the native/Executor owners have released it.
-const owners = new WeakMap<HTMLElement, () => () => void>()
+type StyleOwner = {
+  readonly prepare: () => () => void
+  readonly batch?: (write: () => void) => void
+}
+
+const owners = new WeakMap<HTMLElement, StyleOwner>()
 const animations = new WeakMap<HTMLElement, Set<Animation>>()
 // Final/removed sources must invalidate inherited caches even after their last
 // native handle disappears. Unchanged paused clocks otherwise retain their cache.
@@ -35,11 +39,16 @@ export function layoutStyleSourceRevision(document: Document): number {
 }
 
 /** Registers the existing temporary owner; stale cleanup cannot unregister a replacement. */
-export function ownLayoutStyleSource(element: HTMLElement, prepare: () => () => void): () => void {
-  owners.set(element, prepare)
+export function ownLayoutStyleSource(
+  element: HTMLElement,
+  prepare: StyleOwner['prepare'],
+  batch?: StyleOwner['batch'],
+): () => void {
+  const owner = { prepare, batch }
+  owners.set(element, owner)
 
   return () => {
-    if (owners.get(element) === prepare) owners.delete(element)
+    if (owners.get(element) === owner) owners.delete(element)
   }
 }
 
@@ -106,7 +115,7 @@ export function layoutStyleSourceTimes(element: HTMLElement): readonly LayoutSty
  * attempts every acquired cleanup and preserves original failure identities.
  */
 export function observeLayoutStyles<T>(elements: readonly HTMLElement[], read: () => T): T {
-  const prepare = new Set<() => () => void>()
+  const sources = new Set<StyleOwner>()
 
   for (const element of elements) {
     const path: HTMLElement[] = []
@@ -119,24 +128,31 @@ export function observeLayoutStyles<T>(elements: readonly HTMLElement[], read: (
 
     for (const ancestor of path.toReversed()) {
       const owner = owners.get(ancestor)
-      if (owner) prepare.add(owner)
+      if (owner) sources.add(owner)
     }
   }
 
+  if (!sources.size) return read()
+
+  const batch = [...sources].find((source) => source.batch !== undefined)?.batch ?? run
   const restorations: (() => void)[] = []
   let result: T
 
   releaseResources([
     () => {
-      batchLayoutWrites(() => {
-        for (const acquire of prepare) restorations.push(acquire())
+      batch(() => {
+        for (const source of sources) restorations.push(source.prepare())
       })
 
       result = read()
     },
-    () => batchLayoutWrites(() => releaseResources(restorations.toReversed())),
+    () => batch(() => releaseResources(restorations.toReversed())),
   ])
 
   // A failed read propagates above; a successful callback assigns result once.
   return result!
+}
+
+function run(action: () => void) {
+  action()
 }

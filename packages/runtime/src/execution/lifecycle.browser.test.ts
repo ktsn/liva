@@ -1,3 +1,4 @@
+import { MotionHistory } from '../motion/motion-history.ts'
 import { createBrowserRuntimeHarness } from '../__test__/helpers/browser-runtime.ts'
 import * as functions from '../builtins/index.ts'
 import { cdp } from 'vite-plus/test/browser'
@@ -14,7 +15,7 @@ import { capturePresence } from '../__test__/helpers/presence.ts'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { PresenceOperation, createPresenceCapture } from './presence-operation.ts'
 import { evaluate } from '../evaluation/expression.ts'
-import { PropertyMotion } from '../motion/property-motion.ts'
+import { builtinValues } from '../evaluation/full-expression.ts'
 import { timingValue } from '../evaluation/timing-values.ts'
 import { Runtime } from './runtime.ts'
 import { PresentationExecutor } from './presentation-executor.ts'
@@ -186,7 +187,9 @@ describe('lifecycle effects', () => {
   it.each(['enter', 'leave'] as const)(
     'Instant %s completes without leaving effects or ownership',
     async (phase) => {
-      const timing = timingValue(evaluate({ kind: 'reference', path: ['instant'] }, {}))
+      const timing = timingValue(
+        evaluate({ kind: 'reference', path: ['instant'] }, builtinValues({})),
+      )
       const { element, session } = setup(phase, timing)
 
       session.initialize()
@@ -673,7 +676,7 @@ describe('lifecycle effects', () => {
     session.play()
 
     const failure = new Error('motion observation failed')
-    const observe = vi.spyOn(PropertyMotion.prototype, 'read').mockImplementationOnce(() => {
+    const observe = vi.spyOn(MotionHistory.prototype, 'read').mockImplementationOnce(() => {
       throw failure
     })
 

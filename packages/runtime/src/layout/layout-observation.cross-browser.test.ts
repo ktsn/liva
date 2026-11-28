@@ -1,5 +1,6 @@
+import { ProjectionReadBatch } from './projection-read.ts'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
-import { LayoutReadBatch, missingBounds } from './layout-bounds.ts'
+import { missingBounds } from './layout-bounds.ts'
 import { observeLayoutInline, registerLayoutRead, writeLayoutStyle } from './layout-scheduler.ts'
 
 const cleanups: (() => void)[] = []
@@ -119,7 +120,7 @@ describe('geometry read phases', () => {
     const { root, target } = fixture()
     root.style.transform = 'rotate(25deg)'
     target.style.transform = 'rotate(15deg)'
-    const batch = new LayoutReadBatch()
+    const batch = new ProjectionReadBatch()
     const read = vi.spyOn(root, 'getBoundingClientRect')
     const snapshot = batch.projection(target)
     if (!snapshot) throw new Error('Expected supported affine snapshot')
@@ -143,7 +144,7 @@ describe('geometry read phases', () => {
   it('reports cached unsupported geometry independently to each consumer', () => {
     const { root, target } = fixture()
     root.style.position = 'sticky'
-    const batch = new LayoutReadBatch()
+    const batch = new ProjectionReadBatch()
     const first: string[] = []
     const second: string[] = []
     const styles = vi.spyOn(window, 'getComputedStyle')
@@ -159,7 +160,7 @@ describe('geometry read phases', () => {
 
   it('rejects unrelated/disconnected references and boxless projection at the batch boundary', () => {
     const { root, target } = fixture()
-    const batch = new LayoutReadBatch()
+    const batch = new ProjectionReadBatch()
 
     expect(batch.bounds(root, target)).toBe(missingBounds)
     target.style.display = 'none'

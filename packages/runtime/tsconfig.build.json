@@ -1,7 +1,8 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "rootDir": "src"
+    "rootDir": "src",
+    "paths": {}
   },
-  "include": ["src/index.ts"]
+  "include": ["src/index.ts", "src/core.ts", "src/execution/preview-execution.ts"]
 }

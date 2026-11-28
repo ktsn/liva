@@ -1,5 +1,5 @@
 import type { RuntimeValue } from '../evaluation/reactive-value.ts'
-import type { PropertyMotion } from './property-motion.ts'
+import type { MotionHistory } from './motion-history.ts'
 
 /**
  * One receiving target/property and its owner's motion history/diagnostic channel.
@@ -9,7 +9,7 @@ import type { PropertyMotion } from './property-motion.ts'
 export interface ControllerAddress {
   readonly target: string
   readonly property: string
-  readonly motion: PropertyMotion
+  readonly motion: MotionHistory
   readonly report: (message: string) => void
 }
 
@@ -17,7 +17,7 @@ export interface ControllerAddress {
  * Capability behind readable controller snapshots; copying a record does not copy
  * ownership. Configure one address before binding its reactive call, then acquire
  * when it becomes the effective owner. The host applies control() writes and records
- * them through the configured PropertyMotion, releasing when ownership ends.
+ * them through the configured MotionHistory, releasing when ownership ends.
  * Receiving-element cleanup belongs to the ReactiveCall's bind/dispose API.
  */
 export interface PropertyController {
