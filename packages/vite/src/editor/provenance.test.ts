@@ -430,3 +430,69 @@ it('keeps implicit-root timing local to its property', () => {
   expect(scale.localTiming).toBeDefined()
   expect(opacity.timingSource).toBeUndefined()
 })
+
+it('resolves grouped and repeated block timing independently through playback and inspection', () => {
+  const info = inspection(`motion sample {
+    @tween(duration: 100) layer base {
+      opacity: 1
+      @spring(stiffness: 400) self, icon { scale: 1.1 }
+      @tween(duration: 200) self { rotate: 10deg }
+      icon { opacity: .8 }
+    }
+    layer active when false { self, icon { scale: 1.2 } }
+    @tween(duration: 300) enter {
+      @spring(stiffness: 500) self, icon { scale: .5 }
+      self, icon { opacity: 0 }
+    }
+  }`)
+  const before = { layers: { base: true, active: false }, states: {} }
+  const after = { layers: { base: true, active: true }, states: {} }
+  const resolved = resolveComposition(info.definition, {}, after)
+  const baseline = resolveComposition(info.definition, {}, before)
+  const tracks = resolveLayerTracks(
+    baseline,
+    resolved,
+    {},
+    () => '1',
+    () => {},
+  )
+  for (const target of ['self', 'icon']) {
+    const scale = trackProvenance(info, before, after, undefined, target, 'scale')
+    expect(scale.owner).toBe('active')
+    expect(scale.timingSource?.text).toBe('spring(stiffness: 400)')
+    expect(scale.localTiming).toBeUndefined()
+    const opacity = trackProvenance(info, before, after, undefined, target, 'opacity')
+    expect(opacity.timingSource?.text).toBe('tween(duration: 100)')
+    expect(lifecycleProvenance(info, 'enter', before, target, 'scale').timingSource?.text).toBe(
+      'spring(stiffness: 500)',
+    )
+    expect(lifecycleProvenance(info, 'enter', before, target, 'opacity').timingSource?.text).toBe(
+      'tween(duration: 300)',
+    )
+  }
+  expect(tracks.filter((track) => track.property === 'scale')).toHaveLength(2)
+  expect(
+    tracks
+      .filter((track) => track.property === 'scale')
+      .every((track) => track.timing?.kind === 'spring-physics'),
+  ).toBe(true)
+})
+
+it('keeps a grouped state target default off undeclared common properties', () => {
+  const info = inspection(`motion sample {
+    @tween(duration: 100) layer machine {
+      self, icon { opacity: 1; scale: 1 }
+      state idle initial {}
+      state active { @spring() self, icon { scale: 1.2 } }
+    }
+  }`)
+  const selection = { layers: {}, states: { machine: 'active' } }
+  for (const target of ['self', 'icon']) {
+    expect(
+      trackProvenance(info, selection, selection, undefined, target, 'opacity').timingSource?.text,
+    ).toBe('tween(duration: 100)')
+    expect(
+      trackProvenance(info, selection, selection, undefined, target, 'scale').timingSource?.text,
+    ).toBe('spring()')
+  }
+})

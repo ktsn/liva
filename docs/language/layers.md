@@ -21,9 +21,9 @@ layer base {
 
 Both `opacity` and `scale` style the root. An explicit `self` block can give
 its declarations shared timing and needs no `v-liva-target` binding. Use
-distinct properties when mixing the two forms. A second `self` block or a
-repeated property in the same scope is an error, including a value and a track
-for the same property.
+distinct properties when mixing the two forms. Multiple blocks for one target
+are allowed, but a repeated target/property in the same scope is an error,
+including a value and a track for the same property.
 
 Bind a named target with `v-liva-target:name`, such as `v-liva-target:icon`. The
 target belongs to the nearest Motion root in the same Vue component. Ordinary
@@ -33,6 +33,57 @@ duplicate required targets suspend the instance and report a diagnostic.
 Read-only measurement targets may be absent. Removal cancels a target's
 animations. Rebinding applies the current composition without replaying
 previous animations.
+
+## Target groups
+
+Grouped names must also be valid standalone target blocks in the same scope, so
+editing one member can safely split the group. `let` and `event` cannot be grouped.
+Directly inside a layer, `state`, `transition`, `enter`, and `leave` cannot be
+grouped either: those names start structural declarations there. Rename these
+targets to use a group in that scope. Existing singleton target syntax is
+unchanged; for example, `state` remains a valid target inside a state or lifecycle
+block, and can be grouped there. There is no quoted or escaped target-name syntax.
+
+A comma-separated header applies the same declarations independently to each
+listed Liva target. `self` can appear alongside named targets. These names are
+Liva references, not CSS selectors: classes, combinators, and DOM queries are
+not supported. Named targets in layers and states establish motion-local target
+names; directional transitions and lifecycle blocks refer to those targets.
+
+```liva
+motion button {
+  @tween(duration: 100)
+  layer base {
+    opacity: 1 // implicit self
+    @spring(stiffness: 400)
+    self, icon {
+      scale: 1.1
+    }
+    @tween(duration: 200)
+    self { rotate: 10deg }
+    icon { opacity: 0.8 }
+  }
+}
+```
+
+Here both scales use the spring; root rotation uses the 200 ms tween, and both
+opacities use the layer's 100 ms tween. A block's timing applies only to its own
+properties. A property-local decorator overrides the block default. Groups work
+in reactive layers, common stateful-layer styles, states, directional transitions,
+and motion `enter`/`leave` blocks, with the same endpoint and timing rules as
+separate target blocks.
+
+Duplicate members such as `icon, icon` are errors. Overlapping declarations such
+as `self, icon { opacity: 1 } icon { opacity: 0 }` are also errors within one
+scope. Common styles, individual states, individual transitions, and lifecycle
+blocks are separate scopes. Between-layer cascade and animation ownership are
+unchanged.
+
+The editor inspects each member independently. Saving a change to one member
+splits its block from the group, preserving the other members' declarations,
+keyframes, and timing. Equal changes to all members keep the shared declaration.
+Comments and surrounding source are preserved by source edits. As with other
+source edits, fields containing comments may need direct source editing.
 
 ## Conditional layers
 

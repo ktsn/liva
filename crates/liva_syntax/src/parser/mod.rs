@@ -99,11 +99,21 @@ impl Parser<'_> {
                 self.gap();
             }
 
-            if has_prefix && matches!(self.at(), "motion" | "let" | "event") {
+            let starts_target_list = depth >= 2
+                && self.tokens[self.index..]
+                    .iter()
+                    .filter(|token| !token.trivia)
+                    .nth(1)
+                    .is_some_and(|token| token.text == ",");
+
+            if has_prefix
+                && !starts_target_list
+                && (matches!(self.at(), "let" | "event") || (depth == 0 && self.at() == "motion"))
+            {
                 self.error("Decorators are not allowed on motion, let, or event declarations");
             }
 
-            if self.at() == "event" {
+            if self.at() == "event" && !starts_target_list {
                 if depth != 1 {
                     self.error("Events must be declared directly inside a Motion");
                 }
@@ -138,7 +148,7 @@ impl Parser<'_> {
                 continue;
             }
 
-            if self.at() == "let" {
+            if self.at() == "let" && !starts_target_list {
                 self.builder
                     .start_node_at(checkpoint, Liva::kind_to_raw(Kind::Let));
                 self.bump();
@@ -179,6 +189,24 @@ impl Parser<'_> {
                 if nesting_depth == 0 && matches!(self.at(), "\n" | "\r") {
                     let continuation = self.tokens[self.index..].iter().find(|token| !token.trivia);
 
+                    let target_header = depth >= 2
+                        && self.tokens[begin..self.index]
+                            .iter()
+                            .filter(|token| !token.trivia)
+                            .all(|token| is_name(token.text) || token.text == ",");
+                    let after_comma = self.tokens[begin..self.index]
+                        .iter()
+                        .rev()
+                        .find(|token| !token.trivia)
+                        .is_some_and(|token| token.text == ",");
+                    if target_header
+                        && (after_comma
+                            || continuation.is_some_and(|token| matches!(token.text, "," | "{")))
+                    {
+                        self.gap();
+                        continue;
+                    }
+
                     if depth >= 1
                         && matches!(
                             self.tokens[begin].text,
@@ -194,7 +222,8 @@ impl Parser<'_> {
                     break;
                 }
 
-                if depth >= 2
+                if !starts_target_list
+                    && depth >= 2
                     && self.tokens[begin].text == "transition"
                     && header_words == 4
                     && self.at() == "when"
@@ -209,6 +238,7 @@ impl Parser<'_> {
 
                 if self.tokens[begin].text == "on"
                     && header_words == 1
+                    && self.at() != ","
                     && !self.tokens[self.index].trivia
                 {
                     self.start(Kind::Condition);
@@ -217,7 +247,8 @@ impl Parser<'_> {
                     break;
                 }
 
-                if (depth == 1 || depth == 2)
+                if !starts_target_list
+                    && (depth == 1 || depth == 2)
                     && matches!(self.tokens[begin].text, "state" | "layer")
                     && header_words == 2
                     && self.at() == "when"
@@ -253,12 +284,13 @@ impl Parser<'_> {
                 self.gap();
             }
 
-            if (guarded_transition
-                || (self
-                    .tokens
-                    .get(begin)
-                    .is_some_and(|token| token.text == "transition")
-                    && header_words == 4))
+            if !starts_target_list
+                && (guarded_transition
+                    || (self
+                        .tokens
+                        .get(begin)
+                        .is_some_and(|token| token.text == "transition")
+                        && header_words == 4))
                 && self.at() != "{"
             {
                 self.builder
@@ -695,8 +727,24 @@ fn validate_blocks(node: &impl AstNode, depth: usize, diagnostics: &mut Vec<Diag
                         || State::cast(parent.clone()).is_some()
                         || Transition::cast(parent).is_some()
                 })
-        } else if Target::cast(block.syntax().clone()).is_some() {
-            is_name(&header)
+        } else if let Some(target) = Target::cast(block.syntax().clone()) {
+            let references = target.references();
+            if references.len() > 1 {
+                let in_layer = target.syntax().parent().and_then(Layer::cast).is_some();
+                for (name, range) in references {
+                    if matches!(name.as_str(), "let" | "event")
+                        || (in_layer
+                            && matches!(name.as_str(), "state" | "transition" | "enter" | "leave"))
+                    {
+                        diagnostics.push(Diagnostic::error(
+                            "syntax.target-name",
+                            format!("Target name `{name}` cannot be grouped in this scope: a standalone block would be parsed as a declaration; rename this target"),
+                            range,
+                        ));
+                    }
+                }
+            }
+            header.split(',').all(|name| is_name(name.trim()))
         } else {
             depth == 4
                 && header.strip_suffix('%').is_some_and(|n| {

@@ -16,6 +16,7 @@
       "enter": {
         "targets": [
           {
+            "timingProperties": ["opacity", "scale", "translate"],
             "timingExpression": {
               "kind": "call",
               "function": "tween",
@@ -83,6 +84,7 @@
             ]
           },
           {
+            "timingProperties": ["opacity"],
             "timingExpression": {
               "kind": "call",
               "function": "tween",
@@ -124,6 +126,7 @@
       "leave": {
         "targets": [
           {
+            "timingProperties": ["opacity", "scale", "translate"],
             "timingExpression": {
               "kind": "call",
               "function": "tween",
@@ -191,6 +194,7 @@
             ]
           },
           {
+            "timingProperties": ["opacity"],
             "timingExpression": {
               "kind": "call",
               "function": "tween",

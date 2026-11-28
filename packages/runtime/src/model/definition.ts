@@ -88,7 +88,7 @@ export function isCssProperty(declaration: Declaration): declaration is Property
 }
 
 export interface Target<T> {
-  /** Limits target timing to properties declared in its explicit block when root forms coexist. */
+  /** Limits target timing to properties declared in its authored target block. */
   readonly timingProperties?: readonly string[]
   readonly timingExpression?: Expression
   readonly timing?: Timing

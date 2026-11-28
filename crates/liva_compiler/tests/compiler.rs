@@ -70,7 +70,7 @@ fn references_duplicates_and_recovery() {
         "motion a {}",
         "motion a { layer on {} layer on {} }",
         "motion a { layer on { t { color: red; color: blue } } }",
-        "motion a { layer on { t {} t {} } }",
+        "motion a { layer on { t { opacity: 0 } t { opacity: 1 } } }",
         "motion a { layer on { state idle initial {} transition missing -> idle when true {} } }",
         "motion a { layer on {} } motion a { layer on {} }",
     ] {

@@ -965,3 +965,117 @@ fn layout_completion_applies_whole_tokens_without_damaging_adjacent_source() {
         }
     });
 }
+
+#[test]
+fn grouped_target_headers_have_member_hovers_completion_and_duplicate_ranges() {
+    let (server, client) = Connection::memory();
+    let worker = thread::spawn(move || liva_lsp::run(server).unwrap());
+    request(&client, 1, "initialize", json!({ "capabilities": {} }));
+    notify(&client, "initialized", json!({}));
+    let uri = "file:///group.liv";
+    let source = "// 日本😀\r\nmotion sample { layer base { self, icon { opacity: 1 } } }";
+    notify(
+        &client,
+        "textDocument/didOpen",
+        json!({"textDocument": {"uri": uri, "languageId": "liva", "version": 1, "text": source}}),
+    );
+    assert_eq!(diagnostics(&client)["diagnostics"], json!([]));
+    let column = source.lines().nth(1).unwrap().find("icon").unwrap();
+    let hover = request(
+        &client,
+        2,
+        "textDocument/hover",
+        json!({"textDocument": {"uri": uri}, "position": {"line": 1, "character": column}}),
+    );
+    assert!(
+        hover.response_result.unwrap()["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .contains("icon: target")
+    );
+    let completion = request(
+        &client,
+        3,
+        "textDocument/completion",
+        json!({"textDocument": {"uri": uri}, "position": {"line": 1, "character": column}}),
+    );
+    assert!(
+        completion
+            .response_result
+            .unwrap()
+            .to_string()
+            .contains("self")
+    );
+    let invalid = source.replace("self, icon", "self, self");
+    notify(
+        &client,
+        "textDocument/didChange",
+        json!({"textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": invalid}]}),
+    );
+    let errors = diagnostics(&client);
+    let duplicate = errors["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["code"] == "semantic.duplicate")
+        .unwrap();
+    assert_eq!(
+        duplicate["range"],
+        json!({"start": {"line": 1, "character": column}, "end": {"line": 1, "character": column + 4}})
+    );
+    request(&client, 4, "shutdown", Value::Null);
+    notify(&client, "exit", Value::Null);
+    worker.join().unwrap();
+}
+
+#[test]
+fn incomplete_group_header_completion_survives_document_changes() {
+    let (server, client) = Connection::memory();
+    let worker = thread::spawn(move || liva_lsp::run(server).unwrap());
+    request(&client, 1, "initialize", json!({ "capabilities": {} }));
+    notify(&client, "initialized", json!({}));
+    let uri = "file:///typing-group.liv";
+    notify(
+        &client,
+        "textDocument/didOpen",
+        json!({"textDocument": {"uri": uri, "languageId": "liva", "version": 1, "text": "motion sample { layer base { icon {} } }"}}),
+    );
+    assert_eq!(diagnostics(&client)["diagnostics"], json!([]));
+    let source = "motion sample { layer base { icon {} self, /* 日本😀 */ ic } }";
+    notify(
+        &client,
+        "textDocument/didChange",
+        json!({"textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": source}]}),
+    );
+    assert!(
+        !diagnostics(&client)["diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let offset = source.rfind("ic }").unwrap() + 2;
+    let completion = request(
+        &client,
+        2,
+        "textDocument/completion",
+        json!({"textDocument": {"uri": uri}, "position": {"line": 0, "character": source[..offset].encode_utf16().count()}}),
+    );
+    let choices = completion.response_result.unwrap();
+    assert!(
+        choices
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["label"] == "icon")
+    );
+    assert!(
+        choices
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["detail"] == "target")
+    );
+    request(&client, 3, "shutdown", Value::Null);
+    notify(&client, "exit", Value::Null);
+    worker.join().unwrap();
+}

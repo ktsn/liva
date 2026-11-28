@@ -6,7 +6,10 @@ use crate::{
     scope::{Scope, Symbol, SymbolKind},
 };
 use liva_syntax::ast::expression::{Argument, Expr, ExprView};
-use liva_syntax::ast::{AstNode, Decorator, HasValue, LayoutDeclaration, Motion, Property};
+use liva_syntax::ast::{
+    AstNode, Decorator, HasHeader, HasValue, Header, Layer, LayoutDeclaration, Motion, Property,
+    State, Target, Transition,
+};
 use liva_syntax::{Kind, Range, parse, parse_expression, quote_string};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -55,6 +58,26 @@ pub fn completions(source: &str, offset: usize) -> Vec<Completion> {
     let parameters = compiler.parameters(&motion);
     let bindings = compiler.let_bindings(&motion);
     let scope = compiler.motion_scope(&motion, &parameters, &bindings);
+    if motion
+        .syntax()
+        .descendants()
+        .filter_map(Target::cast)
+        .any(|target| {
+            target.header_node().is_some_and(|header| {
+                contains(&header.range(), offset) && !in_comment(&header, offset)
+            })
+        })
+        || incomplete_target_group(&motion, offset)
+    {
+        let typed = prefix
+            .rsplit(|c: char| !c.is_ascii_alphanumeric() && !matches!(c, '_' | '-'))
+            .next()
+            .unwrap_or_default();
+        return name_choices(&scope, typed)
+            .into_iter()
+            .filter(|item| item.detail == "target")
+            .collect();
+    }
     let context = argument_context(&motion, offset);
     let mut choices = context
         .as_ref()
@@ -77,6 +100,54 @@ pub fn completions(source: &str, offset: usize) -> Vec<Completion> {
     choices.extend(name_choices(&scope, typed));
 
     choices
+}
+
+/// Recovery retains an unfinished list as a Header directly inside its scope.
+/// Only recognize alternating identifiers and commas there, never expressions,
+/// decorators, property values, or structural block headers.
+fn incomplete_target_group(motion: &Motion, offset: usize) -> bool {
+    motion
+        .syntax()
+        .descendants()
+        .filter_map(Header::cast)
+        .any(|header| {
+            if !contains(&header.range(), offset) || in_comment(&header, offset) {
+                return false;
+            }
+            let Some(parent) = header.syntax().parent() else {
+                return false;
+            };
+            if !(Layer::cast(parent.clone()).is_some()
+                || State::cast(parent.clone()).is_some()
+                || Transition::cast(parent.clone()).is_some())
+                || parent
+                    .child::<Header>()
+                    .is_some_and(|own| own.syntax() == header.syntax())
+            {
+                return false;
+            }
+            let mut expect_name = true;
+            let mut comma = false;
+            for item in header.syntax().children_with_tokens() {
+                let Some(token) = item.into_token() else {
+                    return false;
+                };
+                if token.kind() == Kind::Trivia {
+                    continue;
+                }
+                if expect_name {
+                    if !liva_syntax::is_identifier(token.text()) {
+                        return false;
+                    }
+                } else if token.text() != "," {
+                    return false;
+                } else {
+                    comma = true;
+                }
+                expect_name = !expect_name;
+            }
+            comma
+        })
 }
 
 fn layout_choices(motion: &Motion, source: &str, offset: usize) -> Option<Vec<Completion>> {

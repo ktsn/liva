@@ -105,3 +105,30 @@ motion layoutExample {
 //            ^ property
   }
 }
+
+motion grouped {
+  layer base {
+    self, icon, label { opacity: 1 }
+//  ^ variable.builtin
+//      ^ punctuation.delimiter
+//        ^ selector.class
+//              ^ selector.class
+  }
+}
+
+motion keywordTargets {
+  layer base {
+    state idle initial {
+      state, when { scale: 1 }
+//    ^ selector.class
+//           ^ selector.class
+      transition, icon, when { opacity: 1 }
+//    ^ selector.class
+//                ^ selector.class
+//                      ^ selector.class
+      @spring() motion, on { rotate: 1deg }
+//              ^ selector.class
+//                      ^ selector.class
+    }
+  }
+}

@@ -94,7 +94,6 @@ fn mixed_root_duplicates_report_both_declarations_in_every_scope() {
             "opacity: 1; self { opacity: .5 }",
             "opacity ~> { 100%: 1 }; self { opacity: .5 }",
             "opacity: 1; self { opacity ~> { 100%: .5 } }",
-            "self { opacity: 1 } self { scale: 1 }",
         ] {
             let result = compile(
                 &format!("motion example {{ {} }}", scope.replace("BODY", body)),
@@ -244,12 +243,12 @@ fn implicit_root_properties_keep_their_own_timing_in_styles_and_transitions() {
 }
 
 #[test]
-fn explicit_named_target_duplicates_remain_errors() {
+fn explicit_named_target_property_duplicates_remain_errors() {
     for scope in ["layer base { BODY }", "layer base {} enter { BODY }"] {
         let result = compile(
             &format!(
                 "motion example {{ {} }}",
-                scope.replace("BODY", "box { opacity: 1 } box { scale: 1 }")
+                scope.replace("BODY", "box { opacity: 1 } box { opacity: 0 }")
             ),
             true,
         );

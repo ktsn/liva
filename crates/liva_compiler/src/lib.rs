@@ -325,6 +325,15 @@ impl Compiler {
     }
 
     fn source_header(&self, path: &str) -> Range {
+        if let Some((_, name)) = path.rsplit_once("/target/")
+            && let Some(target) = syn::Target::cast(self.sources[path].clone())
+            && let Some((_, range)) = target
+                .references()
+                .into_iter()
+                .find(|(reference, _)| reference == name)
+        {
+            return range;
+        }
         header_range(&self.sources[path])
     }
 
@@ -905,13 +914,13 @@ impl Compiler {
                     .states()
                     .flat_map(|state| state.targets().collect::<Vec<_>>()),
             ) {
-                targets
-                    .entry(target.header().unwrap_or_default())
-                    .or_insert(target);
+                for (name, range) in target.references() {
+                    targets.entry(name).or_insert((target.clone(), range));
+                }
             }
         }
 
-        for (name, target) in targets {
+        for (name, (target, range)) in targets {
             if !expression::identifier(&name) || matches!(name.as_str(), "true" | "false") {
                 self.error(
                     "semantic.variable",
@@ -922,7 +931,7 @@ impl Compiler {
 
             // Root target blocks configure the built-in without declaring a variable.
             if !scope.is_reserved(&name) {
-                declarations.push((name, SymbolKind::Value(Type::Target), name_range(&target)));
+                declarations.push((name, SymbolKind::Value(Type::Target), range));
             }
         }
 
@@ -994,7 +1003,7 @@ impl Compiler {
         })
     }
 
-    fn compile_targets<P>(
+    fn compile_targets<P: target::TimedProperty>(
         &mut self,
         node: &impl AstNode,
         path: &str,
@@ -1017,19 +1026,31 @@ impl Compiler {
             ));
         }
 
-        declarations.extend(node.syntax().children().filter_map(|child| {
-            let target = syn::Target::cast(child.clone())?;
-
-            Some((
-                TargetId::from_name(target.header().unwrap_or_default()),
-                TargetOrigin::Explicit,
-                syn::Block::cast(child).unwrap(),
-            ))
-        }));
+        let mut counts = BTreeMap::<String, usize>::new();
+        for target in node.children::<syn::Target>() {
+            let mut group = BTreeMap::new();
+            for (name, range) in target.references() {
+                if let Some(previous) = group.insert(name.clone(), range.clone()) {
+                    let mut diagnostic = Diagnostic::error(
+                        "semantic.duplicate",
+                        format!("Duplicate target in group: {name}"),
+                        range,
+                    );
+                    diagnostic.related.push(previous);
+                    self.diagnostics.push(diagnostic);
+                    continue;
+                }
+                *counts.entry(name.clone()).or_default() += 1;
+                declarations.push((
+                    TargetId::from_name(name),
+                    TargetOrigin::Explicit,
+                    syn::Block::cast(target.syntax().clone()).unwrap(),
+                ));
+            }
+        }
 
         let mut targets: Vec<Target<P>> = vec![];
-        let mut target_names = BTreeMap::new();
-        let mut root_properties = BTreeMap::new();
+        let mut property_names = BTreeMap::<String, BTreeMap<String, Range>>::new();
 
         for binding in node.children::<syn::LetBinding>() {
             self.error(
@@ -1048,8 +1069,6 @@ impl Compiler {
             let timing = match origin {
                 TargetOrigin::Implicit => None,
                 TargetOrigin::Explicit => {
-                    self.unique(&mut target_names, name, &source);
-
                     for binding in source.bindings() {
                         self.error(
                             "semantic.structure",
@@ -1062,14 +1081,29 @@ impl Compiler {
                 }
             };
 
-            let mut named_properties = BTreeMap::new();
-            let seen = if id == TargetId::Root {
-                &mut root_properties
-            } else {
-                &mut named_properties
-            };
-            let properties = compile_properties(self, &source, &target_path, name, seen);
-            let timing_properties = if id == TargetId::Root && timing.is_some() {
+            let seen = property_names.entry(name.into()).or_default();
+            let mut properties = compile_properties(self, &source, &target_path, name, seen);
+            let merged = counts.get(name).is_some_and(|count| *count > 1);
+            if merged {
+                for property in &mut properties {
+                    if property.inherit_timing(timing.as_ref())
+                        && let Some(decorator) = source.decorators().next()
+                    {
+                        self.mappings.insert(
+                            format!("{target_path}/property/{}/blockTiming", property.name()),
+                            Mapping {
+                                range: decorator.expression_range(),
+                                kind: "value".into(),
+                            },
+                        );
+                    }
+                }
+                self.mappings.remove(&format!("{target_path}/timing"));
+                self.mappings
+                    .remove(&format!("{target_path}/timing/decorator"));
+            }
+            let timing = if merged { None } else { timing };
+            let timing_properties = if timing.is_some() {
                 Some(
                     syn::animation_properties(&source)
                         .map(|property| match property {
@@ -1086,9 +1120,7 @@ impl Compiler {
                 None
             };
 
-            if id == TargetId::Root
-                && let Some(target) = targets.iter_mut().find(|target| target.name == name)
-            {
+            if let Some(target) = targets.iter_mut().find(|target| target.name == name) {
                 target.properties.extend(properties);
                 target.timing_expression = timing;
                 target.timing_properties = timing_properties;

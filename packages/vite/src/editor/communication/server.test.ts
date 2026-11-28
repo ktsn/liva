@@ -424,3 +424,84 @@ describe('typed layer source transactions', () => {
     )
   })
 })
+
+it('previews and saves one grouped target without changing siblings or surrounding SFC bytes', async () => {
+  const prefix = '<template><div>日本😀</div></template>\r\n<liva>\r\n'
+  const block =
+    'motion sample { layer base { @spring() self, icon { scale: 1.1; opacity ~> { 0%: 0; 100%: 1 } } } }'
+  const suffix = '\r\n</liva>\r\n<style>div { color: red }</style>\r\n'
+  await writeFile(join(root, 'Toggle.vue'), prefix + block + suffix)
+  const inspected = await service.request({ action: 'inspect', sourceId, definition: 'sample' })
+  const edit: EditorRequest = {
+    action: 'preview',
+    sourceId,
+    definition: 'sample',
+    baseHash: inspected.hash,
+    instanceId: 'group-test',
+    sequence: 1,
+    requestId: crypto.randomUUID(),
+    edits: [
+      { op: 'set', path: 'sample/layer/base/target/icon/property/scale/value', value: '1.2' },
+    ],
+  }
+  const preview = await service.request(edit)
+  const originalSelf = inspected.definition.layers[0].targets.find(
+    (target) => target.name === 'self',
+  )
+  expect(preview.definition.layers[0].targets.find((target) => target.name === 'self')).toEqual(
+    originalSelf,
+  )
+  expect(await readFile(join(root, 'Toggle.vue'), 'utf8')).toBe(prefix + block + suffix)
+  const saved = await service.request({ ...edit, action: 'commit' })
+  const text = await readFile(join(root, 'Toggle.vue'), 'utf8')
+  expect(text.startsWith(prefix)).toBe(true)
+  expect(text.endsWith(suffix)).toBe(true)
+  expect(saved.definition).toEqual(preview.definition)
+  const next = await service.request({
+    ...edit,
+    action: 'commit',
+    baseHash: saved.hash,
+    requestId: crypto.randomUUID(),
+    sequence: 2,
+    edits: [
+      {
+        op: 'timing',
+        path: 'sample/layer/base/target/icon/property/scale',
+        value: 'tween(duration: 100)',
+      },
+    ],
+  })
+  expect(next.definition.layers[0].targets.find((target) => target.name === 'self')).toEqual(
+    originalSelf,
+  )
+})
+
+it('previews and saves equal lifecycle timing edits from distinct authored blocks', async () => {
+  const block =
+    'motion sample { layer base { self, icon { scale: 1 } } @tween() enter { self, icon {} icon { scale: .5 } } }'
+  const original = `<template><div>日本😀</div></template>\r\n<liva>${block}</liva>`
+  await writeFile(join(root, 'Toggle.vue'), original)
+  const inspected = await service.request({ action: 'inspect', sourceId, definition: 'sample' })
+  const edit: EditorRequest = {
+    action: 'preview',
+    sourceId,
+    definition: 'sample',
+    baseHash: inspected.hash,
+    instanceId: 'separate-blocks',
+    sequence: 1,
+    requestId: crypto.randomUUID(),
+    edits: ['self', 'icon'].map((target) => ({
+      op: 'timing',
+      path: `sample/enter/target/${target}/property/scale`,
+      value: 'spring()',
+    })),
+  }
+  const preview = await service.request(edit)
+  expect(await readFile(join(root, 'Toggle.vue'), 'utf8')).toBe(original)
+  const saved = await service.request({ ...edit, action: 'commit' })
+  expect(saved.definition).toEqual(preview.definition)
+  const text = await readFile(join(root, 'Toggle.vue'), 'utf8')
+  expect(text.match(/@spring\(\)/g)).toHaveLength(2)
+  expect(text).toContain('scale: .5')
+  expect(text).toContain('<template><div>日本😀</div></template>\r\n<liva>')
+})
